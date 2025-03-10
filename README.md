@@ -16,7 +16,7 @@ Apart from that there were rendering problems on Linux (Chromium x64) build and 
 
 **Perforamce test**
 
-[![Testing performance](https://i.ytimg.com/vi/CZYd3S08roo/oar2.jpg?sqp=-oaymwEoCJUDENAFSFqQAgHyq4qpAxcIARUAAIhC2AEB4gEKCBgQAhgGOAFAAQ==&rs=AOn4CLD-BMJmn_4UEg2Xf4Uk58C4I4DCPw)](https://www.youtube.com/shorts/CZYd3S08roo)
+[![Testing performance](https://www.youtube.com/shorts/CZYd3S08roo)
 
 **Known issues:**
 
