@@ -1,7 +1,5 @@
 ## **VRmod for Native Linux Garry's Mod x64 build - AIO Package**
 
-<iframe width="315" height="560" src="https://www.youtube.com/embed/CZYd3S08roo" title="Optimizing VRmod for Gmod x64" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-
 **Optimization problem:**
 
 VRmod and its components, such as hand physics and melee attacks, are maintained by different authors. In some cases, they conflict with each other, and some addons are abandoned or broken.
@@ -15,6 +13,10 @@ Apart from that there were rendering problems on Linux (Chromium x64) build and 
 * Fixed rendering issues on Linux native build
 * Tailored for Quest 3 to avoid fish eye effect and distorted image when tilting head.
 * In theory should work on Windows  (not tested)
+
+**Perforamce test**
+
+[![Testing performance](https://i.ytimg.com/vi/CZYd3S08roo/oar2.jpg?sqp=-oaymwEoCJUDENAFSFqQAgHyq4qpAxcIARUAAIhC2AEB4gEKCBgQAhgGOAFAAQ==&rs=AOn4CLD-BMJmn_4UEg2Xf4Uk58C4I4DCPw)](https://www.youtube.com/shorts/CZYd3S08roo)
 
 **Known issues:**
 
