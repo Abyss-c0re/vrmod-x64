@@ -1,5 +1,7 @@
 ## **VRmod for Native Linux Garry's Mod x64 build - AIO Package**
 
+<iframe width="315" height="560" src="https://www.youtube.com/embed/CZYd3S08roo" title="Optimizing VRmod for Gmod x64" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
 **Optimization problem:**
 
 VRmod and its components, such as hand physics and melee attacks, are maintained by different authors. In some cases, they conflict with each other, and some addons are abandoned or broken.
@@ -22,7 +24,7 @@ Apart from that there were rendering problems on Linux (Chromium x64) build and 
 
 Make sure you can run gmod x64 on your system. On Native Linux version it’s required to run [GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
 
-Either [download precompiled module](https://github.com/catoni0/vrmod-module-master/tree/main/install) for native build or complie your own.
+Either [download precompiled module](https://github.com/Abyss-c0re/vrmod-module-master/tree/main/install) for native build or complie your own.
 
 Place vrmod folder in HOME/.steam/steam/steamapps/common/GarrysMod/garrysmod/addons/
 
