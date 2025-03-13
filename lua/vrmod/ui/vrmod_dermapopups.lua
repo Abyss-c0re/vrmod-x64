@@ -56,7 +56,7 @@ meta.MakePopup = function(...)
 
 			if popupCount == 0 then
 				local ang = Angle(0, g_VR.tracking.hmd.ang.yaw - 90, 45)
-				basePos, baseAng = WorldToLocal(g_VR.tracking.hmd.pos + Vector(0, 0, -20) + Angle(0, g_VR.tracking.hmd.ang.yaw, 0):Forward() * 30 + ang:Forward() * vrScrW:GetInt() * -0.02 + ang:Right() * vrScrH:GetInt() * -0.02, ang, g_VR.origin, g_VR.originAngle)
+				basePos, baseAng = WorldToLocal(g_VR.tracking.hmd.pos + Vector(0, 0, -20) + Angle(0, g_VR.tracking.hmd.ang.yaw, 0):Forward() * 30 + ang:Forward() * ScrW:GetInt() * -0.02 + ang:Right() * ScrH:GetInt() * -0.02, ang, g_VR.origin, g_VR.originAngle)
 			end
 
 			--right = down, up = normal, forward = right
