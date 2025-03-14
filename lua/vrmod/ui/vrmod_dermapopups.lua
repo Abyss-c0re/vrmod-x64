@@ -4,6 +4,7 @@ local orig = meta.MakePopup
 local popupCount = 0
 local basePos, baseAng
 local _, convarValues = vrmod.GetConvars()
+local sW, sH = ScrW(), ScrH()
 
 -- All active popups
 local allPopups = {}
@@ -56,7 +57,7 @@ meta.MakePopup = function(...)
 
 			if popupCount == 0 then
 				local ang = Angle(0, g_VR.tracking.hmd.ang.yaw - 90, 45)
-				basePos, baseAng = WorldToLocal(g_VR.tracking.hmd.pos + Vector(0, 0, -20) + Angle(0, g_VR.tracking.hmd.ang.yaw, 0):Forward() * 30 + ang:Forward() * ScrW:GetInt() * -0.02 + ang:Right() * ScrH:GetInt() * -0.02, ang, g_VR.origin, g_VR.originAngle)
+				basePos, baseAng = WorldToLocal(g_VR.tracking.hmd.pos + Vector(0, 0, -20) + Angle(0, g_VR.tracking.hmd.ang.yaw, 0):Forward() * 30 + ang:Forward() * sW * -0.02 + ang:Right() * sH * -0.02, ang, g_VR.origin, g_VR.originAngle)
 			end
 
 			--right = down, up = normal, forward = right
@@ -66,7 +67,7 @@ meta.MakePopup = function(...)
 			if mode == 1 then
 				--
 				--forw, left, up
-				VRUtilMenuOpen(uid,1366,768,panel,mode,Vector(20, 11, 8),Angle(0, -90, 50),0.03,true,function()
+				VRUtilMenuOpen(uid,sW,sH,panel,mode,Vector(20, 11, 8),Angle(0, -90, 50),0.03,true,function()
 					timer.Simple(
 						0.1,
 						function()
@@ -92,7 +93,7 @@ meta.MakePopup = function(...)
 				--
 			elseif mode == 3 then
 				--forw, left, up
-				VRUtilMenuOpen(uid,1366,768,panel,3,Vector(30, 20, 10),Angle(0, -90, 90),0.03,true,function()
+				VRUtilMenuOpen(uid,sW,sH,panel,3,Vector(30, 20, 10),Angle(0, -90, 90),0.03,true,function()
 					timer.Simple(
 						0.1,
 						function()
@@ -117,7 +118,7 @@ meta.MakePopup = function(...)
 				VRUtilMenuRenderPanel(uid)
 			else --
 				--forw, left, up
-				VRUtilMenuOpen(uid,1366,768,panel,mode,pos,ang,0.03,true,function()
+				VRUtilMenuOpen(uid,sW,sH,panel,mode,pos,ang,0.03,true,function()
 					timer.Simple(
 						0.1,
 						function()
@@ -159,7 +160,7 @@ hook.Add(
 
 hook.Add("VRMod_Start","dermapopups",function(ply)
 	if ply ~= LocalPlayer() then return end
-	vgui.GetWorldPanel():SetSize(1366,768)
+	vgui.GetWorldPanel():SetSize(sW,sH)
 end)
 
 hook.Add("VRMod_Exit","dermapopups",function(ply)
