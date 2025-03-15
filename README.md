@@ -38,8 +38,6 @@ The projects is reorganized and contains works of various authors:
 
 *Pescorr*, semiofficial VRmod creator, melee, hostler (I used the code to drop the weapons on release)
 
-*Wheatley126*, VRmod-Plus
-
 *Hugo*, manual pickup,simple hand physics and hl2 weapon replacer
 
 *Arctic* for ArcVR

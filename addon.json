@@ -1,6 +1,13 @@
 {
-"title" : "VRMod-x64",
-"type" : "tool",
-"tags" : ["realism"],
-"ignore" : [".git","LICENSE","README.md"]
+    "title": "VRMod_x64",
+    "type": "tool",
+    "tags": ["realism"],
+    "ignore": [
+        ".git",
+        "LICENSE",
+        "README.md",
+        "models/**/*.sw.vtx",
+        "materials/**/*.sw.vtx",
+        "**/*.sw.vtx"
+    ]
 }
