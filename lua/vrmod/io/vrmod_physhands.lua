@@ -135,7 +135,7 @@ end)
 
 
 hook.Add("VRMod_Pickup", "avrmagdetector", function (ply, ent)
-
+        if not IsValid(ent) then return end	
         local tomatch = ent:GetClass()
 
         if string.match( tomatch, "avrmag_") then
@@ -148,7 +148,7 @@ hook.Add("VRMod_Pickup", "avrmagdetector", function (ply, ent)
 end)
 
 hook.Add("VRMod_Drop", "avrmagdetectorrestore", function (ply, ent)
-
+        if not IsValid(ent) then return end	
         local tomatch = ent:GetClass()
 
         if IsValid(tomatch) then                                                                                                

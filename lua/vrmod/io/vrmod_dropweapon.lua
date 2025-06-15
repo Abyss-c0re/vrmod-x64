@@ -130,7 +130,7 @@ if CLIENT then
         "Tediore_holster_Drop",
         function(action, state)
             if dropenable:GetBool() then
-                if GetConVar("vrmod_Foregripmode"):GetBool() then return end
+                --if GetConVar("vrmod_Foregripmode"):GetBool() then return end
                 if not GetConVar("vrmod_lefthand"):GetBool() then
                     if action == "boolean_right_pickup" and not state then
                         net.Start("DropWeapon")

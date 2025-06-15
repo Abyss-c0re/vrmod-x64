@@ -48,7 +48,7 @@ local cl_usefist = CreateClientConVar("vrmelee_usefist", "1", true, FCVAR_CLIENT
 local cl_usekick = CreateClientConVar("vrmelee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE, "Use kick attacks? (Requires full body tracking)")
 local cl_fisteffect = CreateClientConVar("vrmelee_fist_collision", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE, "Use Fist attack Collision?")
 local cl_fistvisible = CreateClientConVar("vrmelee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE, "Visible Fist Attack Collision Model?")
-local cl_effectmodel = CreateClientConVar("vrmelee_fist_collisionmodel", "models/props_c17/pulleywheels_small01.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE, "Fist Attack Collision Model Config")
+local cl_effectmodel = CreateClientConVar("vrmelee_fist_collisionmodel", "models/Gibs/HGIBS.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE, "Fist Attack Collision Model Config")
 local NextMeleeTime = 0
 if CLIENT then
     local meleeBoxes = {}

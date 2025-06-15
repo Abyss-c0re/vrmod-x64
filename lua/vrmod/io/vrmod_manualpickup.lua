@@ -19,7 +19,8 @@ hook.Add ("VRMod_Exit", "VRModPickupResetState", function (ply)		-- returns a pl
 		IsVR = false
 end)
 
-hook.Add ( "VRMod_Drop", "ManualItemPickupDropHook", function (ply, ent)		-- the heart of the addon; sets 'PickupDisabled' to 'false' when releasing an item, thus picking it up instantly
+hook.Add ( "VRMod_Drop", "ManualItemPickupDropHook", function (ply, ent)
+	if not IsValid(ent) then return end		-- the heart of the addon; sets 'PickupDisabled' to 'false' when releasing an item, thus picking it up instantly
 	if ent:GetClass() == "prop_physics" then return end							-- then returns the value back to its base state of 'true'
 		PickupDisabled = false
 		timer.Simple (0.3, function() print ("here point five")
@@ -29,7 +30,8 @@ hook.Add ( "VRMod_Drop", "ManualItemPickupDropHook", function (ply, ent)		-- the
 	end)
 end)
 
-hook.Add ( "VRMod_Pickup", "ManualWeaponPickupHook", function (ply, ent)		-- this is the same thing as above, but for weapons, and one small difference - it's triggered immediately upon touching the weapon, rather then dropping it
+hook.Add ( "VRMod_Pickup", "ManualWeaponPickupHook", function (ply, ent)
+	if not IsValid(ent) then return end		-- this is the same thing as above, but for weapons, and one small difference - it's triggered immediately upon touching the weapon, rather then dropping it
 	if ent:IsWeapon() == true then												-- this was requested by a user in the addon comments, and i agree that it seems better to pick a weapon up as soon as you grab it rather than releasing it
 		equipgun = ent:GetClass()
 		hook.Call("VRMod_Drop", nil, ply, ent) -- bugfix: picking up weapons with prop togther
