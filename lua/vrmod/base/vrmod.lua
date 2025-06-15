@@ -294,11 +294,28 @@ if CLIENT then
 			v.HorizontalOffset = xoffset
 			v.VerticalOffset = yoffset
 		end
+		
+		local wLeft = (math.abs((1.0 - displayInfo.ProjectionLeft[1][3]) / displayInfo.ProjectionLeft[1][1]) +
+               math.abs((-1.0 - displayInfo.ProjectionLeft[1][3]) / displayInfo.ProjectionLeft[1][1]))
+		local hLeft = (math.abs((1.0 - displayInfo.ProjectionLeft[2][3]) / displayInfo.ProjectionLeft[2][2]) +
+					math.abs((-1.0 - displayInfo.ProjectionLeft[2][3]) / displayInfo.ProjectionLeft[2][2]))
+
+		local wRight = (math.abs((1.0 - displayInfo.ProjectionRight[1][3]) / displayInfo.ProjectionRight[1][1]) +
+						math.abs((-1.0 - displayInfo.ProjectionRight[1][3]) / displayInfo.ProjectionRight[1][1]))
+		local hRight = (math.abs((1.0 - displayInfo.ProjectionRight[2][3]) / displayInfo.ProjectionRight[2][2]) +
+						math.abs((-1.0 - displayInfo.ProjectionRight[2][3]) / displayInfo.ProjectionRight[2][2]))
+
+		-- Average both eyes
+		local wAvg = (wLeft + wRight) / 2
+		local hAvg = (hLeft + hRight) / 2
+
+		local hFactor = 0.5 / wAvg
+		local vFactor = 1.0 / hAvg
 
 		local vMin = system.IsWindows() and 0 or 1
 		local vMax =  system.IsWindows() and 1 or 0
-		local vFactor = convars.vrmod_vertical_scale:GetFloat()
-		local hFactor = convars.vrmod_horizontal_scale:GetFloat()
+		--local vFactor = convars.vrmod_vertical_scale:GetFloat()
+		--local hFactor = convars.vrmod_horizontal_scale:GetFloat()
 		local vMinLeft = vMin - math.abs(displayCalculations.left.VerticalOffset * vFactor)
 		local vMaxLeft = vMax - math.abs(displayCalculations.left.VerticalOffset * vFactor)
 		local vMinRight = vMin - math.abs(displayCalculations.right.VerticalOffset * vFactor)

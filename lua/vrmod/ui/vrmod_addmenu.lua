@@ -15,57 +15,6 @@ hook.Add(
 		sheet:AddSheet("Rendering", MenuTab01, "icon16/cog_add.png")
 		MenuTab01.Paint = function(self, w, h) end -- Clear painting for the panel
 		
-		-- Create the vertical scale slider
-		local vS = vgui.Create("DNumSlider")
-		MenuTab01:Add(vS) -- Add slider to the panel
-		vS:Dock(TOP) -- Dock it to the top
-		vS:DockMargin(5, 0, 0, 5) -- Set margin
-		vS:SetMin(0.05) -- Minimum value
-		vS:SetMax(1) -- Maximum value
-		vS:SetDecimals(2) -- Decimal precision
-		vS:SetValue(convarValues.vrmod_vertical_scale) -- Initialize with the current value
-		vS:SetDark(true) -- Dark background
-		vS:SetText("Vertical Scale Factor") -- Set label text
-
-		vS.OnValueChanged = function(self, value)
-			RunConsoleCommand("vrmod_vertical_scale", value) -- Update the ConVar via a console command
-		end
-		
-		-- Handle value changes
-
-
-		local hS = vgui.Create("DNumSlider")
-
-		MenuTab01:Add(hS)
-		hS:DockMargin(5, 0, 0, 5) -- Set margin
-		hS:SetMin(0.05) -- Minimum value
-		hS:SetMax(1) -- Maximum value
-		hS:SetDecimals(2) -- Decimal precision
-		hS:SetValue(convarValues.vrmod_horizontal_scale) -- Initialize with the current value
-		hS:SetDark(true) -- Dark background
-		hS:SetText("Horizontal Scale Factor") -- Set label text
-		hS:Dock(TOP) -- Dock it to the top
-		
-		hS.OnValueChanged = function(self, value)
-			RunConsoleCommand("vrmod_horizontal_scale", value) -- Update the ConVar via a console command
-		end
-
-		-- Reset Button
-		local resetButton = vgui.Create("DButton", MenuTab01)
-		resetButton:Dock(TOP)
-		resetButton:DockMargin(5, 10, 0, 5)
-		resetButton:SetText("Reset Scale Factors")
-		resetButton:SetSize(150, 25)
-		resetButton.DoClick = function()
-			local vSF = system.IsLinux() and 0.25 or 0.5
-			local hSF = system.IsLinux() and 0.20 or 0.25
-			-- Reset values to defaults
-			vS:SetValue(vSF)  -- Default value for vertical scale
-			hS:SetValue(hSF) -- Default value for horizontal scale
-			convarValues.vrmod_vertical_scale:SetFloat(vSF)
-			convarValues.vrmod_horizontal_scale:SetFloat(hSF)
-		end
-
 		local realtime_render = MenuTab01:Add("DCheckBoxLabel") -- Create the checkbox
 		realtime_render:SetPos(5, 120) -- Set the position
 		realtime_render:SetText("[Realtime UI rendering]") -- Set the text next to the box
