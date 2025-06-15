@@ -341,7 +341,6 @@ if CLIENT then
 		
 		g_VR.active = true
 		
-		overrideConvar("engine_no_focus_sleep", "0")
 		overrideConvar("pac_suppress_frames", "0")
 		overrideConvar("pac_override_fov", "1")
 		overrideConvar("mat_queue_mode", "1")
