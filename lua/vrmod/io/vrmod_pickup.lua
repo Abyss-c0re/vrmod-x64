@@ -188,6 +188,7 @@ elseif SERVER then
 				function pickupController:PhysicsSimulate(phys, deltatime)
 					phys:Wake()
 					local t = phys:GetEntity().vrmod_pickup_info
+					if not t then return end
 					local frame = g_VR[t.steamid] and g_VR[t.steamid].latestFrame
 					if not frame then return end
 					local handPos, handAng = LocalToWorld(t.left and frame.lefthandPos or frame.righthandPos, t.left and frame.lefthandAng or frame.righthandAng, t.ply:GetPos(), Angle()) --frame is relative to ply pos when on foot
@@ -262,12 +263,14 @@ elseif SERVER then
 				pickupCount = pickupCount + 1
 				if pickupController ~= nil or v ~= nil then
 					local tmp_object  = v:GetPhysicsObject()
-					if IsValid(tmp_object) then                                                                                                
+					if IsValid(tmp_object) then
+						print(tmp_object)                                                                                                
 						pickupController:AddToMotionController(tmp_object)
-						tmp_object:PhysWake()                                                                         
+						tmp_object:Wake()                                                                         
 					else                                                                                                                
 						-- 'ent' is NULL or invalid, handle the case appropriately                                                      
-						print("trying to pick up empty object!")                                                                         
+						print("trying to pick up empty object!")
+						ply:DropObject()                                                                        
 					end           
 
 				else
