@@ -36,8 +36,6 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_althead", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_autostart", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_scale", nil, "32.7")
-	vrmod.AddCallbackedConvar("vrmod_vertical_scale", nil, vScale)
-	vrmod.AddCallbackedConvar("vrmod_horizontal_scale", nil, hScale)
 	vrmod.AddCallbackedConvar("vrmod_heightmenu", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3")
@@ -171,6 +169,7 @@ if CLIENT then
 		print(string.format("| %-30s %s", "Server Name:",GetHostName()))
 		print(string.format("| %-30s %s", "Server Address:",game.GetIPAddress()))
 		print(string.format("| %-30s %s", "Gamemode:",GAMEMODE_NAME))
+		
 		local workshopCount = 0
 		for k,v in ipairs(engine.GetAddons()) do
 			workshopCount = workshopCount + (v.mounted and 1 or 0)
@@ -197,15 +196,18 @@ if CLIENT then
 		print("|----------")
 		test("lua/bin")
 		print("|----------")
+
 		local convarNames = {}
 		for k,v in pairs(convars) do
 			convarNames[#convarNames+1] = v:GetName()
 		end
+
 		table.sort(convarNames)
 		for k,v in ipairs(convarNames) do
 			v = GetConVar(v)
 			print(string.format("| %-30s %-20s %s",v:GetName(),v:GetString(),v:GetString()==v:GetDefault() and "" or "*"))
 		end
+
 		print("========================================================================")
 	end )
 	
@@ -238,6 +240,7 @@ if CLIENT then
 			RunConsoleCommand(name, value)
 		end
 	end
+
 	local function restoreConvarOverrides()
 		for k,v in pairs(convarOverrides) do
 			RunConsoleCommand(k, v)
@@ -248,6 +251,33 @@ if CLIENT then
 	local function pow2ceil(x)
 		return math.pow(2, math.ceil(math.log(x,2)))
 	end
+
+	local function calculateProjectionParams(projMatrix)
+		local xscale = projMatrix[1][1]
+		local xoffset = projMatrix[1][3]
+		local yscale = projMatrix[2][2]
+		local yoffset = projMatrix[2][3]
+
+		local tan_px = math.abs((1.0 - xoffset) / xscale)
+		local tan_nx = math.abs((-1.0 - xoffset) / xscale)
+		local tan_py = math.abs((1.0 - yoffset) / yscale)
+		local tan_ny = math.abs((-1.0 - yoffset) / yscale)
+
+		local w = tan_px + tan_nx
+		local h = tan_py + tan_ny
+
+		return {
+			HorizontalFOV = math.atan(w / 2) * 2 * 180 / math.pi,
+			AspectRatio = w / h,
+			HorizontalOffset = xoffset,
+			VerticalOffset = yoffset,
+			Width = w,
+			Height = h,
+		}
+	end
+
+
+	
 	
 	function VRUtilClientStart()
 
@@ -267,6 +297,7 @@ if CLIENT then
 		local displayInfo = VRMOD_GetDisplayInfo(1,10)
 
 		local rtWidth, rtHeight = displayInfo.RecommendedWidth*2, displayInfo.RecommendedHeight
+
 		if system.IsLinux() then
 			rtWidth, rtHeight = math.min(4096,rtWidth), math.min(4096,rtHeight) 
 		end
@@ -274,56 +305,36 @@ if CLIENT then
 		VRMOD_ShareTextureBegin()
 		g_VR.rt = GetRenderTarget( "vrmod_rt".. tostring(SysTime()), rtWidth, rtHeight)
 		VRMOD_ShareTextureFinish()
-		
-		local displayCalculations = { left = {}, right = {}}
-		
-		for k,v in pairs(displayCalculations) do
-			local mtx = (k=="left") and displayInfo.ProjectionLeft or displayInfo.ProjectionRight
-			local xscale = mtx[1][1]
-			local xoffset = mtx[1][3]
-			local yscale = mtx[2][2]
-			local yoffset = mtx[2][3]
-			local tan_px = math.abs((1.0 - xoffset) / xscale)
-			local tan_nx = math.abs((-1.0 - xoffset) / xscale)
-			local tan_py = math.abs((1.0 - yoffset) / yscale)
-			local tan_ny = math.abs((-1.0 - yoffset) / yscale)
-			local w = tan_px + tan_nx
-			local h = tan_py + tan_ny
-			v.HorizontalFOV = math.atan(w / 2.0) * 180 / math.pi * 2
-			v.AspectRatio = w / h
-			v.HorizontalOffset = xoffset
-			v.VerticalOffset = yoffset
-		end
-		
-		local wLeft = (math.abs((1.0 - displayInfo.ProjectionLeft[1][3]) / displayInfo.ProjectionLeft[1][1]) +
-               math.abs((-1.0 - displayInfo.ProjectionLeft[1][3]) / displayInfo.ProjectionLeft[1][1]))
-		local hLeft = (math.abs((1.0 - displayInfo.ProjectionLeft[2][3]) / displayInfo.ProjectionLeft[2][2]) +
-					math.abs((-1.0 - displayInfo.ProjectionLeft[2][3]) / displayInfo.ProjectionLeft[2][2]))
 
-		local wRight = (math.abs((1.0 - displayInfo.ProjectionRight[1][3]) / displayInfo.ProjectionRight[1][1]) +
-						math.abs((-1.0 - displayInfo.ProjectionRight[1][3]) / displayInfo.ProjectionRight[1][1]))
-		local hRight = (math.abs((1.0 - displayInfo.ProjectionRight[2][3]) / displayInfo.ProjectionRight[2][2]) +
-						math.abs((-1.0 - displayInfo.ProjectionRight[2][3]) / displayInfo.ProjectionRight[2][2]))
-
-		-- Average both eyes
-		local wAvg = (wLeft + wRight) / 2
-		local hAvg = (hLeft + hRight) / 2
+		local displayCalculations = {
+			left = calculateProjectionParams(displayInfo.ProjectionLeft),
+			right = calculateProjectionParams(displayInfo.ProjectionRight),
+		}
+		
+		local wAvg = (displayCalculations.left.Width + displayCalculations.right.Width) / 2
+		local hAvg = (displayCalculations.left.Height + displayCalculations.right.Height) / 2
 
 		local hFactor = 0.5 / wAvg
 		local vFactor = 1.0 / hAvg
 
-		local vMin = system.IsWindows() and 0 or 1
-		local vMax =  system.IsWindows() and 1 or 0
-		--local vFactor = convars.vrmod_vertical_scale:GetFloat()
-		--local hFactor = convars.vrmod_horizontal_scale:GetFloat()
-		local vMinLeft = vMin - math.abs(displayCalculations.left.VerticalOffset * vFactor)
-		local vMaxLeft = vMax - math.abs(displayCalculations.left.VerticalOffset * vFactor)
-		local vMinRight = vMin - math.abs(displayCalculations.right.VerticalOffset * vFactor)
-		local vMaxRight = vMax - math.abs(displayCalculations.right.VerticalOffset * vFactor)
-		local uMinLeft =  0.0 + displayCalculations.left.HorizontalOffset * hFactor
+		local vMin, vMax = system.IsWindows() and 0 or 1, system.IsWindows() and 1 or 0
+
+		local function calcVMinMax(verticalOffset)
+			if system.IsWindows() then
+				local adjustment = verticalOffset * vFactor
+				return vMin - adjustment, vMax - adjustment
+			else
+				return vMin - math.abs(verticalOffset * vFactor), vMax - math.abs(verticalOffset * vFactor)
+			end
+		end
+
+		local uMinLeft = 0.0 + displayCalculations.left.HorizontalOffset * hFactor
 		local uMaxLeft = 0.5 + displayCalculations.left.HorizontalOffset * hFactor
 		local uMinRight = 0.5 + displayCalculations.right.HorizontalOffset * hFactor
 		local uMaxRight = 1.0 + displayCalculations.right.HorizontalOffset * hFactor
+
+		local vMinLeft, vMaxLeft = calcVMinMax(displayCalculations.left.VerticalOffset)
+		local vMinRight, vMaxRight = calcVMinMax(displayCalculations.right.VerticalOffset)
 
 		VRMOD_SetSubmitTextureBounds(uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight)
 
@@ -362,6 +373,7 @@ if CLIENT then
 		overrideConvar("pac_override_fov", "1")
 		overrideConvar("mat_queue_mode", "1")
 		overrideConvar("gmod_mcore_test", "1")
+		overrideConvar("cl_threaded_bone_setup","1")
 		
 		--3D audio fix
 		hook.Add("CalcView","vrutil_hook_calcview",function(ply, pos, ang, fv)
@@ -399,9 +411,7 @@ if CLIENT then
 			end
 		end)
 		
-		
 		--rendering
-		
 		
 		g_VR.view = {
 				x = 0, y = 0,
