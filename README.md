@@ -24,24 +24,22 @@ Watch a short demo: [YouTube Link](https://www.youtube.com/shorts/CZYd3S08roo)
 
 ### 📦 Installation
 
-1. **Requirements:**
-   - Ensure your system supports **GMod x64**.
-   - On native Linux, run the following script first:  
+**Requirements:**
+- Ensure your system supports **GMod x64**.
+- On native Linux, run the following script first:  
      [GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
 
-2. **Installation Options:**
+**Installation:**
 
-   **Option 1: Precompiled Binary**  
-   - Download the latest precompiled native build:  
-     [Releases Page](https://github.com/Abyss-c0re/vrmod-module-master/releases)
+1. Download the latest precompiled modules:  
+   [Releases Page](https://github.com/Abyss-c0re/vrmod-module-master/releases)
 
-   **Option 2: Manual Installation**  
-   - Subscribe to the Workshop addon:  
-     [Steam Workshop – VRMod](https://steamcommunity.com/sharedfiles/filedetails/?id=3442302711)  
+2. Subscribe to the Workshop addon:  
+   [Steam Workshop – VRMod](https://steamcommunity.com/sharedfiles/filedetails/?id=3442302711)  
      
    **OR**
-   
-   - Clone or download this repository manually:
+
+   Clone or download this repository manually:
      - Rename the folder to `vrmod` (do **not** use dashes `-`)
      - Place it in:  
        `./GarrysMod/garrysmod/addons/vrmod`
