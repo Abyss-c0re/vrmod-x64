@@ -12,7 +12,7 @@ Apart from that there were rendering problems on Linux (Chromium x64) build and 
 * Developed and tested with Quest 2/Quest 3 on Linux OS (kUbuntu 24.04)
 * Fixed rendering issues on Linux native build
 * Tailored for Quest 3 to avoid fish eye effect and distorted image when tilting head.
-* Work on Windows
+* Works on Windows
 
 **Perforamce test**
 
