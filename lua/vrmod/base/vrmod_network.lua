@@ -587,17 +587,20 @@ if SERVER then
 	vrmod.NetReceiveLimited("vrutil_net_requestvrplayers",5,0,function(len, ply)
 		ply.hasRequestedVRPlayers = true
 		for k,v in pairs(g_VR) do
-			local vrPly = player.GetBySteamID(k)
-			if IsValid(vrPly) then
-				net.Start("vrutil_net_join")
-				net.WriteEntity(vrPly)
-				net.WriteBool(g_VR[k].characterAltHead)
-				net.WriteBool(g_VR[k].dontHideBullets)
-				net.Send(ply)
-			else
-				print("VRMod: Invalid SteamID \""..k.."\" found in player table")
+			if type(k) == "string" and k:match("^STEAM_[0-5]:[01]:%d+$") then
+				local vrPly = player.GetBySteamID(k)
+				if IsValid(vrPly) then
+					net.Start("vrutil_net_join")
+					net.WriteEntity(vrPly)
+					net.WriteBool(v.characterAltHead)
+					net.WriteBool(v.dontHideBullets)
+					net.Send(ply)
+				else
+					print("VRMod: Invalid SteamID \""..k.."\" found in player table")
+				end
 			end
-		end
+end
+
 	end)
 	
 	hook.Add("PlayerDeath","vrutil_hook_playerdeath",function(ply, inflictor, attacker)
