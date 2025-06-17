@@ -1,47 +1,49 @@
-## **VRmod for Native Linux Garry's Mod x64 build - AIO Package**
+## **VRMod x64 Build – All-In-One Package with Linux Support**
 
-**Optimization problem:**
+### ⚠️ Optimization Issues
 
-VRmod and its components, such as hand physics and melee attacks, are maintained by different authors. In some cases, they conflict with each other, and some addons are abandoned or broken.
+VRMod and its components—such as hand physics, melee attacks, and item interaction—are maintained by different authors. This often results in compatibility issues, broken features, or abandoned modules.
 
-Apart from that there were rendering problems on Linux (Chromium x64) build and image was not optimized for Quest 2/3.
+This build focuses on **optimization** by merging essential features from semi-official forks and third-party addons, with an emphasis on performance, cross-platform stability, and code de-duplication.
 
-**Additional info about this version of VRmod:**
+---
 
-* Integrated collision physics, melee, (fixed) manual pickup
-* Developed and tested with Quest 2/Quest 3 on Linux OS (kUbuntu 24.04)
-* Fixed rendering issues on Linux native build
-* Tailored for Quest 3 to avoid fish eye effect and distorted image when tilting head.
-* Works on Windows
+### ✅ Key Features
 
-**Perforamce test**
+- Integrated collision physics, melee system, manual pickup, and interactive buttons  
+- Fixed rendering and shader issues on Linux (native x64 build)  
+- Fully compatible with Windows (x64)
 
-[YouTube link](https://www.youtube.com/shorts/CZYd3S08roo)
+---
 
-**Known issues:**
+### 🧪 Performance Test
 
-* Might Need to install and launch original VRmod once
+Watch a short demo: [YouTube Link](https://www.youtube.com/shorts/CZYd3S08roo)
 
-**Installation:**
+---
 
-Make sure you can run gmod x64 on your system. On Native Linux version it’s required to run [GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
+### 📦 Installation
 
-Either [download precompiled module](https://github.com/Abyss-c0re/vrmod-module-master/tree/main/install) for native build or complie your own.
+1. **Requirements:**
+   - Ensure your system supports **GMod x64**.
+   - On native Linux, run the following script first:  
+     [GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
 
-Place vrmod folder in HOME/.steam/steam/steamapps/common/GarrysMod/garrysmod/addons/
+2. **Installation Options:**
 
-**Credits:**
+   **Option 1: Precompiled Binary**  
+   - Download the latest precompiled native build:  
+     [Releases Page](https://github.com/Abyss-c0re/vrmod-module-master/releases)
 
-The projects is reorganized and contains works of various authors:
+   **Option 2: Manual Installation**  
+   - Subscribe to the Workshop addon:  
+     [Steam Workshop – VRMod](https://steamcommunity.com/sharedfiles/filedetails/?id=3442302711)  
+     
+   **OR**
+   
+   - Clone or download this repository manually:
+     - Rename the folder to `vrmod` (do **not** use dashes `-`)
+     - Place it in:  
+       `./GarrysMod/garrysmod/addons/vrmod`
 
-*Catse*, original VRmod creator
-
-*Pescorr*, semiofficial VRmod creator, melee, hostler (I used the code to drop the weapons on release)
-
-*Hugo*, manual pickup,simple hand physics and hl2 weapon replacer
-
-*Arctic* for ArcVR
-
-Might be more, contact me to be included...
-
-Big Thank You to *Grocel* for helping me to figure how SW_Addons unintentianally fixed rendering issues
+---
