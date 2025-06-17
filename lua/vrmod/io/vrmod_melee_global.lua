@@ -1,16 +1,17 @@
 ----------------------------------------
--- VRMod Melee System - Refactored
+-- VRMod Melee System - Extended
 ----------------------------------------
 
 -- UTILITIES ---------------------------
 local convars, convarValues = vrmod.GetConvars()
 
 local function IsPlayerInVR(ply) return vrmod.IsPlayerInVR(ply) end
-local function GetRightHandVel() return vrmod.GetRightHandVelocity():Length() / 40 end
-local function GetLeftHandVel() return vrmod.GetLeftHandVelocity():Length() / 40 end
-
-local function GetLeftHandNormalizedVel() return vrmod.GetLeftHandVelocity():GetNormalized() end
-local function GetRightHandNormalizedVel() return vrmod.GetRightHandVelocity():GetNormalized() end
+local function GetRightHandVel(ply) return vrmod.GetRightHandVelocity(ply):Length() / 40 end
+local function GetLeftHandVel(ply) return vrmod.GetLeftHandVelocity(ply):Length() / 40 end
+local function GetRightHandVelocity(ply) return vrmod.GetRightHandVelocity(ply) end
+local function GetLeftHandVelocity(ply) return vrmod.GetLeftHandVelocity(ply) end
+local function GetRightHandPos(ply) return vrmod.GetRightHandPos(ply) end
+local function GetLeftHandPos(ply) return vrmod.GetLeftHandPos(ply) end
 
 local function CreateCollisionBox(pos, ang, model, visible)
     local ent = ents.CreateClientProp()
@@ -36,12 +37,13 @@ local function CreateCollisionBox(pos, ang, model, visible)
     return ent
 end
 
-local function SendMeleeAttack(src, dir)
+local function SendMeleeAttack(src, dir, speed)
     net.Start("VRMod_MeleeAttack")
     net.WriteFloat(src.x)
     net.WriteFloat(src.y)
     net.WriteFloat(src.z)
     net.WriteVector(dir)
+    net.WriteFloat(speed)
     net.SendToServer()
 end
 
@@ -67,13 +69,36 @@ if CLIENT then
     local meleeBoxes = {}
     local meleeBoxLifetime = 0.1
 
+
     hook.Add("VRMod_Tracking", "VRMeleeAttacks", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not IsPlayerInVR(ply) then return end
         if NextMeleeTime > CurTime() then return end
 
+        local function IsHoldingProp(ply, hand)
+            if not IsValid(ply) then return false end
+            if ply ~= LocalPlayer() then return false end -- we only track local player's hands clientside
+
+            if hand == "left" then
+                a = IsValid(g_VR.heldEntityLeft)
+                if a then
+                    print(a)
+                end
+                return a
+            elseif hand == "right" then
+                aa = IsValid(g_VR.heldEntityRight)
+                if a then 
+                    print("Right")
+                end
+                return aa
+            else
+                return false
+            end
+        end
+
         local function TryAttack(pos, vel, useWeaponModel)
             local normVel = vel:GetNormalized()
+            local speed = vel:Length()
             local tr = util.TraceLine({ start = pos, endpos = pos, filter = ply })
             local src = tr.HitPos + (tr.HitNormal * -2)
             local tr2 = util.TraceLine({
@@ -87,8 +112,6 @@ if CLIENT then
                 if useWeaponModel then
                     local wep = ply:GetActiveWeapon()
                     model = IsValid(wep) and wep:GetModel() or cl_effectmodel:GetString()
-                    
-                    -- Use the VR controller's actual orientation
                     ang = vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
                 else
                     model = cl_effectmodel:GetString()
@@ -100,13 +123,14 @@ if CLIENT then
             end
 
             if tr2.Hit then
-                SendMeleeAttack(src, normVel)
+                SendMeleeAttack(src, normVel, speed)
             end
         end
 
         -- Gun Melee
         if cv_allowgunmelee:GetBool() and cl_usegunmelee:GetBool() then
-            if GetRightHandVel() >= cv_meleeVelThreshold:GetFloat() then
+            local rightVel = GetRightHandVel(ply)
+            if rightVel >= cv_meleeVelThreshold:GetFloat() then
                 local vm = ply:GetViewModel()
                 if IsValid(vm) then
                     local tr = util.TraceHull({
@@ -119,20 +143,23 @@ if CLIENT then
 
                     if tr.Hit then
                         NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
-                        TryAttack(vm:GetPos(), vrmod.GetRightHandVelocity(), true)
+                        TryAttack(vm:GetPos(), GetRightHandVelocity(ply), true)
                     end
                 end
             end
         end
 
-        -- Fist Melee (left & right)
+        -- Fist Melee
         if cv_allowfist:GetBool() and cl_usefist:GetBool() then
-            if GetLeftHandVel() >= cv_meleeVelThreshold:GetFloat() then
+            local leftVel = GetLeftHandVel(ply)
+            local rightVel = GetRightHandVel(ply)
+
+            if leftVel >= cv_meleeVelThreshold:GetFloat() and not IsHoldingProp(ply,"left") then
                 NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
-                TryAttack(vrmod.GetLeftHandPos(ply), vrmod.GetLeftHandVelocity(), false)
-            elseif GetRightHandVel() >= cv_meleeVelThreshold:GetFloat() then
+                TryAttack(GetLeftHandPos(ply), GetLeftHandVelocity(ply), false)
+            elseif rightVel >= cv_meleeVelThreshold:GetFloat() and not IsHoldingProp(ply,"right") then
                 NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
-                TryAttack(vrmod.GetRightHandPos(ply), vrmod.GetRightHandVelocity(), true)
+                TryAttack(GetRightHandPos(ply), GetRightHandVelocity(ply), true)
             end
         end
 
@@ -159,7 +186,7 @@ if CLIENT then
 
                 if tr2.Hit then
                     NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
-                    SendMeleeAttack(src, footPos:GetNormalized())
+                    SendMeleeAttack(src, footPos:GetNormalized(), vel * 40)
                 end
             end
 
@@ -187,21 +214,28 @@ if SERVER then
         if not IsValid(ply) or not ply:Alive() then return end
 
         local src = Vector(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
-        local vel = net.ReadVector()
+        local dir = net.ReadVector()
+        local speed = net.ReadFloat()
 
-        local speedMod = (ply:GetVelocity():Length() / 100) + (vel:Length() / 2)
-        local dmg = cv_meleeDamage:GetFloat() * speedMod
+        local base = cv_meleeDamage:GetFloat()
+        local scaled = math.Clamp((speed / 80) ^ 2, 0.1, 6.0)
+
+        local damage = base * scaled * 0.1
+
+        --print("Raw Speed:", speed)
+        --print("Final Damage:", damage)
 
         ply:LagCompensation(true)
         ply:FireBullets({
             Attacker = ply,
-            Damage = dmg,
-            Force = 1,
+            Damage = damage,
+            Force = damage, -- optional: use damage as force
             Num = 1,
             Tracer = 0,
-            Dir = vel,
+            Dir = dir,
             Src = src
         })
         ply:LagCompensation(false)
+
     end)
 end
