@@ -35,6 +35,7 @@ hook.Add ( "VRMod_Pickup", "ManualWeaponPickupHook", function (ply, ent)
 	if ent:IsWeapon() == true then												-- this was requested by a user in the addon comments, and i agree that it seems better to pick a weapon up as soon as you grab it rather than releasing it
 		equipgun = ent:GetClass()
 		hook.Call("VRMod_Drop", nil, ply, ent) -- bugfix: picking up weapons with prop togther
+		if not IsValid(ent) then return end
 		ply:PickupWeapon(ent)
 	ply:SelectWeapon(equipgun)
 	

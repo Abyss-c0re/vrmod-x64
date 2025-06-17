@@ -264,12 +264,12 @@ elseif SERVER then
 				if pickupController ~= nil or v ~= nil then
 					local tmp_object  = v:GetPhysicsObject()
 					if IsValid(tmp_object) then
-						print(tmp_object)                                                                                                
+						--print(tmp_object)                                                                                                
 						pickupController:AddToMotionController(tmp_object)
 						tmp_object:Wake()                                                                         
 					else                                                                                                                
 						-- 'ent' is NULL or invalid, handle the case appropriately                                                      
-						print("trying to pick up empty object!")
+						--print("trying to pick up empty object!")
 						ply:DropObject()                                                                        
 					end           
 
