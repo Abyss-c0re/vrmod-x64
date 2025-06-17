@@ -113,7 +113,7 @@ if SERVER then
                     end
                 )
             else
-                print("attempt to drop empty weapon")  
+                --print("attempt to drop empty weapon")  
             end
         end
     )
