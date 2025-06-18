@@ -263,8 +263,9 @@ elseif SERVER then
 				pickupCount = pickupCount + 1
 				if pickupController ~= nil or v ~= nil then
 					local tmp_object  = v:GetPhysicsObject()
-					if IsValid(tmp_object) then
-						--print(tmp_object)                                                                                                
+					if IsValid(tmp_object) and IsValid(tmp_object:GetEntity()) then
+    					pickupController:AddToMotionController(tmp_object)
+                                                                                                
 						pickupController:AddToMotionController(tmp_object)
 						tmp_object:Wake()                                                                         
 					else                                                                                                                
@@ -312,6 +313,16 @@ elseif SERVER then
 			pickup(ply, bLeftHand, net.ReadVector(), net.ReadAngle())
 		else
 			drop(ply:SteamID(), bLeftHand, net.ReadVector(), net.ReadAngle(), net.ReadVector(), net.ReadVector())
+		end
+	end)
+
+	hook.Add("EntityRemoved", "vrmod_cleanup_drop_handler", function(ent)
+		for i = 1, pickupCount do
+			local t = pickupList[i]
+			if t and t.ent == ent then
+				drop(t.steamid, t.left)
+				break
+			end
 		end
 	end)
 
