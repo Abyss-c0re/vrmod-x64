@@ -1,57 +1,98 @@
-print ("running vrmod manual item pickup") 	-- tells me that the script is running so i can sleep at night
-											-- there are going to be comments everywhere
-											-- this is a different take on the same addon, now with hopefully cleaner and more efficient code
-local vrmod_manualpickup = CreateConVar( "vrmod_manualpickups", 1, { FCVAR_ARCHIVE,FCVAR_REPLICATED }, "vrmod manual pickup toggle" ) -- creates the convar so it can be turned on or off (default on)
+local vrmod_manualpickup = CreateConVar("vrmod_manualpickups", 1, {FCVAR_ARCHIVE, FCVAR_REPLICATED}, "vrmod manual pickup toggle")
 
+-- Per-player states
+local PickupDisabled = {}
+local PickupDisabledWeapons = {}
 
-IsVR = false -- bugfix breaks after respawn
-hook.Add ("PlayerSpawn", "SpawnSetPickupState", function (ply)		-- sets the initial state of the addon, aswell as excluding non-VR players from being affected
-	PickupDisabled = true
-	PickupDisabledWeapons = true
-	
+-- Initialize pickup states on spawn
+hook.Add("PlayerSpawn", "SpawnSetPickupState", function(ply)
+	local id = ply:EntIndex()
+	PickupDisabled[id] = true
+	PickupDisabledWeapons[id] = true
 end)
 
-hook.Add ("VRMod_Start", "VRModPickupStartState", function (ply)	-- this gets called when a player enters VR, so this addon only affects VR players (important in multiplayer)
-		IsVR = true
+-- Set player as VR when entering VRMod
+hook.Add("VRMod_Start", "VRModPickupStartState", function(ply)
+	ply:SetNWBool("IsVR", true)
+
+	local id = ply:EntIndex()
+	PickupDisabled[id] = true
+	PickupDisabledWeapons[id] = true
 end)
 
-hook.Add ("VRMod_Exit", "VRModPickupResetState", function (ply)		-- returns a player's status back to non-VR when exiting VRMod
-		IsVR = false
+-- Clear VR state when exiting VRMod
+hook.Add("VRMod_Exit", "VRModPickupResetState", function(ply)
+	ply:SetNWBool("IsVR", false)
+
+	local id = ply:EntIndex()
+	PickupDisabled[id] = nil
+	PickupDisabledWeapons[id] = nil
 end)
 
-hook.Add ( "VRMod_Drop", "ManualItemPickupDropHook", function (ply, ent)
-	if not IsValid(ent) then return end		-- the heart of the addon; sets 'PickupDisabled' to 'false' when releasing an item, thus picking it up instantly
-	if ent:GetClass() == "prop_physics" then return end							-- then returns the value back to its base state of 'true'
-		PickupDisabled = false
-		timer.Simple (0.3, function()
-
-		PickupDisabled = true
-
-	end)
-end)
-
-
-hook.Add ( "VRMod_Pickup", "ManualWeaponPickupHook", function (ply, ent)
-	if not IsValid(ent) then return end		-- this is the same thing as above, but for weapons, and one small difference - it's triggered immediately upon touching the weapon, rather then dropping it
-	if ent:IsWeapon() == true then												-- this was requested by a user in the addon comments, and i agree that it seems better to pick a weapon up as soon as you grab it rather than releasing it
-		equipgun = ent:GetClass()
-		hook.Call("VRMod_Drop", nil, ply, ent)
-		ply:PickupWeapon(ent)
-	ply:SelectWeapon(equipgun)
-	
+-- Fix VR state loss after respawn
+timer.Create("VRModManualPickup_RespawnFixTimer", 1, 0, function()
+	for _, ply in ipairs(player.GetAll()) do
+		if ply:Alive() and ply:GetNWBool("IsVR", false) then
+			local id = ply:EntIndex()
+			if PickupDisabled[id] == nil then
+				PickupDisabled[id] = true
+				PickupDisabledWeapons[id] = true
+			end
+		end
 	end
-	end)
-
-
-hook.Add ("PlayerCanPickupItem", "ItemTouchPickupDisablerVR", function( ply, item )												-- this hook is important - it controls if a player can pickup items by touching them
-if vrmod_manualpickup:GetBool() and item:GetClass() != "item_suit" and PickupDisabled == true and IsVR == true then				-- this part turns it off - the 'GetBool' part checks if the console corresponding convar is true (boolean means true or false) 
-	return false																												-- if it's true, touch-item pickup is disabled (thats what return false does)
-else return true 																												-- another note; 'item:GetClass() != "item_suit"' means if the item is an HEV suit, then it doesn't count - so you can still pick it up by touching
-end																																																					-- because manually picking up an HEV suit wouldn't make sense
 end)
 
-hook.Add ( "PlayerCanPickupWeapon", "WeaponTouchPickupDisablerVR", function( ply, wep )											--does the same thing for weapons as for items
-	if vrmod_manualpickup:GetBool() and wep:GetPos() != ply:GetPos() and PickupDisabledWeapons == true and IsVR == true then
-	return false
-end
+-- Handle item drop to allow manual pickup
+hook.Add("VRMod_Drop", "ManualItemPickupDropHook", function(ply, ent)
+	if not IsValid(ent) then return end
+	if ent:GetClass() == "prop_physics" then return end
+
+	local id = ply:EntIndex()
+	PickupDisabled[id] = false
+
+	timer.Simple(0.3, function()
+		if IsValid(ply) then
+			PickupDisabled[id] = true
+		end
+	end)
+end)
+
+-- Handle weapon pickup by hand
+hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
+	if not IsValid(ply) or not ply:IsPlayer() then return end
+	if not IsValid(ent) or not ent:IsWeapon() then return end
+	if not ply.PickupWeapon then return end -- prevent nil method call crash
+
+	local wepClass = ent:GetClass()
+
+	-- Temporarily disable pickup protection
+	hook.Call("VRMod_Drop", nil, ply, ent)
+
+	-- Attempt actual pickup of the entity
+	local success = ply:PickupWeapon(ent)
+
+	-- Optional: Select it if successful
+	if success and ply:HasWeapon(wepClass) then
+		ply:SelectWeapon(wepClass)
+	end
+end)
+
+-- Disable touch-based item pickup
+hook.Add("PlayerCanPickupItem", "ItemTouchPickupDisablerVR", function(ply, item)
+	local id = ply:EntIndex()
+
+	if vrmod_manualpickup:GetBool() and item:GetClass() ~= "item_suit" and PickupDisabled[id] and ply:GetNWBool("IsVR", false) then
+		return false
+	end
+
+	return true
+end)
+
+-- Disable touch-based weapon pickup
+hook.Add("PlayerCanPickupWeapon", "WeaponTouchPickupDisablerVR", function(ply, wep)
+	local id = ply:EntIndex()
+
+	if vrmod_manualpickup:GetBool() and wep:GetPos() ~= ply:GetPos() and PickupDisabledWeapons[id] and ply:GetNWBool("IsVR", false) then
+		return false
+	end
 end)
