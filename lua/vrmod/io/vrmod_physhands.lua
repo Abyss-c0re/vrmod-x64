@@ -1,164 +1,135 @@
-print ("running vr physhands")
+print("Running VR physical hands system.")
+
 if CLIENT then return end
 
-local function vrmodspawnhands(ply)
-        if VRMODHandPlayer == true then
-    VEERhand = ents.Create("prop_physics")
-    VEERhand:SetModel("models/hunter/plates/plate.mdl")
-    VEERhand:Spawn()
-    VEERhand:Activate()
-    VEERhand:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
-    VEERhandPhys = VEERhand:GetPhysicsObject()
-    VEERhandPhys:SetMass(20)
-    VEERhand:SetPos(ply:GetPos())
-    VEERhand:SetNoDraw(true)
+-- Per-player hand tracking
+local vrHands = {}
 
-    VEERhandLEFT = ents.Create("prop_physics")
-    VEERhandLEFT:SetModel("models/hunter/plates/plate.mdl")
-    VEERhandLEFT:Spawn()
-    VEERhandLEFT:Activate()
-    VEERhandLEFT:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
-    VEERhandPhysLEFT = VEERhandLEFT:GetPhysicsObject()
-    VEERhandPhysLEFT:SetMass(20)
-    VEERhandLEFT:SetPos(ply:GetPos())
-    VEERhandLEFT:SetNoDraw(true)
-        end
+-- Spawns invisible physical hands for a player
+local function SpawnVRHands(ply)
+    if not IsValid(ply) or not ply:Alive() then return end
+
+    if not vrHands[ply] then vrHands[ply] = {} end
+    local hands = vrHands[ply]
+
+    for _, side in ipairs({"right", "left"}) do
+        local hand = ents.Create("prop_physics")
+        if not IsValid(hand) then continue end
+
+        hand:SetModel("models/hunter/plates/plate.mdl")
+        hand:Spawn()
+        hand:Activate()
+        hand:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
+        hand:SetPos(ply:GetPos())
+        hand:SetNoDraw(true)
+
+        local phys = hand:GetPhysicsObject()
+        if IsValid(phys) then phys:SetMass(20) end
+
+        hands[side] = { ent = hand, phys = phys }
+    end
+end
+
+-- Removes hands for a player
+local function RemoveVRHands(ply)
+    if not IsValid(ply) or not ply:Alive() then return end
+    local hands = vrHands[ply]
+    if not hands then return end
+
+    for _, side in pairs(hands) do
+        if IsValid(side.ent) then side.ent:Remove() end
     end
 
-
-    local function vrmodremovehands(ply)
-        if IsValid(VEERhand) and IsValid (VEERhandLEFT) then
-                VEERhand:Remove()
-                VEERhandLEFT:Remove()
-        end
+    vrHands[ply] = nil
 end
 
+-- Handles physics every tick
+hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
+    local hands = vrHands[ply]
+    if not hands or not hands.right or not hands.left then return end
 
-    hook.Add("PlayerTick", "physhandphys", function (ply)
-        if VRMODHandPlayer == true and IsValid(VEERhand) and IsValid(VEERhandLEFT) then
+    local function UpdateHand(side, getPos, getAng)
+        local data = hands[side]
+        if not IsValid(data.ent) or not IsValid(data.phys) then return end
 
+        local pos, ang = LocalToWorld(Vector(3, 0, 0), Angle(90, 0, 0), getPos(ply), getAng(ply))
+        local center = data.ent:LocalToWorld(data.phys:GetMassCenter())
+        local velocity = (pos - center) * 30 + ply:GetVelocity()
 
-local righthandtargetpos = vrmod.GetRightHandPos(ply)
-local righthandtargetang = vrmod.GetRightHandAng(ply)
+        data.phys:SetVelocity(velocity)
 
-        local targetPos, targetAng = LocalToWorld(Vector(3, -0, 0), Angle(90.0, 0.0, 0.0), righthandtargetpos, righthandtargetang)
+        local _, angVel = WorldToLocal(Vector(), ang, Vector(), data.phys:GetAngles())
+        local targetAngVel = Vector(angVel.roll, angVel.pitch, angVel.yaw) * 30
+        data.phys:AddAngleVelocity(targetAngVel - data.phys:GetAngleVelocity())
+    end
 
-        local targetVel = ( targetPos - VEERhand:LocalToWorld(VEERhandPhys:GetMassCenter()) ) * 30 + ply:GetVelocity()
+    UpdateHand("right", vrmod.GetRightHandPos, vrmod.GetRightHandAng)
+    UpdateHand("left", vrmod.GetLeftHandPos, vrmod.GetLeftHandAng)
 
-
-            VEERhandPhys:SetVelocity(targetVel)
-
-
-            local _,tempangvel = WorldToLocal (Vector(), targetAng, Vector(), VEERhandPhys:GetAngles())
-            targetAngVel = Vector(tempangvel.roll, tempangvel.pitch, tempangvel.yaw) * 30
-            VEERhandPhys:AddAngleVelocity(targetAngVel-VEERhandPhys:GetAngleVelocity())
-
-
-                if IsValid(VEERhandLEFT) then
-
-            local lefthandtargetpos = vrmod.GetLeftHandPos(ply)
-local lefthandtargetang = vrmod.GetLeftHandAng(ply)
-
-        local targetPosleft, targetAngleft = LocalToWorld(Vector(3, -0, 0), Angle(90.0, 0.0, 0.0), lefthandtargetpos, lefthandtargetang)
-
-        local targetVelleft = ( targetPosleft - VEERhandLEFT:LocalToWorld(VEERhandPhysLEFT:GetMassCenter()) ) * 30 + ply:GetVelocity()
-
-
-            VEERhandPhysLEFT:SetVelocity(targetVelleft)
-
-
-            local _,tempangvelleft = WorldToLocal (Vector(), targetAngleft, Vector(), VEERhandPhysLEFT:GetAngles())
-            targetAngVelleft = Vector(tempangvelleft.roll, tempangvelleft.pitch, tempangvelleft.yaw) * 30
-            VEERhandPhysLEFT:AddAngleVelocity(targetAngVelleft-VEERhandPhysLEFT:GetAngleVelocity())
-                end
-        end
-
-
-        if IsValid(VEERhand) and IsValid (VEERhandLEFT) then
-                if ply:GetPos():DistToSqr(VEERhand:GetPos()) > 10000 then
-                        VEERhand:SetPos(ply:GetPos())
-                        VEERhandLEFT:SetPos(ply:GetPos())
-                
-                end
-        end
-        if VRMODHandPlayer == true then
-        if not IsValid(VEERhand) or not IsValid (VEERhandLEFT) then
-                vrmodremovehands(ply)
-                vrmodspawnhands(ply)
-        end
-end
-    end)
-
-
-    hook.Add("VRMod_Pickup", "physhandnopickup", function (ply, ent)
-
-            if ent == VEERhand then return false
-            end
-
-            if ent == VEERhandLEFT then return false
-            end
-
-    end)
-
-    hook.Add("VRMod_Start", "physhandinit1", function (ply)
-
-        VRMODHandPlayer = true
-        vrmodspawnhands(ply)
-
+    -- Teleport back if too far
+    if ply:GetPos():DistToSqr(hands.right.ent:GetPos()) > 10000 then
+        hands.right.ent:SetPos(ply:GetPos())
+        hands.left.ent:SetPos(ply:GetPos())
+    end
 end)
 
-hook.Add("PlayerSpawn", "physhandinit2", function (ply)
+-- Prevent pickup of hand entities
+hook.Add("VRMod_Pickup", "VRHand_BlockPickup", function(ply, ent)
+    local hands = vrHands[ply]
+    if not hands then return end
 
-        if VRMODHandPlayer == true then
-                vrmodspawnhands(ply)
-        end
-
-
+    if ent == hands.right.ent or ent == hands.left.ent then
+        return false
+    end
 end)
 
-
-    hook.Add("PlayerDeath", "physhandshutdown2", function (ply)
-
-        if IsValid(VEERhand) and IsValid (VEERhandLEFT) then
-                vrmodremovehands(ply)
-        end
+-- On VR session start
+hook.Add("VRMod_Start", "VRHand_OnVRStart", function(ply)
+    SpawnVRHands(ply)
 end)
 
-hook.Add("VRMod_Exit", "physhandshutdown", function (ply)
-
-        VRMODHandPlayer = false
-        if IsValid(VEERhand) and IsValid (VEERhandLEFT) then
-                vrmodremovehands(ply)
-        end
+-- On player spawn
+hook.Add("PlayerSpawn", "VRHand_OnSpawn", function(ply)
+    if vrmod.IsPlayerInVR(ply) then
+        timer.Simple(0.1, function()
+            if IsValid(ply) then SpawnVRHands(ply) end
+        end)
+    end
 end)
 
-
-
-hook.Add("VRMod_Pickup", "avrmagdetector", function (ply, ent)
-        if not IsValid(ent) then return end	
-        local tomatch = ent:GetClass()
-
-        if string.match( tomatch, "avrmag_") then
-                VEERhandLEFT:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
---                 print ("collision group changed")
-
-
-        end
-
+-- On player death
+hook.Add("PlayerDeath", "VRHand_OnDeath", function(ply)
+    RemoveVRHands(ply)
 end)
 
-hook.Add("VRMod_Drop", "avrmagdetectorrestore", function (ply, ent)
-        if not IsValid(ent) then return end	
-        local tomatch = ent:GetClass()
+-- On VR session end
+hook.Add("VRMod_Exit", "VRHand_OnVRExit", function(ply)
+    RemoveVRHands(ply)
+end)
 
-        if IsValid(tomatch) then                                                                                                
-                if string.match( tomatch, "avrmag_") then
-                        VEERhandLEFT:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
+-- On disconnect
+hook.Add("PlayerDisconnected", "VRHand_OnDisconnect", function(ply)
+    RemoveVRHands(ply)
+end)
 
-                end                                                                         
-        else                                                                                                                
-                                                
-        print("Attemt to drop empty object!")                                                                         
-        end      
-        
+-- Handle avrmag_ pickup collision change
+hook.Add("VRMod_Pickup", "VRHand_AVRMagSet", function(ply, ent)
+    if not IsValid(ent) then return end
+    if not string.match(ent:GetClass(), "avrmag_") then return end
+
+    local hands = vrHands[ply]
+    if hands and hands.left and IsValid(hands.left.ent) then
+        hands.left.ent:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
+    end
+end)
+
+-- Restore collision group on drop
+hook.Add("VRMod_Drop", "VRHand_AVRMagRestore", function(ply, ent)
+    if not IsValid(ent) then return end
+    if not string.match(ent:GetClass(), "avrmag_") then return end
+
+    local hands = vrHands[ply]
+    if hands and hands.left and IsValid(hands.left.ent) then
+        hands.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
+    end
 end)

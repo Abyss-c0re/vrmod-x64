@@ -80,17 +80,9 @@ if CLIENT then
             if ply ~= LocalPlayer() then return false end -- we only track local player's hands clientside
 
             if hand == "left" then
-                a = IsValid(g_VR.heldEntityLeft)
-                if a then
-                    print(a)
-                end
-                return a
+                return IsValid(g_VR.heldEntityLeft)
             elseif hand == "right" then
-                aa = IsValid(g_VR.heldEntityRight)
-                if a then 
-                    print("Right")
-                end
-                return aa
+                return IsValid(g_VR.heldEntityRight)
             else
                 return false
             end
