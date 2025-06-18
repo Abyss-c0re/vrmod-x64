@@ -48,9 +48,16 @@ hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
     local hands = vrHands[ply]
     if not hands or not hands.right or not hands.left then return end
 
+    -- If hands were deleted (e.g., by admin cleanup), recreate them
+    if not IsValid(hands.right.ent) or not IsValid(hands.left.ent) then
+        RemoveVRHands(ply)
+        SpawnVRHands(ply)
+        return
+    end
+
     local function UpdateHand(side, getPos, getAng)
         local data = hands[side]
-        if not IsValid(data.ent) or not IsValid(data.phys) then return end
+        if not data or not IsValid(data.ent) or not IsValid(data.phys) then return end
 
         local pos, ang = LocalToWorld(Vector(3, 0, 0), Angle(90, 0, 0), getPos(ply), getAng(ply))
         local center = data.ent:LocalToWorld(data.phys:GetMassCenter())
@@ -66,7 +73,6 @@ hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
     UpdateHand("right", vrmod.GetRightHandPos, vrmod.GetRightHandAng)
     UpdateHand("left", vrmod.GetLeftHandPos, vrmod.GetLeftHandAng)
 
-    -- Teleport back if too far
     if ply:GetPos():DistToSqr(hands.right.ent:GetPos()) > 10000 then
         hands.right.ent:SetPos(ply:GetPos())
         hands.left.ent:SetPos(ply:GetPos())
@@ -110,6 +116,13 @@ end)
 -- On disconnect
 hook.Add("PlayerDisconnected", "VRHand_OnDisconnect", function(ply)
     RemoveVRHands(ply)
+end)
+
+-- Handle cleanup manually before map cleanup wipes entities
+hook.Add("PreCleanupMap", "VRHand_OnCleanup", function()
+    for ply, _ in pairs(vrHands) do
+        RemoveVRHands(ply)
+    end
 end)
 
 -- Handle avrmag_ pickup collision change
