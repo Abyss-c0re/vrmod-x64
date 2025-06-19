@@ -634,8 +634,8 @@ if CLIENT then
 		
 		hook.Remove("RenderScene","vrutil_hook_renderscene")
 		hook.Remove("PreDrawViewModel","vrutil_hook_predrawviewmodel")
-		hook.Remove( "DrawPhysgunBeam", "vrutil_hook_drawphysgunbeam")
-		hook.Remove( "PreDrawHalos", "vrutil_hook_predrawhalos")
+		hook.Remove("DrawPhysgunBeam", "vrutil_hook_drawphysgunbeam")
+		hook.Remove("PreDrawHalos", "vrutil_hook_predrawhalos")
 		hook.Remove("EntityFireBullets","vrutil_hook_entityfirebullets")
 		hook.Remove("Tick","vrutil_hook_tick")
 		hook.Remove("PostDrawSkyBox","vrutil_hook_postdrawskybox")
