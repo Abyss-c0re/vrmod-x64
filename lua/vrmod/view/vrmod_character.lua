@@ -6,19 +6,32 @@ if CLIENT then
 	local convars = vrmod.GetConvars()
 	
 	g_VR.defaultOpenHandAngles = {
-		--left hand
-		Angle(0,0,0), Angle(0,-40,0), Angle(0,0,0), --finger 0
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0), --finger 1
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0), --finger 2
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0), --finger 3
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0), --finger 4
-		--right hand
-		Angle(0,0,0), Angle(0,-40,0), Angle(0,0,0),
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0),
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0),
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0),
-		Angle(0,-10,0), Angle(0,-10,0), Angle(0,0,0),
+		-- LEFT HAND
+		-- Thumb
+		Angle(5, 10, 0), Angle(0, -20, 5), Angle(0, -10, 0),
+		-- Index
+		Angle(0, -3, 1), Angle(0, -2, 0), Angle(0, -1, 0),
+		-- Middle
+		Angle(0, 0, 0), Angle(0, -2, 0), Angle(0, -1, 0),
+		-- Ring
+		Angle(0, 2, -1), Angle(0, -1, 0), Angle(0, 0, 0),
+		-- Pinky
+		Angle(0, 4, -1), Angle(0, 0, 0), Angle(0, 0, 0),
+
+		-- RIGHT HAND
+		-- Thumb
+		Angle(5, -10, 0), Angle(0, -20, -5), Angle(0, -10, 0),
+		-- Index
+		Angle(0, 3, -1), Angle(0, -2, 0), Angle(0, -1, 0),
+		-- Middle
+		Angle(0, 0, 0), Angle(0, -2, 0), Angle(0, -1, 0),
+		-- Ring
+		Angle(0, -2, 1), Angle(0, -1, 0), Angle(0, 0, 0),
+		-- Pinky
+		Angle(0, -4, 1), Angle(0, 0, 0), Angle(0, 0, 0),
 	}
+
+
 	
 	g_VR.defaultClosedHandAngles = {
 		Angle(30,0,0), Angle(0,0,0), Angle(0,30,0),
