@@ -12,7 +12,7 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_attach_heightmenu", nil, 1, nil, "", 0, 4, tonumber)
 	vrmod.AddCallbackedConvar("vrmod_beam_color", nil, "255,0,0,255")
 
-	local uioutline = CreateClientConVar("vrmod_ui_outline", 1, true, FCVAR_ARCHIVE, nil, 0, 1)
+	local uioutline = CreateClientConVar("vrmod_ui_outline", 0, true, FCVAR_ARCHIVE, nil, 0, 1)
 	local rt_beam = GetRenderTarget("vrmod_rt_beam", 64, 64, false)
 	local mat_beam = CreateMaterial(
 		"vrmod_mat_beam",
