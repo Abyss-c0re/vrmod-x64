@@ -120,21 +120,21 @@ if SERVER then
 end
 
 if CLIENT then
-    local tedioreenable = CreateClientConVar("vrmod_pickupoff_weaponholster", 1, true, FCVAR_ARCHIVE, "", 0, 1)
+    --local tedioreenable = CreateClientConVar("vrmod_pickupoff_weaponholster", 1, true, FCVAR_ARCHIVE, "", 0, 1)
     local dropenable = CreateClientConVar("vrmod_weapondrop_enable", 1, true, FCVAR_ARCHIVE, "", 0, 1)
-    local dropmode = CreateClientConVar("vrmod_weapondrop_trashwep", 0, true, FCVAR_ARCHIVE, "", 0, 1)
+    --local dropmode = CreateClientConVar("vrmod_weapondrop_trashwep", 0, true, FCVAR_ARCHIVE, "", 0, 1)
     local ply = LocalPlayer()
     
     hook.Add(
         "VRMod_Input",
-        "Tediore_holster_Drop",
+        "Weapon_Drop",
         function(action, state)
             if dropenable:GetBool() then
                 --if GetConVar("vrmod_Foregripmode"):GetBool() then return end
                 if not GetConVar("vrmod_lefthand"):GetBool() then
                     if action == "boolean_right_pickup" and not state then
                         net.Start("DropWeapon")
-                        net.WriteBool(dropmode:GetBool())
+                        net.WriteBool(true)
                         net.WriteVector(vrmod.GetRightHandVelocity() * 2.5)
                         net.WriteVector(vrmod.GetRightHandAngularVelocity() * 2.5)
                         net.SendToServer()
