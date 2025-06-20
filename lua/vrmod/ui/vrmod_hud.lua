@@ -15,8 +15,8 @@ local function CurvedPlane(w, h, segments, degrees, matrix)
 		local nextFraction = (i + 1) / segments
 		local ang1 = startAng + fraction * degrees
 		local ang2 = startAng + nextFraction * degrees
-		local x1 = (math.cos(ang1) * -0.5) * scale
-		local x2 = (math.cos(ang2) * -0.5) * scale
+		local x1 = math.cos(ang1) * -0.5 * scale
+		local x2 = math.cos(ang2) * -0.5 * scale
 		local z1 = math.sin(ang1) * 0.5 * scale - zoffset
 		local z2 = math.sin(ang2) * 0.5 * scale - zoffset
 		verts[#verts + 1] = {
@@ -57,20 +57,15 @@ local function CurvedPlane(w, h, segments, degrees, matrix)
 	end
 
 	mesh:BuildFromTriangles(verts)
-
 	return mesh
 end
 
 local rt = GetRenderTarget("vrmod_hud", vrScrW:GetInt(), vrScrH:GetInt(), false)
 local mat = Material("!vrmod_hud")
-mat = not mat:IsError() and mat or CreateMaterial(
-	"vrmod_hud",
-	"UnlitGeneric",
-	{
-		["$basetexture"] = rt:GetName(),
-		["$translucent"] = 1
-	}
-)
+mat = not mat:IsError() and mat or CreateMaterial("vrmod_hud", "UnlitGeneric", {
+	["$basetexture"] = rt:GetName(),
+	["$translucent"] = 1
+})
 
 local hudMeshes = {}
 local hudMesh = nil
@@ -85,7 +80,7 @@ end
 local function AddHUD()
 	RemoveHUD()
 	if not g_VR.active or not convarValues.vrmod_hud then return end
-		local mtx = Matrix()
+	local mtx = Matrix()
 	mtx:Translate(Vector(0, 0, vrScrH:GetInt() * convarValues.vrmod_hudscale / 2))
 	mtx:Rotate(Angle(0, -90, -90))
 	local meshName = convarValues.vrmod_hudscale .. "_" .. convarValues.vrmod_hudcurve
@@ -96,32 +91,19 @@ local function AddHUD()
 		blacklist[v] = #v > 0 and true or blacklist[v]
 	end
 
-	if table.Count(blacklist) > 0 then
-		hook.Add(
-			"HUDShouldDraw",
-			"vrmod_hud",
-			function(name)
-				if blacklist[name] then return false end
-			end
-		)
-	end
-
-	hook.Add(
-		"VRMod_PreRender",
-		"hud",
-		function()
-			if not g_VR.threePoints then return end
-			render.PushRenderTarget(rt)
-			render.OverrideAlphaWriteEnable(true, true)
-			render.Clear(0, 0, 0, convarValues.vrmod_hudtestalpha, true, true)
-			render.RenderHUD(0, 0, vrScrW:GetInt(), vrScrH:GetInt())
-			render.OverrideAlphaWriteEnable(false)
-			render.PopRenderTarget()
-			mtx:Identity()
-			mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * convarValues.vrmod_huddistance)
-			mtx:Rotate(g_VR.tracking.hmd.ang)
-		end
-	)
+	if table.Count(blacklist) > 0 then hook.Add("HUDShouldDraw", "vrmod_hud", function(name) if blacklist[name] then return false end end) end
+	hook.Add("VRMod_PreRender", "hud", function()
+		if not g_VR.threePoints then return end
+		render.PushRenderTarget(rt)
+		render.OverrideAlphaWriteEnable(true, true)
+		render.Clear(0, 0, 0, convarValues.vrmod_hudtestalpha, true, true)
+		render.RenderHUD(0, 0, vrScrW:GetInt(), vrScrH:GetInt())
+		render.OverrideAlphaWriteEnable(false)
+		render.PopRenderTarget()
+		mtx:Identity()
+		mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * convarValues.vrmod_huddistance)
+		mtx:Rotate(g_VR.tracking.hmd.ang)
+	end)
 
 	--todo dont hook menu system to draw on top of player lol
 	orig = orig or VRUtilRenderMenuSystem
@@ -142,28 +124,13 @@ vrmod.AddCallbackedConvar("vrmod_hudcurve", nil, "60", nil, nil, nil, nil, tonum
 vrmod.AddCallbackedConvar("vrmod_hudscale", nil, "0.05", nil, nil, nil, nil, tonumber, AddHUD)
 vrmod.AddCallbackedConvar("vrmod_huddistance", nil, "60", nil, nil, nil, nil, tonumber)
 vrmod.AddCallbackedConvar("vrmod_hudtestalpha", nil, "0", nil, nil, nil, nil, tonumber)
-hook.Add(
-	"VRMod_Menu",
-	"vrmod_hud",
-	function(frame)
-		frame.SettingsForm:CheckBox("Enable HUD", "vrmod_hud")
-	end
-)
+hook.Add("VRMod_Menu", "vrmod_hud", function(frame) frame.SettingsForm:CheckBox("Enable HUD", "vrmod_hud") end)
+hook.Add("VRMod_Start", "hud", function(ply)
+	if ply ~= LocalPlayer() then return end
+	AddHUD()
+end)
 
-hook.Add(
-	"VRMod_Start",
-	"hud",
-	function(ply)
-		if ply ~= LocalPlayer() then return end
-		AddHUD()
-	end
-)
-
-hook.Add(
-	"VRMod_Exit",
-	"hud",
-	function(ply)
-		if ply ~= LocalPlayer() then return end
-		RemoveHUD()
-	end
-)
+hook.Add("VRMod_Exit", "hud", function(ply)
+	if ply ~= LocalPlayer() then return end
+	RemoveHUD()
+end)

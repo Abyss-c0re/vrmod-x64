@@ -6,20 +6,18 @@
 	and player:GetModel() will always return the old model no matter how many times you change pm
 
 --]]
-local cv_allowpmchg = CreateClientConVar("vrmod_pmchange", 1,true,FCVAR_ARCHIVE)
+local cv_allowpmchg = CreateClientConVar("vrmod_pmchange", 1, true, FCVAR_ARCHIVE)
 if CLIENT then
 	if cv_allowpmchg:GetBool() then
-		net.Receive("vrmod_pmchange",function()
+		net.Receive("vrmod_pmchange", function()
 			local ply = player.GetBySteamID(net.ReadString())
 			local model = net.ReadString()
-			if ply then
-				ply.vrmod_pm = model
-			end
+			if ply then ply.vrmod_pm = model end
 		end)
 	elseif SERVER then
 		if cv_allowpmchg:GetBool() then
 			util.AddNetworkString("vrmod_pmchange")
-			hook.Add("InitPostEntity","vrmod_pmchange",function()
+			hook.Add("InitPostEntity", "vrmod_pmchange", function()
 				local og = getmetatable(Entity(0)).SetModel
 				getmetatable(Entity(0)).SetModel = function(...)
 					local args = {...}

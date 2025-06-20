@@ -1,5 +1,4 @@
 if SERVER then return end
-
 local changelog = [[
 
 Version 200 - Gmod 64 Edition:
@@ -470,18 +469,16 @@ Version 71.1
 Version 71:
 -fixed issue where players would get spammed by lua errors on servers with ulib installed when someone disconnects while in VR
 ]]
-
-hook.Add("VRMod_Menu","changelog",function(frame)
-	local panel = vgui.Create( "DPanel", frame.DPropertySheet )
-	frame.DPropertySheet:AddSheet( "Changelog", panel )
-	
-	local richtext = vgui.Create( "RichText", panel )
-	richtext:Dock( FILL )
-	richtext:InsertColorChange(0,0,0,255)
+hook.Add("VRMod_Menu", "changelog", function(frame)
+	local panel = vgui.Create("DPanel", frame.DPropertySheet)
+	frame.DPropertySheet:AddSheet("Changelog", panel)
+	local richtext = vgui.Create("RichText", panel)
+	richtext:Dock(FILL)
+	richtext:InsertColorChange(0, 0, 0, 255)
 	richtext:AppendText(changelog)
 	richtext.PerformLayout = function(self)
-		richtext:SetBGColor(255,255,255,255)
-		richtext:SetFGColor(0,0,0,255)
+		richtext:SetBGColor(255, 255, 255, 255)
+		richtext:SetFGColor(0, 0, 0, 255)
 		richtext:SetFontInternal("DermaDefault")
 	end
 end)

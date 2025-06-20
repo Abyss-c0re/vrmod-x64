@@ -1,5 +1,4 @@
 if CLIENT then
-
 	local function LoadViewModelConfig()
 		if file.Exists("vrmod/viewmodelinfo.json", "DATA") then
 			local json = file.Read("vrmod/viewmodelinfo.json", "DATA")
@@ -10,7 +9,6 @@ if CLIENT then
 	end
 
 	LoadViewModelConfig()
-
 	function CreateWeaponConfigGUI()
 		local frame = vgui.Create("DFrame")
 		frame:SetSize(600, 400)
@@ -22,9 +20,8 @@ if CLIENT then
 		listview:AddColumn("Weapon Class")
 		listview:AddColumn("Offset Position")
 		listview:AddColumn("Offset Angle")
-
 		local function UpdateListView()
-			if not viewModelConfig then return end 
+			if not viewModelConfig then return end
 			listview:Clear()
 			for class, data in pairs(viewModelConfig) do
 				listview:AddLine(class, tostring(data.offsetPos), tostring(data.offsetAng))
@@ -32,7 +29,6 @@ if CLIENT then
 		end
 
 		UpdateListView()
-
 		local addButton = vgui.Create("DButton", frame)
 		addButton:SetText("New")
 		addButton:Dock(BOTTOM)
@@ -72,7 +68,6 @@ if CLIENT then
 
 	-- viewModelConfig
 	viewModelConfig = viewModelConfig or {}
-
 	local function LoadViewModelConfig()
 		if file.Exists("vrmod/viewmodelinfo.json", "DATA") then
 			local json = file.Read("vrmod/viewmodelinfo.json", "DATA")
@@ -94,7 +89,6 @@ if CLIENT then
 		}
 
 		local originalData = table.Copy(data)
-
 		-- Offset Position
 		local posPanel = vgui.Create("DPanel", frame)
 		posPanel:Dock(TOP)
@@ -176,28 +170,19 @@ if CLIENT then
 		vrmod.SetViewModelOffsetForWeaponClass(class, originalData.offsetPos, originalData.offsetAng)
 		cancelButton:SetText("Cancel")
 		cancelButton:Dock(BOTTOM)
-		cancelButton.DoClick = function()
-			frame:Close()
-		end
+		cancelButton.DoClick = function() frame:Close() end
 	end
 
 	-- GUI
-	concommand.Add("vrmod_weaponconfig",function()
-		if not viewModelConfig then
-			LoadViewModelConfig()
-		end
-
+	concommand.Add("vrmod_weaponconfig", function()
+		if not viewModelConfig then LoadViewModelConfig() end
 		CreateWeaponConfigGUI()
-	end
-	)
+	end)
 
 	local function InitializeVRModViewModelSettings()
 		LoadViewModelConfig()
-
 		for classname, settings in pairs(viewModelConfig) do
-			if settings.offsetPos and settings.offsetAng then
-				vrmod.SetViewModelOffsetForWeaponClass(classname, settings.offsetPos, settings.offsetAng)
-			end
+			if settings.offsetPos and settings.offsetAng then vrmod.SetViewModelOffsetForWeaponClass(classname, settings.offsetPos, settings.offsetAng) end
 		end
 	end
 

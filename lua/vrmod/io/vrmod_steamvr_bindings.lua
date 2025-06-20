@@ -1,7 +1,5 @@
 if SERVER then return end
-
 g_VR = g_VR or {}
-
 g_VR.action_manifest = [[
 {
 	"default_bindings": [
@@ -364,13 +362,11 @@ g_VR.action_manifest = [[
 	]
 }
 ]]
-
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
-
 g_VR.bindings_holographic = [[
 
 {
@@ -615,13 +611,11 @@ g_VR.bindings_holographic = [[
 }
 
 ]]
-
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
-
 g_VR.bindings_touch = [[
    {
       "action_manifest_version" : 0,
@@ -1083,13 +1077,11 @@ g_VR.bindings_touch = [[
    }
       
 ]]
-
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
-
 g_VR.bindings_vive = [[
 {
    "action_manifest_version" : 0,
@@ -1333,13 +1325,11 @@ g_VR.bindings_vive = [[
 }
 
 ]]
-
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
-
 g_VR.bindings_knuckles = [[
 {
    "action_manifest_version" : 0,
@@ -1655,13 +1645,11 @@ g_VR.bindings_knuckles = [[
    "simulated_actions" : []
 }
 ]]
-
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
-
 g_VR.bindings_cosmos = [[
 
 {
@@ -1955,13 +1943,11 @@ g_VR.bindings_cosmos = [[
    "simulated_actions" : []
 }
 ]]
-
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
-
 g_VR.bindings_vive_tracker_left_foot = [[
 {
    "action_manifest_version" : 0,
@@ -1990,7 +1976,6 @@ g_VR.bindings_vive_tracker_left_foot = [[
    "simulated_actions" : []
 }
 ]]
-
 g_VR.bindings_vive_tracker_right_foot = [[
 {
    "action_manifest_version" : 0,
@@ -2019,7 +2004,6 @@ g_VR.bindings_vive_tracker_right_foot = [[
    "simulated_actions" : []
 }
 ]]
-
 g_VR.bindings_vive_tracker_waist = [[
 {
    "action_manifest_version" : 0,
@@ -2048,35 +2032,28 @@ g_VR.bindings_vive_tracker_waist = [[
    "simulated_actions" : []
 }
 ]]
-
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
 --##############################################################################
-
 local function WriteBindingFiles()
-	if not file.Exists("vrmod","DATA") then
-		file.CreateDir("vrmod")
-	end
-	file.Write("vrmod/vrmod_action_manifest.txt",g_VR.action_manifest)
-	file.Write("vrmod/vrmod_bindings_holographic_controller.txt",g_VR.bindings_holographic)
-	file.Write("vrmod/vrmod_bindings_oculus_touch.txt",g_VR.bindings_touch)
-	file.Write("vrmod/vrmod_bindings_vive_controller.txt",g_VR.bindings_vive)
-	file.Write("vrmod/vrmod_bindings_knuckles.txt",g_VR.bindings_knuckles)
-	file.Write("vrmod/vrmod_bindings_vive_cosmos_controller.txt",g_VR.bindings_cosmos)
-	file.Write("vrmod/vrmod_bindings_vive_tracker_left_foot.txt",g_VR.bindings_vive_tracker_left_foot)
-	file.Write("vrmod/vrmod_bindings_vive_tracker_right_foot.txt",g_VR.bindings_vive_tracker_right_foot)
-	file.Write("vrmod/vrmod_bindings_vive_tracker_waist.txt",g_VR.bindings_vive_tracker_waist)
+   if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
+   file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
+   file.Write("vrmod/vrmod_bindings_holographic_controller.txt", g_VR.bindings_holographic)
+   file.Write("vrmod/vrmod_bindings_oculus_touch.txt", g_VR.bindings_touch)
+   file.Write("vrmod/vrmod_bindings_vive_controller.txt", g_VR.bindings_vive)
+   file.Write("vrmod/vrmod_bindings_knuckles.txt", g_VR.bindings_knuckles)
+   file.Write("vrmod/vrmod_bindings_vive_cosmos_controller.txt", g_VR.bindings_cosmos)
+   file.Write("vrmod/vrmod_bindings_vive_tracker_left_foot.txt", g_VR.bindings_vive_tracker_left_foot)
+   file.Write("vrmod/vrmod_bindings_vive_tracker_right_foot.txt", g_VR.bindings_vive_tracker_right_foot)
+   file.Write("vrmod/vrmod_bindings_vive_tracker_waist.txt", g_VR.bindings_vive_tracker_waist)
 end
 
 local cv_bindingVersion = CreateClientConVar("vrmod_bindingversion", "0", true, false)
 if cv_bindingVersion:GetInt() < 16 then
-	cv_bindingVersion:SetInt(16)
-	WriteBindingFiles()
+   cv_bindingVersion:SetInt(16)
+   WriteBindingFiles()
 end
 
-hook.Add("VRMod_Reset","vrmod_reset_bindings",function()
-	WriteBindingFiles()
-end)
-
+hook.Add("VRMod_Reset", "vrmod_reset_bindings", function() WriteBindingFiles() end)

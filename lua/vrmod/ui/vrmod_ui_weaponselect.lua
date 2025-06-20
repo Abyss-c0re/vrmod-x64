@@ -1,43 +1,31 @@
 if SERVER then return end
-
 defFont = "vrmod_Trebuchet24"
+surface.CreateFont("vrmod_font_normal", {
+	font = defFont,
+	extended = false,
+	size = 30,
+	weight = 0,
+	blursize = 0,
+	scanlines = 0,
+	antialias = true,
+})
 
-surface.CreateFont(
-	"vrmod_font_normal",
-	{
-		font = defFont,
-		extended = false,
-		size = 30,
-		weight = 0,
-		blursize = 0,
-		scanlines = 0,
-		antialias = true,
-	}
-)
+surface.CreateFont("vrmod_font_mid", {
+	font = defFont,
+	size = 20,
+	weight = 600,
+	antialias = true,
+})
 
-surface.CreateFont(
-	"vrmod_font_mid",
-	{
-		font = defFont,
-		size = 20,
-		weight = 600,
-		antialias = true,
-	}
-)
-
-surface.CreateFont(
-	"vrmod_font_small",
-	{
-		font = defFont,
-		extended = false,
-		size = 10,
-		weight = 0,
-		blursize = 0,
-		scanlines = 0,
-		antialias = true,
-	}
-)
-
+surface.CreateFont("vrmod_font_small", {
+	font = defFont,
+	extended = false,
+	size = 10,
+	weight = 0,
+	blursize = 0,
+	scanlines = 0,
+	antialias = true,
+})
 
 local open = false
 function VRUtilWeaponMenuOpen()
@@ -45,7 +33,6 @@ function VRUtilWeaponMenuOpen()
 	open = true
 	--
 	local items = {}
-
 	for k, v in pairs(LocalPlayer():GetWeapons()) do
 		local slot, slotPos = v:GetSlot(), v:GetSlotPos()
 		local index = #items + 1
@@ -56,18 +43,14 @@ function VRUtilWeaponMenuOpen()
 			end
 		end
 
-		table.insert(
-			items,
-			index,
-			{
-				title = v:GetPrintName(),
-				label = v:GetPrintName(),
-				font = "vrmod_font_small",
-				wep = v,
-				slot = slot,
-				slotPos = slotPos
-			}
-		)
+		table.insert(items, index, {
+			title = v:GetPrintName(),
+			label = v:GetPrintName(),
+			font = "vrmod_font_small",
+			wep = v,
+			slot = slot,
+			slotPos = slotPos
+		})
 	end
 
 	local currentSlot, actualSlotPos = 0, 0
@@ -99,55 +82,42 @@ function VRUtilWeaponMenuOpen()
 	--uid, width, height, panel, attachment, pos, ang, scale, cursorEnabled, closeFunc
 	local mode = convarValues.vrmod_attach_weaponmenu
 	if mode == 1 then
-		VRUtilMenuOpen("weaponmenu",512,512,nil,1,Vector(4, 6, 15.5),Angle(0, -90, 60),0.03,true,function()
+		VRUtilMenuOpen("weaponmenu", 512, 512, nil, 1, Vector(4, 6, 15.5), Angle(0, -90, 60), 0.03, true, function()
 			hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 			open = false
-			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then
-				input.SelectWeapon(items[prevValues.hoveredItem].wep)
-			end
+			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then input.SelectWeapon(items[prevValues.hoveredItem].wep) end
 		end)
 		--
 	elseif mode == 3 then
 		--forw, left, up
-		VRUtilMenuOpen("weaponmenu",512,512,nil,3,Vector(35, 20, 10),Angle(0, -90, 90),0.03,true,function()
+		VRUtilMenuOpen("weaponmenu", 512, 512, nil, 3, Vector(35, 20, 10), Angle(0, -90, 90), 0.03, true, function()
 			hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 			open = false
-			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then
-				input.SelectWeapon(items[prevValues.hoveredItem].wep)
-			end
+			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then input.SelectWeapon(items[prevValues.hoveredItem].wep) end
 		end)
 	elseif mode == 2 then
 		--forw, left, up
-		VRUtilMenuOpen("weaponmenu",512,512,nil,2,Vector(13, 6, 10.5),Angle(0, -90, 90),0.03,true,function()hook.Remove("PreRender", "vrutil_hook_renderweaponselect")open = false
-			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then
-				input.SelectWeapon(items[prevValues.hoveredItem].wep)
-			end
-		end)
-
-	else --
-		VRUtilMenuOpen("weaponmenu",512,512,nil,mode,pos,ang,0.03,true,function()
+		VRUtilMenuOpen("weaponmenu", 512, 512, nil, 2, Vector(13, 6, 10.5), Angle(0, -90, 90), 0.03, true, function()
 			hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 			open = false
-			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then
-				input.SelectWeapon(items[prevValues.hoveredItem].wep)
-			end
+			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then input.SelectWeapon(items[prevValues.hoveredItem].wep) end
+		end)
+	else --
+		VRUtilMenuOpen("weaponmenu", 512, 512, nil, mode, pos, ang, 0.03, true, function()
+			hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
+			open = false
+			if items[prevValues.hoveredItem] and IsValid(items[prevValues.hoveredItem].wep) then input.SelectWeapon(items[prevValues.hoveredItem].wep) end
 		end)
 	end
 
-	hook.Add("PreRender","vrutil_hook_renderweaponselect",function()
+	hook.Add("PreRender", "vrutil_hook_renderweaponselect", function()
 		local values = {}
 		values.hoveredItem = -1
 		local hoveredSlot, hoveredSlotPos = -1, -1
-
 		local buttonWidth, buttonHeight = 82, 33
 		local Wgap = (512 - buttonWidth * 6) / 5
 		local Hgap = 2
-		
-
-		if g_VR.menuFocus == "weaponmenu" then
-			hoveredSlot, hoveredSlotPos = math.floor(g_VR.menuCursorX / (buttonWidth + Wgap)), math.floor((g_VR.menuCursorY - 57) / (buttonHeight + Hgap))
-		end
-
+		if g_VR.menuFocus == "weaponmenu" then hoveredSlot, hoveredSlotPos = math.floor(g_VR.menuCursorX / (buttonWidth + Wgap)), math.floor((g_VR.menuCursorY - 57) / (buttonHeight + Hgap)) end
 		for i = 1, #items do
 			if items[i].slot == hoveredSlot and items[i].actualSlotPos == hoveredSlotPos then
 				values.hoveredItem = i
@@ -158,10 +128,7 @@ function VRUtilWeaponMenuOpen()
 		values.health, values.suit = ply:Health(), ply:Armor()
 		values.clip, values.total, values.alt = 0, 0, 0
 		local wep = ply:GetActiveWeapon()
-		if IsValid(wep) then
-			values.clip, values.total, values.alt = wep:Clip1(), ply:GetAmmoCount(wep:GetPrimaryAmmoType()), ply:GetAmmoCount(wep:GetSecondaryAmmoType())
-		end
-
+		if IsValid(wep) then values.clip, values.total, values.alt = wep:Clip1(), ply:GetAmmoCount(wep:GetPrimaryAmmoType()), ply:GetAmmoCount(wep:GetSecondaryAmmoType()) end
 		local changes = false
 		for k, v in pairs(values) do
 			if v ~= prevValues[k] then
@@ -199,8 +166,7 @@ function VRUtilWeaponMenuOpen()
 		end
 
 		VRUtilMenuRenderEnd()
-	end
-	)
+	end)
 end
 
 function VRUtilWeaponMenuClose()

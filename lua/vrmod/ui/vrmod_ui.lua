@@ -11,17 +11,12 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_attach_popup", nil, 1, nil, "", 0, 4, tonumber)
 	vrmod.AddCallbackedConvar("vrmod_attach_heightmenu", nil, 1, nil, "", 0, 4, tonumber)
 	vrmod.AddCallbackedConvar("vrmod_beam_color", nil, "255,0,0,255")
-
 	local uioutline = CreateClientConVar("vrmod_ui_outline", 0, true, FCVAR_ARCHIVE, nil, 0, 1)
 	local rt_beam = GetRenderTarget("vrmod_rt_beam", 64, 64, false)
-	local mat_beam = CreateMaterial(
-		"vrmod_mat_beam",
-		"UnlitGeneric",
-		{
-			["$basetexture"] = rt_beam:GetName(),
-			["$ignorez"] = 1
-		}
-	)
+	local mat_beam = CreateMaterial("vrmod_mat_beam", "UnlitGeneric", {
+		["$basetexture"] = rt_beam:GetName(),
+		["$ignorez"] = 1
+	})
 
 	render.PushRenderTarget(rt_beam)
 	--menu pointer color
@@ -29,13 +24,11 @@ if CLIENT then
 	local r, g, b, a = string.match(beamColor, "(%d+),(%d+),(%d+),(%d+)")
 	render.Clear(tonumber(r), tonumber(g), tonumber(b), tonumber(a))
 	render.PopRenderTarget()
-
 	g_VR.menus = {}
 	local menus = g_VR.menus
 	local menuOrder = {}
 	local menusExist = false
 	local prevFocusPanel = nil
-
 	function VRUtilMenuRenderPanel(uid)
 		if not menus[uid] or not menus[uid].panel or not menus[uid].panel:IsValid() then return end
 		render.PushRenderTarget(menus[uid].rt)
@@ -73,8 +66,6 @@ if CLIENT then
 		local menuFocusPanel = nil
 		local menuFocusCursorWorldPos = nil
 		local tms = render.GetToneMappingScaleLinear()
-
-		
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
 		for k, v in ipairs(menuOrder) do
 			k = v.uid
@@ -86,7 +77,6 @@ if CLIENT then
 			end
 
 			local pos, ang = v.pos, v.ang
-			
 			if v.attachment == 1 then
 				pos, ang = LocalToWorld(pos, ang, g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang)
 			elseif v.attachment == 2 then
@@ -96,10 +86,8 @@ if CLIENT then
 			elseif v.attachment == 4 then
 				pos, ang = LocalToWorld(pos, ang, g_VR.origin, g_VR.originAngle)
 			end
-	
-			if v.uid ~= "heightmenu" then
-				v.scale = 0.02
-			end
+
+			if v.uid ~= "heightmenu" then v.scale = 0.02 end
 			cam.IgnoreZ(true)
 			cam.Start3D2D(pos, ang, v.scale)
 			surface.SetDrawColor(255, 255, 255, 255)
@@ -115,7 +103,6 @@ if CLIENT then
 			cam.IgnoreZ(false)
 			if v.cursorEnabled then
 				local cursorX, cursorY = -1, -1
-				
 				local cursorWorldPos = Vector(0, 0, 0)
 				local start = g_VR.tracking.pose_righthand.pos
 				local dir = g_VR.tracking.pose_righthand.ang:Forward()
@@ -128,8 +115,8 @@ if CLIENT then
 						dist = B / A
 						cursorWorldPos = start + dir * dist
 						local tp, unused = WorldToLocal(cursorWorldPos, Angle(0, 0, 0), pos, ang)
-						cursorX = tp.x * (1 / v.scale)
-						cursorY = -tp.y * (1 / v.scale)
+						cursorX = tp.x * 1 / v.scale
+						cursorY = -tp.y * 1 / v.scale
 					end
 				end
 
@@ -146,14 +133,8 @@ if CLIENT then
 
 		render.SetToneMappingScaleLinear(tms)
 		if menuFocusPanel ~= prevFocusPanel then
-			if IsValid(prevFocusPanel) then
-				prevFocusPanel:SetMouseInputEnabled(false)
-			end
-
-			if IsValid(menuFocusPanel) then
-				menuFocusPanel:SetMouseInputEnabled(true)
-			end
-
+			if IsValid(prevFocusPanel) then prevFocusPanel:SetMouseInputEnabled(false) end
+			if IsValid(menuFocusPanel) then menuFocusPanel:SetMouseInputEnabled(true) end
 			gui.EnableScreenClicker(menuFocusPanel ~= nil)
 			prevFocusPanel = menuFocusPanel
 		end
@@ -163,10 +144,7 @@ if CLIENT then
 			render.DrawBeam(g_VR.tracking.pose_righthand.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(0, 0, 255))
 			input.SetCursorPos(g_VR.menuCursorX, g_VR.menuCursorY)
 			-- realtime ui start
-			if convarValues.vrmod_ui_realtime == 1 then
-			
-				VRUtilMenuRenderPanel(g_VR.menuFocus)
-			end
+			if convarValues.vrmod_ui_realtime == 1 then VRUtilMenuRenderPanel(g_VR.menuFocus) end
 		end
 
 		render.DepthRange(0, 1)
@@ -190,14 +168,10 @@ if CLIENT then
 
 		menuOrder[#menuOrder + 1] = menus[uid]
 		local mat = Material("!vrmod_mat_ui_" .. uid)
-		menus[uid].mat = not mat:IsError() and mat or CreateMaterial(
-			"vrmod_mat_ui_" .. uid,
-			"UnlitGeneric",
-			{
-				["$basetexture"] = menus[uid].rt:GetName(),
-				["$translucent"] = 1
-			}
-		)
+		menus[uid].mat = not mat:IsError() and mat or CreateMaterial("vrmod_mat_ui_" .. uid, "UnlitGeneric", {
+			["$basetexture"] = menus[uid].rt:GetName(),
+			["$translucent"] = 1
+		})
 
 		if panel then
 			panel:SetPaintedManually(true)
@@ -208,14 +182,10 @@ if CLIENT then
 		render.Clear(0, 0, 0, 0)
 		render.PopRenderTarget()
 		if GetConVar("vrmod_useworldmodels"):GetBool() then
-			hook.Add(
-				"PostDrawTranslucentRenderables",
-				"vrutil_hook_drawmenus",
-				function(bDrawingDepth, bDrawingSkybox)
-					if bDrawingSkybox then return end
-					VRUtilRenderMenuSystem()
-				end
-			)
+			hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawmenus", function(bDrawingDepth, bDrawingSkybox)
+				if bDrawingSkybox then return end
+				VRUtilRenderMenuSystem()
+			end)
 		end
 
 		menusExist = true
@@ -224,14 +194,8 @@ if CLIENT then
 	function VRUtilMenuClose(uid)
 		for k, v in pairs(menus) do
 			if k == uid or not uid then
-				if IsValid(v.panel) then
-					v.panel:SetPaintedManually(false)
-				end
-
-				if v.closeFunc then
-					v.closeFunc()
-				end
-
+				if IsValid(v.panel) then v.panel:SetPaintedManually(false) end
+				if v.closeFunc then v.closeFunc() end
 				for k2, v2 in ipairs(menuOrder) do
 					if v2 == v then
 						table.remove(menuOrder, k2)
@@ -251,7 +215,7 @@ if CLIENT then
 		end
 	end
 
-	hook.Add("VRMod_Input","ui",function(action, pressed)
+	hook.Add("VRMod_Input", "ui", function(action, pressed)
 		if g_VR.menuFocus and action == "boolean_primaryfire" then
 			if pressed then
 				gui.InternalMousePressed(MOUSE_LEFT)
@@ -284,10 +248,11 @@ if CLIENT then
 	end)
 end
 
-concommand.Add("vrmod_vgui_reset",function()
+concommand.Add("vrmod_vgui_reset", function()
 	for _, v in pairs(vgui.GetWorldPanel():GetChildren()) do
 		v:Remove()
 	end
+
 	RunConsoleCommand("spawnmenu_reload")
-	 -- It even removes spawnmenu, so we need to reload it
+	-- It even removes spawnmenu, so we need to reload it
 end)

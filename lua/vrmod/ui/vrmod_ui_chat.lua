@@ -8,37 +8,30 @@ if CLIENT then
 	local function toggleNametags()
 		nametags = not nametags
 		if nametags then
-			hook.Add(
-				"PostDrawOpaqueRenderables",
-				"vrutil_hook_nametags",
-				function(depth, sky)
-					if not g_VR.threePoints or depth or sky then return end
-					surface.SetFont("vrmod_Verdana37")
-					surface.SetDrawColor(0, 0, 0, 128)
-					for k, v in pairs(player.GetAll()) do
-						if v == LocalPlayer() or EyePos():DistToSqr(v:GetPos()) > 1000000 then continue end
-						local mtx = v:GetBoneMatrix(v:LookupBone("ValveBiped.Bip01_Head1") or -1)
-						local pos = mtx and mtx:GetTranslation() + Vector(0, 0, 15) or v:GetPos() + Vector(0, 0, 74)
-						cam.Start3D2D(pos, Angle(0, (g_VR.tracking.hmd.pos - v:GetPos()):Angle().yaw + 90, 90), 0.1)
-						local textWidth, textHeight = surface.GetTextSize(v:Nick())
-						surface.DrawRect(textWidth * -0.5 - 5, 0, textWidth + 10, textHeight)
-						surface.SetTextPos(textWidth * -0.5, 0)
-						surface.SetTextColor(GAMEMODE:GetTeamColor(v))
-						surface.DrawText(v:Nick())
-						cam.End3D2D()
-					end
+			hook.Add("PostDrawOpaqueRenderables", "vrutil_hook_nametags", function(depth, sky)
+				if not g_VR.threePoints or depth or sky then return end
+				surface.SetFont("vrmod_Verdana37")
+				surface.SetDrawColor(0, 0, 0, 128)
+				for k, v in pairs(player.GetAll()) do
+					if v == LocalPlayer() or EyePos():DistToSqr(v:GetPos()) > 1000000 then continue end
+					local mtx = v:GetBoneMatrix(v:LookupBone("ValveBiped.Bip01_Head1") or -1)
+					local pos = mtx and mtx:GetTranslation() + Vector(0, 0, 15) or v:GetPos() + Vector(0, 0, 74)
+					cam.Start3D2D(pos, Angle(0, (g_VR.tracking.hmd.pos - v:GetPos()):Angle().yaw + 90, 90), 0.1)
+					local textWidth, textHeight = surface.GetTextSize(v:Nick())
+					surface.DrawRect(textWidth * -0.5 - 5, 0, textWidth + 10, textHeight)
+					surface.SetTextPos(textWidth * -0.5, 0)
+					surface.SetTextColor(GAMEMODE:GetTeamColor(v))
+					surface.DrawText(v:Nick())
+					cam.End3D2D()
 				end
-			)
+			end)
 		else
 			hook.Remove("PostDrawOpaqueRenderables", "vrutil_hook_nametags")
 		end
 	end
 
 	local function addChatMessage(msg)
-		if #chatLog > 30 then
-			table.remove(chatLog, 1)
-		end
-
+		if #chatLog > 30 then table.remove(chatLog, 1) end
 		if not chatPanel or not chatPanel:IsValid() then return end
 		chatPanel.chatbox:InsertColorChange(151, 211, 255, 255)
 		for i = 1, #msg do
@@ -50,9 +43,7 @@ if CLIENT then
 		end
 
 		chatPanel.chatbox:AppendText("\n")
-		if VRUtilIsMenuOpen("chat") then
-			VRUtilMenuRenderPanel("chat")
-		end
+		if VRUtilIsMenuOpen("chat") then VRUtilMenuRenderPanel("chat") end
 	end
 
 	local function updatePlayerList()
@@ -64,15 +55,12 @@ if CLIENT then
 			chatPanel.playerlist:AppendText("\n" .. v:Nick())
 		end
 
-		if VRUtilIsMenuOpen("chat") then
-			VRUtilMenuRenderPanel("chat")
-		end
+		if VRUtilIsMenuOpen("chat") then VRUtilMenuRenderPanel("chat") end
 	end
 
 	local function ToggleChat()
 		if VRUtilIsMenuOpen("chat") then
 			VRUtilMenuClose("chat")
-
 			return
 		end
 
@@ -114,7 +102,7 @@ if CLIENT then
 			local button = chatPanel["button" .. i]
 			button:SetPos((i - 1) * 85, 285)
 			button:SetSize(80, 25)
-			button:SetTextColor(((i == 1 and LocalPlayer():IsSpeaking()) or (i == 2 and nametags)) and Color(0, 255, 0, 255) or Color(255, 0, 0, 255))
+			button:SetTextColor((i == 1 and LocalPlayer():IsSpeaking() or i == 2 and nametags) and Color(0, 255, 0, 255) or Color(255, 0, 0, 255))
 			button:SetText(i == 1 and "Voice" or i == 2 and "Console" or "Keyboard")
 			button:SetFont("HudSelectionText")
 			button:SetContentAlignment(5)
@@ -127,19 +115,13 @@ if CLIENT then
 			button.OnMousePressed = function()
 				if i == 1 then
 					permissions.EnableVoiceChat(not LocalPlayer():IsSpeaking())
-					timer.Simple(
-						0.01,
-						function()
-							chatPanel.button1:SetTextColor(LocalPlayer():IsSpeaking() and Color(0, 255, 0, 255) or Color(255, 0, 0, 255))
-						end
-					)
+					timer.Simple(0.01, function() chatPanel.button1:SetTextColor(LocalPlayer():IsSpeaking() and Color(0, 255, 0, 255) or Color(255, 0, 0, 255)) end)
 				elseif i == 2 then
 					toggleNametags()
 					chatPanel.button2:SetColor(nametags and Color(0, 255, 0, 255) or Color(255, 0, 0, 255))
 				else
 					if VRUtilIsMenuOpen("keyboard") then
 						VRUtilMenuClose("keyboard")
-
 						return
 					end
 
@@ -171,7 +153,7 @@ if CLIENT then
 					for i = 1, #selectedCase do
 						if selectedCase[i] == "\n" then
 							y = y + 50
-							x = (y == 205) and 127 or (y == 155) and 5 or 5 + ((y - 5) / 50 * 15)
+							x = y == 205 and 127 or y == 155 and 5 or 5 + (y - 5) / 50 * 15
 							continue
 						end
 
@@ -197,7 +179,7 @@ if CLIENT then
 									chatPanel.msgbar:SetText("")
 								end
 							elseif key:GetText() == "Shift" then
-								selectedCase = (selectedCase == lowerCase) and upperCase or lowerCase
+								selectedCase = selectedCase == lowerCase and upperCase or lowerCase
 								updateKeyboard()
 							elseif key:GetText() == "chat" then
 								VRUtilMenuClose("chat")
@@ -220,74 +202,45 @@ if CLIENT then
 						x = x + 50
 					end
 
-					VRUtilMenuOpen(
-						"keyboard",
-						555,
-						255,
-						keyboardPanel,
-						1,
-						Vector(4, 6, 5.5),
-						Angle(0, -90, 10),
-						0.03,
-						true,
-						function()
-							keyboardPanel:Remove()
-							keyboardPanel = nil
-							if chatPanel then
-								chatPanel.msgbar:SetVisible(false)
-								chatPanel.chatbox:SetSize(450, 280)
-								chatPanel.button3:SetColor(Color(255, 0, 0, 255))
-							end
+					VRUtilMenuOpen("keyboard", 555, 255, keyboardPanel, 1, Vector(4, 6, 5.5), Angle(0, -90, 10), 0.03, true, function()
+						keyboardPanel:Remove()
+						keyboardPanel = nil
+						if chatPanel then
+							chatPanel.msgbar:SetVisible(false)
+							chatPanel.chatbox:SetSize(450, 280)
+							chatPanel.button3:SetColor(Color(255, 0, 0, 255))
 						end
-					)
+					end)
 				end
 			end
 		end
 
-		timer.Simple(
-			0.1,
-			function()
-				for i = 1, #chatLog do
-					addChatMessage(chatLog[i])
-				end
-
-				updatePlayerList()
-				--			
-				--forw, left, up
-				VRUtilMenuOpen(
-					"chat",
-					600,
-					310,
-					chatPanel,
-					1,
-					Vector(10, 6, 13),
-					Angle(0, -90, 50),
-					0.03,
-					true,
-					function()
-						chatPanel:SetVisible(false)
-						chatPanel:Remove()
-						chatPanel = nil
-						VRUtilMenuClose("keyboard")
-					end
-				)
+		timer.Simple(0.1, function()
+			for i = 1, #chatLog do
+				addChatMessage(chatLog[i])
 			end
-		)
+
+			updatePlayerList()
+			--			
+			--forw, left, up
+			VRUtilMenuOpen("chat", 600, 310, chatPanel, 1, Vector(10, 6, 13), Angle(0, -90, 50), 0.03, true, function()
+				chatPanel:SetVisible(false)
+				chatPanel:Remove()
+				chatPanel = nil
+				VRUtilMenuClose("keyboard")
+			end)
+		end)
 	end
 
-	hook.Add(
-		"ChatText",
-		"vrutil_hook_chattext",
-		function(index, name, text, type)
-			if type == "joinleave" then
-				chatLog[#chatLog + 1] = {Color(162, 255, 162, 255), text}
-			else
-				chatLog[#chatLog + 1] = {text}
-			end
-
-			addChatMessage(chatLog[#chatLog])
+	hook.Add("ChatText", "vrutil_hook_chattext", function(index, name, text, type)
+		if type == "joinleave" then
+			chatLog[#chatLog + 1] = {Color(162, 255, 162, 255), text}
+		else
+			chatLog[#chatLog + 1] = {text}
 		end
-	)
+
+		addChatMessage(chatLog[#chatLog])
+	end)
 
 	local orig = chat.AddText
 	chat.AddText = function(...)
@@ -308,10 +261,5 @@ if CLIENT then
 		addChatMessage(chatLog[#chatLog])
 	end
 
-	concommand.Add(
-		"vrmod_chatmode",
-		function(ply, cmd, args)
-			ToggleChat()
-		end
-	)
+	concommand.Add("vrmod_chatmode", function(ply, cmd, args) ToggleChat() end)
 end
