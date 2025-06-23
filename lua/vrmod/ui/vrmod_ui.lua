@@ -77,17 +77,15 @@ if CLIENT then
 			end
 
 			local pos, ang = v.pos, v.ang
-			if v.attachment == 1 then
-				pos, ang = LocalToWorld(pos, ang, g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang)
-			elseif v.attachment == 2 then
-				pos, ang = LocalToWorld(pos, ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-			elseif v.attachment == 3 then
-				pos, ang = LocalToWorld(pos, ang, g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang)
-			elseif v.attachment == 4 then
-				pos, ang = LocalToWorld(pos, ang, g_VR.origin, g_VR.originAngle)
+			if v.uid ~= "heightmenu" then
+				v.scale = 0.02
+				if v.attachment then
+					pos, ang = LocalToWorld(pos, ang, g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang)
+				else
+					pos, ang = LocalToWorld(pos, ang, g_VR.origin, g_VR.originAngle)
+				end
 			end
 
-			if v.uid ~= "heightmenu" then v.scale = 0.02 end
 			cam.IgnoreZ(true)
 			cam.Start3D2D(pos, ang, v.scale)
 			surface.SetDrawColor(255, 255, 255, 255)
@@ -114,7 +112,7 @@ if CLIENT then
 					if B < 0 then
 						dist = B / A
 						cursorWorldPos = start + dir * dist
-						local tp, unused = WorldToLocal(cursorWorldPos, Angle(0, 0, 0), pos, ang)
+						local tp = WorldToLocal(cursorWorldPos, Angle(0, 0, 0), pos, ang)
 						cursorX = tp.x * 1 / v.scale
 						cursorY = -tp.y * 1 / v.scale
 					end

@@ -1,5 +1,5 @@
 if SERVER then return end
-local convars, convarValues = vrmod.GetConvars()
+local convarValues = vrmod.GetConvars()
 hook.Add("VRMod_Menu", "addsettings", function(frame)
 	--Settings02 Start
 	--add VRMod_Menu Settings02 propertysheet start
@@ -176,66 +176,26 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	hudtestalpha:SetConVar("vrmod_hudtestalpha") -- Changes the ConVar when you slide
 	-- If not using convars, you can use this hook + Panel.SetValue()
 	hudtestalpha.OnValueChanged = function(self, value) end -- Called when the slider value changes
-	--DNumSlider end
-	--DCheckBoxLabel Start
-	local vrmod_test_ui_testver = MenuTab03:Add("DCheckBoxLabel") -- Create the checkbox
-	vrmod_test_ui_testver:SetPos(20, 135) -- Set the position
-	vrmod_test_ui_testver:SetText("vrmod_test_ui_testver") -- Set the text next to the box
-	vrmod_test_ui_testver:SetConVar("vrmod_test_ui_testver") -- Change a ConVar when the box it ticked/unticked
-	vrmod_test_ui_testver:SizeToContents() -- Make its size the same as the contents
-	--DCheckBoxLabel end
-	--DCheckBoxLabel Start
 	local vrmod_hud_visible_quickmenukey = MenuTab03:Add("DCheckBoxLabel") -- Create the checkbox
-	vrmod_hud_visible_quickmenukey:SetPos(20, 165) -- Set the position
+	vrmod_hud_visible_quickmenukey:SetPos(20, 135) -- Set the position
 	vrmod_hud_visible_quickmenukey:SetText("HUD only while pressing menu key") -- Set the text next to the box
 	vrmod_hud_visible_quickmenukey:SetConVar("vrmod_hud_visible_quickmenukey") -- Change a ConVar when the box it ticked/unticked
 	vrmod_hud_visible_quickmenukey:SizeToContents() -- Make its size the same as the contents
-	--DCheckBoxLabel 
-	--vrmod_attach_quickmenu
-	local attach_quickmenu = vgui.Create("DComboBox", MenuTab03)
-	attach_quickmenu:SetPos(20, 215) -- Set the position (X,Y)
-	attach_quickmenu:SetSize(320, 25) -- Set the size (X,Y)
-	attach_quickmenu:SetText("[quickmenu Attach Position]") -- Set the text above the slider
-	attach_quickmenu:AddChoice("left hand")
-	attach_quickmenu:AddChoice("HMD")
-	attach_quickmenu:AddChoice("Right Static")
-	attach_quickmenu.OnSelect = function(self, index, value) LocalPlayer():ConCommand("vrmod_attach_quickmenu " .. index) end
-	--DNumSlider end
-	--vrmod_attach_weaponmenu
-	local attach_weaponmenu = vgui.Create("DComboBox", MenuTab03)
-	attach_weaponmenu:SetPos(20, 245) -- Set the position (X,Y)
-	attach_weaponmenu:SetSize(320, 25) -- Set the size (X,Y)
-	attach_weaponmenu:SetText("[weaponmenu Attach Position]") -- Set the text above the slider
-	attach_weaponmenu:AddChoice("left hand")
-	attach_weaponmenu:AddChoice("HMD")
-	attach_weaponmenu:AddChoice("Right Static")
-	attach_weaponmenu.OnSelect = function(self, index, value) LocalPlayer():ConCommand("vrmod_attach_weaponmenu " .. index) end
-	--DNumSlider end
-	--vrmod_attach_popup
-	local attach_popup = vgui.Create("DComboBox", MenuTab03)
-	attach_popup:SetPos(20, 275) -- Set the position (X,Y)
-	attach_popup:SetSize(320, 25) -- Set the size (X,Y)
-	attach_popup:SetText("[popup Window Attach Position]") -- Set the text above the slider
-	attach_popup:AddChoice("left hand")
-	attach_popup:AddChoice("HMD")
-	attach_popup:AddChoice("Right Static")
-	attach_popup.OnSelect = function(self, index, value) LocalPlayer():ConCommand("vrmod_attach_popup " .. index) end
-	--DCheckBoxLabel end
 	--DCheckBoxLabel Start
 	local vrmod_ui_outline = MenuTab03:Add("DCheckBoxLabel") -- Create the checkbox
-	vrmod_ui_outline:SetPos(20, 335) -- Set the position
+	vrmod_ui_outline:SetPos(20, 165) -- Set the position
 	vrmod_ui_outline:SetText("[Menu&UI Red outline]") -- Set the text next to the box
 	vrmod_ui_outline:SetConVar("vrmod_ui_outline") -- Change a ConVar when the box it ticked/unticked
 	vrmod_ui_outline:SizeToContents() -- Make its size the same as the contents
 	local label = vgui.Create("DLabel", MenuTab03) -- 'parentPanel' is the parent container
-	label:SetPos(20, 340) -- Set the position on the parent panel
+	label:SetPos(20, 185) -- Set the position on the parent panel
 	label:SetSize(200, 30) -- Set the size of the label
 	label:SetText("Beam color") -- Set the text for the label
 	label:SetTextColor(Color(255, 255, 255)) -- Set the text color (optional)
 	label:SetFont("Default") -- Set the font (optional)
 	label:SetWrap(true)
 	local colorMixer = vgui.Create("DColorMixer", MenuTab03)
-	colorMixer:SetPos(20, 360)
+	colorMixer:SetPos(20, 205)
 	colorMixer:SetSize(360, 200)
 	colorMixer:SetPalette(true) -- Allow the user to choose custom colors from a palette
 	colorMixer:SetAlphaBar(true) -- Show alpha channel (opacity)
@@ -256,7 +216,7 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	--HUD_defaultbutton
 	local HUD_defaultbutton = vgui.Create("DButton", MenuTab03) -- Create the button and parent it to the frame
 	HUD_defaultbutton:SetText("set defaults") -- Set the text on the button
-	HUD_defaultbutton:SetPos(190, 600) -- Set the position on the frame
+	HUD_defaultbutton:SetPos(190, 380) -- Set the position on the frame
 	HUD_defaultbutton:SetSize(160, 30) -- Set the size
 	HUD_defaultbutton.DoClick = function()
 		RunConsoleCommand("vrmod_hud", "1")
@@ -264,7 +224,6 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 		RunConsoleCommand("vrmod_huddistance", "60")
 		RunConsoleCommand("vrmod_hudscale", "0.05")
 		RunConsoleCommand("vrmod_hudtestalpha", "0")
-		RunConsoleCommand("vrmod_test_ui_testver", "0")
 		RunConsoleCommand("vrmod_hudblacklist", "")
 		RunConsoleCommand("vrmod_hud_visible_quickmenukey", "0")
 	end

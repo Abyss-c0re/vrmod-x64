@@ -78,7 +78,7 @@ end
 function VRUtilOpenHeightMenu()
     if not g_VR.threePoints or VRUtilIsMenuOpen("heightmenu") then return end
     RenderMirror()
-    VRUtilMenuOpen("heightmenu", 300, 512, nil, 0, Vector(), Angle(), 0.1, true, function()
+    VRUtilMenuOpen("heightmenu", 300, 512, nil, nil, Vector(), Angle(), 0.1, true, function()
         hook.Remove("PreDrawTranslucentRenderables", "vrmodheightmirror")
         hook.Remove("VRMod_Input", "vrmodheightmenuinput")
     end)
