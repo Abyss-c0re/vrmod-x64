@@ -97,6 +97,9 @@ local cv_sight = CreateClientConVar("vrmod_sight_bodypart", 1, false, FCVAR_ARCH
 local jumpduck = CreateClientConVar("vrmod_autojumpduck", 1, true, FCVAR_ARCHIVE)
 local zeroVec, zeroAng = Vector(), Angle()
 local upVec = Vector(0, 0, 1)
+local function NormalizeAngleDeg(a)
+	return (a + 180) % 360 - 180
+end
 local function start()
 	local ply = LocalPlayer()
 	local followVec = zeroVec
@@ -108,9 +111,9 @@ local function start()
 			local v = ply:GetVehicle()
 			local attachment = v:GetAttachment(v:LookupAttachment("vehicle_driver_eyes"))
 			if not originVehicleLocalPos then
-				local originHmdRelV, originHmdRelA = WorldToLocal(g_VR.origin, g_VR.originAngle, g_VR.tracking.hmd.pos, Angle(0, g_VR.tracking.hmd.ang.yaw, 0)) --where the origin is relative to the hmd				
-				g_VR.origin, g_VR.originAngle = LocalToWorld(originHmdRelV + Vector(7, 0, 2), originHmdRelA, attachment.Pos, attachment.Ang) --where the origin would be if the attachment was the hmd
-				originVehicleLocalPos, originVehicleLocalAng = WorldToLocal(g_VR.origin, g_VR.originAngle, attachment.Pos, attachment.Ang) --new origin relative to the attachment
+				local originHmdRelV, originHmdRelA = WorldToLocal(g_VR.origin, g_VR.originAngle, g_VR.tracking.hmd.pos, Angle(0, g_VR.tracking.hmd.ang.yaw, 0))
+				g_VR.origin, g_VR.originAngle = LocalToWorld(originHmdRelV + Vector(7, 0, 2), originHmdRelA, attachment.Pos, attachment.Ang)
+				originVehicleLocalPos, originVehicleLocalAng = WorldToLocal(g_VR.origin, g_VR.originAngle, attachment.Pos, attachment.Ang)
 			end
 
 			g_VR.origin, g_VR.originAngle = LocalToWorld(originVehicleLocalPos, originVehicleLocalAng, attachment.Pos, attachment.Ang)
@@ -119,25 +122,28 @@ local function start()
 
 		if originVehicleLocalPos then
 			originVehicleLocalPos = nil
-			g_VR.originAngle = Angle(0, g_VR.originAngle.yaw, 0)
+			-- Reset yaw to current HMD yaw on exit for alignment
+			g_VR.originAngle.yaw = NormalizeAngleDeg(g_VR.tracking.hmd.ang.yaw)
 		end
 
 		local plyPos = ply:GetPos()
 		local turnAmount = convarValues.smoothTurn and -g_VR.input.vector2_smoothturn.x * convarValues.smoothTurnRate * RealFrameTime() or g_VR.changedInputs.boolean_turnright and -30 or g_VR.changedInputs.boolean_turnleft and 30 or 0
-		if turnAmount ~= 0 then
+		if math.abs(turnAmount) > 0.01 then
 			g_VR.origin = LocalToWorld(g_VR.origin - plyPos, zeroAng, plyPos, Angle(0, turnAmount, 0))
-			g_VR.originAngle.yaw = g_VR.originAngle.yaw + turnAmount
+
+
+			g_VR.originAngle.yaw = NormalizeAngleDeg(g_VR.originAngle.yaw + turnAmount)
+
 		end
 
-		--make the player follow the hmd
 		local plyTargetPos = g_VR.tracking.hmd.pos + upVec:Cross(g_VR.tracking.hmd.ang:Right()) * -10
 		followVec = ply:GetMoveType() == MOVETYPE_NOCLIP and zeroVec or Vector((plyTargetPos.x - plyPos.x) * 8, (plyPos.y - plyTargetPos.y) * -8, 0)
-		--teleport view if further than 64 units from target
 		if followVec:LengthSqr() > 262144 then
 			local prevOrigin = g_VR.origin
 			g_VR.origin = g_VR.origin + plyPos - plyTargetPos
 			g_VR.origin.z = plyPos.z
 			followVec = zeroVec
+			g_VR.originAngle.yaw = NormalizeAngleDeg(g_VR.tracking.hmd.ang.yaw)
 			return
 		end
 
@@ -152,23 +158,22 @@ local function start()
 
 	hook.Add("CreateMove", "vrmod_locomotion", function(cmd)
 		if not g_VR.threePoints then return end
-		--vehicle behaviour
 		if ply:InVehicle() then
 			cmd:SetForwardMove((g_VR.input.vector1_forward - g_VR.input.vector1_reverse) * 400)
 			cmd:SetSideMove(g_VR.input.vector2_steer.x * 400)
 			local _, relativeAng = WorldToLocal(Vector(0, 0, 0), g_VR.tracking.hmd.ang, Vector(0, 0, 0), ply:GetVehicle():GetAngles())
-			cmd:SetViewAngles(relativeAng) --turret aiming
+			cmd:SetViewAngles(relativeAng)
 			cmd:SetButtons(bit.bor(cmd:GetButtons(), g_VR.input.boolean_turbo and IN_SPEED or 0, g_VR.input.boolean_handbrake and IN_JUMP or 0))
 			return
 		end
 
 		local moveType = ply:GetMoveType()
 		cmd:SetButtons(bit.bor(cmd:GetButtons(), g_VR.input.boolean_jump and IN_JUMP + IN_DUCK or 0, g_VR.input.boolean_sprint and IN_SPEED or 0, moveType == MOVETYPE_LADDER and IN_FORWARD or 0, g_VR.tracking.hmd.pos.z < g_VR.origin.z + convarValues.crouchThreshold and IN_DUCK or 0))
-		--set view angles to viewmodel muzzle angles for engine weapon support, note: movement is relative to view angles
+		-- 📐 Set view angle from hand or HMD
 		local viewAngles = g_VR.currentvmi and g_VR.currentvmi.wrongMuzzleAng and g_VR.tracking.pose_righthand.ang or g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang or g_VR.tracking.hmd.ang
 		viewAngles = viewAngles:Forward():Angle()
 		cmd:SetViewAngles(viewAngles)
-		--noclip behaviour
+		-- NOCLIP MOVE
 		if moveType == MOVETYPE_NOCLIP then
 			if cl_analogmoveonly:GetBool() then LocalPlayer():ConCommand("vrmod_test_analogmoveonly 1") end
 			cmd:SetForwardMove(math.abs(g_VR.input.vector2_walkdirection.y) > 0.5 and g_VR.input.vector2_walkdirection.y or 0)
@@ -179,9 +184,9 @@ local function start()
 			if cl_analogmoveonly:GetBool() then LocalPlayer():ConCommand("vrmod_test_analogmoveonly 0") end
 		end
 
-		--
-		local joystickVec = LocalToWorld(Vector(g_VR.input.vector2_walkdirection.y * math.abs(g_VR.input.vector2_walkdirection.y), -g_VR.input.vector2_walkdirection.x * math.abs(g_VR.input.vector2_walkdirection.x), 0) * ply:GetMaxSpeed() * 0.9, Angle(0, 0, 0), Vector(0, 0, 0), Angle(0, convarValues.controllerOriented and g_VR.tracking.pose_lefthand.ang.yaw or g_VR.tracking.hmd.ang.yaw, 0))
-		--
+		-- 💡 Apply controller or HMD yaw for joystick movement
+		local controlYaw = convarValues.controllerOriented and g_VR.tracking.pose_lefthand.ang.yaw or g_VR.tracking.hmd.ang.yaw
+		local joystickVec = LocalToWorld(Vector(g_VR.input.vector2_walkdirection.y * math.abs(g_VR.input.vector2_walkdirection.y), -g_VR.input.vector2_walkdirection.x * math.abs(g_VR.input.vector2_walkdirection.x), 0) * ply:GetMaxSpeed() * 0.9, Angle(0, 0, 0), Vector(0, 0, 0), Angle(0, controlYaw, 0))
 		local walkDirViewAngRelative = WorldToLocal(followVec + joystickVec, zeroAng, zeroVec, Angle(0, viewAngles.yaw, 0))
 		cmd:SetForwardMove(walkDirViewAngRelative.x)
 		cmd:SetSideMove(-walkDirViewAngRelative.y)
