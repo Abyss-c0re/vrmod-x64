@@ -10,7 +10,7 @@ if CLIENT then
 		if nametags then
 			hook.Add("PostDrawOpaqueRenderables", "vrutil_hook_nametags", function(depth, sky)
 				if not g_VR.threePoints or depth or sky then return end
-				surface.SetFont("vrmod_Verdana37")
+				surface.SetFont("vrmod_Trebuchet24")
 				surface.SetDrawColor(0, 0, 0, 128)
 				for k, v in pairs(player.GetAll()) do
 					if v == LocalPlayer() or EyePos():DistToSqr(v:GetPos()) > 1000000 then continue end
@@ -162,7 +162,7 @@ if CLIENT then
 						key:SetPos(x, y)
 						key:SetSize(selectedCase[i] == " " and 250 or selectedCase[i] == "\2" and 65 or selectedCase[i] == "\4" and 50 or 45, 45) -- chatボタンのサイズを50に変更
 						key:SetTextColor(Color(255, 255, 255, 255))
-						key:SetFont((selectedCase[i] == "\1" or selectedCase[i] == "\2" or selectedCase[i] == "\3" or selectedCase[i] == "\4") and "HudSelectionText" or "vrmod_Verdana37")
+						key:SetFont((selectedCase[i] == "\1" or selectedCase[i] == "\2" or selectedCase[i] == "\3" or selectedCase[i] == "\4") and "HudSelectionText" or "vrmod_Trebuchet24")
 						key:SetText(selectedCase[i] == "\1" and "Back" or selectedCase[i] == "\2" and "Enter" or selectedCase[i] == "\4" and "Shift" or selectedCase[i] == "\3" and "chat" or selectedCase[i])
 						key:SetMouseInputEnabled(true)
 						key:SetContentAlignment(5)
@@ -202,7 +202,7 @@ if CLIENT then
 						x = x + 50
 					end
 
-					VRUtilMenuOpen("keyboard", 555, 255, keyboardPanel, 1, Vector(4, 6, 5.5), Angle(0, -90, 10), 0.03, true, function()
+					VRUtilMenuOpen("keyboard", 555, 255, keyboardPanel, true, Vector(4, 6, 5.5), Angle(0, -90, 10), 0.03, true, function()
 						keyboardPanel:Remove()
 						keyboardPanel = nil
 						if chatPanel then
@@ -223,7 +223,7 @@ if CLIENT then
 			updatePlayerList()
 			--			
 			--forw, left, up
-			VRUtilMenuOpen("chat", 600, 310, chatPanel, 1, Vector(10, 6, 13), Angle(0, -90, 50), 0.03, true, function()
+			VRUtilMenuOpen("chat", 600, 310, chatPanel, true, Vector(10, 6, 13), Angle(0, -90, 50), 0.03, true, function()
 				chatPanel:SetVisible(false)
 				chatPanel:Remove()
 				chatPanel = nil
