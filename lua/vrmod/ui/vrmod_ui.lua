@@ -4,31 +4,35 @@ if CLIENT then
 	g_VR.menuCursorX = 0
 	g_VR.menuCursorY = 0
 	local _, convarValues = vrmod.GetConvars()
-	vrmod.AddCallbackedConvar("vrmod_test_ui_testver", nil, 0, nil, "", 0, 1, tonumber) --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
-	vrmod.AddCallbackedConvar("vrmod_ui_realtime", nil, 0, nil, "", 0, 1, tonumber) --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
-	vrmod.AddCallbackedConvar("vrmod_attach_weaponmenu", nil, 1, nil, "", 0, 4, tonumber)
-	vrmod.AddCallbackedConvar("vrmod_attach_quickmenu", nil, 1, nil, "", 0, 4, tonumber)
-	vrmod.AddCallbackedConvar("vrmod_attach_popup", nil, 1, nil, "", 0, 4, tonumber)
-	vrmod.AddCallbackedConvar("vrmod_attach_heightmenu", nil, 1, nil, "", 0, 4, tonumber)
-	vrmod.AddCallbackedConvar("vrmod_beam_color", nil, "255,0,0,255")
 	local uioutline = CreateClientConVar("vrmod_ui_outline", 0, true, FCVAR_ARCHIVE, nil, 0, 1)
 	local rt_beam = GetRenderTarget("vrmod_rt_beam", 64, 64, false)
 	local mat_beam = CreateMaterial("vrmod_mat_beam", "UnlitGeneric", {
 		["$basetexture"] = rt_beam:GetName(),
-		["$ignorez"] = 1
+		["$ignorez"] = 1,
+		["$vertexcolor"] = 1,
+		["$vertexalpha"] = 1
 	})
 
-	render.PushRenderTarget(rt_beam)
-	--menu pointer color
-	local beamColor = convarValues.vrmod_beam_color
-	local r, g, b, a = string.match(beamColor, "(%d+),(%d+),(%d+),(%d+)")
-	render.Clear(tonumber(r), tonumber(g), tonumber(b), tonumber(a))
-	render.PopRenderTarget()
+	local function UpdateBeamColor(colorString)
+		local r, g, b, a = string.match(colorString, "(%d+),(%d+),(%d+),(%d+)")
+		r, g, b, a = tonumber(r), tonumber(g), tonumber(b), tonumber(a)
+		if not (r and g and b and a) then return end
+		mat_beam:SetVector("$color", Vector(r / 255, g / 255, b / 255))
+		mat_beam:SetFloat("$alpha", a / 255)
+		render.PushRenderTarget(rt_beam)
+		render.Clear(r, g, b, a)
+		render.PopRenderTarget()
+	end
+
+	vrmod.AddCallbackedConvar("vrmod_test_ui_testver", nil, 0, nil, "", 0, 1, tonumber)
+	vrmod.AddCallbackedConvar("vrmod_ui_realtime", nil, 0, nil, "", 0, 1, tonumber)
+	vrmod.AddCallbackedConvar("vrmod_beam_color", nil, "255,0,0,255", nil, "", nil, nil, nil, function(newValue) UpdateBeamColor(newValue) end)
 	g_VR.menus = {}
 	local menus = g_VR.menus
 	local menuOrder = {}
 	local menusExist = false
 	local prevFocusPanel = nil
+	UpdateBeamColor(convarValues.vrmod_beam_color)
 	function VRUtilMenuRenderPanel(uid)
 		if not menus[uid] or not menus[uid].panel or not menus[uid].panel:IsValid() then return end
 		render.PushRenderTarget(menus[uid].rt)
@@ -139,7 +143,7 @@ if CLIENT then
 
 		if g_VR.menuFocus then
 			render.SetMaterial(mat_beam)
-			render.DrawBeam(g_VR.tracking.pose_righthand.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(0, 0, 255))
+			render.DrawBeam(g_VR.tracking.pose_righthand.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(255, 255, 255, 255))
 			input.SetCursorPos(g_VR.menuCursorX, g_VR.menuCursorY)
 			-- realtime ui start
 			if convarValues.vrmod_ui_realtime == 1 then VRUtilMenuRenderPanel(g_VR.menuFocus) end

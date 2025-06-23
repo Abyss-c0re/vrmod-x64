@@ -187,6 +187,7 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	vrmod_ui_outline:SetText("[Menu&UI Red outline]") -- Set the text next to the box
 	vrmod_ui_outline:SetConVar("vrmod_ui_outline") -- Change a ConVar when the box it ticked/unticked
 	vrmod_ui_outline:SizeToContents() -- Make its size the same as the contents
+	--Beam color selection
 	local label = vgui.Create("DLabel", MenuTab03) -- 'parentPanel' is the parent container
 	label:SetPos(20, 185) -- Set the position on the parent panel
 	label:SetSize(200, 30) -- Set the size of the label
@@ -202,8 +203,17 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	colorMixer:SetWangs(true) -- Show RGB wangs (sliders)
 	-- Load the stored color from the ConVar and set it as the default color
 	--local storedColor = string.ToColor(convarValues.vrmod_beam_color)
-	local r, g, b, a = string.match(convarValues.vrmod_beam_color, "(%d+),(%d+),(%d+),(%d+)")
-	local storedColor = Color(tonumber(r), tonumber(g), tonumber(b), tonumber(a))
+	local defaultColor = Color(255, 255, 255, 255)
+	local colorStr = convarValues.vrmod_beam_color:GetString()
+	local r, g, b, a = string.match(colorStr, "(%d+),(%d+),(%d+),(%d+)")
+	r, g, b, a = tonumber(r), tonumber(g), tonumber(b), tonumber(a)
+	-- Validate all components
+	if not (r and g and b and a) then
+		storedColor = defaultColor
+	else
+		storedColor = Color(r, g, b, a)
+	end
+
 	colorMixer:SetColor(storedColor)
 	-- Add an event listener to handle color changes
 	colorMixer.ValueChanged = function(picker, color)
@@ -216,7 +226,7 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	--HUD_defaultbutton
 	local HUD_defaultbutton = vgui.Create("DButton", MenuTab03) -- Create the button and parent it to the frame
 	HUD_defaultbutton:SetText("set defaults") -- Set the text on the button
-	HUD_defaultbutton:SetPos(190, 380) -- Set the position on the frame
+	HUD_defaultbutton:SetPos(190, 450) -- Set the position on the frame
 	HUD_defaultbutton:SetSize(160, 30) -- Set the size
 	HUD_defaultbutton.DoClick = function()
 		RunConsoleCommand("vrmod_hud", "1")
@@ -226,6 +236,7 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 		RunConsoleCommand("vrmod_hudtestalpha", "0")
 		RunConsoleCommand("vrmod_hudblacklist", "")
 		RunConsoleCommand("vrmod_hud_visible_quickmenukey", "0")
+		RunConsoleCommand("vrmod_beam_color", "255,0,0,255")
 	end
 
 	--MenuTab04  Start
