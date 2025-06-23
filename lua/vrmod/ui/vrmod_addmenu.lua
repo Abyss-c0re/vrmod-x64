@@ -12,15 +12,8 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	sheet:AddSheet("GamePlay", MenuTab02, "icon16/joystick.png")
 	MenuTab02.Paint = function(self, w, h) end -- -- draw.RoundedBox(4, 0, 0, w, h, Color(0, 0, 0, self:GetAlpha()))
 	--DCheckBoxLabel Start
-	local autojumpduck = MenuTab02:Add("DCheckBoxLabel") -- Create the checkbox
-	autojumpduck:SetPos(20, 10) -- Set the position
-	autojumpduck:SetText("[Jumpkey Auto Duck]\nON => Jumpkey = IN_DUCK + IN_JUMP\nOFF => Jumpkey = IN_JUMP") -- Set the text next to the box
-	autojumpduck:SetConVar("vrmod_autojumpduck") -- Change a ConVar when the box it ticked/unticked
-	autojumpduck:SizeToContents() -- Make its size the same as the contents
-	--DCheckBoxLabel end
-	--DCheckBoxLabel Start
 	local allow_teleport_client = MenuTab02:Add("DCheckBoxLabel") -- Create the checkbox
-	allow_teleport_client:SetPos(20, 60) -- Set the position
+	allow_teleport_client:SetPos(20, 10) -- Set the position
 	allow_teleport_client:SetText("Teleport Button Enable(Client)") -- Set the text next to the box
 	allow_teleport_client:SetConVar("vrmod_allow_teleport_client") -- Change a ConVar when the box it ticked/unticked
 	allow_teleport_client:SizeToContents() -- Make its size the same as the contents
@@ -28,20 +21,8 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	--DNumSlider Start
 	--flashlight_attachment
 	--character_restart
-	local togglelaserpointer = vgui.Create("DButton", MenuTab02) -- Create the button and parent it to the frame
-	togglelaserpointer:SetText("Toggle Laser Pointer") -- Set the text on the button
-	togglelaserpointer:SetPos(20, 100) -- Set the position on the frame
-	togglelaserpointer:SetSize(160, 30) -- Set the size
-	-- A custom function run when clicked ( note the . instead of : )
-	togglelaserpointer.DoClick = function()
-		RunConsoleCommand("vrmod_togglelaserpointer") -- Run the console command "say hi" when you click it ( command, args )
-	end
-
-	togglelaserpointer.DoRightClick = function() end
-	--DButton end
-	--DCheckBoxLabel Start
 	local pickup_disable_client = MenuTab02:Add("DCheckBoxLabel") -- Create the checkbox
-	pickup_disable_client:SetPos(20, 135) -- Set the position
+	pickup_disable_client:SetPos(20, 30) -- Set the position
 	pickup_disable_client:SetText("VR Disable Pickup(Client)") -- Set the text next to the box
 	pickup_disable_client:SetConVar("vr_pickup_disable_client") -- Change a ConVar when the box it ticked/unticked
 	pickup_disable_client:SizeToContents() -- Make its size the same as the contents
@@ -49,17 +30,17 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	drop_weapons:SetText("Drop weapon") -- Set the text next to the box
 	drop_weapons:SetConVar("vrmod_weapondrop_enable") -- Change a ConVar when the box it ticked/unticked
 	drop_weapons:SizeToContents() -- Make its size the same as the contents
-	drop_weapons:SetPos(20, 155) -- Set the position
+	drop_weapons:SetPos(20, 50) -- Set the position
 	local vrmod_manualpickup = MenuTab02:Add("DCheckBoxLabel")
 	vrmod_manualpickup:SetText("Manual item pickup")
 	vrmod_manualpickup:SetConVar("vrmod_manualpickups")
 	vrmod_manualpickup:SizeToContents()
-	vrmod_manualpickup:SetPos(20, 175)
+	vrmod_manualpickup:SetPos(20, 70)
 	--DCheckBoxLabel end
 	--DNumSlider Start
 	--vrmod_pickup_weight
 	local pickup_weight = vgui.Create("DNumSlider", MenuTab02)
-	pickup_weight:SetPos(20, 200) -- Set the position (X,Y)
+	pickup_weight:SetPos(20, 140) -- Set the position (X,Y)
 	pickup_weight:SetSize(370, 25) -- Set the size (X,Y)
 	pickup_weight:SetText("pickup_weight(server)") -- Set the text above the slider
 	pickup_weight:SetMin(1) -- Set the minimum number you can slide to
@@ -72,7 +53,7 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	--DNumSlider Start
 	--vr_vrmod_pickup_range
 	local vrmod_pickup_range = vgui.Create("DNumSlider", MenuTab02)
-	vrmod_pickup_range:SetPos(20, 225) -- Set the position (X,Y)
+	vrmod_pickup_range:SetPos(20, 180) -- Set the position (X,Y)
 	vrmod_pickup_range:SetSize(370, 25) -- Set the size (X,Y)
 	vrmod_pickup_range:SetText("pickup_range(server)") -- Set the text above the slider
 	vrmod_pickup_range:SetMin(0.0) -- Set the minimum number you can slide to
@@ -85,7 +66,7 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	--DNumSlider Start
 	--vr_vrmod_pickup_limit
 	local vrmod_pickup_limit = vgui.Create("DNumSlider", MenuTab02)
-	vrmod_pickup_limit:SetPos(20, 250) -- Set the position (X,Y)
+	vrmod_pickup_limit:SetPos(20, 220) -- Set the position (X,Y)
 	vrmod_pickup_limit:SetSize(370, 25) -- Set the size (X,Y)
 	vrmod_pickup_limit:SetText("pickup_limit(server)") -- Set the text above the slider
 	vrmod_pickup_limit:SetMin(0) -- Set the minimum number you can slide to
@@ -98,8 +79,8 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 	--DButton Start
 	--GamePlay_defaultbutton
 	local GamePlay_defaultbutton = vgui.Create("DButton", MenuTab02) -- Create the button and parent it to the frame
-	GamePlay_defaultbutton:SetText("setdefaultvalue") -- Set the text on the button
-	GamePlay_defaultbutton:SetPos(190, 310) -- Set the position on the frame
+	GamePlay_defaultbutton:SetText("Reset") -- Set the text on the button
+	GamePlay_defaultbutton:SetPos(190, 255) -- Set the position on the frame
 	GamePlay_defaultbutton:SetSize(160, 30) -- Set the size
 	-- A custom function run when clicked ( note the . instead of : )
 	GamePlay_defaultbutton.DoClick = function()

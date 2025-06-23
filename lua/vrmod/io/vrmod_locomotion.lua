@@ -93,13 +93,12 @@ local convars, convarValues = vrmod.AddCallbackedConvar("vrmod_controlleroriente
 vrmod.AddCallbackedConvar("vrmod_smoothturn", "smoothTurn", "0", nil, nil, nil, nil, tobool)
 vrmod.AddCallbackedConvar("vrmod_smoothturnrate", "smoothTurnRate", "180", nil, nil, nil, nil, tonumber)
 vrmod.AddCallbackedConvar("vrmod_crouchthreshold", "crouchThreshold", "40", nil, nil, nil, nil, tonumber)
-local cv_sight = CreateClientConVar("vrmod_sight_bodypart", 1, false, FCVAR_ARCHIVE)
-local jumpduck = CreateClientConVar("vrmod_autojumpduck", 1, true, FCVAR_ARCHIVE)
 local zeroVec, zeroAng = Vector(), Angle()
 local upVec = Vector(0, 0, 1)
 local function NormalizeAngleDeg(a)
 	return (a + 180) % 360 - 180
 end
+
 local function start()
 	local ply = LocalPlayer()
 	local followVec = zeroVec
@@ -130,16 +129,12 @@ local function start()
 		local turnAmount = convarValues.smoothTurn and -g_VR.input.vector2_smoothturn.x * convarValues.smoothTurnRate * RealFrameTime() or g_VR.changedInputs.boolean_turnright and -30 or g_VR.changedInputs.boolean_turnleft and 30 or 0
 		if math.abs(turnAmount) > 0.01 then
 			g_VR.origin = LocalToWorld(g_VR.origin - plyPos, zeroAng, plyPos, Angle(0, turnAmount, 0))
-
-
 			g_VR.originAngle.yaw = NormalizeAngleDeg(g_VR.originAngle.yaw + turnAmount)
-
 		end
 
 		local plyTargetPos = g_VR.tracking.hmd.pos + upVec:Cross(g_VR.tracking.hmd.ang:Right()) * -10
 		followVec = ply:GetMoveType() == MOVETYPE_NOCLIP and zeroVec or Vector((plyTargetPos.x - plyPos.x) * 8, (plyPos.y - plyTargetPos.y) * -8, 0)
 		if followVec:LengthSqr() > 262144 then
-			local prevOrigin = g_VR.origin
 			g_VR.origin = g_VR.origin + plyPos - plyTargetPos
 			g_VR.origin.z = plyPos.z
 			followVec = zeroVec
@@ -169,7 +164,6 @@ local function start()
 
 		local moveType = ply:GetMoveType()
 		cmd:SetButtons(bit.bor(cmd:GetButtons(), g_VR.input.boolean_jump and IN_JUMP + IN_DUCK or 0, g_VR.input.boolean_sprint and IN_SPEED or 0, moveType == MOVETYPE_LADDER and IN_FORWARD or 0, g_VR.tracking.hmd.pos.z < g_VR.origin.z + convarValues.crouchThreshold and IN_DUCK or 0))
-		-- 📐 Set view angle from hand or HMD
 		local viewAngles = g_VR.currentvmi and g_VR.currentvmi.wrongMuzzleAng and g_VR.tracking.pose_righthand.ang or g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang or g_VR.tracking.hmd.ang
 		viewAngles = viewAngles:Forward():Angle()
 		cmd:SetViewAngles(viewAngles)
@@ -184,7 +178,6 @@ local function start()
 			if cl_analogmoveonly:GetBool() then LocalPlayer():ConCommand("vrmod_test_analogmoveonly 0") end
 		end
 
-		-- 💡 Apply controller or HMD yaw for joystick movement
 		local controlYaw = convarValues.controllerOriented and g_VR.tracking.pose_lefthand.ang.yaw or g_VR.tracking.hmd.ang.yaw
 		local joystickVec = LocalToWorld(Vector(g_VR.input.vector2_walkdirection.y * math.abs(g_VR.input.vector2_walkdirection.y), -g_VR.input.vector2_walkdirection.x * math.abs(g_VR.input.vector2_walkdirection.x), 0) * ply:GetMaxSpeed() * 0.9, Angle(0, 0, 0), Vector(0, 0, 0), Angle(0, controlYaw, 0))
 		local walkDirViewAngRelative = WorldToLocal(followVec + joystickVec, zeroAng, zeroVec, Angle(0, viewAngles.yaw, 0))
