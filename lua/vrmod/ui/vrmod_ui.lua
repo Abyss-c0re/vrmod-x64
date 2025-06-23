@@ -251,10 +251,9 @@ if CLIENT then
 end
 
 concommand.Add("vrmod_vgui_reset", function()
-	for _, v in pairs(vgui.GetWorldPanel():GetChildren()) do
-		v:Remove()
+	if g_VR and g_VR.menus then
+		for uid, _ in pairs(g_VR.menus) do
+			VRUtilMenuClose(uid)
+		end
 	end
-
-	RunConsoleCommand("spawnmenu_reload")
-	-- It even removes spawnmenu, so we need to reload it
 end)

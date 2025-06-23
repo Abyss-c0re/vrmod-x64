@@ -31,6 +31,7 @@ local function RenderMirror()
         local mirrorPos = Vector(g_VR.tracking.hmd.pos.x, g_VR.tracking.hmd.pos.y, g_VR.origin.z + 45)
         mirrorPos:Add(Angle(0, mirrorYaw, 0):Forward() * 50)
         local mirrorAng = Angle(0, mirrorYaw - 90, 90)
+        if not g_VR.menus.heightmenu then return end
         g_VR.menus.heightmenu.pos = mirrorPos + Vector(0, 0, 30) + mirrorAng:Forward() * -15
         g_VR.menus.heightmenu.ang = mirrorAng
         local camPos = LocalToWorld(WorldToLocal(EyePos(), Angle(), mirrorPos, mirrorAng) * Vector(1, 1, -1), Angle(), mirrorPos, mirrorAng)
