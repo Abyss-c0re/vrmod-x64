@@ -153,7 +153,7 @@ if CLIENT then
 	end
 
 	function VRUtilMenuOpen(uid, width, height, panel, attachment, pos, ang, scale, cursorEnabled, closeFunc)
-		if menus[uid] then return end
+		VRUtilMenuClose(uid)
 		menus[uid] = {
 			uid = uid,
 			panel = panel,
