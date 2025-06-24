@@ -455,8 +455,27 @@ if CLIENT then
 			VRMOD_SubmitSharedTexture()
 			VRMOD_UpdatePosesAndActions()
 			--handle tracking
+			local maxVelSqr = 50 * 50 -- velocity threshold (squared)
+			local maxPosDeltaSqr = 10 * 10 -- position delta threshold (squared)
+			local lastPosePos = lastPosePos or {}
+			local function LengthSqr(vec)
+				return vec.x * vec.x + vec.y * vec.y + vec.z * vec.z
+			end
+
+			local function SubVec(a, b)
+				return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
+			end
+
 			local rawPoses = VRMOD_GetPoses()
 			for k, v in pairs(rawPoses) do
+				-- Skip junk velocities
+				if LengthSqr(v.vel) > maxVelSqr then continue end
+				-- Skip jumps in position (tracking glitches)
+				if lastPosePos[k] then
+					local delta = SubVec(v.pos, lastPosePos[k])
+					if LengthSqr(delta) > maxPosDeltaSqr then continue end
+				end
+				lastPosePos[k] = v.pos
 				g_VR.tracking[k] = g_VR.tracking[k] or {}
 				local worldPose = g_VR.tracking[k]
 				worldPose.pos, worldPose.ang = LocalToWorld(v.pos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
