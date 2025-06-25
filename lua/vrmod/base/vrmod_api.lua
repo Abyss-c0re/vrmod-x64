@@ -405,51 +405,6 @@ if CLIENT then
 		if selectedOption then selectedOption.stopfunc() end
 	end
 
-	hook.Add("VRMod_Menu", "locomotion_selection", function(frame)
-		local locomotionPanel = vgui.Create("DPanel")
-		frame.SettingsForm:AddItem(locomotionPanel)
-		local dlabel = vgui.Create("DLabel", locomotionPanel)
-		dlabel:SetSize(100, 30)
-		dlabel:SetPos(5, -3)
-		dlabel:SetText("Locomotion:")
-		dlabel:SetColor(Color(0, 0, 0))
-		local locomotionControls = nil
-		local function updateLocomotionCPanel(index)
-			if IsValid(locomotionControls) then locomotionControls:Remove() end
-			locomotionControls = vgui.Create("DPanel")
-			locomotionControls.Paint = function() end
-			g_VR.locomotionOptions[index].buildcpanelfunc(locomotionControls)
-			locomotionControls:InvalidateLayout(true)
-			locomotionControls:SizeToChildren(true, true)
-			locomotionPanel:Add(locomotionControls)
-			locomotionControls:Dock(TOP)
-			locomotionPanel:InvalidateLayout(true)
-			locomotionPanel:SizeToChildren(true, true)
-		end
-
-		local DComboBox = vgui.Create("DComboBox")
-		locomotionPanel:Add(DComboBox)
-		DComboBox:Dock(TOP)
-		DComboBox:DockMargin(70, 0, 0, 5)
-		DComboBox:SetValue("none")
-		for i = 1, #g_VR.locomotionOptions do
-			DComboBox:AddChoice(g_VR.locomotionOptions[i].name)
-		end
-
-		DComboBox.OnSelect = function(self, index, value) convars.vrmod_locomotion:SetInt(index) end
-		DComboBox.Think = function(self)
-			local v = convars.vrmod_locomotion:GetInt()
-			if self.ConvarVal ~= v then
-				self.ConvarVal = v
-				if g_VR.locomotionOptions[v] then
-					self:ChooseOptionID(v)
-					updateLocomotionCPanel(v)
-				end
-			end
-		end
-	end)
-
-	--
 	function vrmod.GetOrigin()
 		return g_VR.origin, g_VR.originAngle
 	end

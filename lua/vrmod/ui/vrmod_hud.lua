@@ -124,7 +124,7 @@ vrmod.AddCallbackedConvar("vrmod_hudcurve", nil, "60", nil, nil, nil, nil, tonum
 vrmod.AddCallbackedConvar("vrmod_hudscale", nil, "0.05", nil, nil, nil, nil, tonumber, AddHUD)
 vrmod.AddCallbackedConvar("vrmod_huddistance", nil, "60", nil, nil, nil, nil, tonumber)
 vrmod.AddCallbackedConvar("vrmod_hudtestalpha", nil, "0", nil, nil, nil, nil, tonumber)
-hook.Add("VRMod_Menu", "vrmod_hud", function(frame) frame.SettingsForm:CheckBox("Enable HUD", "vrmod_hud") end)
+
 hook.Add("VRMod_Start", "hud", function(ply)
 	if ply ~= LocalPlayer() then return end
 	AddHUD()

@@ -17,10 +17,7 @@ end
 
 vrmod.AddCallbackedConvar("vrmod_seatedoffset", nil, "0", nil, nil, nil, nil, tonumber, function(val) updateOffsetHook() end)
 vrmod.AddCallbackedConvar("vrmod_seated", nil, "0", nil, nil, nil, nil, tobool, function(val) updateOffsetHook() end)
-hook.Add("VRMod_Menu", "vrmod_n_seated", function(frame)
-	frame.SettingsForm:CheckBox("Enable seated offset", "vrmod_seated")
-	frame.SettingsForm:ControlHelp("Adjust from height adjustment menu")
-end)
+
 
 hook.Add("VRMod_Start", "seatedmode", function(ply)
 	if ply ~= LocalPlayer() then return end

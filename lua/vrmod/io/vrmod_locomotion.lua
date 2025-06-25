@@ -89,7 +89,7 @@ end)
 
 --******************************************************************************************************************************
 if SERVER then return end
-local convars, convarValues = vrmod.AddCallbackedConvar("vrmod_controlleroriented", "controllerOriented", "0", nil, nil, nil, nil, tobool)
+local _, convarValues = vrmod.AddCallbackedConvar("vrmod_controlleroriented", "controllerOriented", "0", nil, nil, nil, nil, tobool)
 vrmod.AddCallbackedConvar("vrmod_smoothturn", "smoothTurn", "0", nil, nil, nil, nil, tobool)
 vrmod.AddCallbackedConvar("vrmod_smoothturnrate", "smoothTurnRate", "180", nil, nil, nil, nil, tonumber)
 vrmod.AddCallbackedConvar("vrmod_crouchthreshold", "crouchThreshold", "40", nil, nil, nil, nil, tonumber)
@@ -208,44 +208,6 @@ local function stop()
 	if IsValid(tpBeamEnt) then tpBeamEnt:Remove() end
 	vrmod.RemoveInGameMenuItem("Map Browser")
 	vrmod.RemoveInGameMenuItem("Reset Vehicle View")
-end
-
-local function options(panel)
-	local tmp = vgui.Create("DCheckBoxLabel")
-	panel:Add(tmp)
-	tmp:Dock(TOP)
-	tmp:DockMargin(5, 0, 0, 5)
-	tmp:SetDark(true)
-	tmp:SetText("Controller oriented locomotion")
-	tmp:SetChecked(convarValues.controllerOriented)
-	function tmp:OnChange(val)
-		convars.vrmod_controlleroriented:SetBool(val)
-	end
-
-	local tmp = vgui.Create("DCheckBoxLabel")
-	panel:Add(tmp)
-	tmp:Dock(TOP)
-	tmp:DockMargin(5, 0, 0, 0)
-	tmp:SetDark(true)
-	tmp:SetText("Smooth turning")
-	tmp:SetChecked(convarValues.smoothTurn)
-	function tmp:OnChange(val)
-		convars.vrmod_smoothturn:SetBool(val)
-	end
-
-	local tmp = vgui.Create("DNumSlider")
-	panel:Add(tmp)
-	tmp:Dock(TOP)
-	tmp:DockMargin(5, 0, 0, 5)
-	tmp:SetMin(1)
-	tmp:SetMax(360)
-	tmp:SetDecimals(0)
-	tmp:SetValue(convarValues.smoothTurnRate)
-	tmp:SetDark(true)
-	tmp:SetText("Smooth turn rate")
-	function tmp:OnValueChanged(val)
-		convars.vrmod_smoothturnrate:SetInt(val)
-	end
 end
 
 timer.Simple(0, function()
