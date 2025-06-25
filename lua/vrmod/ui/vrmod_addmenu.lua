@@ -220,16 +220,6 @@ hook.Add("VRMod_Menu", "addsettings", function(frame)
 		RunConsoleCommand("vrmod_beam_color", "255,0,0,255")
 	end
 
-	--MenuTab04  Start
-	local MenuTab04 = vgui.Create("DPanel", sheet)
-	sheet:AddSheet("Rendering", MenuTab04, "icon16/cog_add.png")
-	MenuTab04.Paint = function(self, w, h) end -- Clear painting for the panel
-	local realtime_render = MenuTab04:Add("DCheckBoxLabel") -- Create the checkbox
-	realtime_render:SetPos(20, 10) -- Set the position
-	realtime_render:SetText("[Realtime UI rendering]") -- Set the text next to the box
-	realtime_render:SetConVar("vrmod_ui_realtime") -- Change a ConVar when the box it ticked/unticked
-	realtime_render:SizeToContents() -- Make its size the same as the contents
-	--DButton end
 	local sheet = vgui.Create("DPropertySheet", frame.DPropertySheet)
 	frame.DPropertySheet:AddSheet("Melee", sheet)
 	sheet:Dock(FILL)
