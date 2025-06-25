@@ -41,7 +41,7 @@ if CLIENT then
 			if system.IsLinux() then
 				moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
 			else
-				moduleFile = "lua/bin/gmcl_vrmod_win32.dll"
+				moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
 			end
 
 			if not file.Exists(moduleFile, "GAME") then
