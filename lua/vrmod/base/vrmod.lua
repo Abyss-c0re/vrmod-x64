@@ -199,6 +199,10 @@ if CLIENT then
 		local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
 		local function calcVMinMax(verticalOffset)
 			if isWindows then
+<<<<<<< HEAD
+=======
+				print("Windows peasant detected")
+>>>>>>> 31398aa72325d8c394f15fe6dba7a33b42bb20ac
 				local adj = verticalOffset * vFactor
 				return vMin - adj, vMax - adj
 			else
