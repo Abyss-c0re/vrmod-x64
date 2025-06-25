@@ -179,6 +179,7 @@ if CLIENT then
             local frame = data.lerpedFrame
             local lf = frame.leftfootPos
             local rf = frame.rightfootPos
+            if not lf or not rf then return end
             local function TryKick(footPos)
                 local vel = footPos:Length() / 40
                 if vel < cv_meleeVelThreshold:GetFloat() then return end
