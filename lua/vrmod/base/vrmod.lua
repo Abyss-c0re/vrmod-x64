@@ -45,8 +45,6 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_yaw", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_roll", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
-
-
 	concommand.Add("vrmod_start", function(ply, cmd, args)
 		if vgui.CursorVisible() then print("vrmod: attempting startup when game is unpaused") end
 		timer.Create("vrmod_start", 0.1, 0, function()
@@ -174,20 +172,51 @@ if CLIENT then
 		local xoffset = projMatrix[1][3]
 		local yscale = projMatrix[2][2]
 		local yoffset = projMatrix[2][3]
-		local tan_px = math.abs((1.0 - xoffset) / xscale)
-		local tan_nx = math.abs((-1.0 - xoffset) / xscale)
-		local tan_py = math.abs((1.0 - yoffset) / yscale)
-		local tan_ny = math.abs((-1.0 - yoffset) / yscale)
+		local tan_px = math.abs((1 - xoffset) / xscale)
+		local tan_nx = math.abs((-1 - xoffset) / xscale)
+		local tan_py = math.abs((1 - yoffset) / yscale)
+		local tan_ny = math.abs((-1 - yoffset) / yscale)
 		local w = tan_px + tan_nx
 		local h = tan_py + tan_ny
 		return {
-			HorizontalFOV = math.atan(w / 2) * 2 * 180 / math.pi,
+			HorizontalFOV = math.deg(2 * math.atan(w / 2)),
 			AspectRatio = w / h,
 			HorizontalOffset = xoffset,
 			VerticalOffset = yoffset,
 			Width = w,
 			Height = h,
 		}
+	end
+
+	local function computeSubmitBounds(leftCalc, rightCalc)
+		local isWindows = system.IsWindows()
+		-- average half-eye sizes
+		local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
+		local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
+		local hFactor = 0.5 / wAvg
+		local vFactor = 1.0 / hAvg
+		-- vertical-bounds helper
+		local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
+		local function calcVMinMax(verticalOffset)
+			if isWindows then
+				print("Windows peasant detected")
+				local adj = verticalOffset * vFactor
+				return vMin - adj, vMax - adj
+			else
+				local absAdj = math.abs(verticalOffset * vFactor)
+				return vMin - absAdj, vMax - absAdj
+			end
+		end
+
+		-- horizontal U min/max for each eye
+		local uMinLeft = 0.0 + leftCalc.HorizontalOffset * hFactor
+		local uMaxLeft = 0.5 + leftCalc.HorizontalOffset * hFactor
+		local uMinRight = 0.5 + rightCalc.HorizontalOffset * hFactor
+		local uMaxRight = 1.0 + rightCalc.HorizontalOffset * hFactor
+		-- vertical V min/max for each eye
+		local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset)
+		local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset)
+		return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
 	end
 
 	function VRUtilClientStart()
@@ -209,36 +238,16 @@ if CLIENT then
 		VRMOD_ShareTextureBegin()
 		g_VR.rt = GetRenderTarget("vrmod_rt" .. tostring(SysTime()), rtWidth, rtHeight)
 		VRMOD_ShareTextureFinish()
-		local displayCalculations = {
-			left = calculateProjectionParams(displayInfo.ProjectionLeft),
-			right = calculateProjectionParams(displayInfo.ProjectionRight),
-		}
-
-		local wAvg = (displayCalculations.left.Width + displayCalculations.right.Width) / 2
-		local hAvg = (displayCalculations.left.Height + displayCalculations.right.Height) / 2
-		local hFactor = 0.5 / wAvg
-		local vFactor = 1.0 / hAvg
-		local vMin, vMax = system.IsWindows() and 0 or 1, system.IsWindows() and 1 or 0
-		local function calcVMinMax(verticalOffset)
-			if system.IsWindows() then
-				local adjustment = verticalOffset * vFactor
-				return vMin - adjustment, vMax - adjustment
-			else
-				return vMin - math.abs(verticalOffset * vFactor), vMax - math.abs(verticalOffset * vFactor)
-			end
-		end
-
-		local uMinLeft = 0.0 + displayCalculations.left.HorizontalOffset * hFactor
-		local uMaxLeft = 0.5 + displayCalculations.left.HorizontalOffset * hFactor
-		local uMinRight = 0.5 + displayCalculations.right.HorizontalOffset * hFactor
-		local uMaxRight = 1.0 + displayCalculations.right.HorizontalOffset * hFactor
-		local vMinLeft, vMaxLeft = calcVMinMax(displayCalculations.left.VerticalOffset)
-		local vMinRight, vMaxRight = calcVMinMax(displayCalculations.right.VerticalOffset)
-		VRMOD_SetSubmitTextureBounds(uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight)
-		local hfovLeft = displayCalculations.left.HorizontalFOV
-		local hfovRight = displayCalculations.right.HorizontalFOV
-		local aspectLeft = displayCalculations.left.AspectRatio
-		local aspectRight = displayCalculations.right.AspectRatio
+		local leftCalc = calculateProjectionParams(displayInfo.ProjectionLeft)
+		local rightCalc = calculateProjectionParams(displayInfo.ProjectionRight)
+		-- set up texture bounds
+		local bounds = {computeSubmitBounds(leftCalc, rightCalc)}
+		VRMOD_SetSubmitTextureBounds(unpack(bounds))
+		-- extract FOV, aspect, IPD, eyeZ for later
+		local hfovLeft = leftCalc.HorizontalFOV
+		local hfovRight = rightCalc.HorizontalFOV
+		local aspectLeft = leftCalc.AspectRatio
+		local aspectRight = rightCalc.AspectRatio
 		local ipd = displayInfo.TransformRight[1][4] * 2
 		local eyez = displayInfo.TransformRight[3][4]
 		--set up active bindings
@@ -373,6 +382,7 @@ if CLIENT then
 					local delta = SubVec(v.pos, lastPosePos[k])
 					if LengthSqr(delta) > maxPosDeltaSqr then continue end
 				end
+
 				lastPosePos[k] = v.pos
 				g_VR.tracking[k] = g_VR.tracking[k] or {}
 				local worldPose = g_VR.tracking[k]
