@@ -3,6 +3,12 @@ if CLIENT then
 	g_VR.menuFocus = false
 	g_VR.menuCursorX = 0
 	g_VR.menuCursorY = 0
+	local heldButtons = {
+		[MOUSE_LEFT] = false,
+		[MOUSE_RIGHT] = false,
+		[MOUSE_MIDDLE] = false
+	}
+
 	local _, convarValues = vrmod.GetConvars()
 	local uioutline = CreateClientConVar("vrmod_ui_outline", 0, true, FCVAR_ARCHIVE, nil, 0, 1)
 	local rt_beam = GetRenderTarget("vrmod_rt_beam", 64, 64, false)
@@ -25,7 +31,6 @@ if CLIENT then
 	end
 
 	vrmod.AddCallbackedConvar("vrmod_test_ui_testver", nil, 0, nil, "", 0, 1, tonumber)
-	vrmod.AddCallbackedConvar("vrmod_ui_realtime", nil, 0, nil, "", 0, 1, tonumber)
 	vrmod.AddCallbackedConvar("vrmod_beam_color", nil, "255,0,0,255", nil, "", nil, nil, nil, function(newValue) UpdateBeamColor(newValue) end)
 	g_VR.menus = {}
 	local menus = g_VR.menus
@@ -144,9 +149,6 @@ if CLIENT then
 		if g_VR.menuFocus then
 			render.SetMaterial(mat_beam)
 			render.DrawBeam(g_VR.tracking.pose_righthand.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(255, 255, 255, 255))
-			input.SetCursorPos(g_VR.menuCursorX, g_VR.menuCursorY)
-			-- realtime ui start
-			if convarValues.vrmod_ui_realtime == 1 then VRUtilMenuRenderPanel(g_VR.menuFocus) end
 		end
 
 		render.DepthRange(0, 1)
@@ -193,6 +195,14 @@ if CLIENT then
 		menusExist = true
 	end
 
+	local function SyncCursorToVR()
+		if not g_VR.menuFocus then return end
+		-- This must match the cursor math used for rendering the VR pointer
+		local x = g_VR.menuCursorX
+		local y = g_VR.menuCursorY
+		input.SetCursorPos(x, y)
+	end
+
 	function VRUtilMenuClose(uid)
 		for k, v in pairs(menus) do
 			if k == uid or not uid then
@@ -218,34 +228,36 @@ if CLIENT then
 	end
 
 	hook.Add("VRMod_Input", "ui", function(action, pressed)
-		if g_VR.menuFocus and action == "boolean_primaryfire" then
+		if not g_VR.menuFocus then return end
+		local mouseButton = nil
+		if action == "boolean_primaryfire" then
+			mouseButton = MOUSE_LEFT
+		elseif action == "boolean_secondaryfire" then
+			mouseButton = MOUSE_RIGHT
+		elseif action == "boolean_sprint" then
+			mouseButton = MOUSE_MIDDLE
+		end
+
+		if mouseButton then
+			heldButtons[mouseButton] = pressed
+			SyncCursorToVR()
 			if pressed then
-				gui.InternalMousePressed(MOUSE_LEFT)
+				gui.InternalMousePressed(mouseButton)
 			else
-				gui.InternalMouseReleased(MOUSE_LEFT)
+				gui.InternalMouseReleased(mouseButton)
 			end
 
 			VRUtilMenuRenderPanel(g_VR.menuFocus)
 		end
+	end)
 
-		if g_VR.menuFocus and action == "boolean_secondaryfire" then
-			if pressed then
-				gui.InternalMousePressed(MOUSE_RIGHT)
-			else
-				gui.InternalMouseReleased(MOUSE_RIGHT)
+	hook.Add("Think", "VRUtil_SyncCursorWhileHeld", function()
+		if not g_VR or not g_VR.menuFocus then return end
+		for btn, held in pairs(heldButtons) do
+			if held then
+				SyncCursorToVR()
+				break
 			end
-
-			VRUtilMenuRenderPanel(g_VR.menuFocus)
-		end
-
-		if g_VR.menuFocus and action == "boolean_sprint" then
-			if pressed then
-				gui.InternalMousePressed(MOUSE_MIDDLE)
-			else
-				gui.InternalMouseReleased(MOUSE_MIDDLE)
-			end
-
-			VRUtilMenuRenderPanel(g_VR.menuFocus)
 		end
 	end)
 end
