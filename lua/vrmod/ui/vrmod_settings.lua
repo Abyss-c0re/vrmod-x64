@@ -1,6 +1,5 @@
 if SERVER then return end
 local convars = vrmod.GetConvars()
-
 hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 	local form = frame.SettingsForm
 	-- Controls Section
@@ -83,7 +82,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 	AddOffsetSlider("Pitch", "vrmod_controlleroffset_pitch", -180, 180)
 	AddOffsetSlider("Yaw", "vrmod_controlleroffset_yaw", -180, 180)
 	AddOffsetSlider("Roll", "vrmod_controlleroffset_roll", -180, 180)
-	local applyBtn = offsetForm:Button("Apply offsets", "")
+	local applyBtn = offsetForm:Button("Apply offsets", nil)
 	function applyBtn:OnReleased()
 		local x = convars.vrmod_controlleroffset_x:GetFloat()
 		local y = convars.vrmod_controlleroffset_y:GetFloat()
@@ -91,10 +90,30 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 		local p = convars.vrmod_controlleroffset_pitch:GetFloat()
 		local yw = convars.vrmod_controlleroffset_yaw:GetFloat()
 		local r = convars.vrmod_controlleroffset_roll:GetFloat()
-		g_VR.rightControllerOffsetPos = Vector(x, y, z)
-		g_VR.leftControllerOffsetPos = Vector(x, -y, z)
-		g_VR.rightControllerOffsetAng = Angle(p, yw, r)
-		g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
+		if g_VR then
+			g_VR.rightControllerOffsetPos = Vector(x, y, z)
+			g_VR.leftControllerOffsetPos = Vector(x, -y, z)
+			g_VR.rightControllerOffsetAng = Angle(p, yw, r)
+			g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
+		end
+	end
+
+	local resetBtn = offsetForm:Button("Reset offsets", "")
+	function resetBtn:OnReleased()
+		-- Reset convars to their default values
+		RunConsoleCommand("vrmod_controlleroffset_x", "-15")
+		RunConsoleCommand("vrmod_controlleroffset_y", "-1")
+		RunConsoleCommand("vrmod_controlleroffset_z", "5")
+		RunConsoleCommand("vrmod_controlleroffset_pitch", "50")
+		RunConsoleCommand("vrmod_controlleroffset_yaw", "0")
+		RunConsoleCommand("vrmod_controlleroffset_roll", "0")
+		-- Also immediately apply to g_VR (if table exists)
+		if g_VR then
+			g_VR.rightControllerOffsetPos = Vector(-15, -1, 5)
+			g_VR.leftControllerOffsetPos = Vector(-15, 1, 5)
+			g_VR.rightControllerOffsetAng = Angle(50, 0, 0)
+			g_VR.leftControllerOffsetAng = Angle(50, 0, 0)
+		end
 	end
 
 	-- Core settings
