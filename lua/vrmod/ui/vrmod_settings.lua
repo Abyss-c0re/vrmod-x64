@@ -3,52 +3,104 @@ local convars = vrmod.GetConvars()
 
 hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 	local form = frame.SettingsForm
+	-- Controls Section
+	local controlsPanel = vgui.Create("DForm", form)
+	controlsPanel:SetName("Controls")
+	controlsPanel:Dock(TOP)
+	controlsPanel:DockMargin(10, 10, 10, 0)
+	controlsPanel:SetExpanded(true)
+	-- Controller oriented locomotion
+	local controllerLocomotion = vgui.Create("DCheckBoxLabel", controlsPanel)
+	controlsPanel:AddItem(controllerLocomotion)
+	controllerLocomotion:SetDark(true)
+	controllerLocomotion:SetText("Controller oriented locomotion")
+	controllerLocomotion:SetChecked(convars.vrmod_controlleroriented:GetBool())
+	function controllerLocomotion:OnChange(val)
+		convars.vrmod_controlleroriented:SetBool(val)
+	end
 
-	-- ─────────────── Locomotion Settings (moved to top) ───────────────
-	do
-		local panel = vgui.Create("DForm", form)
-		panel:SetName("Locomotion")
-		panel:Dock(TOP)
-		panel:DockMargin(10, 10, 10, 0)
-		panel:SetExpanded(true)
+	-- Smooth turning
+	local smoothTurning = vgui.Create("DCheckBoxLabel", controlsPanel)
+	controlsPanel:AddItem(smoothTurning)
+	smoothTurning:SetDark(true)
+	smoothTurning:SetText("Smooth turning")
+	smoothTurning:SetChecked(convars.vrmod_smoothturn:GetBool())
+	function smoothTurning:OnChange(val)
+		convars.vrmod_smoothturn:SetBool(val)
+	end
 
-		local controllerLocomotion = vgui.Create("DCheckBoxLabel", panel)
-		panel:AddItem(controllerLocomotion)
-		controllerLocomotion:SetDark(true)
-		controllerLocomotion:SetText("Controller oriented locomotion")
-		controllerLocomotion:SetChecked(convars.vrmod_controlleroriented:GetBool())
-		function controllerLocomotion:OnChange(val)
-			convars.vrmod_controlleroriented:SetBool(val)
-		end
+	-- Smooth turn rate slider
+	local turnRateSlider = vgui.Create("DNumSlider", controlsPanel)
+	controlsPanel:AddItem(turnRateSlider)
+	turnRateSlider:SetMin(1)
+	turnRateSlider:SetMax(360)
+	turnRateSlider:SetDecimals(0)
+	turnRateSlider:SetValue(convars.vrmod_smoothturnrate:GetInt())
+	turnRateSlider:SetDark(true)
+	turnRateSlider:SetText("Smooth turn rate")
+	function turnRateSlider:OnValueChanged(val)
+		convars.vrmod_smoothturnrate:SetInt(val)
+	end
 
-		local smoothTurning = vgui.Create("DCheckBoxLabel", panel)
-		panel:AddItem(smoothTurning)
-		smoothTurning:SetDark(true)
-		smoothTurning:SetText("Smooth turning")
-		smoothTurning:SetChecked(convars.vrmod_smoothturn:GetBool())
-		function smoothTurning:OnChange(val)
-			convars.vrmod_smoothturn:SetBool(val)
-		end
+	-- Teleportation
+	controlsPanel:CheckBox("Teleportation (Client)", "vrmod_allow_teleport_client")
+	-- Alternative head angles
+	local headAngleBox = vgui.Create("DCheckBoxLabel", controlsPanel)
+	controlsPanel:AddItem(headAngleBox)
+	headAngleBox:SetDark(true)
+	headAngleBox:SetText("Alternative head angle manipulation method")
+	headAngleBox:SetChecked(convars.vrmod_althead:GetBool())
+	function headAngleBox:OnChange(val)
+		convars.vrmod_althead:SetBool(val)
+	end
 
-		local turnRateSlider = vgui.Create("DNumSlider", panel)
-		panel:AddItem(turnRateSlider)
-		turnRateSlider:SetMin(1)
-		turnRateSlider:SetMax(360)
-		turnRateSlider:SetDecimals(0)
-		turnRateSlider:SetValue(convars.vrmod_smoothturnrate:GetInt())
-		turnRateSlider:SetDark(true)
-		turnRateSlider:SetText("Smooth turn rate")
-		function turnRateSlider:OnValueChanged(val)
-			convars.vrmod_smoothturnrate:SetInt(val)
+	controlsPanel:ControlHelp("Less precise, compatibility for jigglebones")
+	-- Edit custom input actions
+	local actionBtn = vgui.Create("DButton", controlsPanel)
+	controlsPanel:AddItem(actionBtn)
+	actionBtn:SetText("Edit custom controller input actions")
+	function actionBtn:DoClick()
+		RunConsoleCommand("vrmod_actioneditor")
+	end
+
+	-- Controller-offset sliders under Controls
+	local offsetForm = vgui.Create("DForm", form)
+	offsetForm:SetName("Controller offsets")
+	offsetForm:Dock(TOP)
+	offsetForm:DockMargin(10, 10, 10, 0)
+	offsetForm:SetExpanded(false)
+	local function AddOffsetSlider(name, convar, mn, mx)
+		local s = offsetForm:NumSlider(name, convar, mn, mx, 0)
+		function s:PerformLayout()
+			self.TextArea:SetWide(30)
+			self.Label:SetWide(30)
 		end
 	end
 
-	-- ─────────────── Core Settings ───────────────
-	form:CheckBox("Teleportation (Client)", "vrmod_allow_teleport_client")
+	AddOffsetSlider("X", "vrmod_controlleroffset_x", -30, 30)
+	AddOffsetSlider("Y", "vrmod_controlleroffset_y", -30, 30)
+	AddOffsetSlider("Z", "vrmod_controlleroffset_z", -30, 30)
+	AddOffsetSlider("Pitch", "vrmod_controlleroffset_pitch", -180, 180)
+	AddOffsetSlider("Yaw", "vrmod_controlleroffset_yaw", -180, 180)
+	AddOffsetSlider("Roll", "vrmod_controlleroffset_roll", -180, 180)
+	local applyBtn = offsetForm:Button("Apply offsets", "")
+	function applyBtn:OnReleased()
+		local x = convars.vrmod_controlleroffset_x:GetFloat()
+		local y = convars.vrmod_controlleroffset_y:GetFloat()
+		local z = convars.vrmod_controlleroffset_z:GetFloat()
+		local p = convars.vrmod_controlleroffset_pitch:GetFloat()
+		local yw = convars.vrmod_controlleroffset_yaw:GetFloat()
+		local r = convars.vrmod_controlleroffset_roll:GetFloat()
+		g_VR.rightControllerOffsetPos = Vector(x, y, z)
+		g_VR.leftControllerOffsetPos = Vector(x, -y, z)
+		g_VR.rightControllerOffsetAng = Angle(p, yw, r)
+		g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
+	end
+
+	-- Core settings
 	form:CheckBox("Use floating hands", "vrmod_floatinghands")
 	form:CheckBox("Use weapon world models", "vrmod_useworldmodels")
 	form:CheckBox("Add laser pointer to tools/weapons", "vrmod_laserpointer")
-
 	local heightCheckbox = form:CheckBox("Show height adjustment menu", "vrmod_heightmenu")
 	local checkTime = 0
 	function heightCheckbox:OnChange(checked)
@@ -58,82 +110,68 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 
 	form:CheckBox("Enable seated offset", "vrmod_seated")
 	form:ControlHelp("Adjust from height adjustment menu")
-	form:CheckBox("Alternative head angle manipulation method", "vrmod_althead")
-	form:ControlHelp("Less precise, compatibility for jigglebones")
 	form:CheckBox("Automatically start VR after map loads", "vrmod_autostart")
 	form:CheckBox("Replace climbing mechanics (when available)", "vrmod_climbing")
 	form:CheckBox("Replace door use mechanics (when available)", "vrmod_doors")
-	form:CheckBox("Enable engine postprocessing", "vrmod_postprocess")
-
-	-- Desktop-view combo
-	do
-		local panel = vgui.Create("DPanel")
-		panel:SetSize(300, 30)
-		panel.Paint = nil
-		local lbl = vgui.Create("DLabel", panel)
-		lbl:SetPos(0, -3)
-		lbl:SetSize(100, 30)
-		lbl:SetText("Desktop view:")
-		lbl:SetColor(Color(0, 0, 0))
-		local cb = vgui.Create("DComboBox", panel)
-		cb:Dock(TOP)
-		cb:DockMargin(70, 0, 0, 5)
-		cb:AddChoice("none")
-		cb:AddChoice("left eye")
-		cb:AddChoice("right eye")
-		function cb:OnSelect(index)
-			convars.vrmod_desktopview:SetInt(index)
-		end
-
-		function cb:Think()
-			local v = convars.vrmod_desktopview:GetInt()
-			if self.ConvarVal ~= v then
-				self.ConvarVal = v
-				self:ChooseOptionID(v)
-			end
-		end
-
-		form:AddItem(panel)
-	end
-
-	form:Button("Edit custom controller input actions", "vrmod_actioneditor")
 	form:Button("Reset settings to default", "vrmod_reset")
-
-	-- Controller-offset sliders
+	-- ─────────────── Rendering Tab ───────────────
 	do
-		local offsetForm = vgui.Create("DForm", form)
-		offsetForm:SetName("Controller offsets")
-		offsetForm:Dock(TOP)
-		offsetForm:DockMargin(10, 10, 10, 0)
-		offsetForm:SetExpanded(false)
-
-		local function AddOffsetSlider(name, convar, mn, mx)
-			local s = offsetForm:NumSlider(name, convar, mn, mx, 0)
-			function s:PerformLayout()
-				self.TextArea:SetWide(30)
-				self.Label:SetWide(30)
-			end
+		local t = vgui.Create("DScrollPanel", frame.DPropertySheet)
+		t.Paint = nil
+		frame.DPropertySheet:AddSheet("Rendering", t, "icon16/monitor.png")
+		local function AddCB(lbl, cv, y)
+			local cb = t:Add("DCheckBoxLabel")
+			cb:SetText(lbl)
+			cb:SetConVar(cv)
+			cb:SetPos(20, y)
+			cb:SizeToContents()
+			return y + 25
 		end
 
-		AddOffsetSlider("X", "vrmod_controlleroffset_x", -30, 30)
-		AddOffsetSlider("Y", "vrmod_controlleroffset_y", -30, 30)
-		AddOffsetSlider("Z", "vrmod_controlleroffset_z", -30, 30)
-		AddOffsetSlider("Pitch", "vrmod_controlleroffset_pitch", -180, 180)
-		AddOffsetSlider("Yaw", "vrmod_controlleroffset_yaw", -180, 180)
-		AddOffsetSlider("Roll", "vrmod_controlleroffset_roll", -180, 180)
+		local y = 10
+		y = AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
+		-- Desktop-view combo
+		do
+			local panel = vgui.Create("DPanel", t)
+			panel:SetSize(300, 30)
+			panel:SetPos(20, y)
+			panel.Paint = nil
+			local lbl = vgui.Create("DLabel", panel)
+			lbl:SetPos(0, 5) -- vertical center alignment
+			lbl:SetSize(90, 20)
+			lbl:SetText("Desktop view:")
+			lbl:SetColor(Color(0, 0, 0))
+			local cb = vgui.Create("DComboBox", panel)
+			cb:SetPos(95, 2) -- adds a clean space after label
+			cb:SetSize(150, 25)
+			cb:AddChoice("none")
+			cb:AddChoice("left eye")
+			cb:AddChoice("right eye")
+			function cb:OnSelect(index)
+				convars.vrmod_desktopview:SetInt(index)
+			end
 
-		local applyBtn = offsetForm:Button("Apply offsets", "")
-		function applyBtn:OnReleased()
-			local x = convars.vrmod_controlleroffset_x:GetFloat()
-			local y = convars.vrmod_controlleroffset_y:GetFloat()
-			local z = convars.vrmod_controlleroffset_z:GetFloat()
-			local p = convars.vrmod_controlleroffset_pitch:GetFloat()
-			local yw = convars.vrmod_controlleroffset_yaw:GetFloat()
-			local r = convars.vrmod_controlleroffset_roll:GetFloat()
-			g_VR.rightControllerOffsetPos = Vector(x, y, z)
-			g_VR.leftControllerOffsetPos = Vector(x, -y, z)
-			g_VR.rightControllerOffsetAng = Angle(p, yw, r)
-			g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
+			function cb:Think()
+				local v = convars.vrmod_desktopview:GetInt()
+				if self.ConvarVal ~= v then
+					self.ConvarVal = v
+					self:ChooseOptionID(v)
+				end
+			end
+
+			y = y + 40
+		end
+
+		-- View scale slider
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetText("View scale")
+			s:SetMin(0.1)
+			s:SetMax(2.0)
+			s:SetDecimals(1)
+			s:SetConVar("vrmod_viewScale")
 		end
 	end
 
