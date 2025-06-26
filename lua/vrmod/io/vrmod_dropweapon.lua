@@ -1,9 +1,27 @@
 AddCSLuaFile()
 if SERVER then
-    local blacklist = {"weapon_fists", "piss_swep", "weapon_bsmod_punch", "weapon_vrmod_empty", "weapon_haax_vr", "alex_matrix_stopbullets", "blink", "spartan_kick", "arcticvr_nade_frag", "arcticvr_nade_flash", "arcticvr_nade_smoke",}
+    local blacklist_path = "vrmod_blacklist.txt"
+    -- Default blacklist values
+    local default_blacklist = {"weapon_fists", "piss_swep", "weapon_bsmod_punch", "weapon_vrmod_empty", "weapon_haax_vr", "alex_matrix_stopbullets", "blink", "spartan_kick", "arcticvr_nade_frag", "arcticvr_nade_flash", "arcticvr_nade_smoke"}
+    -- Ensure file exists and load blacklist
+    local blacklist = {}
+    if not file.Exists(blacklist_path, "DATA") then
+        file.Write(blacklist_path, table.concat(default_blacklist, "\n"))
+        blacklist = default_blacklist
+    else
+        local content = file.Read(blacklist_path, "DATA") or ""
+        for line in string.gmatch(content, "[^\r\n]+") do
+            table.insert(blacklist, string.Trim(line))
+        end
+    end
+
+    -- Lookup function
     local function InBlackList(weaponClass)
-        for _, v in ipairs(blacklist) do
-            if v == weaponClass then return true end
+        local path = blacklist_path
+        if not file.Exists(path, "DATA") then return false end
+        local content = file.Read(path, "DATA") or ""
+        for line in string.gmatch(content, "[^\r\n]+") do
+            if string.Trim(line) == weaponClass then return true end
         end
         return false
     end
@@ -21,13 +39,11 @@ if SERVER then
         local wepdropmode = net.ReadBool()
         local rhandvel = net.ReadVector()
         local rhandangvel = net.ReadVector()
-
         local wep = ply:GetActiveWeapon()
         if IsValid(wep) and not ply:InVehicle() and not InBlackList(wep:GetClass()) then
             local modelname = wep:GetModel()
             local guninhandpos = vrmod.GetRightHandPos(ply)
             local guninhandang = vrmod.GetRightHandAng(ply)
-
             wep.VR_Pickup_Tag = false
             if wepdropmode then
                 Wwep = ents.Create(wep:GetClass())
@@ -68,10 +84,44 @@ if SERVER then
             if wepdropmode then ply:StripWeapon(ply:GetActiveWeapon():GetClass()) end
             ply:Give("weapon_vrmod_empty")
             ply:SelectWeapon("weapon_vrmod_empty")
-            timer.Simple(3, function() if IsValid(Wwep) and Wwep:GetClass() == "prop_physics" then Wwep:Remove() end end) 
+            timer.Simple(3, function() if IsValid(Wwep) and Wwep:GetClass() == "prop_physics" then Wwep:Remove() end end)
         end
     end)
 end
+
+concommand.Add("vrmod_toggle_blacklist", function(ply)
+    if not IsValid(ply) or not ply:IsPlayer() then return end
+    local wep = ply:GetActiveWeapon()
+    if not IsValid(wep) then
+        ply:ChatPrint("[VRMod] No active weapon to toggle in blacklist.")
+        return
+    end
+
+    local class = wep:GetClass()
+    local path = "vrmod_blacklist.txt"
+    -- Read file lines into a table
+    local lines = {}
+    if file.Exists(path, "DATA") then
+        for line in string.gmatch(file.Read(path, "DATA") or "", "[^\r\n]+") do
+            table.insert(lines, string.Trim(line))
+        end
+    end
+
+    -- Determine action
+    for i, v in ipairs(lines) do
+        if v == class then
+            table.remove(lines, i)
+            file.Write(path, table.concat(lines, "\n"))
+            ply:ChatPrint("[VRMod] Removed '" .. class .. "' from blacklist.")
+            return
+        end
+    end
+
+    -- If not found, add
+    table.insert(lines, class)
+    file.Write(path, table.concat(lines, "\n"))
+    ply:ChatPrint("[VRMod] Added '" .. class .. "' to blacklist.")
+end)
 
 if CLIENT then
     local dropenable = CreateClientConVar("vrmod_weapondrop_enable", 1, true, FCVAR_ARCHIVE, "", 0, 1)

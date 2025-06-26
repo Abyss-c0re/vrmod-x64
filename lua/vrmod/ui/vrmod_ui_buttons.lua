@@ -29,8 +29,9 @@ vrmod.AddInGameMenuItem("Undo", 1, 1, function() LocalPlayer():ConCommand("gmod_
 vrmod.AddInGameMenuItem("Cleanup", 4, 1, function() LocalPlayer():ConCommand("gmod_cleanup") end)
 vrmod.AddInGameMenuItem("Admin Cleanup", 5, 1, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end)
 vrmod.AddInGameMenuItem("Mirror", 0, 2, function() VRUtilOpenHeightMenu() end)
-vrmod.AddInGameMenuItem("Ui Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end)
+vrmod.AddInGameMenuItem("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end)
 vrmod.AddInGameMenuItem("Laser pointer", 2, 2, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end)
+vrmod.AddInGameMenuItem("Toggle blacklist weapon", 2, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end)
 vrmod.AddInGameMenuItem("Respawn", 4, 2, function() LocalPlayer():ConCommand("kill") end)
 --more space
 vrmod.AddInGameMenuItem("VR EXIT", 5, 2, function() LocalPlayer():ConCommand("vrmod_exit") end)
