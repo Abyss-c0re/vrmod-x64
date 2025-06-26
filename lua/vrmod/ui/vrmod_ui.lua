@@ -71,6 +71,7 @@ if CLIENT then
 	function VRUtilRenderMenuSystem()
 		if menusExist == false then return end
 		g_VR.menuFocus = false
+		local cursorX, cursorY = 0, 0
 		local menuFocusDist = 99999
 		local menuFocusPanel = nil
 		local menuFocusCursorWorldPos = nil
@@ -109,7 +110,6 @@ if CLIENT then
 			cam.End3D2D()
 			cam.IgnoreZ(false)
 			if v.cursorEnabled then
-				local cursorX, cursorY = -1, -1
 				local cursorWorldPos = Vector(0, 0, 0)
 				local start = g_VR.tracking.pose_righthand.pos
 				local dir = g_VR.tracking.pose_righthand.ang:Forward()
@@ -129,8 +129,6 @@ if CLIENT then
 
 				if cursorX > 0 and cursorY > 0 and cursorX < v.width and cursorY < v.height and dist < menuFocusDist then
 					g_VR.menuFocus = k
-					g_VR.menuCursorX = cursorX
-					g_VR.menuCursorY = cursorY
 					menuFocusDist = dist
 					menuFocusPanel = v.panel
 					menuFocusCursorWorldPos = cursorWorldPos
@@ -147,6 +145,8 @@ if CLIENT then
 		end
 
 		if g_VR.menuFocus then
+			g_VR.menuCursorX = cursorX
+			g_VR.menuCursorY = cursorY
 			render.SetMaterial(mat_beam)
 			render.DrawBeam(g_VR.tracking.pose_righthand.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(255, 255, 255, 255))
 		end
@@ -197,7 +197,6 @@ if CLIENT then
 
 	local function SyncCursorToVR()
 		if not g_VR.menuFocus then return end
-		-- This must match the cursor math used for rendering the VR pointer
 		local x = g_VR.menuCursorX
 		local y = g_VR.menuCursorY
 		input.SetCursorPos(x, y)
@@ -253,12 +252,7 @@ if CLIENT then
 
 	hook.Add("Think", "VRUtil_SyncCursorWhileHeld", function()
 		if not g_VR or not g_VR.menuFocus then return end
-		for btn, held in pairs(heldButtons) do
-			if held then
-				SyncCursorToVR()
-				break
-			end
-		end
+		SyncCursorToVR()
 	end)
 end
 
