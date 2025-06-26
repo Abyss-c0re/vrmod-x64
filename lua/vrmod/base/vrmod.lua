@@ -13,7 +13,6 @@ end
 
 if CLIENT then
 	g_VR.scale = 0
-	g_VR.viewScale = 0
 	g_VR.origin = Vector(0, 0, 0)
 	g_VR.originAngle = Angle(0, 0, 0)
 	g_VR.viewModel = nil --this will point to either the viewmodel, worldmodel or nil
@@ -32,7 +31,7 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_althead", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_autostart", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_scale", nil, "32.7")
-	vrmod.AddCallbackedConvar("vrmod_viewScale", nil, "1.0")
+	vrmod.AddCallbackedConvar("vrmod_viewscale", nil, "1.0")
 	vrmod.AddCallbackedConvar("vrmod_heightmenu", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3")
@@ -40,6 +39,8 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_laserpointer", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_znear", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_renderoffset", nil, "1")
+	vrmod.AddCallbackedConvar("vrmod_fovscale_x", nil, "1")
+	vrmod.AddCallbackedConvar("vrmod_fovscale_y", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")
@@ -232,6 +233,17 @@ if CLIENT then
 		return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
 	end
 
+	local function adjustFOV(proj, fovScaleX, fovScaleY)
+		local clone = {}
+		for i = 1, 4 do
+			clone[i] = {proj[i][1], proj[i][2], proj[i][3], proj[i][4]}
+		end
+
+		clone[1][1] = clone[1][1] * fovScaleX
+		clone[2][2] = clone[2][2] * fovScaleY
+		return clone
+	end
+
 	function VRUtilClientStart()
 		local error = vrmod.GetStartupError()
 		if error then
@@ -245,11 +257,15 @@ if CLIENT then
 			return
 		end
 
-		g_VR.viewScale = convars.vrmod_viewScale:GetFloat()
+		local viewscale = convars.vrmod_viewscale:GetFloat()
+		local fovscaleX = convars.vrmod_fovscale_x:GetFloat()
+		local fovscaleY = convars.vrmod_fovscale_y:GetFloat()
 		local displayInfo = VRMOD_GetDisplayInfo(1, 10)
 		local rtWidth, rtHeight = displayInfo.RecommendedWidth * 2, displayInfo.RecommendedHeight
-		local leftCalc = calculateProjectionParams(displayInfo.ProjectionLeft, g_VR.viewScale)
-		local rightCalc = calculateProjectionParams(displayInfo.ProjectionRight, g_VR.viewScale)
+		local leftProj = adjustFOV(displayInfo.ProjectionLeft, fovscaleX, fovscaleY)
+		local rightProj = adjustFOV(displayInfo.ProjectionRight, fovscaleX, fovscaleY)
+		local leftCalc = calculateProjectionParams(leftProj, viewscale)
+		local rightCalc = calculateProjectionParams(rightProj, viewscale)
 		if system.IsLinux() then
 			local clampW, clampH = math.min(4096, rtWidth), math.min(4096, rtHeight)
 			local wScale = clampW / rtWidth
@@ -274,6 +290,7 @@ if CLIENT then
 		local aspectRight = rightCalc.AspectRatio
 		local ipd = displayInfo.TransformRight[1][4] * 2
 		local eyez = displayInfo.TransformRight[3][4]
+		print(string.format("[VRMod] FOV L/R: %.2f / %.2f | Aspect L/R: %.2f / %.2f | IPD: %.2f | EyeZ: %.2f", hfovLeft, hfovRight, aspectLeft, aspectRight, ipd, eyez))
 		--set up active bindings
 		VRMOD_SetActionManifest("vrmod/vrmod_action_manifest.txt")
 		VRMOD_SetActiveActionSets("/actions/base", LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main")

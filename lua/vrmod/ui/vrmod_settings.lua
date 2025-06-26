@@ -148,8 +148,12 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 		end
 
 		local y = 10
-		y = AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
-		y = AddCB("Auto offset (disable if having distortion)", "vrmod_renderoffset", y)
+		surface.CreateFont("BoldSliderFont", {
+			font = "Tahoma", 
+			size = 13,
+			weight = 1000,
+		})
+
 		-- Desktop-view combo
 		do
 			local panel = vgui.Create("DPanel", t)
@@ -182,6 +186,8 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			y = y + 40
 		end
 
+		y = AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
+		y = AddCB("Auto offset (disable if having distortion)", "vrmod_renderoffset", y)
 		-- View scale slider
 		do
 			local s = vgui.Create("DNumSlider", t)
@@ -191,8 +197,73 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			s:SetMin(0.1)
 			s:SetMax(2.0)
 			s:SetDecimals(1)
-			s:SetConVar("vrmod_viewScale")
+			s:SetConVar("vrmod_viewscale")
+			y = y + 40
 		end
+
+		-- Explanation label for view scaling
+		do
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y + 5)
+			label:SetSize(370, 30)
+			label:SetText("Increasing this makes the world appear smaller—useful for correcting scale if everything feels giant or too close.")
+			label:SetWrap(true)
+			label:SetAutoStretchVertical(true)
+			label:SetFont("BoldSliderFont")
+			y = y + 35
+		end
+
+		-- View scale slider
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetText("Fov scale X")
+			s:SetMin(0.1)
+			s:SetMax(2.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_fovscale_x")
+			y = y + 40
+		end
+
+		-- View scale slider
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetText("Fov scale Y")
+			s:SetMin(0.1)
+			s:SetMax(2.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_fovscale_y")
+			y = y + 40
+		end
+
+		-- Explanation label for FOV scaling
+		do
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y + 5)
+			label:SetSize(370, 30)
+			label:SetText("FOV scale lets you fine-tune horizontal and vertical field of view.\nUse only if you notice lens warping or feel discomfort. \nValues below 1.0 will make FOV wider")
+			label:SetWrap(true)
+			label:SetAutoStretchVertical(true)
+			label:SetFont("BoldSliderFont")
+			y = y + 35
+		end
+
+		local reset = vgui.Create("DButton", t)
+		reset:SetPos(20, y + 10)
+		reset:SetSize(200, 30)
+		reset:SetText("Reset")
+		reset.DoClick = function()
+			RunConsoleCommand("vrmod_postprocess", "0")
+			RunConsoleCommand("vrmod_renderoffset", "1")
+			RunConsoleCommand("vrmod_viewscale", "1.0")
+			RunConsoleCommand("vrmod_fovscale_x", "1.0")
+			RunConsoleCommand("vrmod_fovscale_y", "1.0")
+		end
+
+		y = y + 50
 	end
 
 	-- ─────────────── Shared PropertySheet ───────────────
