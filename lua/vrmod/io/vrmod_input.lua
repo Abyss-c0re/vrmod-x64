@@ -1,9 +1,34 @@
 local cl_bothkey = CreateClientConVar("vrmod_vehicle_bothkeymode", 0, true, FCVAR_ARCHIVE)
 local cl_pickupdisable = CreateClientConVar("vr_pickup_disable_client", 0, true, FCVAR_ARCHIVE)
-local cl_lefthand = CreateClientConVar("vrmod_LeftHand", 0, true, FCVAR_ARCHIVE)
-local cl_lefthandfire = CreateClientConVar("vrmod_lefthandleftfire", 0, true, FCVAR_ARCHIVE)
 local cl_hudonlykey = CreateClientConVar("vrmod_hud_visible_quickmenukey", 0, true, FCVAR_ARCHIVE)
 if SERVER then return end
+-- Internal state for hand tracking
+local lastHandPos = nil
+local lastHandAng = nil
+-- Function to control physgun with hand movement
+local function VRPhysgunControl(cmd)
+	local hand = g_VR.tracking.pose_lefthand
+	if not hand then return end
+	local newPos = hand.pos
+	local newAng = hand.ang
+	local deltaPos = newPos - lastHandPos
+	local deltaAng = Angle(math.AngleDifference(newAng.pitch, lastHandAng.pitch), math.AngleDifference(newAng.yaw, lastHandAng.yaw), math.AngleDifference(newAng.roll, lastHandAng.roll))
+	-- Forward/backward motion detection
+	local forward = EyeAngles():Forward()
+	local forwardDelta = forward:Dot(deltaPos) * 10
+	if forwardDelta > 0.3 then
+		cmd:SetButtons(bit.bor(cmd:GetButtons(), IN_FORWARD))
+	elseif forwardDelta < -0.3 then
+		cmd:SetButtons(bit.bor(cmd:GetButtons(), IN_BACK))
+	end
+
+	-- Mouse movement from hand rotation
+	cmd:SetMouseX(deltaAng.yaw * 50)
+	cmd:SetMouseY(-deltaAng.pitch * 50)
+	-- Update for next frame
+	lastHandPos = newPos
+	lastHandAng = newAng
+end
 
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 	if cl_bothkey:GetBool() then
@@ -49,34 +74,23 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	if action == "boolean_left_pickup" then
 		if cl_pickupdisable:GetBool() then return end
 		vrmod.Pickup(true, not pressed)
-		-- DropItemsHeldByPlayer(LocalPlayer(), true)
 		return
 	end
 
 	if action == "boolean_right_pickup" then
 		if cl_pickupdisable:GetBool() then return end
 		vrmod.Pickup(false, not pressed)
-		-- DropItemsHeldByPlayer(LocalPlayer(), false)
 		return
 	end
 
-	if action == "boolean_lefthandmode" then LocalPlayer():ConCommand("vrmod_lefthand 1") end
-	if action == "boolean_righthandmode" then LocalPlayer():ConCommand("vrmod_lefthand 0") end
 	if action == "boolean_use" or action == "boolean_exit" then
 		if pressed then
 			LocalPlayer():ConCommand("+use")
 			local wep = LocalPlayer():GetActiveWeapon()
 			if IsValid(wep) and wep:GetClass() == "weapon_physgun" then
-				hook.Add("CreateMove", "vrutil_hook_cmphysguncontrol", function(cmd)
-					if g_VR.input.vector2_walkdirection.y > 0.9 then
-						cmd:SetButtons(bit.bor(cmd:GetButtons(), IN_FORWARD))
-					elseif g_VR.input.vector2_walkdirection.y < -0.9 then
-						cmd:SetButtons(bit.bor(cmd:GetButtons(), IN_BACK))
-					else
-						cmd:SetMouseX(g_VR.input.vector2_walkdirection.x * 50)
-						cmd:SetMouseY(g_VR.input.vector2_walkdirection.y * -50)
-					end
-				end)
+				lastHandPos = g_VR.tracking.pose_lefthand.pos
+				lastHandAng = g_VR.tracking.pose_lefthand.ang
+				hook.Add("CreateMove", "vrutil_hook_cmphysguncontrol", VRPhysgunControl)
 			end
 		else
 			LocalPlayer():ConCommand("-use")
@@ -134,16 +148,6 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 
 	if action == "boolean_menucontext" then
 		LocalPlayer():ConCommand(pressed and "+menu_context" or "-menu_context")
-		return
-	end
-
-	if action == "boolean_left_primaryfire" and not g_VR.menuFocus and cl_lefthand:GetBool() and cl_lefthandfire:GetBool() then
-		LocalPlayer():ConCommand(pressed and "+attack" or "-attack")
-		return
-	end
-
-	if action == "boolean_left_secondaryfire" and not g_VR.menuFocus and cl_lefthand:GetBool() and cl_lefthandfire:GetBool() then
-		LocalPlayer():ConCommand(pressed and "+attack2" or "-attack2")
 		return
 	end
 

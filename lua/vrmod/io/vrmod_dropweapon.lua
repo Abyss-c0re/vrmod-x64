@@ -21,16 +21,13 @@ if SERVER then
         local wepdropmode = net.ReadBool()
         local rhandvel = net.ReadVector()
         local rhandangvel = net.ReadVector()
-        local lhandvel = net.ReadVector()
-        local lhandangvel = net.ReadVector()
+
         local wep = ply:GetActiveWeapon()
         if IsValid(wep) and not ply:InVehicle() and not InBlackList(wep:GetClass()) then
             local modelname = wep:GetModel()
             local guninhandpos = vrmod.GetRightHandPos(ply)
             local guninhandang = vrmod.GetRightHandAng(ply)
-            local guninlefthandpos = vrmod.GetLeftHandPos(ply)
-            local guninlefthandang = vrmod.GetLeftHandAng(ply)
-            local gunvelocity = Vector(0, 0, 0)
+
             wep.VR_Pickup_Tag = false
             if wepdropmode then
                 Wwep = ents.Create(wep:GetClass())
@@ -71,40 +68,22 @@ if SERVER then
             if wepdropmode then ply:StripWeapon(ply:GetActiveWeapon():GetClass()) end
             ply:Give("weapon_vrmod_empty")
             ply:SelectWeapon("weapon_vrmod_empty")
-            timer.Simple(3, function() if IsValid(Wwep) and Wwep:GetClass() == "prop_physics" then Wwep:Remove() end end)
-        else
-            --print("attempt to drop empty weapon")  
+            timer.Simple(3, function() if IsValid(Wwep) and Wwep:GetClass() == "prop_physics" then Wwep:Remove() end end) 
         end
     end)
 end
 
 if CLIENT then
-    --local tedioreenable = CreateClientConVar("vrmod_pickupoff_weaponholster", 1, true, FCVAR_ARCHIVE, "", 0, 1)
     local dropenable = CreateClientConVar("vrmod_weapondrop_enable", 1, true, FCVAR_ARCHIVE, "", 0, 1)
-    --local dropmode = CreateClientConVar("vrmod_weapondrop_trashwep", 0, true, FCVAR_ARCHIVE, "", 0, 1)
-    local ply = LocalPlayer()
     hook.Add("VRMod_Input", "Weapon_Drop", function(action, state)
-        if dropenable:GetBool() then
-            --if GetConVar("vrmod_Foregripmode"):GetBool() then return end
-            if not GetConVar("vrmod_lefthand"):GetBool() then
-                if action == "boolean_right_pickup" and not state then
-                    net.Start("DropWeapon")
-                    net.WriteBool(true)
-                    net.WriteVector(vrmod.GetRightHandVelocity() * 2.5)
-                    net.WriteVector(vrmod.GetRightHandAngularVelocity() * 2.5)
-                    net.SendToServer()
-                    return
-                end
-            else
-                if action == "boolean_left_pickup" and not state then
-                    net.Start("DropWeapon")
-                    net.WriteBool(dropmode:GetBool())
-                    net.WriteVector(vrmod.GetLeftHandVelocity() * 2.5)
-                    net.WriteVector(vrmod.GetLeftHandAngularVelocity() * 2.5)
-                    net.SendToServer()
-                    return
-                end
-            end
+        if not dropenable:GetBool() then return end
+        if action == "boolean_right_pickup" and not state then
+            net.Start("DropWeapon")
+            net.WriteBool(true)
+            net.WriteVector(vrmod.GetRightHandVelocity() * 2.5)
+            net.WriteVector(vrmod.GetRightHandAngularVelocity() * 2.5)
+            net.SendToServer()
+            return
         end
     end)
 end
