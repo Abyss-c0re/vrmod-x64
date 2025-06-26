@@ -39,6 +39,7 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_useworldmodels", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_laserpointer", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_znear", nil, "1")
+	vrmod.AddCallbackedConvar("vrmod_renderoffset", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")
@@ -58,8 +59,8 @@ if CLIENT then
 	end)
 
 	concommand.Add("vrmod_exit", function(ply, cmd, args)
-		timer.Remove("vrmod_start")
-		VRUtilClientExit()
+		if timer.Exists("vrmod_start") then timer.Remove("vrmod_start") end
+		if isfunction(VRUtilClientExit) then VRUtilClientExit() end
 	end)
 
 	concommand.Add("vrmod_reset", function(ply, cmd, args)
@@ -199,11 +200,19 @@ if CLIENT then
 
 	local function computeSubmitBounds(leftCalc, rightCalc)
 		local isWindows = system.IsWindows()
+		local hFactor, vFactor = 0, 0
 		-- average half‐eye extents in tangent space
-		local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
-		local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
-		local hFactor = 0.5 / wAvg
-		local vFactor = 1.0 / hAvg
+		if convars.vrmod_renderoffset:GetBool() then
+			local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
+			local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
+			hFactor = 0.5 / wAvg
+			vFactor = 1.0 / hAvg
+		else
+			--original calues
+			hFactor = 0.25
+			vFactor = 0.5
+		end
+
 		-- UV origin flip only affects V‐range endpoints, not the offset sign:
 		local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
 		local function calcVMinMax(offset)
@@ -235,6 +244,7 @@ if CLIENT then
 			print("vr init failed")
 			return
 		end
+
 		g_VR.viewScale = convars.vrmod_viewScale:GetFloat()
 		local displayInfo = VRMOD_GetDisplayInfo(1, 10)
 		local rtWidth, rtHeight = displayInfo.RecommendedWidth * 2, displayInfo.RecommendedHeight

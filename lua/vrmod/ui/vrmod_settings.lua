@@ -130,6 +130,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 
 		local y = 10
 		y = AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
+		y = AddCB("Auto offset (disable if having distortion)", "vrmod_renderoffset", y)
 		-- Desktop-view combo
 		do
 			local panel = vgui.Create("DPanel", t)
