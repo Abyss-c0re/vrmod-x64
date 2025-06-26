@@ -290,7 +290,7 @@ if CLIENT then
 		local aspectRight = rightCalc.AspectRatio
 		local ipd = displayInfo.TransformRight[1][4] * 2
 		local eyez = displayInfo.TransformRight[3][4]
-		print(string.format("[VRMod] FOV L/R: %.2f / %.2f | Aspect L/R: %.2f / %.2f | IPD: %.2f | EyeZ: %.2f", hfovLeft, hfovRight, aspectLeft, aspectRight, ipd, eyez))
+		--print(string.format("[VRMod] FOV L/R: %.2f / %.2f | Aspect L/R: %.2f / %.2f | IPD: %.2f | EyeZ: %.2f", hfovLeft, hfovRight, aspectLeft, aspectRight, ipd, eyez))
 		--set up active bindings
 		VRMOD_SetActionManifest("vrmod/vrmod_action_manifest.txt")
 		VRMOD_SetActiveActionSets("/actions/base", LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main")

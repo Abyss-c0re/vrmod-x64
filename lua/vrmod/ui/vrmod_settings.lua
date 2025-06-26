@@ -149,7 +149,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 
 		local y = 10
 		surface.CreateFont("BoldSliderFont", {
-			font = "Tahoma", 
+			font = "Tahoma",
 			size = 13,
 			weight = 1000,
 		})
@@ -251,6 +251,31 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			y = y + 35
 		end
 
+		-- View scale slider
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetText("ZNear")
+			s:SetMin(-3.0)
+			s:SetMax(3.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_znear")
+			y = y + 40
+		end
+
+		-- Explanation label for FOV scaling
+		do
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y + 5)
+			label:SetSize(370, 30)
+			label:SetText("Determines how far away is the 'camera' from your face")
+			label:SetWrap(true)
+			label:SetAutoStretchVertical(true)
+			label:SetFont("BoldSliderFont")
+			y = y + 35
+		end
+
 		local reset = vgui.Create("DButton", t)
 		reset:SetPos(20, y + 10)
 		reset:SetSize(200, 30)
@@ -261,6 +286,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			RunConsoleCommand("vrmod_viewscale", "1.0")
 			RunConsoleCommand("vrmod_fovscale_x", "1.0")
 			RunConsoleCommand("vrmod_fovscale_y", "1.0")
+			RunConsoleCommand("vrmod_znear", "1.0")
 		end
 
 		y = y + 50
