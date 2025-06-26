@@ -13,6 +13,7 @@ end
 
 if CLIENT then
 	g_VR.scale = 0
+	g_VR.viewScale = 0
 	g_VR.origin = Vector(0, 0, 0)
 	g_VR.originAngle = Angle(0, 0, 0)
 	g_VR.viewModel = nil --this will point to either the viewmodel, worldmodel or nil
@@ -31,6 +32,7 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_althead", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_autostart", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_scale", nil, "32.7")
+	vrmod.AddCallbackedConvar("vrmod_viewScale", nil, "1.0")
 	vrmod.AddCallbackedConvar("vrmod_heightmenu", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3")
@@ -167,22 +169,29 @@ if CLIENT then
 		convarOverrides = {}
 	end
 
-	local function calculateProjectionParams(projMatrix)
+	local function calculateProjectionParams(projMatrix, worldScale)
 		local xscale = projMatrix[1][1]
 		local xoffset = projMatrix[1][3]
 		local yscale = projMatrix[2][2]
 		local yoffset = projMatrix[2][3]
+		-- ** Normalize vertical sign: **
+		if not system.IsWindows() then
+			-- On Linux/OpenGL: invert the sign so + means “down” just like on Windows
+			yoffset = -yoffset
+		end
+
+		-- now the rest is identical on both platforms:
 		local tan_px = math.abs((1 - xoffset) / xscale)
 		local tan_nx = math.abs((-1 - xoffset) / xscale)
 		local tan_py = math.abs((1 - yoffset) / yscale)
 		local tan_ny = math.abs((-1 - yoffset) / yscale)
-		local w = tan_px + tan_nx
-		local h = tan_py + tan_ny
+		local w = (tan_px + tan_nx) / worldScale -- <-- apply scale
+		local h = (tan_py + tan_ny) / worldScale
 		return {
 			HorizontalFOV = math.deg(2 * math.atan(w / 2)),
 			AspectRatio = w / h,
 			HorizontalOffset = xoffset,
-			VerticalOffset = yoffset,
+			VerticalOffset = yoffset, -- now unified sign
 			Width = w,
 			Height = h,
 		}
@@ -190,29 +199,25 @@ if CLIENT then
 
 	local function computeSubmitBounds(leftCalc, rightCalc)
 		local isWindows = system.IsWindows()
-		-- average half-eye sizes
+		-- average half‐eye extents in tangent space
 		local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
 		local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
 		local hFactor = 0.5 / wAvg
 		local vFactor = 1.0 / hAvg
-		-- vertical-bounds helper
+		-- UV origin flip only affects V‐range endpoints, not the offset sign:
 		local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
-		local function calcVMinMax(verticalOffset)
-			if isWindows then
-				local adj = verticalOffset * vFactor
-				return vMin - adj, vMax - adj
-			else
-				local absAdj = math.abs(verticalOffset * vFactor)
-				return vMin - absAdj, vMax - absAdj
-			end
+		local function calcVMinMax(offset)
+			-- offset is already in “positive = down” convention on both platforms
+			local adj = offset * vFactor
+			return vMin - adj, vMax - adj
 		end
 
-		-- horizontal U min/max for each eye
+		-- U bounds (unchanged)
 		local uMinLeft = 0.0 + leftCalc.HorizontalOffset * hFactor
 		local uMaxLeft = 0.5 + leftCalc.HorizontalOffset * hFactor
 		local uMinRight = 0.5 + rightCalc.HorizontalOffset * hFactor
 		local uMaxRight = 1.0 + rightCalc.HorizontalOffset * hFactor
-		-- vertical V min/max for each eye
+		-- V bounds (now unified)
 		local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset)
 		local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset)
 		return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
@@ -230,19 +235,29 @@ if CLIENT then
 			print("vr init failed")
 			return
 		end
-
+		g_VR.viewScale = convars.vrmod_viewScale:GetFloat()
 		local displayInfo = VRMOD_GetDisplayInfo(1, 10)
 		local rtWidth, rtHeight = displayInfo.RecommendedWidth * 2, displayInfo.RecommendedHeight
-		if system.IsLinux() then rtWidth, rtHeight = math.min(4096, rtWidth), math.min(4096, rtHeight) end
+		local leftCalc = calculateProjectionParams(displayInfo.ProjectionLeft, g_VR.viewScale)
+		local rightCalc = calculateProjectionParams(displayInfo.ProjectionRight, g_VR.viewScale)
+		if system.IsLinux() then
+			local clampW, clampH = math.min(4096, rtWidth), math.min(4096, rtHeight)
+			local wScale = clampW / rtWidth
+			local hScale = clampH / rtHeight
+			leftCalc.Width = leftCalc.Width * wScale
+			rightCalc.Width = rightCalc.Width * wScale
+			leftCalc.Height = leftCalc.Height * hScale
+			rightCalc.Height = rightCalc.Height * hScale
+			rtWidth, rtHeight = clampW, clampH
+		end
+
 		VRMOD_ShareTextureBegin()
 		g_VR.rt = GetRenderTarget("vrmod_rt" .. tostring(SysTime()), rtWidth, rtHeight)
 		VRMOD_ShareTextureFinish()
-		local leftCalc = calculateProjectionParams(displayInfo.ProjectionLeft)
-		local rightCalc = calculateProjectionParams(displayInfo.ProjectionRight)
 		-- set up texture bounds
 		local bounds = {computeSubmitBounds(leftCalc, rightCalc)}
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
-		-- extract FOV, aspect, IPD, eyeZ for later
+		-- extract FOV, aspect, IPD, eyez for later
 		local hfovLeft = leftCalc.HorizontalFOV
 		local hfovRight = rightCalc.HorizontalFOV
 		local aspectLeft = leftCalc.AspectRatio
