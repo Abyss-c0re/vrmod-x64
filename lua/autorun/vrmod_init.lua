@@ -1,39 +1,45 @@
 AddCSLuaFile()
 
-include("vrmod/base/vrmod_api.lua")
-include("vrmod/base/vrmod.lua")
-include("vrmod/base/vrmod_network.lua")
-include("vrmod/ui/vrmod_actioneditor.lua")
-include("vrmod/io/vrmod_locomotion.lua")
-include("vrmod/ui/vrmod_dermapopups.lua")
-include("vrmod/ui/vrmod_halos.lua")
-include("vrmod/ui/vrmod_hud.lua")
-include("vrmod/ui/vrmod_mapbrowser.lua")
-include("vrmod/ui/vrmod_menu.lua")
-include("vrmod/ui/vrmod_ui.lua")
-include("vrmod/ui/vrmod_ui_buttons.lua")
-include("vrmod/ui/vrmod_ui_chat.lua")
-include("vrmod/ui/vrmod_ui_heightadjust.lua")
-include("vrmod/ui/vrmod_ui_quickmenu.lua")
-include("vrmod/ui/vrmod_ui_weaponselect.lua")
-include("vrmod/ui/vrmod_worldtips.lua")
-include("vrmod/io/vrmod_buttons.lua")
-include("vrmod/io/vrmod_climbing.lua")
-include("vrmod/io/vrmod_doors.lua")
-include("vrmod/io/vrmod_dropweapon.lua")
-include("vrmod/io/vrmod_flashlight.lua")
-include("vrmod/io/vrmod_input.lua")
-include("vrmod/io/vrmod_manualpickup.lua")
-include("vrmod/io/vrmod_melee_global.lua")
-include("vrmod/io/vrmod_physhands.lua")
-include("vrmod/io/vrmod_pickup.lua")
-include("vrmod/io/vrmod_pickup_arcvr.lua")
-include("vrmod/io/vrmod_seated.lua")
-include("vrmod/io/vrmod_steamvr_bindings.lua")
-include("vrmod/view/vrmod_character.lua")
-include("vrmod/view/vrmod_character_hands.lua")
-include("vrmod/view/vrmod_pmchange.lua")
-include("vrmod/view/vrmod_viewmodeledit.lua")
-include("vrmod/view/vrmod_viewmodelinfo.lua")
-include("vrmod/view/vrmod_weaponreplacer.lua")
-include("vrmod/ui/vrmod_settings.lua")
+local files = {
+    "vrmod/base/vrmod_api.lua",
+    "vrmod/base/vrmod.lua",
+    "vrmod/base/vrmod_network.lua",
+    "vrmod/io/vrmod_locomotion.lua",
+    "vrmod/io/vrmod_buttons.lua",
+    "vrmod/io/vrmod_climbing.lua",
+    "vrmod/io/vrmod_doors.lua",
+    "vrmod/io/vrmod_dropweapon.lua",
+    "vrmod/io/vrmod_flashlight.lua",
+    "vrmod/io/vrmod_input.lua",
+    "vrmod/io/vrmod_manualpickup.lua",
+    "vrmod/io/vrmod_melee_global.lua",
+    "vrmod/io/vrmod_physhands.lua",
+    "vrmod/io/vrmod_pickup.lua",
+    "vrmod/io/vrmod_pickup_arcvr.lua",
+    "vrmod/io/vrmod_seated.lua",
+    "vrmod/io/vrmod_steamvr_bindings.lua",
+    "vrmod/view/vrmod_character.lua",
+    "vrmod/view/vrmod_character_hands.lua",
+    "vrmod/view/vrmod_pmchange.lua",
+    "vrmod/view/vrmod_viewmodeledit.lua",
+    "vrmod/view/vrmod_viewmodelinfo.lua",
+    "vrmod/view/vrmod_weaponreplacer.lua",
+    "vrmod/ui/vrmod_actioneditor.lua",
+    "vrmod/ui/vrmod_dermapopups.lua",
+    "vrmod/ui/vrmod_halos.lua",
+    "vrmod/ui/vrmod_hud.lua",
+    "vrmod/ui/vrmod_mapbrowser.lua",
+    "vrmod/ui/vrmod_menu.lua",
+    "vrmod/ui/vrmod_ui.lua",
+    "vrmod/ui/vrmod_ui_buttons.lua",
+    "vrmod/ui/vrmod_ui_chat.lua",
+    "vrmod/ui/vrmod_ui_heightadjust.lua",
+    "vrmod/ui/vrmod_ui_quickmenu.lua",
+    "vrmod/ui/vrmod_ui_weaponselect.lua",
+    "vrmod/ui/vrmod_worldtips.lua",
+    "vrmod/ui/vrmod_settings.lua"
+}
+
+for _, path in ipairs(files) do
+    include(path)
+end
