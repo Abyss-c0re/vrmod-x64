@@ -4,7 +4,7 @@ if CLIENT then return end
 local vrHands = {}
 -- Spawns invisible physical hands for a player
 local function SpawnVRHands(ply)
-    if not IsValid(ply) or not ply:Alive() then return end
+    if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
     if not vrHands[ply] then vrHands[ply] = {} end
     local hands = vrHands[ply]
     for _, side in ipairs({"right", "left"}) do
