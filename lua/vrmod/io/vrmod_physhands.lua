@@ -12,6 +12,7 @@ local function SpawnVRHands(ply)
         if not IsValid(hand) then continue end
         hand:SetModel("models/hunter/plates/plate.mdl")
         hand:Spawn()
+        hand:SetPersistent(true)
         hand:Activate()
         hand:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
         hand:SetPos(ply:GetPos())
@@ -40,9 +41,7 @@ end
 -- Handles physics every tick
 hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
     local hands = vrHands[ply]
-    if not hands or not hands.right or not hands.left then return end
-    -- If hands were deleted (e.g., by admin cleanup), recreate them
-    if not IsValid(hands.right.ent) or not IsValid(hands.left.ent) then
+    if not hands or not hands.right or not hands.left then
         RemoveVRHands(ply)
         SpawnVRHands(ply)
         return
@@ -67,6 +66,7 @@ hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
         hands.left.ent:SetPos(ply:GetPos())
     end
 end)
+
 
 -- Prevent pickup of hand entities
 hook.Add("VRMod_Pickup", "VRHand_BlockPickup", function(ply, ent)
