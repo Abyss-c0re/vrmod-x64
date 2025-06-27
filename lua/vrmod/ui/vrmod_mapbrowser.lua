@@ -174,7 +174,7 @@ local function CreateMapBrowserWindow()
 	DButton:SetSize(25, 40)
 	function DButton:DoClick()
 		if g_VR.active then GetConVar("vrmod_autostart"):SetBool(true) end
-		RunConsoleCommand("map", selectedMap.filename)
+		RunConsoleCommand("changelevel", selectedMap.name)
 	end
 
 	function DButton:Paint(w, h)
