@@ -308,11 +308,13 @@ if CLIENT then
 		g_VR.rightControllerOffsetAng = Angle(convars.vrmod_controlleroffset_pitch:GetFloat(), convars.vrmod_controlleroffset_yaw:GetFloat(), convars.vrmod_controlleroffset_roll:GetFloat())
 		g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
 		g_VR.active = true
-		overrideConvar("pac_suppress_frames", "0")
-		overrideConvar("pac_override_fov", "1")
+
 		overrideConvar("mat_queue_mode", "1")
 		overrideConvar("gmod_mcore_test", "1")
 		overrideConvar("cl_threaded_bone_setup", "1")
+		overrideConvar("cl_threaded_client_leaf_system", "1")
+		overrideConvar("r_threaded_particles", "1")
+
 		--3D audio fix
 		hook.Add("CalcView", "vrutil_hook_calcview", function(ply, pos, ang, fv)
 			return {
