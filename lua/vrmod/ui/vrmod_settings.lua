@@ -196,7 +196,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			s:SetText("View scale")
 			s:SetMin(0.1)
 			s:SetMax(2.0)
-			s:SetDecimals(1)
+			s:SetDecimals(2)
 			s:SetConVar("vrmod_viewscale")
 			y = y + 40
 		end
