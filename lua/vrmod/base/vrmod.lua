@@ -308,13 +308,11 @@ if CLIENT then
 		g_VR.rightControllerOffsetAng = Angle(convars.vrmod_controlleroffset_pitch:GetFloat(), convars.vrmod_controlleroffset_yaw:GetFloat(), convars.vrmod_controlleroffset_roll:GetFloat())
 		g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
 		g_VR.active = true
-
 		overrideConvar("mat_queue_mode", "1")
 		overrideConvar("gmod_mcore_test", "1")
 		overrideConvar("cl_threaded_bone_setup", "1")
 		overrideConvar("cl_threaded_client_leaf_system", "1")
 		overrideConvar("r_threaded_particles", "1")
-
 		--3D audio fix
 		hook.Add("CalcView", "vrutil_hook_calcview", function(ply, pos, ang, fv)
 			return {
@@ -383,8 +381,6 @@ if CLIENT then
 			y = 0,
 			w = rtWidth / 2,
 			h = rtHeight,
-			--aspectratio = aspect,
-			--fov = hfov,
 			drawmonitors = true,
 			drawviewmodel = false,
 			znear = convars.vrmod_znear:GetFloat(),
@@ -572,7 +568,6 @@ if CLIENT then
 					cam.End3D()
 					g_VR.allowPlayerDraw = false
 				end
-
 				--draw menus
 				VRUtilRenderMenuSystem()
 			end)
@@ -612,6 +607,13 @@ if CLIENT then
 			g_VR.tracking = {}
 			g_VR.threePoints = false
 			g_VR.sixPoints = false
+			if g_VR.rt then
+				render.PushRenderTarget(g_VR.rt)
+				render.Clear(0, 0, 0, 255, true, true)
+				render.PopRenderTarget()
+				g_VR.rt = nil
+			end
+
 			g_VR.active = false
 			VRMOD_Shutdown()
 		end
