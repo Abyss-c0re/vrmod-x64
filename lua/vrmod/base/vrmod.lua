@@ -393,6 +393,7 @@ if CLIENT then
 		local mat_rt = CreateMaterial("vrmod_mat_rt" .. tostring(SysTime()), "UnlitGeneric", {
 			["$basetexture"] = g_VR.rt:GetName()
 		})
+		VRMOD_UpdatePosesAndActions()
 
 		local localply = LocalPlayer()
 		local currentViewEnt = localply
