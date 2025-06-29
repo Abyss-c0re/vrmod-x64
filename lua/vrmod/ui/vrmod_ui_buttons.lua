@@ -53,7 +53,7 @@ vrmod.AddInGameMenuItem("Admin Cleanup", 5, 1, function() LocalPlayer():ConComma
 vrmod.AddInGameMenuItem("Reset Vehicle View", 0, 2, function() vrmod.resetVehicleView() end)
 vrmod.AddInGameMenuItem("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end)
 vrmod.AddInGameMenuItem("Toggle blacklist weapon", 2, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end)
-vrmod.AddInGameMenuItem("Respawn", 3, 2, function() LocalPlayer():ConCommand("kill") end)
+vrmod.AddInGameMenuItem("RESPAWN", 3, 2, function() LocalPlayer():ConCommand("kill") end)
 vrmod.AddInGameMenuItem("VR EXIT", 4, 2, function() LocalPlayer():ConCommand("vrmod_exit") end)
 vrmod.AddInGameMenuItem("DISCONNECT", 5, 2, function() LocalPlayer():ConCommand("disconnect") end)
 -- Row 4
