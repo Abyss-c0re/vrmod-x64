@@ -1,6 +1,6 @@
 if SERVER then return end
 local window = nil
-function vrmod.CreateMapBrowserWindow()
+function VRUtilCreateMapBrowserWindow()
 	if IsValid(window) then return window end
 	window = vgui.Create("DFrame")
 	window:SetPos(0, 0)

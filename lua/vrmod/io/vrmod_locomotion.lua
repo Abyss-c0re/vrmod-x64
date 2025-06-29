@@ -96,7 +96,7 @@ vrmod.AddCallbackedConvar("vrmod_crouchthreshold", "crouchThreshold", "40", nil,
 local zeroVec, zeroAng = Vector(), Angle()
 local originVehicleLocalPos, originVehicleLocalAng = Vector(), Angle()
 
-function vrmod.resetVehicleView()
+function VRUtilresetVehicleView()
 	if not g_VR.threePoints and not ply:InVehicle() then return end
 	originVehicleLocalPos = nil
 end
