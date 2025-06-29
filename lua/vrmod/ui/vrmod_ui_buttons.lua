@@ -23,7 +23,16 @@ local function InitializeMenuItems()
 	end)
 
 	vrmod.AddInGameMenuItem("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end)
-	vrmod.AddInGameMenuItem("Settings", 3, 0, function() LocalPlayer():ConCommand("vrmod") end)
+	vrmod.AddInGameMenuItem("Settings", 3, 0, function()
+	local frame = VRUtilOpenMenu()
+	hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
+		hook.Remove("VRMod_OpenQuickMenu", "closesettings")
+		if IsValid(frame) then
+			frame:Remove()
+			return false
+		end
+	end)
+end)
 	vrmod.AddInGameMenuItem("Mirror", 4, 0, function() VRUtilOpenHeightMenu() end)
 	vrmod.AddInGameMenuItem("Map Browser", 5, 0, function()
 		local window = VRUtilCreateMapBrowserWindow()
