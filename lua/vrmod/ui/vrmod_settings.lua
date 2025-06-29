@@ -1,7 +1,7 @@
 if SERVER then return end
 local convars = vrmod.GetConvars()
 local frame = nil
-local function OpenMenu()
+function vrmod.OpenMenu()
 	if IsValid(frame) then return frame end
 	frame = vgui.Create("DFrame")
 	frame:SetSize(420, 505)
@@ -573,7 +573,7 @@ concommand.Add("vrmod", function(ply, cmd, args)
 	if vgui.CursorVisible() then print("vrmod: menu will open when game is unpaused") end
 	timer.Create("vrmod_open_menu", 0.1, 0, function()
 		if not vgui.CursorVisible() then
-			OpenMenu()
+			vrmod.OpenMenu()
 			timer.Remove("vrmod_open_menu")
 		end
 	end)
@@ -605,14 +605,3 @@ if convars.vrmod_showonstartup:GetBool() then
 	end)
 end
 
-vrmod.AddInGameMenuItem("Settings", 4, 0, function()
-	OpenMenu()
-	hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
-		hook.Remove("VRMod_OpenQuickMenu", "closesettings")
-		if IsValid(frame) then
-			frame:Remove()
-			frame = nil
-			return false
-		end
-	end)
-end)

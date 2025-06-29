@@ -94,12 +94,18 @@ vrmod.AddCallbackedConvar("vrmod_smoothturn", "smoothTurn", "0", nil, nil, nil, 
 vrmod.AddCallbackedConvar("vrmod_smoothturnrate", "smoothTurnRate", "180", nil, nil, nil, nil, tonumber)
 vrmod.AddCallbackedConvar("vrmod_crouchthreshold", "crouchThreshold", "40", nil, nil, nil, nil, tonumber)
 local zeroVec, zeroAng = Vector(), Angle()
+local originVehicleLocalPos, originVehicleLocalAng = Vector(), Angle()
+
+function vrmod.resetVehicleView()
+	if not g_VR.threePoints and not ply:InVehicle() then return end
+	originVehicleLocalPos = nil
+end
+
 local upVec = Vector(0, 0, 1)
 local function start()
 	local ply = LocalPlayer()
 	local followVec = zeroVec
-	local originVehicleLocalPos, originVehicleLocalAng = zeroVec, zeroAng
-	vrmod.AddInGameMenuItem("Reset Vehicle View", 3, 1, function() originVehicleLocalPos = nil end)
+	originVehicleLocalPos, originVehicleLocalAng = zeroVec, zeroAng
 	hook.Add("PreRender", "vrmod_locomotion", function()
 		if not g_VR.threePoints then return end
 		if ply:InVehicle() then
@@ -212,5 +218,4 @@ end
 
 timer.Simple(0, function()
 	vrmod.AddLocomotionOption("default", start, stop, options)
-	vrmod.AddInGameMenuItem("Toggle Noclip", 2, 1, function() LocalPlayer():ConCommand("noclip") end)
 end)

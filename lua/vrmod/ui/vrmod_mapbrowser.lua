@@ -1,6 +1,6 @@
 if SERVER then return end
 local window = nil
-local function CreateMapBrowserWindow()
+function vrmod.CreateMapBrowserWindow()
 	if IsValid(window) then return window end
 	window = vgui.Create("DFrame")
 	window:SetPos(0, 0)
@@ -215,13 +215,3 @@ local function CreateMapBrowserWindow()
 	return window
 end
 
-vrmod.AddInGameMenuItem("Map Browser", 0, 0, function()
-	CreateMapBrowserWindow()
-	hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
-		hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
-		if IsValid(window) then
-			window:Remove()
-			return false
-		end
-	end)
-end)

@@ -1,6 +1,6 @@
 if SERVER then return end
---0,0 map browser
-vrmod.AddInGameMenuItem("Spawn Menu", 1, 0, function()
+-- Row 1
+vrmod.AddInGameMenuItem("Spawn Menu", 0, 0, function()
 	if not IsValid(g_SpawnMenu) then return end
 	g_SpawnMenu:Open()
 	hook.Add("VRMod_OpenQuickMenu", "close_spawnmenu", function()
@@ -10,7 +10,7 @@ vrmod.AddInGameMenuItem("Spawn Menu", 1, 0, function()
 	end)
 end)
 
-vrmod.AddInGameMenuItem("Context Menu", 2, 0, function()
+vrmod.AddInGameMenuItem("Context Menu", 1, 0, function()
 	if not IsValid(g_ContextMenu) then return end
 	g_ContextMenu:Open()
 	hook.Add("VRMod_OpenQuickMenu", "closecontextmenu", function()
@@ -20,21 +20,44 @@ vrmod.AddInGameMenuItem("Context Menu", 2, 0, function()
 	end)
 end)
 
-vrmod.AddInGameMenuItem("Chat", 3, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end)
---4,0 settings
-vrmod.AddInGameMenuItem("Flashlight", 5, 0, function() LocalPlayer():ConCommand("impulse 100") end)
-vrmod.AddInGameMenuItem("Undo", 1, 1, function() LocalPlayer():ConCommand("gmod_undo") end)
---2,1 noclip 
---3,1 Reset Vehicle
+vrmod.AddInGameMenuItem("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end)
+vrmod.AddInGameMenuItem("Settings", 3, 0, function()
+	local frame = vrmod.OpenMenu()
+	hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
+		hook.Remove("VRMod_OpenQuickMenu", "closesettings")
+		if IsValid(frame) then
+			frame:Remove()
+			return false
+		end
+	end)
+end)
+
+vrmod.AddInGameMenuItem("Mirror", 4, 0, function() VRUtilOpenHeightMenu() end)
+vrmod.AddInGameMenuItem("Map Browser", 5, 0, function()
+	local window = vrmod.CreateMapBrowserWindow()
+	hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
+		hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
+		if IsValid(window) then window:Remove() end
+		return false
+	end)
+end)
+
+-- Row 2
+vrmod.AddInGameMenuItem("Flashlight", 0, 1, function() LocalPlayer():ConCommand("impulse 100") end)
+vrmod.AddInGameMenuItem("Laser pointer", 1, 1, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end)
+vrmod.AddInGameMenuItem("Toggle Noclip", 2, 1, function() LocalPlayer():ConCommand("noclip") end)
+vrmod.AddInGameMenuItem("Undo", 3, 1, function() LocalPlayer():ConCommand("gmod_undo") end)
 vrmod.AddInGameMenuItem("Cleanup", 4, 1, function() LocalPlayer():ConCommand("gmod_cleanup") end)
 vrmod.AddInGameMenuItem("Admin Cleanup", 5, 1, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end)
-vrmod.AddInGameMenuItem("Mirror", 0, 2, function() VRUtilOpenHeightMenu() end)
+-- Row 3
+vrmod.AddInGameMenuItem("Reset Vehicle View", 0, 2, function() vrmod.resetVehicleView() end)
 vrmod.AddInGameMenuItem("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end)
-vrmod.AddInGameMenuItem("Laser pointer", 2, 2, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end)
-vrmod.AddInGameMenuItem("Toggle blacklist weapon", 3, 3, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end)
-vrmod.AddInGameMenuItem("Respawn", 4, 2, function() LocalPlayer():ConCommand("kill") end)
---more space
-vrmod.AddInGameMenuItem("VR EXIT", 5, 2, function() LocalPlayer():ConCommand("vrmod_exit") end)
+vrmod.AddInGameMenuItem("Toggle blacklist weapon", 2, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end)
+vrmod.AddInGameMenuItem("Respawn", 3, 2, function() LocalPlayer():ConCommand("kill") end)
+vrmod.AddInGameMenuItem("VR EXIT", 4, 2, function() LocalPlayer():ConCommand("vrmod_exit") end)
+vrmod.AddInGameMenuItem("DISCONNECT", 5, 2, function() LocalPlayer():ConCommand("disconnect") end)
+-- Row 4
+-- Exit VR hook to fix spawnmenu after exiting VR
 hook.Add("VRMod_Exit", "restore_spawnmenu", function(ply)
 	if ply ~= LocalPlayer() then return end
 	timer.Simple(0.1, function() if IsValid(g_SpawnMenu) and g_SpawnMenu.HorizontalDivider ~= nil then g_SpawnMenu.HorizontalDivider:SetLeftWidth(ScrW()) end end)
