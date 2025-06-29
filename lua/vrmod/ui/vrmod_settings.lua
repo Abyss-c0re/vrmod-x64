@@ -1,6 +1,82 @@
 if SERVER then return end
 local convars = vrmod.GetConvars()
-hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
+local frame = nil
+local function OpenMenu()
+	if IsValid(frame) then return frame end
+	frame = vgui.Create("DFrame")
+	frame:SetSize(420, 505)
+	frame:SetTitle("VRMod Menu")
+	frame:MakePopup()
+	frame:Center()
+	local error = vrmod.GetStartupError()
+	if error and error ~= "Already running" then
+		local tmp = vgui.Create("DLabel", frame)
+		tmp:SetText(error)
+		tmp:SetWrap(true)
+		tmp:SetSize(250, 100)
+		tmp:SetAutoStretchVertical(true)
+		tmp:SetFont("vrmod_Trebuchet24")
+		function tmp:PerformLayout()
+			tmp:Center()
+		end
+		return frame
+	end
+
+	local sheet = vgui.Create("DPropertySheet", frame)
+	sheet:SetPadding(1)
+	sheet:Dock(FILL)
+	frame.DPropertySheet = sheet
+	-- Create "Settings" tab container
+	local settingsPanel = vgui.Create("DPanel", sheet)
+	settingsPanel:Dock(FILL)
+	-- Add the tab
+	sheet:AddSheet("Settings", settingsPanel, "icon16/cog.png")
+	-- Scrollable panel
+	local scrollPanel = vgui.Create("DScrollPanel", settingsPanel)
+	scrollPanel:Dock(FILL)
+	-- Form container used by settings hook
+	local form = vgui.Create("DForm", scrollPanel)
+	form:SetName("Settings")
+	form:Dock(TOP)
+	form.Header:SetVisible(false)
+	form.Paint = nil
+	-- Expose the form to the hook
+	frame.SettingsForm = form
+	-- Bottom info and buttons
+	local bottomPanel = vgui.Create("DPanel", frame)
+	bottomPanel:Dock(BOTTOM)
+	bottomPanel:SetTall(35)
+	bottomPanel.Paint = nil
+	local versionLabel = vgui.Create("DLabel", bottomPanel)
+	versionLabel:SetText("Addon version: " .. vrmod.GetVersion() .. "\nModule version: " .. vrmod.GetModuleVersion())
+	versionLabel:SizeToContents()
+	versionLabel:SetPos(5, 5)
+	local exitBtn = vgui.Create("DButton", bottomPanel)
+	exitBtn:SetText("Exit")
+	exitBtn:Dock(RIGHT)
+	exitBtn:DockMargin(0, 5, 0, 0)
+	exitBtn:SetWide(96)
+	exitBtn:SetEnabled(g_VR.active)
+	function exitBtn:DoClick()
+		frame:Remove()
+		VRUtilClientExit()
+	end
+
+	local startBtn = vgui.Create("DButton", bottomPanel)
+	startBtn:SetText(g_VR.active and "Restart" or "Start")
+	startBtn:Dock(RIGHT)
+	startBtn:DockMargin(0, 5, 5, 0)
+	startBtn:SetWide(96)
+	function startBtn:DoClick()
+		frame:Remove()
+		if g_VR.active then
+			VRUtilClientExit()
+			timer.Simple(1, function() VRUtilClientStart() end)
+		else
+			VRUtilClientStart()
+		end
+	end
+
 	local form = frame.SettingsForm
 	-- Controls Section
 	local controlsPanel = vgui.Create("DForm", form)
@@ -135,11 +211,12 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 	form:Button("Reset settings to default", "vrmod_reset")
 	-- ─────────────── Rendering Tab ───────────────
 	do
-		local t = vgui.Create("DScrollPanel", frame.DPropertySheet)
-		t.Paint = nil
+		local t = vgui.Create("DPanel", frame.DPropertySheet)
+		t:Dock(FILL)
 		frame.DPropertySheet:AddSheet("Rendering", t, "icon16/monitor.png")
 		local function AddCB(lbl, cv, y)
 			local cb = t:Add("DCheckBoxLabel")
+			cb:SetDark(true)
 			cb:SetText(lbl)
 			cb:SetConVar(cv)
 			cb:SetPos(20, y)
@@ -163,6 +240,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local lbl = vgui.Create("DLabel", panel)
 			lbl:SetPos(0, 5) -- vertical center alignment
 			lbl:SetSize(90, 20)
+			lbl:SetDark(true)
 			lbl:SetText("Desktop view:")
 			lbl:SetColor(Color(0, 0, 0))
 			local cb = vgui.Create("DComboBox", panel)
@@ -193,6 +271,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText("View scale")
 			s:SetMin(0.1)
 			s:SetMax(2.0)
@@ -206,6 +285,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local label = vgui.Create("DLabel", t)
 			label:SetPos(20, y + 5)
 			label:SetSize(370, 30)
+			label:SetDark(true)
 			label:SetText("Increasing this makes the world appear smaller—useful for correcting scale if everything feels giant or too close.")
 			label:SetWrap(true)
 			label:SetAutoStretchVertical(true)
@@ -218,6 +298,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText("Fov scale X")
 			s:SetMin(0.1)
 			s:SetMax(2.0)
@@ -231,6 +312,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText("Fov scale Y")
 			s:SetMin(0.1)
 			s:SetMax(2.0)
@@ -244,6 +326,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local label = vgui.Create("DLabel", t)
 			label:SetPos(20, y + 5)
 			label:SetSize(370, 30)
+			label:SetDark(true)
 			label:SetText("FOV scale lets you fine-tune horizontal and vertical field of view.\nUse only if you notice lens warping or feel discomfort. \nValues below 1.0 will make FOV wider")
 			label:SetWrap(true)
 			label:SetAutoStretchVertical(true)
@@ -256,6 +339,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText("ZNear")
 			s:SetMin(-3.0)
 			s:SetMax(3.0)
@@ -269,6 +353,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local label = vgui.Create("DLabel", t)
 			label:SetPos(20, y + 5)
 			label:SetSize(370, 30)
+			label:SetDark(true)
 			label:SetText("Determines how far away is the 'camera' from your face")
 			label:SetWrap(true)
 			label:SetAutoStretchVertical(true)
@@ -297,11 +382,11 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 	-- ─────────────── Gameplay Tab ───────────────
 	do
 		local t = vgui.Create("DPanel", sheet)
-		t.Paint = nil
 		sheet:AddSheet("Gameplay", t, "icon16/joystick.png")
 		local y = 10
 		local function AddCB(lbl, cv)
 			local cb = t:Add("DCheckBoxLabel")
+			cb:SetDark(true)
 			cb:SetText(lbl)
 			cb:SetConVar(cv)
 			cb:SetPos(20, y)
@@ -316,6 +401,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText(lbl)
 			s:SetMin(mn)
 			s:SetMax(mx)
@@ -345,12 +431,17 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 	-- ─────────────── HUD/UI Tab ───────────────
 	do
 		local t = vgui.Create("DScrollPanel", sheet)
-		t.Paint = nil
 		sheet:AddSheet("HUD/UI", t, "icon16/layers.png")
+		function t:Paint(w, h)
+			surface.SetDrawColor(234, 234, 234) -- solid white
+			surface.DrawRect(0, 0, w, h)
+		end
+
 		local function AddSl(lbl, cv, mn, mx, dec, py)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, py)
 			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText(lbl)
 			s:SetMin(mn)
 			s:SetMax(mx)
@@ -361,6 +452,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 		local cY = 10
 		local cb = t:Add("DCheckBoxLabel")
 		cb:SetPos(20, cY)
+		cb:SetDark(true)
 		cb:SetText("Enable HUD")
 		cb:SetConVar("vrmod_hud")
 		cb:SizeToContents()
@@ -371,12 +463,14 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 		cY = 135
 		local cb2 = t:Add("DCheckBoxLabel")
 		cb2:SetPos(20, cY)
+		cb2:SetDark(true)
 		cb2:SetText("HUD only while pressing menu key")
 		cb2:SetConVar("vrmod_hud_visible_quickmenukey")
 		cb2:SizeToContents()
 		cY = 165
 		local cb3 = t:Add("DCheckBoxLabel")
 		cb3:SetPos(20, cY)
+		cb3:SetDark(true)
 		cb3:SetText("[Menu & UI Red Outline]")
 		cb3:SetConVar("vrmod_ui_outline")
 		cb3:SizeToContents()
@@ -384,8 +478,9 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 		local lbl = vgui.Create("DLabel", t)
 		lbl:SetPos(20, 185)
 		lbl:SetSize(200, 30)
+		surface.SetDrawColor(75, 75, 75, 255)
 		lbl:SetText("Beam color")
-		lbl:SetTextColor(Color(255, 255, 255))
+		lbl:SetTextColor(Color(0, 0, 0))
 		local mixer = vgui.Create("DColorMixer", t)
 		mixer:SetPos(20, 220)
 		mixer:SetSize(360, 200)
@@ -415,12 +510,12 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 	-- ─────────────── VR Melee Tab ───────────────
 	do
 		local t = vgui.Create("DPanel", sheet)
-		t.Paint = nil
-		sheet:AddSheet("VR Melee", t, "icon16/briefcase.png")
+		sheet:AddSheet("Melee", t, "icon16/asterisk_orange.png")
 		local y = 10
 		-- Checkbox helper
 		local function AddCB(lbl, cv)
 			local cb = t:Add("DCheckBoxLabel")
+			cb:SetDark(true)
 			cb:SetText(lbl)
 			cb:SetConVar(cv)
 			cb:SizeToContents()
@@ -433,6 +528,7 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText(lbl)
 			s:SetMin(mn)
 			s:SetMax(mx)
@@ -454,8 +550,69 @@ hook.Add("VRMod_Menu", "vrmod_combined_options", function(frame)
 		te:SetSize(370, 20)
 		te:SetConVar("vrmod_melee_fist_collisionmodel")
 		local lbl = vgui.Create("DLabel", t)
+		lbl:SetDark(true)
 		lbl:SetText("Collision Model")
 		lbl:SizeToContents()
 		lbl:SetPos(20, y)
 	end
+
+	local hooks = hook.GetTable().VRMod_Menu
+	local names = {}
+	for k, _ in pairs(hooks) do
+		table.insert(names, k)
+	end
+
+	table.sort(names)
+	for _, v in ipairs(names) do
+		hooks[v](frame)
+	end
+	return frame
+end
+
+concommand.Add("vrmod", function(ply, cmd, args)
+	if vgui.CursorVisible() then print("vrmod: menu will open when game is unpaused") end
+	timer.Create("vrmod_open_menu", 0.1, 0, function()
+		if not vgui.CursorVisible() then
+			OpenMenu()
+			timer.Remove("vrmod_open_menu")
+		end
+	end)
+end)
+
+concommand.Add("vrmod_togglelaserpointer", function(ply, cmd, args)
+	if not GetConVar("vrmod_laserpointer"):GetBool() then
+		local mat = Material("cable/redlaser")
+		hook.Add("PostDrawTranslucentRenderables", "vr_laserpointer", function(bDrawingDepth, bDrawingSkybox)
+			if bDrawingSkybox then return end
+			if g_VR.viewModelMuzzle and not g_VR.menuFocus then
+				render.SetMaterial(mat)
+				render.DrawBeam(g_VR.viewModelMuzzle.Pos, g_VR.viewModelMuzzle.Pos + g_VR.viewModelMuzzle.Ang:Forward() * 10000, 1, 0, 1, Color(255, 255, 255, 255))
+			end
+		end)
+
+		LocalPlayer():ConCommand("vrmod_laserpointer 1")
+	else
+		hook.Remove("PostDrawTranslucentRenderables", "vr_laserpointer")
+		LocalPlayer():ConCommand("vrmod_laserpointer 0")
+	end
+end)
+
+local convars = vrmod.AddCallbackedConvar("vrmod_showonstartup", nil, "0")
+if convars.vrmod_showonstartup:GetBool() then
+	hook.Add("CreateMove", "vrmod_showonstartup", function()
+		hook.Remove("CreateMove", "vrmod_showonstartup")
+		timer.Simple(1, function() RunConsoleCommand("vrmod") end)
+	end)
+end
+
+vrmod.AddInGameMenuItem("Settings", 4, 0, function()
+	OpenMenu()
+	hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
+		hook.Remove("VRMod_OpenQuickMenu", "closesettings")
+		if IsValid(frame) then
+			frame:Remove()
+			frame = nil
+			return false
+		end
+	end)
 end)

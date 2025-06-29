@@ -29,7 +29,6 @@ local files = {
     "vrmod/ui/vrmod_halos.lua",
     "vrmod/ui/vrmod_hud.lua",
     "vrmod/ui/vrmod_mapbrowser.lua",
-    "vrmod/ui/vrmod_menu.lua",
     "vrmod/ui/vrmod_ui.lua",
     "vrmod/ui/vrmod_ui_buttons.lua",
     "vrmod/ui/vrmod_ui_chat.lua",
