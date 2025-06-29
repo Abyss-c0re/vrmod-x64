@@ -257,6 +257,11 @@ if CLIENT then
 			return
 		end
 
+		overrideConvar("mat_queue_mode", "1")
+		overrideConvar("gmod_mcore_test", "1")
+		overrideConvar("cl_threaded_bone_setup", "1")
+		overrideConvar("cl_threaded_client_leaf_system", "1")
+		overrideConvar("r_threaded_particles", "1")
 		local viewscale = convars.vrmod_viewscale:GetFloat()
 		local fovscaleX = convars.vrmod_fovscale_x:GetFloat()
 		local fovscaleY = convars.vrmod_fovscale_y:GetFloat()
@@ -277,19 +282,17 @@ if CLIENT then
 			rtWidth, rtHeight = clampW, clampH
 		end
 
-		VRMOD_ShareTextureBegin()
-		g_VR.rt = GetRenderTarget("vrmod_rt" .. tostring(SysTime()), rtWidth, rtHeight)
-		VRMOD_ShareTextureFinish()
-		-- set up texture bounds
 		local bounds = {computeSubmitBounds(leftCalc, rightCalc)}
-		VRMOD_SetSubmitTextureBounds(unpack(bounds))
-		-- extract FOV, aspect, IPD, eyez for later
 		local hfovLeft = leftCalc.HorizontalFOV
 		local hfovRight = rightCalc.HorizontalFOV
 		local aspectLeft = leftCalc.AspectRatio
 		local aspectRight = rightCalc.AspectRatio
 		local ipd = displayInfo.TransformRight[1][4] * 2
 		local eyez = displayInfo.TransformRight[3][4]
+		--desktop
+		local desktopView = convars.vrmod_desktopview:GetInt()
+		local cropVerticalMargin = (1 - ScrH() / ScrW() * rtWidth / 2 / rtHeight) / 2
+		local cropHorizontalOffset = desktopView == 3 and 0.5 or 0
 		--print(string.format("[VRMod] FOV L/R: %.2f / %.2f | Aspect L/R: %.2f / %.2f | IPD: %.2f | EyeZ: %.2f", hfovLeft, hfovRight, aspectLeft, aspectRight, ipd, eyez))
 		--set up active bindings
 		VRMOD_SetActionManifest("vrmod/vrmod_action_manifest.txt")
@@ -307,12 +310,19 @@ if CLIENT then
 		g_VR.leftControllerOffsetPos = g_VR.rightControllerOffsetPos * Vector(1, -1, 1)
 		g_VR.rightControllerOffsetAng = Angle(convars.vrmod_controlleroffset_pitch:GetFloat(), convars.vrmod_controlleroffset_yaw:GetFloat(), convars.vrmod_controlleroffset_roll:GetFloat())
 		g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
+		--rendering
+		g_VR.view = {
+			x = 0,
+			y = 0,
+			w = rtWidth / 2,
+			h = rtHeight,
+			drawmonitors = true,
+			drawviewmodel = false,
+			znear = convars.vrmod_znear:GetFloat(),
+			dopostprocess = convars.vrmod_postprocess:GetBool()
+		}
+
 		g_VR.active = true
-		overrideConvar("mat_queue_mode", "1")
-		overrideConvar("gmod_mcore_test", "1")
-		overrideConvar("cl_threaded_bone_setup", "1")
-		overrideConvar("cl_threaded_client_leaf_system", "1")
-		overrideConvar("r_threaded_particles", "1")
 		--3D audio fix
 		hook.Add("CalcView", "vrutil_hook_calcview", function(ply, pos, ang, fv)
 			return {
@@ -322,6 +332,15 @@ if CLIENT then
 			}
 		end)
 
+		VRMOD_ShareTextureBegin()
+		local rtName = "vrmod_rt_" .. tostring(SysTime())
+		g_VR.rt = GetRenderTarget(rtName, rtWidth, rtHeight)
+		local matName = "vrmod_rt_mat_" .. tostring(SysTime())
+		g_VR.rtMaterial = CreateMaterial(matName, "UnlitGeneric", {
+			["$basetexture"] = g_VR.rt:GetName()
+		})
+		VRMOD_ShareTextureFinish()
+		VRMOD_SetSubmitTextureBounds(unpack(bounds))
 		vrmod.StartLocomotion()
 		g_VR.tracking = {
 			hmd = {
@@ -375,29 +394,10 @@ if CLIENT then
 			if #simulate == 0 then hook.Remove("VRMod_Tracking", "simulatehands") end
 		end)
 
-		--rendering
-		g_VR.view = {
-			x = 0,
-			y = 0,
-			w = rtWidth / 2,
-			h = rtHeight,
-			drawmonitors = true,
-			drawviewmodel = false,
-			znear = convars.vrmod_znear:GetFloat(),
-			dopostprocess = convars.vrmod_postprocess:GetBool()
-		}
-
-		local desktopView = convars.vrmod_desktopview:GetInt()
-		local cropVerticalMargin = (1 - ScrH() / ScrW() * rtWidth / 2 / rtHeight) / 2
-		local cropHorizontalOffset = desktopView == 3 and 0.5 or 0
-		local mat_rt = CreateMaterial("vrmod_mat_rt" .. tostring(SysTime()), "UnlitGeneric", {
-			["$basetexture"] = g_VR.rt:GetName()
-		})
-		VRMOD_UpdatePosesAndActions()
-
 		local localply = LocalPlayer()
 		local currentViewEnt = localply
 		local pos1, ang1
+		VRMOD_UpdatePosesAndActions() --reduces latency, according to openVR you need to update poses then post submit texture. 
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			VRMOD_SubmitSharedTexture()
 			VRMOD_UpdatePosesAndActions()
@@ -503,6 +503,7 @@ if CLIENT then
 			g_VR.eyePosLeft = g_VR.view.origin + g_VR.view.angles:Right() * -(ipd * 0.5 * g_VR.scale)
 			g_VR.eyePosRight = g_VR.view.origin + g_VR.view.angles:Right() * ipd * 0.5 * g_VR.scale
 			render.PushRenderTarget(g_VR.rt)
+			render.Clear(0, 0, 0, 255, true, true)
 			-- left
 			g_VR.view.origin = g_VR.eyePosLeft
 			g_VR.view.x = 0
@@ -529,7 +530,7 @@ if CLIENT then
 			if desktopView == nil then desktopView = 0 end
 			if desktopView > 1 then
 				surface.SetDrawColor(255, 255, 255, 255)
-				surface.SetMaterial(mat_rt)
+				surface.SetMaterial(g_VR.rtMaterial)
 				render.CullMode(1)
 				surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
 				render.CullMode(0)
@@ -569,6 +570,7 @@ if CLIENT then
 					cam.End3D()
 					g_VR.allowPlayerDraw = false
 				end
+
 				--draw menus
 				VRUtilRenderMenuSystem()
 			end)
