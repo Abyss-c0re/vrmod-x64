@@ -271,7 +271,7 @@ if CLIENT then
 		if cur ~= lastMenuFocus then
 			-- focus just moved
 			if cur then
-				print("[VRMod] Now pointing at menu:", cur)
+				--print("[VRMod] Now pointing at menu:", cur)
 				-- sync the OS cursor to the new panel
 				SyncCursorToVR()
 			end
