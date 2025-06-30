@@ -131,6 +131,8 @@ if CLIENT then
 					g_VR.menuFocus = k
 					menuFocusDist = dist
 					menuFocusPanel = v.panel
+					v.lastCursorX = cursorX
+					v.lastCursorY = cursorY
 					menuFocusCursorWorldPos = cursorWorldPos
 				end
 			end
@@ -144,9 +146,10 @@ if CLIENT then
 			prevFocusPanel = menuFocusPanel
 		end
 
-		if g_VR.menuFocus then
-			g_VR.menuCursorX = cursorX
-			g_VR.menuCursorY = cursorY
+		local focus = g_VR.menuFocus
+		if focus and menus[focus] then
+			g_VR.menuCursorX = menus[focus].lastCursorX
+			g_VR.menuCursorY = menus[focus].lastCursorY
 			render.SetMaterial(mat_beam)
 			render.DrawBeam(g_VR.tracking.pose_righthand.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(255, 255, 255, 255))
 		end
@@ -168,6 +171,8 @@ if CLIENT then
 			rt = GetRenderTarget("vrmod_rt_ui_" .. uid, width, height, false),
 			width = width,
 			height = height,
+			lastCursorX = 0,
+			lastCursorY = 0
 		}
 
 		menuOrder[#menuOrder + 1] = menus[uid]
@@ -197,9 +202,14 @@ if CLIENT then
 
 	local function SyncCursorToVR()
 		if not g_VR.menuFocus then return end
-		local x = g_VR.menuCursorX
-		local y = g_VR.menuCursorY
+		local menu = menus[g_VR.menuFocus]
+		if not menu or not menu.lastCursorX or not menu.lastCursorY then return end
+		-- Optional: convert local panel coords to screen coords if needed
+		local x, y = menu.lastCursorX, menu.lastCursorY
 		input.SetCursorPos(x, y)
+		-- Also update globals if still needed elsewhere
+		g_VR.menuCursorX = x
+		g_VR.menuCursorY = y
 	end
 
 	function VRUtilMenuClose(uid)
@@ -253,6 +263,21 @@ if CLIENT then
 	hook.Add("Think", "VRUtil_SyncCursorWhileHeld", function()
 		if not g_VR or not g_VR.menuFocus then return end
 		SyncCursorToVR()
+	end)
+
+	local lastMenuFocus = nil
+	hook.Add("Think", "VRMod_MenuFocusChangeDetect", function()
+		local cur = g_VR.menuFocus
+		if cur ~= lastMenuFocus then
+			-- focus just moved
+			if cur then
+				print("[VRMod] Now pointing at menu:", cur)
+				-- sync the OS cursor to the new panel
+				SyncCursorToVR()
+			end
+
+			lastMenuFocus = cur
+		end
 	end)
 end
 
