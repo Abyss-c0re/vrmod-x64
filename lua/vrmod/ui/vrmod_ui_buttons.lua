@@ -23,23 +23,16 @@ local function InitializeMenuItems()
 	end)
 
 	vrmod.AddInGameMenuItem("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end)
-	vrmod.AddInGameMenuItem("Settings", 3, 0, function()
-	local frame = VRUtilOpenMenu()
-	hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
-		hook.Remove("VRMod_OpenQuickMenu", "closesettings")
-		if IsValid(frame) then
-			frame:Remove()
-			return false
-		end
-	end)
-end)
+	vrmod.AddInGameMenuItem("Numpad", 3, 0, function() LocalPlayer():ConCommand("vrmod_numpad") end)
 	vrmod.AddInGameMenuItem("Mirror", 4, 0, function() VRUtilOpenHeightMenu() end)
-	vrmod.AddInGameMenuItem("Map Browser", 5, 0, function()
-		local window = VRUtilCreateMapBrowserWindow()
-		hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
-			hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
-			if IsValid(window) then window:Remove() end
-			return false
+	vrmod.AddInGameMenuItem("Settings", 5, 0, function()
+		local frame = VRUtilOpenMenu()
+		hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
+			hook.Remove("VRMod_OpenQuickMenu", "closesettings")
+			if IsValid(frame) then
+				frame:Remove()
+				return false
+			end
 		end)
 	end)
 
@@ -54,9 +47,18 @@ end)
 	vrmod.AddInGameMenuItem("Reset Vehicle View", 0, 2, function() VRUtilresetVehicleView() end)
 	vrmod.AddInGameMenuItem("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end)
 	vrmod.AddInGameMenuItem("Toggle blacklist weapon", 2, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end)
-	vrmod.AddInGameMenuItem("RESPAWN", 3, 2, function() LocalPlayer():ConCommand("kill") end)
-	vrmod.AddInGameMenuItem("VR EXIT", 4, 2, function() LocalPlayer():ConCommand("vrmod_exit") end)
-	vrmod.AddInGameMenuItem("DISCONNECT", 5, 2, function() LocalPlayer():ConCommand("disconnect") end)
+	vrmod.AddInGameMenuItem("Map Browser", 3, 2, function()
+		local window = VRUtilCreateMapBrowserWindow()
+		hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
+			hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
+			if IsValid(window) then window:Remove() end
+			return false
+		end)
+	end)
+
+	vrmod.AddInGameMenuItem("RESPAWN", 4, 2, function() LocalPlayer():ConCommand("kill") end)
+	vrmod.AddInGameMenuItem("VR EXIT", 5, 2, function() LocalPlayer():ConCommand("vrmod_exit") end)
+	--vrmod.AddInGameMenuItem("DISCONNECT", 5, 2, function() LocalPlayer():ConCommand("disconnect") end)
 	-- Row 4
 	-- Exit VR hook to fix spawnmenu after exiting VR
 end
