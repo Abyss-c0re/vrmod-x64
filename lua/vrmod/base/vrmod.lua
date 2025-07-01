@@ -153,10 +153,6 @@ if CLIENT then
 		-- V bounds (now unified)
 		local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset)
 		local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset)
-		if system.IsLinux() then
-			vMaxLeft = vMaxLeft + 0.03
-			vMaxRight = vMaxRight + 0.03
-		end
 		return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
 	end
 
@@ -166,8 +162,12 @@ if CLIENT then
 			clone[i] = {proj[i][1], proj[i][2], proj[i][3], proj[i][4]}
 		end
 
+		-- scale the FOV (diagonal terms)
 		clone[1][1] = clone[1][1] * fovScaleX
 		clone[2][2] = clone[2][2] * fovScaleY
+		-- scale the center offset (asymmetry) terms
+		clone[1][3] = clone[1][3] * fovScaleX
+		clone[2][3] = clone[2][3] * fovScaleY
 		return clone
 	end
 
@@ -185,13 +185,6 @@ if CLIENT then
 		if system.IsLinux() then
 			local maxW, maxH = 4096, 4096
 			local cw, ch = math.min(maxW, rawW), math.min(maxH, rawH)
-			local wS, hS = cw / rawW, ch / rawH
-			leftCalc.Width = leftCalc.Width * wS
-			rightCalc.Width = rightCalc.Width * wS
-			leftCalc.Height = leftCalc.Height * hS
-			rightCalc.Height = rightCalc.Height * hS
-			leftCalc.VerticalOffset = leftCalc.VerticalOffset * hS 
-			rightCalc.VerticalOffset = rightCalc.VerticalOffset * hS 
 			rawW, rawH = cw, ch
 		end
 
