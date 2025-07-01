@@ -558,8 +558,9 @@ function VRUtilOpenMenu()
 
 	local hooks = hook.GetTable().VRMod_Menu or {}
 	local names = {}
-	for k, _ in pairs(hooks) do
-		table.insert(names, k)
+	for _, v in ipairs(names) do
+		local func = hooks[v]
+		if isfunction(func) then pcall(func, frame) end
 	end
 
 	table.sort(names)
@@ -604,4 +605,3 @@ if convars.vrmod_showonstartup:GetBool() then
 		timer.Simple(1, function() RunConsoleCommand("vrmod") end)
 	end)
 end
-
