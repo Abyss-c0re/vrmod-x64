@@ -25,11 +25,12 @@ if CLIENT then
     }
 
     local keys = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "CLR", "0", "ENT", "+", "-", "*"}
-    local function emitKey(name)
+    local function emitKey(name, down)
         local code = keyMap[name]
         if not code then return end
         net.Start("vrmod_numpad_emit")
         net.WriteUInt(code, 8)
+        net.WriteBool(down)
         net.SendToServer()
     end
 
@@ -40,17 +41,27 @@ if CLIENT then
             hook.Remove("PreRender", "vrutil_hook_rendernumpad")
             hook.Remove("VRMod_Input", "vrmod_numpad_clickdetect")
             hook.Remove("Think", "vrmod_numpad_holdrepeat")
+            -- Release any held key on close
+            if holdKey then
+                emitKey(holdKey, false)
+                holdKey = nil
+            end
+
+            wasClicking = false
+            justClicked = false
             open = false
         end)
 
         hook.Add("VRMod_Input", "vrmod_numpad_clickdetect", function(action, pressed)
-        local clickInCar = LocalPlayer():InVehicle() and action == "boolean_right_pickup"
-
-        if action == "boolean_primaryfire" or clickInCar then
-            justClicked = pressed and not wasClicking
-            wasClicking = pressed
-            if not pressed then holdKey = nil end
-        end
+            local clickInCar = LocalPlayer():InVehicle() and action == "boolean_right_pickup"
+            if action == "boolean_primaryfire" or clickInCar then
+                justClicked = pressed and not wasClicking
+                wasClicking = pressed
+                if not pressed and holdKey then
+                    emitKey(holdKey, false)
+                    holdKey = nil
+                end
+            end
         end)
 
         hook.Add("PreRender", "vrutil_hook_rendernumpad", function()
@@ -67,7 +78,6 @@ if CLIENT then
             bh = bh * scale
             pad = pad * scale
             VRUtilMenuRenderStart("numpadmenu")
-            -- Close button (top-right corner, above grid)
             for i = 0, #keys - 1 do
                 local col = i % 3
                 local row = math.floor(i / 3)
@@ -78,7 +88,7 @@ if CLIENT then
                 draw.RoundedBox(8, x, y, bw, bh, Color(0, 0, 0, hovered and 200 or 100))
                 draw.SimpleText(key, "DermaLarge", x + bw / 2, y + bh / 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
                 if hovered and justClicked then
-                    emitKey(key)
+                    emitKey(key, true)
                     holdKey = key
                     holdStart = SysTime()
                 end
@@ -90,9 +100,15 @@ if CLIENT then
 
         hook.Add("Think", "vrmod_numpad_holdrepeat", function()
             if not holdKey then return end
+            if not wasClicking then
+                emitKey(holdKey, false)
+                holdKey = nil
+                return
+            end
+
             local dt = SysTime() - holdStart
             if dt >= holdDelay then
-                emitKey(holdKey)
+                emitKey(holdKey, true)
                 holdStart = holdStart + holdRate
             end
         end)
@@ -115,7 +131,11 @@ if SERVER then
     util.AddNetworkString("vrmod_numpad_emit")
     net.Receive("vrmod_numpad_emit", function(len, ply)
         local key = net.ReadUInt(8)
-        numpad.Activate(ply, key, true)
-        timer.Simple(0.1, function() if IsValid(ply) then numpad.Deactivate(ply, key, true) end end)
+        local down = net.ReadBool()
+        if down then
+            numpad.Activate(ply, key, true)
+        else
+            numpad.Deactivate(ply, key, true)
+        end
     end)
 end
