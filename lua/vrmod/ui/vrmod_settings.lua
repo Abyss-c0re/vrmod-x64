@@ -556,7 +556,7 @@ function VRUtilOpenMenu()
 		lbl:SetPos(20, y)
 	end
 
-	local hooks = hook.GetTable().VRMod_Menu
+	local hooks = hook.GetTable().VRMod_Menu or {}
 	local names = {}
 	for k, _ in pairs(hooks) do
 		table.insert(names, k)
