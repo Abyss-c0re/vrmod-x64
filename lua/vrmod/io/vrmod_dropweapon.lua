@@ -2,6 +2,9 @@ AddCSLuaFile()
 local blacklist_path = "vrmod_blacklist.txt"
 -- Shared blacklist check
 local function InBlackList(weaponClass)
+    if weaponClass == "weapon_vrmod_empty" then
+        return true
+    end
     if not file.Exists(blacklist_path, "DATA") then return false end
     local content = file.Read(blacklist_path, "DATA") or ""
     for line in string.gmatch(content, "[^\r\n]+") do
