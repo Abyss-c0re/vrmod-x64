@@ -141,7 +141,6 @@ if CLIENT then
 		-- UV origin flip only affects V‐range endpoints, not the offset sign:
 		local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
 		local function calcVMinMax(offset)
-			-- offset is already in “positive = down” convention on both platforms
 			local adj = offset * vFactor
 			return vMin - adj, vMax - adj
 		end
@@ -154,6 +153,10 @@ if CLIENT then
 		-- V bounds (now unified)
 		local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset)
 		local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset)
+		if system.IsLinux() then
+			vMaxLeft = vMaxLeft + 0.03
+			vMaxRight = vMaxRight + 0.03
+		end
 		return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
 	end
 
@@ -187,6 +190,8 @@ if CLIENT then
 			rightCalc.Width = rightCalc.Width * wS
 			leftCalc.Height = leftCalc.Height * hS
 			rightCalc.Height = rightCalc.Height * hS
+			leftCalc.VerticalOffset = leftCalc.VerticalOffset * hS 
+			rightCalc.VerticalOffset = rightCalc.VerticalOffset * hS 
 			rawW, rawH = cw, ch
 		end
 
@@ -195,8 +200,8 @@ if CLIENT then
 		return {
 			rtW = rawW,
 			rtH = rawH,
-			leftCalc = leftCalc, -- ← now returned
-			rightCalc = rightCalc, -- ← now returned
+			leftCalc = leftCalc,
+			rightCalc = rightCalc,
 			hfovL = leftCalc.HorizontalFOV,
 			hfovR = rightCalc.HorizontalFOV,
 			aspL = leftCalc.AspectRatio,
