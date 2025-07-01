@@ -15,7 +15,7 @@ if CLIENT then
 	g_VR.scale = 0
 	g_VR.origin = Vector(0, 0, 0)
 	g_VR.originAngle = Angle(0, 0, 0)
-	g_VR.viewModel = nil --this will point to either the viewmodel, worldmodel or nil
+	g_VR.viewModel = nil
 	g_VR.viewModelMuzzle = nil
 	g_VR.viewModelPos = Vector(0, 0, 0)
 	g_VR.viewModelAng = Angle(0, 0, 0)
@@ -27,7 +27,18 @@ if CLIENT then
 	g_VR.input = {}
 	g_VR.changedInputs = {}
 	g_VR.errorText = ""
-	--todo move some of these to the files where they belong
+	g_VR.moduleVersion = 0
+	local moduleLoaded = false
+	local rtWidth, rtHeight
+	local hfovLeft, hfovRight
+	local aspectLeft, aspectRight
+	local leftCalc, rightCalc
+	local ipd, eyez
+	local cropVerticalMargin, cropHorizontalOffset
+	local desktopView
+	local lastPosePos = {}
+	local currentViewEnt, pos1, ang1
+	local convarOverrides = {}
 	vrmod.AddCallbackedConvar("vrmod_althead", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_autostart", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_scale", nil, "32.7")
@@ -49,93 +60,6 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_yaw", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_roll", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
-	concommand.Add("vrmod_start", function(ply, cmd, args)
-		if vgui.CursorVisible() then print("vrmod: attempting startup when game is unpaused") end
-		timer.Create("vrmod_start", 0.1, 0, function()
-			if not vgui.CursorVisible() then
-				timer.Remove("vrmod_start")
-				VRUtilClientStart()
-			end
-		end)
-	end)
-
-	concommand.Add("vrmod_exit", function(ply, cmd, args)
-		if timer.Exists("vrmod_start") then timer.Remove("vrmod_start") end
-		if isfunction(VRUtilClientExit) then VRUtilClientExit() end
-	end)
-
-	concommand.Add("vrmod_reset", function(ply, cmd, args)
-		for k, v in pairs(vrmod.GetConvars()) do
-			pcall(function() v:Revert() end)
-		end
-
-		hook.Call("VRMod_Reset")
-	end)
-
-	concommand.Add("vrmod_info", function(ply, cmd, args)
-		print("========================================================================")
-		print(string.format("| %-30s %s", "Addon Version:", vrmod.GetVersion()))
-		print(string.format("| %-30s %s", "Module Version:", vrmod.GetModuleVersion()))
-		print(string.format("| %-30s %s", "GMod Version:", VERSION .. ", Branch: " .. BRANCH))
-		print(string.format("| %-30s %s", "Operating System:", system.IsWindows() and "Windows" or system.IsLinux() and "Linux" or system.IsOSX() and "OSX" or "Unknown"))
-		print(string.format("| %-30s %s", "Server Type:", game.SinglePlayer() and "Single Player" or "Multiplayer"))
-		print(string.format("| %-30s %s", "Server Name:", GetHostName()))
-		print(string.format("| %-30s %s", "Server Address:", game.GetIPAddress()))
-		print(string.format("| %-30s %s", "Gamemode:", GAMEMODE_NAME))
-		local workshopCount = 0
-		for k, v in ipairs(engine.GetAddons()) do
-			workshopCount = workshopCount + (v.mounted and 1 or 0)
-		end
-
-		local _, folders = file.Find("addons/*", "GAME")
-		local legacyBlacklist = {
-			checkers = true,
-			chess = true,
-			common = true,
-			go = true,
-			hearts = true,
-			spades = true
-		}
-
-		local legacyCount = 0
-		for k, v in ipairs(folders) do
-			legacyCount = legacyCount + (legacyBlacklist[v] == nil and 1 or 0)
-		end
-
-		print(string.format("| %-30s %s", "Workshop Addons:", workshopCount))
-		print(string.format("| %-30s %s", "Legacy Addons:", legacyCount))
-		print("|----------")
-		local function test(path)
-			local files, folders = file.Find(path .. "/*", "GAME")
-			for k, v in ipairs(folders) do
-				test(path .. "/" .. v)
-			end
-
-			for k, v in ipairs(files) do
-				print(string.format("| %-60s %X", path .. "/" .. v, util.CRC(file.Read(path .. "/" .. v, "GAME") or "")))
-			end
-		end
-
-		test("data/vrmod")
-		print("|----------")
-		test("lua/bin")
-		print("|----------")
-		local convarNames = {}
-		for k, v in pairs(convars) do
-			convarNames[#convarNames + 1] = v:GetName()
-		end
-
-		table.sort(convarNames)
-		for k, v in ipairs(convarNames) do
-			v = GetConVar(v)
-			print(string.format("| %-30s %-20s %s", v:GetName(), v:GetString(), v:GetString() == v:GetDefault() and "" or "*"))
-		end
-
-		print("========================================================================")
-	end)
-
-	local moduleLoaded = false
-	g_VR.moduleVersion = 0
 	if system.IsLinux() then
 		moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
 	else
@@ -154,7 +78,7 @@ if CLIENT then
 		g_VR.moduleVersion = moduleLoaded and VRMOD_GetVersion and VRMOD_GetVersion() or 0
 	end
 
-	local convarOverrides = {}
+	-- 0) Helper functions
 	local function overrideConvar(name, value)
 		local cv = GetConVar(name)
 		if cv then
@@ -244,73 +168,258 @@ if CLIENT then
 		return clone
 	end
 
-	function VRUtilClientStart()
-		local error = vrmod.GetStartupError()
-		if error then
-			print("VRMod failed to start: " .. error)
-			return
-		end
-
-		VRMOD_Shutdown() --in case we're retrying after an error and shutdown wasn't called
-		if VRMOD_Init() == false then
-			print("vr init failed")
-			return
-		end
-
-		overrideConvar("mat_queue_mode", "1")
-		overrideConvar("gmod_mcore_test", "1")
-		overrideConvar("cl_threaded_bone_setup", "1")
-		overrideConvar("cl_threaded_client_leaf_system", "1")
-		overrideConvar("r_threaded_particles", "1")
+	local function ComputeDisplayParams()
 		local viewscale = convars.vrmod_viewscale:GetFloat()
-		local fovscaleX = convars.vrmod_fovscale_x:GetFloat()
-		local fovscaleY = convars.vrmod_fovscale_y:GetFloat()
-		local displayInfo = VRMOD_GetDisplayInfo(1, 10)
-		local rtWidth, rtHeight = displayInfo.RecommendedWidth * 2, displayInfo.RecommendedHeight
-		local leftProj = adjustFOV(displayInfo.ProjectionLeft, fovscaleX, fovscaleY)
-		local rightProj = adjustFOV(displayInfo.ProjectionRight, fovscaleX, fovscaleY)
+		local fovX, fovY = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
+		local di = VRMOD_GetDisplayInfo(1, 10)
+		local rawW, rawH = di.RecommendedWidth * 2, di.RecommendedHeight
+		-- preserve your variables exactly
+		local leftProj = adjustFOV(di.ProjectionLeft, fovX, fovY)
+		local rightProj = adjustFOV(di.ProjectionRight, fovX, fovY)
 		local leftCalc = calculateProjectionParams(leftProj, viewscale)
 		local rightCalc = calculateProjectionParams(rightProj, viewscale)
+		-- clamp on Linux exactly as before
 		if system.IsLinux() then
-			local clampW, clampH = math.min(4096, rtWidth), math.min(4096, rtHeight)
-			local wScale = clampW / rtWidth
-			local hScale = clampH / rtHeight
-			leftCalc.Width = leftCalc.Width * wScale
-			rightCalc.Width = rightCalc.Width * wScale
-			leftCalc.Height = leftCalc.Height * hScale
-			rightCalc.Height = rightCalc.Height * hScale
-			rtWidth, rtHeight = clampW, clampH
+			local maxW, maxH = 4096, 4096
+			local cw, ch = math.min(maxW, rawW), math.min(maxH, rawH)
+			local wS, hS = cw / rawW, ch / rawH
+			leftCalc.Width = leftCalc.Width * wS
+			rightCalc.Width = rightCalc.Width * wS
+			leftCalc.Height = leftCalc.Height * hS
+			rightCalc.Height = rightCalc.Height * hS
+			rawW, rawH = cw, ch
 		end
 
+		local ipd = di.TransformRight[1][4] * 2
+		local eyez = di.TransformRight[3][4]
+		return {
+			rtW = rawW,
+			rtH = rawH,
+			leftCalc = leftCalc, -- ← now returned
+			rightCalc = rightCalc, -- ← now returned
+			hfovL = leftCalc.HorizontalFOV,
+			hfovR = rightCalc.HorizontalFOV,
+			aspL = leftCalc.AspectRatio,
+			aspR = rightCalc.AspectRatio,
+			ipd = ipd,
+			eyez = eyez
+		}
+	end
+
+	local function ComputeDesktopCrop(w, h)
+		desktopView = convars.vrmod_desktopview:GetInt()
+		local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
+		local hoffset = desktopView == 3 and 0.5 or 0
+		return vmargin, hoffset
+	end
+
+	local function LengthSqr(v)
+		return v.x * v.x + v.y * v.y + v.z * v.z
+	end
+
+	local function SubVec(a, b)
+		return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
+	end
+
+	local function UpdateTracking()
+		local maxVelSqr = 50 * 50
+		local maxPosDeltaSqr = 10 * 10
+		local rawPoses = VRMOD_GetPoses()
+		for k, v in pairs(rawPoses) do
+			if LengthSqr(v.vel) > maxVelSqr then continue end
+			if lastPosePos[k] then
+				local delta = SubVec(v.pos, lastPosePos[k])
+				if LengthSqr(delta) > maxPosDeltaSqr then continue end
+			end
+
+			lastPosePos[k] = v.pos
+			g_VR.tracking[k] = g_VR.tracking[k] or {}
+			local worldPose = g_VR.tracking[k]
+			worldPose.pos, worldPose.ang = LocalToWorld(v.pos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
+			worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle) * g_VR.scale
+			worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle)
+			if k == "pose_righthand" then
+				worldPose.pos, worldPose.ang = LocalToWorld(g_VR.rightControllerOffsetPos * 0.01 * g_VR.scale, g_VR.rightControllerOffsetAng, worldPose.pos, worldPose.ang)
+			elseif k == "pose_lefthand" then
+				worldPose.pos, worldPose.ang = LocalToWorld(g_VR.leftControllerOffsetPos * 0.01 * g_VR.scale, g_VR.leftControllerOffsetAng, worldPose.pos, worldPose.ang)
+			end
+		end
+
+		g_VR.sixPoints = (g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot) ~= nil
+		hook.Call("VRMod_Tracking")
+	end
+
+	local function HandleInput()
+		g_VR.input, g_VR.changedInputs = VRMOD_GetActions()
+		for k, v in pairs(g_VR.changedInputs) do
+			hook.Call("VRMod_Input", nil, k, v)
+		end
+	end
+
+	local function DrawErrorOverlay()
+		if not system.HasFocus() or #g_VR.errorText > 0 then
+			render.Clear(0, 0, 0, 255, true, true)
+			cam.Start2D()
+			local text = not system.HasFocus() and "Please focus the game window" or g_VR.errorText
+			draw.DrawText(text, "DermaLarge", ScrW() / 2, ScrH() / 2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER)
+			cam.End2D()
+			return true
+		end
+	end
+
+	local function UpdateViewModel(netFrame)
+		if g_VR.currentvmi then
+			local pos, ang = LocalToWorld(g_VR.currentvmi.offsetPos, g_VR.currentvmi.offsetAng, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+			g_VR.viewModelPos = pos
+			g_VR.viewModelAng = ang
+		end
+
+		if IsValid(g_VR.viewModel) and not g_VR.usingWorldModels then
+			g_VR.viewModel:SetPos(g_VR.viewModelPos)
+			g_VR.viewModel:SetAngles(g_VR.viewModelAng)
+			g_VR.viewModel:SetupBones()
+			if netFrame then
+				local b = g_VR.viewModel:LookupBone("ValveBiped.Bip01_R_Hand")
+				if b then
+					local mtx = g_VR.viewModel:GetBoneMatrix(b)
+					netFrame.righthandPos = mtx:GetTranslation()
+					netFrame.righthandAng = mtx:GetAngles() - Angle(0, 0, 180)
+				end
+			end
+		end
+
+		if IsValid(g_VR.viewModel) then g_VR.viewModelMuzzle = g_VR.viewModel:GetAttachment(1) end
+	end
+
+	local function UpdateViewFromEntity()
+		local ply = LocalPlayer()
+		if not IsValid(ply) then return end
+		local viewEnt = ply:GetViewEntity()
+		if viewEnt ~= ply then
+			local rawPos, rawAng = WorldToLocal(g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang, g_VR.origin, g_VR.originAngle)
+			if viewEnt ~= currentViewEnt then
+				local pos, ang = LocalToWorld(rawPos, rawAng, viewEnt:GetPos(), viewEnt:GetAngles())
+				pos1, ang1 = WorldToLocal(viewEnt:GetPos(), viewEnt:GetAngles(), pos, ang)
+			end
+
+			rawPos, rawAng = LocalToWorld(rawPos, rawAng, pos1, ang1)
+			g_VR.view.origin, g_VR.view.angles = LocalToWorld(rawPos, rawAng, viewEnt:GetPos(), viewEnt:GetAngles())
+		else
+			g_VR.view.origin, g_VR.view.angles = g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang
+		end
+
+		currentViewEnt = viewEnt
+	end
+
+	local function PerformRenderViews()
+		g_VR.view.origin = g_VR.view.origin + g_VR.view.angles:Forward() * -(eyez * g_VR.scale)
+		g_VR.eyePosLeft = g_VR.view.origin + g_VR.view.angles:Right() * -(ipd * 0.5 * g_VR.scale)
+		g_VR.eyePosRight = g_VR.view.origin + g_VR.view.angles:Right() * ipd * 0.5 * g_VR.scale
+		render.PushRenderTarget(g_VR.rt)
+		render.Clear(0, 0, 0, 255, true, true)
+		-- Left eye
+		g_VR.view.origin = g_VR.eyePosLeft
+		g_VR.view.x = 0
+		g_VR.view.fov = hfovLeft
+		g_VR.view.aspectratio = aspectLeft
+		hook.Call("VRMod_PreRender")
+		render.RenderView(g_VR.view)
+		-- Right eye
+		g_VR.view.origin = g_VR.eyePosRight
+		g_VR.view.x = rtWidth / 2
+		g_VR.view.fov = hfovRight
+		g_VR.view.aspectratio = aspectRight
+		hook.Call("VRMod_PreRenderRight")
+		render.RenderView(g_VR.view)
+		if not LocalPlayer():Alive() then
+			cam.Start2D()
+			surface.SetDrawColor(255, 0, 0, 128)
+			surface.DrawRect(0, 0, rtWidth, rtHeight)
+			cam.End2D()
+		end
+
+		render.PopRenderTarget(g_VR.rt)
+		if desktopView == nil then desktopView = 0 end
+		if desktopView > 1 then
+			surface.SetDrawColor(255, 255, 255, 255)
+			surface.SetMaterial(g_VR.rtMaterial)
+			render.CullMode(1)
+			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
+			render.CullMode(0)
+		end
+	end
+
+	-- 1) Startup checks & init
+	local function PerformStartup()
+		local err = vrmod.GetStartupError()
+		if err then
+			print("VRMod failed to start: " .. err)
+			return false
+		end
+
+		VRMOD_Shutdown() -- ensure clean state
+		if VRMOD_Init() == false then
+			print("vr init failed")
+			return false
+		end
+		return true
+	end
+
+	-- 2) Convar overrides for performance
+	local function OverridePerformanceConvars()
+		for _, c in ipairs{"mat_queue_mode", "gmod_mcore_test", "cl_threaded_bone_setup", "cl_threaded_client_leaf_system", "r_threaded_particles"} do
+			overrideConvar(c, "1")
+		end
+	end
+
+	-- 3) Display parameters & render target setup
+	local function SetupRenderTargets()
+		local dp = ComputeDisplayParams()
+		rtWidth, rtHeight = dp.rtW, dp.rtH
+		leftCalc, rightCalc = dp.leftCalc, dp.rightCalc
+		hfovLeft, hfovRight = dp.hfovL, dp.hfovR
+		aspectLeft, aspectRight = dp.aspL, dp.aspR
+		ipd, eyez = dp.ipd, dp.eyez
+		cropVerticalMargin, cropHorizontalOffset = ComputeDesktopCrop(rtWidth, rtHeight)
+		VRMOD_ShareTextureBegin()
+		local rtName = "vrmod_rt_" .. tostring(SysTime())
+		g_VR.rt = GetRenderTarget(rtName, rtWidth, rtHeight)
+		local matName = "vrmod_rt_mat_" .. tostring(SysTime())
+		g_VR.rtMaterial = CreateMaterial(matName, "UnlitGeneric", {
+			["$basetexture"] = g_VR.rt:GetName()
+		})
+
+		VRMOD_ShareTextureFinish()
 		local bounds = {computeSubmitBounds(leftCalc, rightCalc)}
-		local hfovLeft = leftCalc.HorizontalFOV
-		local hfovRight = rightCalc.HorizontalFOV
-		local aspectLeft = leftCalc.AspectRatio
-		local aspectRight = rightCalc.AspectRatio
-		local ipd = displayInfo.TransformRight[1][4] * 2
-		local eyez = displayInfo.TransformRight[3][4]
-		--desktop
-		local desktopView = convars.vrmod_desktopview:GetInt()
-		local cropVerticalMargin = (1 - ScrH() / ScrW() * rtWidth / 2 / rtHeight) / 2
-		local cropHorizontalOffset = desktopView == 3 and 0.5 or 0
-		--print(string.format("[VRMod] FOV L/R: %.2f / %.2f | Aspect L/R: %.2f / %.2f | IPD: %.2f | EyeZ: %.2f", hfovLeft, hfovRight, aspectLeft, aspectRight, ipd, eyez))
-		--set up active bindings
+		VRMOD_SetSubmitTextureBounds(unpack(bounds))
+	end
+
+	-- 4) Action manifest & input initialization
+	local function SetupActions()
 		VRMOD_SetActionManifest("vrmod/vrmod_action_manifest.txt")
-		VRMOD_SetActiveActionSets("/actions/base", LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main")
+		local set = LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main"
+		VRMOD_SetActiveActionSets("/actions/base", set)
 		VRUtilLoadCustomActions()
-		g_VR.input, g_VR.changedInputs = VRMOD_GetActions() --make inputs immediately available
-		--start transmit loop and send join msg to server
+		g_VR.input, g_VR.changedInputs = VRMOD_GetActions()
+	end
+
+	-- 5) Networking & origin
+	local function SetupNetworkAndOrigin()
 		VRUtilNetworkInit()
-		--set initial origin
 		g_VR.origin = LocalPlayer():GetPos()
-		--
+	end
+
+	-- 6) Controller offsets & scale
+	local function SetupScaleAndOffsets()
 		g_VR.scale = convars.vrmod_scale:GetFloat()
-		--
 		g_VR.rightControllerOffsetPos = Vector(convars.vrmod_controlleroffset_x:GetFloat(), convars.vrmod_controlleroffset_y:GetFloat(), convars.vrmod_controlleroffset_z:GetFloat())
 		g_VR.leftControllerOffsetPos = g_VR.rightControllerOffsetPos * Vector(1, -1, 1)
 		g_VR.rightControllerOffsetAng = Angle(convars.vrmod_controlleroffset_pitch:GetFloat(), convars.vrmod_controlleroffset_yaw:GetFloat(), convars.vrmod_controlleroffset_roll:GetFloat())
 		g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
-		--rendering
+	end
+
+	-- 7) Initial view setup
+	local function SetupViewParams()
 		g_VR.view = {
 			x = 0,
 			y = 0,
@@ -321,27 +430,11 @@ if CLIENT then
 			znear = convars.vrmod_znear:GetFloat(),
 			dopostprocess = convars.vrmod_postprocess:GetBool()
 		}
+	end
 
-		g_VR.active = true
-		--3D audio fix
-		hook.Add("CalcView", "vrutil_hook_calcview", function(ply, pos, ang, fv)
-			return {
-				origin = g_VR.tracking.hmd.pos,
-				angles = g_VR.tracking.hmd.ang,
-				fov = fv
-			}
-		end)
-
-		VRMOD_ShareTextureBegin()
-		local rtName = "vrmod_rt_" .. tostring(SysTime())
-		g_VR.rt = GetRenderTarget(rtName, rtWidth, rtHeight)
-		local matName = "vrmod_rt_mat_" .. tostring(SysTime())
-		g_VR.rtMaterial = CreateMaterial(matName, "UnlitGeneric", {
-			["$basetexture"] = g_VR.rt:GetName()
-		})
-		VRMOD_ShareTextureFinish()
-		VRMOD_SetSubmitTextureBounds(unpack(bounds))
-		vrmod.StartLocomotion()
+	-- 8) Initial tracking state
+	local function InitializeTracking()
+		lastPosePos = {}
 		g_VR.tracking = {
 			hmd = {
 				pos = LocalPlayer():GetPos() + Vector(0, 0, 66.8),
@@ -364,7 +457,10 @@ if CLIENT then
 		}
 
 		g_VR.threePoints = true
-		--simulate missing hands
+	end
+
+	-- 9) Simulated hand fallback
+	local function SetupHandSimulation()
 		local simulate = {
 			{
 				pose = g_VR.tracking.pose_lefthand,
@@ -376,212 +472,83 @@ if CLIENT then
 			},
 		}
 
-		for k, v in ipairs(simulate) do
+		for _, v in ipairs(simulate) do
 			v.pose.simulatedPos = v.pose.pos
 		end
 
 		hook.Add("VRMod_Tracking", "simulatehands", function()
-			for k, v in ipairs(simulate) do
+			for i = #simulate, 1, -1 do
+				local v = simulate[i]
 				if v.pose.pos == v.pose.simulatedPos then
 					v.pose.pos, v.pose.ang = LocalToWorld(v.offset, Angle(90, 0, 0), g_VR.tracking.hmd.pos, Angle(0, g_VR.tracking.hmd.ang.yaw, 0))
 					v.pose.simulatedPos = v.pose.pos
 				else
-					v.pose.simulatedPos = nil
-					table.remove(simulate, k)
+					table.remove(simulate, i)
 				end
 			end
 
 			if #simulate == 0 then hook.Remove("VRMod_Tracking", "simulatehands") end
 		end)
+	end
 
-		local localply = LocalPlayer()
-		local currentViewEnt = localply
-		local pos1, ang1
-		VRMOD_UpdatePosesAndActions() --reduces latency, according to openVR you need to update poses then post submit texture. 
+	local function BindRenderSceneHook()
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			VRMOD_SubmitSharedTexture()
 			VRMOD_UpdatePosesAndActions()
-			--handle tracking
-			local maxVelSqr = 50 * 50 -- velocity threshold (squared)
-			local maxPosDeltaSqr = 10 * 10 -- position delta threshold (squared)
-			local lastPosePos = lastPosePos or {}
-			local function LengthSqr(vec)
-				return vec.x * vec.x + vec.y * vec.y + vec.z * vec.z
-			end
-
-			local function SubVec(a, b)
-				return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
-			end
-
-			local rawPoses = VRMOD_GetPoses()
-			for k, v in pairs(rawPoses) do
-				-- Skip junk velocities
-				if LengthSqr(v.vel) > maxVelSqr then continue end
-				-- Skip jumps in position (tracking glitches)
-				if lastPosePos[k] then
-					local delta = SubVec(v.pos, lastPosePos[k])
-					if LengthSqr(delta) > maxPosDeltaSqr then continue end
-				end
-
-				lastPosePos[k] = v.pos
-				g_VR.tracking[k] = g_VR.tracking[k] or {}
-				local worldPose = g_VR.tracking[k]
-				worldPose.pos, worldPose.ang = LocalToWorld(v.pos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
-				worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle) * g_VR.scale
-				worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle)
-				if k == "pose_righthand" then
-					worldPose.pos, worldPose.ang = LocalToWorld(g_VR.rightControllerOffsetPos * 0.01 * g_VR.scale, g_VR.rightControllerOffsetAng, worldPose.pos, worldPose.ang)
-				elseif k == "pose_lefthand" then
-					worldPose.pos, worldPose.ang = LocalToWorld(g_VR.leftControllerOffsetPos * 0.01 * g_VR.scale, g_VR.leftControllerOffsetAng, worldPose.pos, worldPose.ang)
-				end
-			end
-
-			g_VR.sixPoints = (g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot) ~= nil
-			hook.Call("VRMod_Tracking")
-			--handle input
-			g_VR.input, g_VR.changedInputs = VRMOD_GetActions()
-			for k, v in pairs(g_VR.changedInputs) do
-				hook.Call("VRMod_Input", nil, k, v)
-			end
-
-			--
-			if not system.HasFocus() or #g_VR.errorText > 0 then
-				render.Clear(0, 0, 0, 255, true, true)
-				cam.Start2D()
-				local text = not system.HasFocus() and "Please focus the game window" or g_VR.errorText
-				draw.DrawText(text, "DermaLarge", ScrW() / 2, ScrH() / 2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER)
-				cam.End2D()
-				return true
-			end
-
-			--update clientside local player net frame
+			UpdateTracking()
+			HandleInput()
+			if DrawErrorOverlay() then return true end
 			local netFrame = VRUtilNetUpdateLocalPly()
-			--update viewmodel position
-			if g_VR.currentvmi then
-				local pos, ang = LocalToWorld(g_VR.currentvmi.offsetPos, g_VR.currentvmi.offsetAng, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-				g_VR.viewModelPos = pos
-				g_VR.viewModelAng = ang
-			end
-
-			if IsValid(g_VR.viewModel) then
-				if not g_VR.usingWorldModels then
-					g_VR.viewModel:SetPos(g_VR.viewModelPos)
-					g_VR.viewModel:SetAngles(g_VR.viewModelAng)
-					g_VR.viewModel:SetupBones()
-					--override hand pose in net frame
-					if netFrame then
-						local b = g_VR.viewModel:LookupBone("ValveBiped.Bip01_R_Hand")
-						if b then
-							local mtx = g_VR.viewModel:GetBoneMatrix(b)
-							netFrame.righthandPos = mtx:GetTranslation()
-							netFrame.righthandAng = mtx:GetAngles() - Angle(0, 0, 180)
-						end
-					end
-				end
-
-				g_VR.viewModelMuzzle = g_VR.viewModel:GetAttachment(1)
-			end
-
-			--set view according to viewentity
-			local viewEnt = localply:GetViewEntity()
-			if viewEnt ~= localply then
-				local rawPos, rawAng = WorldToLocal(g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang, g_VR.origin, g_VR.originAngle)
-				if viewEnt ~= currentViewEnt then
-					local pos, ang = LocalToWorld(rawPos, rawAng, viewEnt:GetPos(), viewEnt:GetAngles())
-					pos1, ang1 = WorldToLocal(viewEnt:GetPos(), viewEnt:GetAngles(), pos, ang)
-				end
-
-				rawPos, rawAng = LocalToWorld(rawPos, rawAng, pos1, ang1)
-				g_VR.view.origin, g_VR.view.angles = LocalToWorld(rawPos, rawAng, viewEnt:GetPos(), viewEnt:GetAngles())
-			else
-				g_VR.view.origin, g_VR.view.angles = g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang
-			end
-
-			currentViewEnt = viewEnt
-			--
-			g_VR.view.origin = g_VR.view.origin + g_VR.view.angles:Forward() * -(eyez * g_VR.scale)
-			g_VR.eyePosLeft = g_VR.view.origin + g_VR.view.angles:Right() * -(ipd * 0.5 * g_VR.scale)
-			g_VR.eyePosRight = g_VR.view.origin + g_VR.view.angles:Right() * ipd * 0.5 * g_VR.scale
-			render.PushRenderTarget(g_VR.rt)
-			render.Clear(0, 0, 0, 255, true, true)
-			-- left
-			g_VR.view.origin = g_VR.eyePosLeft
-			g_VR.view.x = 0
-			g_VR.view.fov = hfovLeft
-			g_VR.view.aspectratio = aspectLeft
-			hook.Call("VRMod_PreRender")
-			render.RenderView(g_VR.view)
-			-- right
-			g_VR.view.origin = g_VR.eyePosRight
-			g_VR.view.x = rtWidth / 2
-			g_VR.view.fov = hfovRight
-			g_VR.view.aspectratio = aspectRight
-			hook.Call("VRMod_PreRenderRight")
-			render.RenderView(g_VR.view)
-			--
-			if not LocalPlayer():Alive() then
-				cam.Start2D()
-				surface.SetDrawColor(255, 0, 0, 128)
-				surface.DrawRect(0, 0, rtWidth, rtHeight)
-				cam.End2D()
-			end
-
-			render.PopRenderTarget(g_VR.rt)
-			if desktopView == nil then desktopView = 0 end
-			if desktopView > 1 then
-				surface.SetDrawColor(255, 255, 255, 255)
-				surface.SetMaterial(g_VR.rtMaterial)
-				render.CullMode(1)
-				surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
-				render.CullMode(0)
-			end
-
+			UpdateViewModel(netFrame)
+			UpdateViewFromEntity()
+			PerformRenderViews()
 			hook.Call("VRMod_PostRender")
-			--return true to override default scene rendering
 			return true
 		end)
+	end
 
+	local function SetupModelAndPlayerHooks()
 		g_VR.usingWorldModels = convars.vrmod_useworldmodels:GetBool()
 		if not g_VR.usingWorldModels then
 			overrideConvar("viewmodel_fov", GetConVar("fov_desired"):GetString())
-			hook.Add("CalcViewModelView", "vrutil_hook_calcviewmodelview", function(wep, vm, oldPos, oldAng, pos, ang) return g_VR.viewModelPos, g_VR.viewModelAng end)
+			hook.Add("CalcViewModelView", "vrutil_hook_calcviewmodelview", function(_, vm, _, _, _, _) return g_VR.viewModelPos, g_VR.viewModelAng end)
 			local blockViewModelDraw = true
 			g_VR.allowPlayerDraw = false
 			local hideplayer = convars.vrmod_floatinghands:GetBool()
-			hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel", function(bDrawingDepth, bDrawingSkybox)
-				if bDrawingSkybox or not LocalPlayer():Alive() or not (EyePos() == g_VR.eyePosLeft or EyePos() == g_VR.eyePosRight) then return end
-				--draw viewmodel
+			hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel", function(bSky, _)
+				if bSky or not LocalPlayer():Alive() then return end
 				if IsValid(g_VR.viewModel) then
 					blockViewModelDraw = false
 					g_VR.viewModel:DrawModel()
 					blockViewModelDraw = true
 				end
 
-				--draw playermodel
 				if not hideplayer then
 					g_VR.allowPlayerDraw = true
-					cam.Start3D() --this invalidates ShouldDrawLocalPlayer cache
+					cam.Start3D()
 					cam.End3D()
-					local tmp = render.GetBlend()
-					render.SetBlend(1) --without this the despawning bullet casing effect gets applied to the player???
+					local prev = render.GetBlend()
+					render.SetBlend(1)
 					LocalPlayer():DrawModel()
-					render.SetBlend(tmp)
+					render.SetBlend(prev)
 					cam.Start3D()
 					cam.End3D()
 					g_VR.allowPlayerDraw = false
 				end
 
-				--draw menus
 				VRUtilRenderMenuSystem()
 			end)
 
 			hook.Add("PreDrawPlayerHands", "vrutil_hook_predrawplayerhands", function() return true end)
-			hook.Add("PreDrawViewModel", "vrutil_hook_predrawviewmodel", function(vm, ply, wep) return blockViewModelDraw or nil end)
+			hook.Add("PreDrawViewModel", "vrutil_hook_predrawviewmodel", function() return blockViewModelDraw end)
 		else
 			g_VR.allowPlayerDraw = true
 		end
 
-		hook.Add("ShouldDrawLocalPlayer", "vrutil_hook_shoulddrawlocalplayer", function(ply) return g_VR.allowPlayerDraw end)
+		hook.Add("ShouldDrawLocalPlayer", "vrutil_hook_shoulddrawlocalplayer", function() return g_VR.allowPlayerDraw end)
+	end
+
+	local function SetupShutdownHooks()
 		function VRUtilClientExit()
 			if not g_VR.active then return end
 			restoreConvarOverrides()
@@ -594,19 +561,12 @@ if CLIENT then
 			LocalPlayer():GetViewModel().RenderOverride = nil
 			LocalPlayer():GetViewModel():RemoveEffects(EF_NODRAW)
 			hook.Remove("RenderScene", "vrutil_hook_renderscene")
-			hook.Remove("PreDrawViewModel", "vrutil_hook_predrawviewmodel")
-			hook.Remove("DrawPhysgunBeam", "vrutil_hook_drawphysgunbeam")
-			hook.Remove("PreDrawHalos", "vrutil_hook_predrawhalos")
-			hook.Remove("EntityFireBullets", "vrutil_hook_entityfirebullets")
-			hook.Remove("Tick", "vrutil_hook_tick")
-			hook.Remove("PostDrawSkyBox", "vrutil_hook_postdrawskybox")
-			hook.Remove("CalcView", "vrutil_hook_calcview")
-			hook.Remove("PostDrawTranslucentRenderables", "vr_laserpointer")
 			hook.Remove("CalcViewModelView", "vrutil_hook_calcviewmodelview")
 			hook.Remove("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel")
 			hook.Remove("PreDrawPlayerHands", "vrutil_hook_predrawplayerhands")
 			hook.Remove("PreDrawViewModel", "vrutil_hook_predrawviewmodel")
 			hook.Remove("ShouldDrawLocalPlayer", "vrutil_hook_shoulddrawlocalplayer")
+			hook.Remove("CalcView", "vrutil_hook_calcview")
 			g_VR.tracking = {}
 			g_VR.threePoints = false
 			g_VR.sixPoints = false
@@ -623,4 +583,124 @@ if CLIENT then
 
 		hook.Add("ShutDown", "vrutil_hook_shutdown", function() if IsValid(LocalPlayer()) and g_VR.net[LocalPlayer():SteamID()] then VRUtilClientExit() end end)
 	end
+
+	-- Main ----------------------------------------------------------------------
+	function VRUtilClientStart()
+		if not PerformStartup() then return end
+		OverridePerformanceConvars()
+		SetupRenderTargets()
+		SetupActions()
+		SetupNetworkAndOrigin()
+		SetupScaleAndOffsets()
+		SetupViewParams()
+		InitializeTracking()
+		SetupHandSimulation()
+		BindRenderSceneHook()
+		SetupModelAndPlayerHooks()
+		SetupShutdownHooks()
+		-- finalize
+		vrmod.StartLocomotion()
+		VRMOD_UpdatePosesAndActions()
+		g_VR.active = true
+	end
+
+	concommand.Add("vrmod_start", function(ply, cmd, args)
+		if vgui.CursorVisible() then print("vrmod: attempting startup when game is unpaused") end
+		timer.Create("vrmod_start", 0.1, 0, function()
+			if not vgui.CursorVisible() then
+				timer.Remove("vrmod_start")
+				VRUtilClientStart()
+			end
+		end)
+	end)
+
+	concommand.Add("vrmod_exit", function(ply, cmd, args)
+		if timer.Exists("vrmod_start") then timer.Remove("vrmod_start") end
+		if isfunction(VRUtilClientExit) then VRUtilClientExit() end
+	end)
+
+	concommand.Add("vrmod_reset", function(ply, cmd, args)
+		for k, v in pairs(vrmod.GetConvars()) do
+			pcall(function() v:Revert() end)
+		end
+
+		hook.Call("VRMod_Reset")
+	end)
+
+	concommand.Add("vrmod_info", function()
+		-- simple banner and key–value printer
+		local function banner()
+			print(("="):rep(72))
+		end
+
+		local function kv(label, val)
+			print(string.format("| %-30s %s", label, val))
+		end
+
+		banner()
+		-- General info
+		kv("Addon Version:", vrmod.GetVersion())
+		kv("Module Version:", vrmod.GetModuleVersion())
+		kv("GMod Version:", VERSION .. " (Branch: " .. BRANCH .. ")")
+		kv("Operating System:", system.IsWindows() and "Windows" or system.IsLinux() and "Linux" or system.IsOSX() and "OSX" or "Unknown")
+		kv("Server Type:", game.SinglePlayer() and "Single Player" or "Multiplayer")
+		kv("Server Name:", GetHostName())
+		kv("Server Address:", game.GetIPAddress())
+		kv("Gamemode:", GAMEMODE_NAME)
+		-- Addon counts
+		local wcount = 0
+		for _, a in ipairs(engine.GetAddons()) do
+			if a.mounted then wcount = wcount + 1 end
+		end
+
+		kv("Workshop Addons:", wcount)
+		local _, folders = file.Find("addons/*", "GAME")
+		local blacklist = {
+			checkers = true,
+			chess = true,
+			common = true,
+			go = true,
+			hearts = true,
+			spades = true
+		}
+
+		local lcount = 0
+		for _, name in ipairs(folders) do
+			if not blacklist[name] then lcount = lcount + 1 end
+		end
+
+		kv("Legacy Addons:", lcount)
+		print("|" .. ("-"):rep(70))
+		-- CRC of data/vrmod and lua/bin
+		local function dumpCRC(path)
+			for _, entry in ipairs(file.Find(path .. "/*", "GAME")) do
+				local full = path .. "/" .. entry
+				if file.IsDir(full, "GAME") then
+					dumpCRC(full)
+				else
+					local crc = util.CRC(file.Read(full, "GAME") or "")
+					kv(full, string.format("%X", crc))
+				end
+			end
+		end
+
+		dumpCRC("data/vrmod")
+		print("|" .. ("-"):rep(70))
+		dumpCRC("lua/bin")
+		print("|" .. ("-"):rep(70))
+		-- Convar list
+		local names = {}
+		for _, cv in pairs(convars) do
+			names[#names + 1] = cv:GetName()
+		end
+
+		table.sort(names)
+		for _, n in ipairs(names) do
+			local cv = GetConVar(n)
+			local val = cv:GetString()
+			kv(n, val .. (val ~= cv:GetDefault() and " *" or ""))
+		end
+
+		banner()
+	end)
 end
