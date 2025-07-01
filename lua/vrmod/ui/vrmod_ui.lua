@@ -239,9 +239,11 @@ if CLIENT then
 	hook.Add("VRMod_Input", "ui", function(action, pressed)
 		if not g_VR.menuFocus then return end
 		local mouseButton = nil
-		if action == "boolean_primaryfire" then
+		local rClickInCar = LocalPlayer():InVehicle() and action == "boolean_right_pickup"
+		local lClickInCar = LocalPlayer():InVehicle() and action == "boolean_left_pickup"
+		if action == "boolean_primaryfire" or rClickInCar then
 			mouseButton = MOUSE_LEFT
-		elseif action == "boolean_secondaryfire" then
+		elseif action == "boolean_secondaryfire" or lClickInCar then
 			mouseButton = MOUSE_RIGHT
 		elseif action == "boolean_sprint" then
 			mouseButton = MOUSE_MIDDLE

@@ -44,10 +44,13 @@ if CLIENT then
         end)
 
         hook.Add("VRMod_Input", "vrmod_numpad_clickdetect", function(action, pressed)
-            if action ~= "boolean_primaryfire" then return end
+        local clickInCar = LocalPlayer():InVehicle() and action == "boolean_right_pickup"
+
+        if action == "boolean_primaryfire" or clickInCar then
             justClicked = pressed and not wasClicking
             wasClicking = pressed
             if not pressed then holdKey = nil end
+        end
         end)
 
         hook.Add("PreRender", "vrutil_hook_rendernumpad", function()
