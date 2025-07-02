@@ -41,5 +41,6 @@ local files = {
 }
 
 for _, path in ipairs(files) do
+    AddCSLuaFile(path)
     include(path)
 end
