@@ -556,8 +556,11 @@ function VRUtilOpenMenu()
 		lbl:SetPos(20, y)
 	end
 
-	do
+	local maxChecks = 30
+	local checks = 0
+	timer.Create("VRMod_CheckArcVR", 1, 0, function()
 		if ConVarExists("arcticvr_virtualstock") then
+			timer.Remove("VRMod_CheckArcVR")
 			local t = vgui.Create("DScrollPanel", sheet)
 			sheet:AddSheet("ArcVR", t, "icon16/gun.png")
 			local function AddSection(parentList, title, builder)
@@ -611,8 +614,14 @@ function VRUtilOpenMenu()
 				f:CheckBox("Alternate physics bullets", "arcticvr_physical_bullets")
 				f:NumSlider("Mag pickup delay", "arcticvr_net_magtimertime", 0, 1, 2)
 			end)
+		else
+			checks = checks + 1
+			if checks >= maxChecks then
+				timer.Remove("VRMod_CheckArcVR")
+				print("[VRMod] Timed out waiting for ArcVR convars.")
+			end
 		end
-	end
+	end)
 
 	local hooks = hook.GetTable().VRMod_Menu or {}
 	local names = {}
