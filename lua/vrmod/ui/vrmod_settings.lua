@@ -556,6 +556,64 @@ function VRUtilOpenMenu()
 		lbl:SetPos(20, y)
 	end
 
+	do
+		if ConVarExists("arcticvr_virtualstock") then
+			local t = vgui.Create("DScrollPanel", sheet)
+			sheet:AddSheet("ArcVR", t, "icon16/gun.png")
+			local function AddSection(parentList, title, builder)
+				local cat = vgui.Create("DCollapsibleCategory", parentList)
+				cat:SetLabel(title)
+				cat:Dock(TOP)
+				cat:DockMargin(0, 0, 0, 5)
+				cat:SetExpanded(false)
+				local form = vgui.Create("DForm", cat)
+				form:Dock(FILL)
+				form.Header:SetVisible(false)
+				form:InvalidateLayout(true)
+				builder(form)
+				cat:SetContents(form)
+				return cat
+			end
+
+			AddSection(t, "Controls", function(f)
+				f:CheckBox("Grip with reload key", "arcticvr_grip_withreloadkey")
+				f:CheckBox("Magazine bump preload", "arcticvr_mag_bumpreload")
+				f:CheckBox("Alternative frontgrip mode", "arcticvr_grip_alternative_mode")
+				f:NumSlider("Slide magnification", "arcticvr_slide_magnification", 1, 10, 2)
+				f:NumSlider("Grip magnification", "arcticvr_grip_magnification", 1, 10, 2)
+				f:CheckBox("Disable reload with key", "arcticvr_disable_reloadkey")
+				f:CheckBox("Disable grab reload", "arcticvr_disable_grabreload")
+			end)
+
+			AddSection(t, "Virtual Stock & Fixes", function(f)
+				f:CheckBox("Enable virtual stock", "arcticvr_virtualstock")
+				f:NumSlider("Frontgrip power", "arcticvr_2h_sens", 0, 2, 2)
+				f:CheckBox("Grenade pin enable", "arcticvr_grenade_pin_enable")
+				f:CheckBox("Shoot system fix", "arcticvr_shootsys")
+				f:CheckBox("Misc client fix", "arcticvr_test_cl_misc_fix")
+			end)
+
+			AddSection(t, "Mag Pouches", function(f)
+				f:NumSlider("Default pouch distance", "arcticvr_defpouchdist", 0, 200, 2)
+				f:CheckBox("Hybrid pouch", "arcticvr_hybridpouch")
+				f:NumSlider("Hybrid pouch distance", "arcticvr_hybridpouchdist", 0, 200, 1)
+				f:CheckBox("Head pouch", "arcticvr_headpouch")
+				f:NumSlider("Head pouch distance", "arcticvr_headpouchdist", 0, 200, 1)
+				f:CheckBox("Infinite pouch range", "arcticvr_infpouch")
+			end)
+
+			AddSection(t, "Server Settings", function(f)
+				f:CheckBox("Allow reload key (all guns)", "arcticvr_allgun_allow_reloadkey")
+				f:CheckBox("Allow reload key (client)", "arcticvr_allgun_allow_reloadkey_client")
+				f:CheckBox("Bump reload (all guns)", "arcticvr_bumpreload_allgun")
+				f:CheckBox("Bump reload (client)", "arcticvr_bumpreload_allgun_client")
+				f:CheckBox("Normalize default ammo", "arcticvr_defaultammo_normalize")
+				f:CheckBox("Alternate physics bullets", "arcticvr_physical_bullets")
+				f:NumSlider("Mag pickup delay", "arcticvr_net_magtimertime", 0, 1, 2)
+			end)
+		end
+	end
+
 	local hooks = hook.GetTable().VRMod_Menu or {}
 	local names = {}
 	for _, v in ipairs(names) do
@@ -568,40 +626,4 @@ function VRUtilOpenMenu()
 		hooks[v](frame)
 	end
 	return frame
-end
-
-concommand.Add("vrmod", function(ply, cmd, args)
-	if vgui.CursorVisible() then print("vrmod: menu will open when game is unpaused") end
-	timer.Create("vrmod_open_menu", 0.1, 0, function()
-		if not vgui.CursorVisible() then
-			VRUtilOpenMenu()
-			timer.Remove("vrmod_open_menu")
-		end
-	end)
-end)
-
-concommand.Add("vrmod_togglelaserpointer", function(ply, cmd, args)
-	if not GetConVar("vrmod_laserpointer"):GetBool() then
-		local mat = Material("cable/redlaser")
-		hook.Add("PostDrawTranslucentRenderables", "vr_laserpointer", function(bDrawingDepth, bDrawingSkybox)
-			if bDrawingSkybox then return end
-			if g_VR.viewModelMuzzle and not g_VR.menuFocus then
-				render.SetMaterial(mat)
-				render.DrawBeam(g_VR.viewModelMuzzle.Pos, g_VR.viewModelMuzzle.Pos + g_VR.viewModelMuzzle.Ang:Forward() * 10000, 1, 0, 1, Color(255, 255, 255, 255))
-			end
-		end)
-
-		LocalPlayer():ConCommand("vrmod_laserpointer 1")
-	else
-		hook.Remove("PostDrawTranslucentRenderables", "vr_laserpointer")
-		LocalPlayer():ConCommand("vrmod_laserpointer 0")
-	end
-end)
-
-local convars = vrmod.AddCallbackedConvar("vrmod_showonstartup", nil, "0")
-if convars.vrmod_showonstartup:GetBool() then
-	hook.Add("CreateMove", "vrmod_showonstartup", function()
-		hook.Remove("CreateMove", "vrmod_showonstartup")
-		timer.Simple(1, function() RunConsoleCommand("vrmod") end)
-	end)
 end

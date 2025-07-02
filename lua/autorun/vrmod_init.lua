@@ -38,6 +38,7 @@ local files = {
     "vrmod/ui/vrmod_worldtips.lua",
     "vrmod/ui/vrmod_settings.lua",
     "vrmod/ui/vrmod_ui_buttons.lua",
+    "vrmod/base/vrmod_startup.lua"
 }
 
 for _, path in ipairs(files) do
