@@ -6,10 +6,22 @@ scripted_ents.Register({
 }, "vrmod_pickup")
 
 local _, convarValues = vrmod.GetConvars()
-vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber) --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
-vrmod.AddCallbackedConvar("vrmod_dev_pickup_limit_droptest", nil, 1, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 2, tonumber) --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
+vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber) --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
 vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.3, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber) --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
-vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 99999, tonumber) --cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
+vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 10000, tonumber)
+local function CanPickupEntity(v, ply, convarValues)
+	if not IsValid(v) or not IsValid(v:GetPhysicsObject()) or v == ply or ply:InVehicle() then return false end
+	local phys = v:GetPhysicsObject()
+	local limitEnabled = convarValues.vrmod_pickup_limit == 1
+	local weightLimit = convarValues.vrmod_pickup_weight
+	if limitEnabled then
+		return v:GetMoveType() == MOVETYPE_VPHYSICS and phys:GetMass() <= weightLimit
+	else
+		return true
+	end
+end
+
+--cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc
 if CLIENT then
 	function vrmod.Pickup(bLeftHand, bDrop)
 		net.Start("vrmod_pickup")
@@ -128,10 +140,7 @@ elseif SERVER then
 		for k = 1, #entities do
 			local v = entities[k]
 			if not shouldPickUp(v) then continue end
-			if convarValues.vrmod_pickup_limit == 3 then return end
-			if convarValues.vrmod_pickup_limit == 2 then if not IsValid(v) or not IsValid(v:GetPhysicsObject()) or ply:InVehicle() or not v:GetPhysicsObject():IsMoveable() or v:GetPhysicsObject():GetMass() > convarValues.vrmod_pickup_weight or v:GetPhysicsObject():HasGameFlag(FVPHYSICS_MULTIOBJECT_ENTITY) or v == ply or v.CPPICanPickup ~= nil and not v:CPPICanPickup(ply) then continue end end
-			if convarValues.vrmod_pickup_limit == 1 then if not IsValid(v) or not IsValid(v:GetPhysicsObject()) or v == ply or ply:InVehicle() or v:GetMoveType() ~= MOVETYPE_VPHYSICS or v:GetPhysicsObject():GetMass() > convarValues.vrmod_pickup_weight then continue end end
-			if convarValues.vrmod_pickup_limit == 0 then if not IsValid(v) or not IsValid(v:GetPhysicsObject()) or v == ply or ply:InVehicle() or v:GetPhysicsObject():GetMass() > convarValues.vrmod_pickup_weight then continue end end
+			if not CanPickupEntity(v, ply, convarValues) then continue end
 			--pescorrzoneend
 			if not WorldToLocal(pickupPoint - v:GetPos(), Angle(), Vector(), v:GetAngles()):WithinAABox(v:OBBMins() * convarValues.vrmod_pickup_range, v:OBBMaxs() * convarValues.vrmod_pickup_range) then continue end
 			if hook.Call("VRMod_Pickup", nil, ply, v) == false then return end
@@ -181,25 +190,6 @@ elseif SERVER then
 							i = 0
 							break
 						end
-
-						--pescorrzonestart
-						if convarValues.vrmod_test_pickup_limit_droptest == 2 then drop(t.steamid, t.left) end
-						if convarValues.vrmod_test_pickup_limit_droptest == 1 then
-							if not IsValid(t.phys) or not t.phys:IsMoveable() or not g_VR[t.steamid] or not t.ply:Alive() or t.ply:InVehicle() then
-								if not g_VR[t.steamid] or t.ply:InVehicle() then
-									--print("dropping invalid")
-									drop(t.steamid, t.left)
-								end
-							end
-						end
-
-						if convarValues.vrmod_test_pickup_limit_droptest == 0 then
-							if not g_VR[t.steamid] or t.ply:InVehicle() then
-								--print("dropping invalid")
-								drop(t.steamid, t.left)
-							end
-						end
-						--pescorrzoneend
 					end
 				end)
 			end
