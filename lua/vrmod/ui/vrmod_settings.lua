@@ -211,9 +211,13 @@ function VRUtilOpenMenu()
 	form:Button("Reset settings to default", "vrmod_reset")
 	-- ─────────────── Rendering Tab ───────────────
 	do
-		local t = vgui.Create("DPanel", frame.DPropertySheet)
-		t:Dock(FILL)
-		frame.DPropertySheet:AddSheet("Rendering", t, "icon16/monitor.png")
+		local t = vgui.Create("DScrollPanel", sheet)
+		sheet:AddSheet("Rendering", t, "icon16/monitor.png")
+		function t:Paint(w, h)
+			surface.SetDrawColor(234, 234, 234) -- solid white
+			surface.DrawRect(0, 0, w, h)
+		end
+
 		local function AddCB(lbl, cv, y)
 			local cb = t:Add("DCheckBoxLabel")
 			cb:SetDark(true)
@@ -238,13 +242,13 @@ function VRUtilOpenMenu()
 			panel:SetPos(20, y)
 			panel.Paint = nil
 			local lbl = vgui.Create("DLabel", panel)
-			lbl:SetPos(0, 5) -- vertical center alignment
+			lbl:SetPos(0, 5)
 			lbl:SetSize(90, 20)
 			lbl:SetDark(true)
 			lbl:SetText("Desktop view:")
 			lbl:SetColor(Color(0, 0, 0))
 			local cb = vgui.Create("DComboBox", panel)
-			cb:SetPos(95, 2) -- adds a clean space after label
+			cb:SetPos(95, 2)
 			cb:SetSize(150, 25)
 			cb:AddChoice("none")
 			cb:AddChoice("left eye")
@@ -266,7 +270,6 @@ function VRUtilOpenMenu()
 
 		y = AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
 		y = AddCB("Auto offset (disable if having distortion)", "vrmod_renderoffset", y)
-		-- View scale slider
 		do
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -280,7 +283,6 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
-		-- Explanation label for view scaling
 		do
 			local label = vgui.Create("DLabel", t)
 			label:SetPos(20, y + 5)
@@ -293,7 +295,6 @@ function VRUtilOpenMenu()
 			y = y + 35
 		end
 
-		-- View scale slider
 		do
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -307,7 +308,6 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
-		-- View scale slider
 		do
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -321,7 +321,6 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
-		-- Explanation label for FOV scaling
 		do
 			local label = vgui.Create("DLabel", t)
 			label:SetPos(20, y + 5)
@@ -334,7 +333,6 @@ function VRUtilOpenMenu()
 			y = y + 35
 		end
 
-		-- View scale slider
 		do
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -348,13 +346,37 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
-		-- Explanation label for FOV scaling
 		do
 			local label = vgui.Create("DLabel", t)
 			label:SetPos(20, y + 5)
 			label:SetSize(370, 30)
 			label:SetDark(true)
 			label:SetText("Determines how far away is the 'camera' from your face")
+			label:SetWrap(true)
+			label:SetAutoStretchVertical(true)
+			label:SetFont("BoldSliderFont")
+			y = y + 35
+		end
+
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetDark(true)
+			s:SetText("Scale Factor")
+			s:SetMin(0.1)
+			s:SetMax(2.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_scalefactor")
+			y = y + 40
+		end
+
+		do
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y + 5)
+			label:SetSize(370, 30)
+			label:SetDark(true)
+			label:SetText("Adjust this if you see borders")
 			label:SetWrap(true)
 			label:SetAutoStretchVertical(true)
 			label:SetFont("BoldSliderFont")
@@ -372,6 +394,7 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_fovscale_x", "1.0")
 			RunConsoleCommand("vrmod_fovscale_y", "1.0")
 			RunConsoleCommand("vrmod_znear", "1.0")
+			RunConsoleCommand("vrmod_scalefactor", "1.0")
 		end
 
 		y = y + 50

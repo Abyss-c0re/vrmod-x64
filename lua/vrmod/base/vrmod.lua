@@ -42,7 +42,6 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_althead", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_autostart", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_scale", nil, "32.7")
-	vrmod.AddCallbackedConvar("vrmod_viewscale", nil, "1.0")
 	vrmod.AddCallbackedConvar("vrmod_heightmenu", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3")
@@ -50,8 +49,10 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_laserpointer", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_znear", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_renderoffset", nil, "1")
+	vrmod.AddCallbackedConvar("vrmod_viewscale", nil, "1.0")
 	vrmod.AddCallbackedConvar("vrmod_fovscale_x", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_fovscale_y", nil, "1")
+	vrmod.AddCallbackedConvar("vrmod_scalefactor", nil, "1")
 	vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
 	vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")
@@ -126,6 +127,7 @@ if CLIENT then
 	local function computeSubmitBounds(leftCalc, rightCalc)
 		local isWindows = system.IsWindows()
 		local hFactor, vFactor = 0, 0
+		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
 		-- average half‐eye extents in tangent space
 		if convars.vrmod_renderoffset:GetBool() then
 			local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
@@ -137,6 +139,9 @@ if CLIENT then
 			hFactor = 0.25
 			vFactor = 0.5
 		end
+
+		hFactor = hFactor * scaleFactor
+		vFactor = vFactor * scaleFactor
 
 		-- UV origin flip only affects V‐range endpoints, not the offset sign:
 		local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
