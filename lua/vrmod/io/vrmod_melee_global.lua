@@ -20,7 +20,7 @@ local function CreateCollisionBox(pos, ang, model, visible)
     ent:SetMoveType(MOVETYPE_VPHYSICS)
     ent:SetCollisionGroup(COLLISION_GROUP_INTERACTIVE)
     ent:SetRenderMode(visible and RENDERMODE_NORMAL or RENDERMODE_ENVIROMENTAL)
-    ent:SetNotSolid(true)
+    ent:SetNotSolid(false)
     local phys = ent:GetPhysicsObject()
     if IsValid(phys) then
         phys:SetMass(100)
