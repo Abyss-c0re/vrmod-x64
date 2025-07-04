@@ -8,7 +8,7 @@ local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.01", FCVAR_REPLICATED
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_usekick = CreateClientConVar("vrmod_melee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/hunter/plates/plate.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/hunter/misc/sphere025x025.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 -- UTILITIES ---------------------------
 local function CreateCollisionBox(pos, ang, model, visible)
     local ent = ents.CreateClientProp()
