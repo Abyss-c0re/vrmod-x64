@@ -568,15 +568,31 @@ function VRUtilOpenMenu()
 		AddSl("Melee Delay", "vrmod_melee_delay", 0.01, 1, 2)
 		AddCB("Visible Collision", "vrmod_melee_fist_visible")
 		-- Text entry
-		local te = vgui.Create("DTextEntry", t)
-		te:SetPos(20, y + 15)
-		te:SetSize(370, 20)
-		te:SetConVar("vrmod_melee_fist_collisionmodel")
 		local lbl = vgui.Create("DLabel", t)
 		lbl:SetDark(true)
 		lbl:SetText("Collision Model")
 		lbl:SizeToContents()
-		lbl:SetPos(20, y)
+		lbl:SetPos(20, y + 15)
+		local te = vgui.Create("DTextEntry", t)
+		te:SetPos(20, y + 15)
+		te:SetSize(370, 20)
+		te:SetConVar("vrmod_melee_fist_collisionmodel")
+		
+
+		local btn = vgui.Create("DButton", t)
+		btn:SetText("Reset")
+		btn:SetPos(190, y + 65)
+		btn:SetSize(160, 30)
+		function btn:DoClick()
+			RunConsoleCommand("vrmod_melee_gunmelee", "1")
+			RunConsoleCommand("vrmod_melee_velthreshold", "1.2")
+			RunConsoleCommand("vrmod_melee_damage", "80")
+			RunConsoleCommand("vrmod_melee_delay", "0.15")
+			RunConsoleCommand("vrmod_melee_usefist", "1")
+			RunConsoleCommand("vrmod_melee_usekick", "0")
+			RunConsoleCommand("vrmod_melee_fist_visible", "0")
+			RunConsoleCommand("vrmod_melee_fist_collisionmodel", "models/hunter/misc/sphere025x025.mdl")
+		end
 	end
 
 	local maxChecks = 30
