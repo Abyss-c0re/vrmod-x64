@@ -8,7 +8,7 @@ local function drawLaser()
     end
 end
 
--- Enable or disable laser
+
 local function setLaserEnabled(enabled)
     if enabled then
         hook.Add("PostDrawTranslucentRenderables", "vr_laserpointer", drawLaser)
@@ -33,18 +33,13 @@ concommand.Add("vrmod", function(ply, cmd, args)
     end)
 end)
 
--- Toggle command
 concommand.Add("vrmod_togglelaserpointer", function()
     local enabled = GetConVar("vrmod_laserpointer"):GetBool()
     setLaserEnabled(not enabled)
 end)
 
--- Startup hook
-hook.Add("VRMod_Start", "laserOn", function() timer.Simple(0.1, function() setLaserEnabled(true) end) end)
-local convars = vrmod.AddCallbackedConvar("vrmod_showonstartup", nil, "0")
-if convars.vrmod_showonstartup:GetBool() then
-    hook.Add("CreateMove", "vrmod_showonstartup", function()
-        hook.Remove("CreateMove", "vrmod_showonstartup")
-        timer.Simple(1, function() RunConsoleCommand("vrmod") end)
-    end)
-end
+
+hook.Add("VRMod_Start", "laserOn", function()
+    timer.Simple(0.1, function() end)
+    if convars.vrmod_laserpointer:GetBool() then setLaserEnabled(true) end
+end)
