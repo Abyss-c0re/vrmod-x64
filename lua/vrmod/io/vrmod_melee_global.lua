@@ -77,39 +77,18 @@ if CLIENT then
                 filter = ply
             })
 
+            local convarModel = cl_effectmodel:GetString()
             local model, ang
-            local fallbackModel = "models/hunter/misc/sphere025x025.mdl"
             if useWeaponModel then
                 local wep = ply:GetActiveWeapon()
                 if IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then
-                    model = wep:GetModel() local model, ang
-            if useWeaponModel then
-                local wep = ply:GetActiveWeapon()
-                model = IsValid(wep) and wep:GetModel() or cl_effectmodel:GetString()
-                ang = vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
-            else
-                model = cl_effectmodel:GetString()
-                ang = tr2.HitNormal:Angle()
+                    model = wep:GetModel()
+                    ang = vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
+                end
             end
-                else
-                    local convarModel = cl_effectmodel:GetString()
-                    if util.IsValidModel(convarModel) then
-                        model = convarModel
-                    else
-                        model = fallbackModel
-                        print("VRMOD: Incorrect collision model, using default")
-                    end
-                end
 
-                ang = vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
-            else
-                local convarModel = cl_effectmodel:GetString()
-                if util.IsValidModel(convarModel) then
-                    model = convarModel
-                else
-                    model = fallbackModel
-                end
-
+            if not model then
+                model = convarModel
                 ang = tr2.HitNormal:Angle()
             end
 

@@ -535,7 +535,7 @@ function VRUtilOpenMenu()
 		local t = vgui.Create("DPanel", sheet)
 		sheet:AddSheet("Melee", t, "icon16/asterisk_orange.png")
 		local y = 10
-		-- Checkbox helper
+		local defaultModel = "models/hunter/misc/sphere025x025.mdl"
 		local function AddCB(lbl, cv)
 			local cb = t:Add("DCheckBoxLabel")
 			cb:SetDark(true)
@@ -546,7 +546,6 @@ function VRUtilOpenMenu()
 			y = y + 20
 		end
 
-		-- Slider helper
 		local function AddSl(lbl, cv, mn, mx, dec)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -567,21 +566,46 @@ function VRUtilOpenMenu()
 		AddSl("Melee Damage", "vrmod_melee_damage", 0, 1000, 0)
 		AddSl("Melee Delay", "vrmod_melee_delay", 0.01, 1, 2)
 		AddCB("Visible Collision", "vrmod_melee_fist_visible")
-		-- Text entry
+		-- Collision Model Label
 		local lbl = vgui.Create("DLabel", t)
 		lbl:SetDark(true)
 		lbl:SetText("Collision Model")
 		lbl:SizeToContents()
 		lbl:SetPos(20, y + 15)
+		-- Collision Model Text Entry
 		local te = vgui.Create("DTextEntry", t)
-		te:SetPos(20, y + 15)
-		te:SetSize(370, 20)
+		te:SetPos(20, y + 35)
+		te:SetSize(280, 20)
 		te:SetConVar("vrmod_melee_fist_collisionmodel")
-		
+		-- Set Model Button
+		local btnSet = vgui.Create("DButton", t)
+		btnSet:SetText("Set Model")
+		btnSet:SetPos(310, y + 35)
+		btnSet:SetSize(80, 20)
+		function btnSet:DoClick()
+			local model = te:GetValue()
+			local fullPath = model:lower()
+			-- Ensure it starts with "models/"
+			if not fullPath:StartWith("models/") then fullPath = "models/" .. fullPath end
+			-- Ensure it ends with ".mdl"
+			if not fullPath:EndsWith(".mdl") then fullPath = fullPath .. ".mdl" end
+			if file.Exists(fullPath, "GAME") then
+				RunConsoleCommand("vrmod_melee_fist_collisionmodel", fullPath)
+				te:SetText(fullPath)
+				notification.AddLegacy("Model set successfully", NOTIFY_GENERIC, 2)
+				surface.PlaySound("buttons/button14.wav")
+			else
+				RunConsoleCommand("vrmod_melee_fist_collisionmodel", defaultModel)
+				te:SetText(defaultModel)
+				notification.AddLegacy("Invalid model. Reset to default.", NOTIFY_ERROR, 3)
+				surface.PlaySound("buttons/button10.wav")
+			end
+		end
 
+		-- Reset Button
 		local btn = vgui.Create("DButton", t)
 		btn:SetText("Reset")
-		btn:SetPos(190, y + 65)
+		btn:SetPos(190, y + 70)
 		btn:SetSize(160, 30)
 		function btn:DoClick()
 			RunConsoleCommand("vrmod_melee_gunmelee", "1")
@@ -591,8 +615,11 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_melee_usefist", "1")
 			RunConsoleCommand("vrmod_melee_usekick", "0")
 			RunConsoleCommand("vrmod_melee_fist_visible", "0")
-			RunConsoleCommand("vrmod_melee_fist_collisionmodel", "models/hunter/misc/sphere025x025.mdl")
+			RunConsoleCommand("vrmod_melee_fist_collisionmodel", defaultModel)
+			te:SetText(defaultModel)
 		end
+
+		y = y + 110
 	end
 
 	local maxChecks = 30
@@ -600,6 +627,7 @@ function VRUtilOpenMenu()
 	timer.Create("VRMod_CheckArcVR", 1, 0, function()
 		if ConVarExists("arcticvr_virtualstock") then
 			timer.Remove("VRMod_CheckArcVR")
+			local sheet = frame.DPropertySheet
 			local t = vgui.Create("DScrollPanel", sheet)
 			sheet:AddSheet("ArcVR", t, "icon16/gun.png")
 			local function AddSection(parentList, title, builder)
