@@ -2,9 +2,9 @@
 -- VRMod Melee System 
 -- CONVARS -----------------------------
 local cv_allowgunmelee = CreateConVar("vrmod_melee_gunmelee", "1", FCVAR_REPLICATED + FCVAR_ARCHIVE)
-local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "2.0", FCVAR_REPLICATED + FCVAR_ARCHIVE)
-local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "15", FCVAR_REPLICATED + FCVAR_ARCHIVE)
-local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.01", FCVAR_REPLICATED + FCVAR_ARCHIVE)
+local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "1.2", FCVAR_REPLICATED + FCVAR_ARCHIVE)
+local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "80", FCVAR_REPLICATED + FCVAR_ARCHIVE)
+local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.15", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_usekick = CreateClientConVar("vrmod_melee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
@@ -78,12 +78,38 @@ if CLIENT then
             })
 
             local model, ang
+            local fallbackModel = "models/hunter/misc/sphere025x025.mdl"
+            if useWeaponModel then
+                local wep = ply:GetActiveWeapon()
+                if IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then
+                    model = wep:GetModel() local model, ang
             if useWeaponModel then
                 local wep = ply:GetActiveWeapon()
                 model = IsValid(wep) and wep:GetModel() or cl_effectmodel:GetString()
                 ang = vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
             else
                 model = cl_effectmodel:GetString()
+                ang = tr2.HitNormal:Angle()
+            end
+                else
+                    local convarModel = cl_effectmodel:GetString()
+                    if util.IsValidModel(convarModel) then
+                        model = convarModel
+                    else
+                        model = fallbackModel
+                        print("VRMOD: Incorrect collision model, using default")
+                    end
+                end
+
+                ang = vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
+            else
+                local convarModel = cl_effectmodel:GetString()
+                if util.IsValidModel(convarModel) then
+                    model = convarModel
+                else
+                    model = fallbackModel
+                end
+
                 ang = tr2.HitNormal:Angle()
             end
 
