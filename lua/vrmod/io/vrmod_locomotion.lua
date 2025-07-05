@@ -41,7 +41,7 @@ hook.Add("VRMod_Input", "teleport", function(action, pressed)
 						local tr = util.TraceLine({
 							start = prevPos,
 							endpos = prevPos + v,
-							filter = LocalPlayer(),
+							filter = function(ent) return ent ~= LocalPlayer() and not ent:GetNWBool("IsVRHand", false) end,
 							mask = MASK_PLAYERSOLID
 						})
 
@@ -95,7 +95,6 @@ vrmod.AddCallbackedConvar("vrmod_smoothturnrate", "smoothTurnRate", "180", nil, 
 vrmod.AddCallbackedConvar("vrmod_crouchthreshold", "crouchThreshold", "40", nil, nil, nil, nil, tonumber)
 local zeroVec, zeroAng = Vector(), Angle()
 local originVehicleLocalPos, originVehicleLocalAng = Vector(), Angle()
-
 function VRUtilresetVehicleView()
 	if not g_VR.threePoints and not ply:InVehicle() then return end
 	originVehicleLocalPos = nil
@@ -216,6 +215,4 @@ local function stop()
 	vrmod.RemoveInGameMenuItem("Reset Vehicle View")
 end
 
-timer.Simple(0, function()
-	vrmod.AddLocomotionOption("default", start, stop, options)
-end)
+timer.Simple(0, function() vrmod.AddLocomotionOption("default", start, stop, options) end)

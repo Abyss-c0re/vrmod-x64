@@ -8,15 +8,17 @@ local function SpawnVRHands(ply)
     if not vrHands[ply] then vrHands[ply] = {} end
     local hands = vrHands[ply]
     for _, side in ipairs({"right", "left"}) do
-        local hand = ents.Create("prop_physics")
+        local hand = ents.Create("base_anim")
         if not IsValid(hand) then continue end
-        hand:SetModel("models/hunter/plates/plate.mdl")
+        hand:SetModel("models/props_junk/PopCan01a.mdl")
         hand:Spawn()
+        hand:PhysicsInitSphere(3.5, "metal_bouncy")
         hand:SetPersistent(true)
         hand:Activate()
         hand:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
         hand:SetPos(ply:GetPos())
         hand:SetNoDraw(true)
+        hand:SetNWBool("isVRHand", true) 
         local phys = hand:GetPhysicsObject()
         if IsValid(phys) then phys:SetMass(20) end
         hands[side] = {
@@ -50,9 +52,9 @@ hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
     local function UpdateHand(side, getPos, getAng)
         local data = hands[side]
         if not data or not IsValid(data.ent) or not IsValid(data.phys) then return end
-        local pos, ang = LocalToWorld(Vector(3, 0, 0), Angle(90, 0, 0), getPos(ply), getAng(ply))
+        local pos, ang = LocalToWorld(Vector(2, 0, 0), Angle(0, 0, 0), getPos(ply), getAng(ply))
         local center = data.ent:LocalToWorld(data.phys:GetMassCenter())
-        local velocity = (pos - center) * 30 + ply:GetVelocity()
+        local velocity = (pos - center) * 60 + ply:GetVelocity()
         data.phys:SetVelocity(velocity)
         local _, angVel = WorldToLocal(Vector(), ang, Vector(), data.phys:GetAngles())
         local targetAngVel = Vector(angVel.roll, angVel.pitch, angVel.yaw) * 30
