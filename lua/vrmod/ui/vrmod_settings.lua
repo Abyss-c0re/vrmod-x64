@@ -195,7 +195,12 @@ function VRUtilOpenMenu()
 	-- Core settings
 	form:CheckBox("Use floating hands", "vrmod_floatinghands")
 	form:CheckBox("Use weapon world models", "vrmod_useworldmodels")
-	form:CheckBox("Add laser pointer to tools/weapons", "vrmod_laserpointer")
+	local laser_pointer = form:CheckBox("Add laser pointer to tools/weapons")
+	laser_pointer:SetChecked(GetConVar("vrmod_laserpointer"):GetBool())
+	function laser_pointer:OnChange(val)
+		RunConsoleCommand("vrmod_togglelaserpointer")
+	end
+
 	local heightCheckbox = form:CheckBox("Show height adjustment menu", "vrmod_heightmenu")
 	local checkTime = 0
 	function heightCheckbox:OnChange(checked)
@@ -654,7 +659,7 @@ function VRUtilOpenMenu()
 	timer.Create("VRMod_CheckArcVR", 1, 0, function()
 		if ConVarExists("arcticvr_virtualstock") then
 			timer.Remove("VRMod_CheckArcVR")
-			local sheet = frame.DPropertySheet
+			if not IsValid(sheet) then return end
 			local t = vgui.Create("DScrollPanel", sheet)
 			sheet:AddSheet("ArcVR", t, "icon16/gun.png")
 			local function AddSection(parentList, title, builder)
