@@ -75,6 +75,11 @@ elseif SERVER then
 		return ent:IsWeapon() or c:find("weapon_") or c == "prop_physics" and ent:GetModel():find("w_")
 	end
 
+	local function IsImportantPickup(ent)
+		local class = ent:GetClass()
+		return class:find("^item_") or class:find("^spawned_") or class:find("^vr_item")
+	end
+
 	local function HasHeldWeaponRight(ply)
 		local sid = ply:SteamID()
 		return g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[2] and IsWeaponEntity(g_VR[sid].heldItems[2].ent)
@@ -96,14 +101,16 @@ elseif SERVER then
 		local sid = ply:SteamID()
 		if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[bLeftHand and 1 or 2] then return end
 		local cv = convarValues
-		local baseRange = cv.vrmod_pickup_range * 75
-		local weaponBoost = cv.vrmod_pickup_range * 250
+		local baseRange = cv.vrmod_pickup_range * 100
+		local boostedRange = cv.vrmod_pickup_range * 250
 		local grabPoint = LocalToWorld(Vector(3, bLeftHand and -1.5 or 1.5, 0), Angle(), handPos, handAng)
 		local candidates = {}
-		for _, ent in ipairs(ents.FindInSphere(grabPoint, baseRange + weaponBoost)) do
+		for _, ent in ipairs(ents.FindInSphere(grabPoint, baseRange + boostedRange)) do
 			if not shouldPickUp(ent) or not CanPickupEntity(ent, ply, cv) then continue end
 			local isWep = IsWeaponEntity(ent)
-			local testRng = cv.vrmod_pickup_range + (isWep and weaponBoost / 75 or 0)
+			local isImportant = isWep or IsImportantPickup(ent)
+			local boost = isImportant and boostedRange or 0
+			local testRng = cv.vrmod_pickup_range + boost / 100
 			local lp = WorldToLocal(grabPoint, Angle(), ent:GetPos(), ent:GetAngles())
 			if not lp:WithinAABox(ent:OBBMins() * testRng, ent:OBBMaxs() * testRng) then continue end
 			if isWep then
