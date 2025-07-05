@@ -420,7 +420,7 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_fovscale_y", "1.0")
 			RunConsoleCommand("vrmod_znear", "1.0")
 			RunConsoleCommand("vrmod_scalefactor", "1.0")
-			RunConsoleCommand("vrmod_verticaliffset", "0")
+			RunConsoleCommand("vrmod_verticaloffset", "0")
 			RunConsoleCommand("vrmod_horizontaloffset", "0")
 		end
 
