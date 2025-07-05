@@ -4,9 +4,7 @@ vrmod.AddCallbackedConvar("vrmod_configversion", nil, "5")
 if convars.vrmod_configversion:GetString() ~= convars.vrmod_configversion:GetDefault() then
     timer.Simple(1, function()
         for k, v in pairs(convars) do
-            pcall(function()
-                v:Revert() --reverting certain convars makes error
-            end)
+            pcall(function() v:Revert() end)
         end
     end)
 end
@@ -33,11 +31,6 @@ vrmod.AddCallbackedConvar("vrmod_controlleroffset_pitch", nil, "50")
 vrmod.AddCallbackedConvar("vrmod_controlleroffset_yaw", nil, "0")
 vrmod.AddCallbackedConvar("vrmod_controlleroffset_roll", nil, "0")
 vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
-vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
-vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber)
-vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 10000, tonumber)
-vrmod.AddCallbackedConvar("vrmod_seatedoffset", nil, "0", nil, nil, nil, nil, tonumber, function(val) updateOffsetHook() end)
-vrmod.AddCallbackedConvar("vrmod_seated", nil, "0", nil, nil, nil, nil, tobool, function(val) updateOffsetHook() end)
 local matLaser = Material("cable/redlaser")
 local function drawLaser()
     if g_VR.viewModelMuzzle and not g_VR.menuFocus then
@@ -178,4 +171,15 @@ end)
 hook.Add("VRMod_Start", "laserOn", function()
     timer.Simple(0.1, function() end)
     if convars.vrmod_laserpointer:GetBool() then setLaserEnabled(true) end
+end)
+
+hook.Add("GravGunOnPickedUp", "MyVRRotationHandler", function(ply, ent)
+    if not IsValid(ent) then return end
+    if ply:IsPlayer() and ply:InVehicle() then -- optional VR-related filter
+        return
+    end
+
+    print("[Gravity Gun] Picked up:", ent)
+    -- Store or flag entity for rotation update via VR
+    --ent.VRPickedUp = true
 end)

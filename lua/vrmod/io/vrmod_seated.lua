@@ -15,6 +15,10 @@ local function updateOffsetHook()
 	end)
 end
 
+vrmod.AddCallbackedConvar("vrmod_seatedoffset", nil, "0", nil, nil, nil, nil, tonumber, function(val) updateOffsetHook() end)
+vrmod.AddCallbackedConvar("vrmod_seated", nil, "0", nil, nil, nil, nil, tobool, function(val) updateOffsetHook() end)
+
+
 hook.Add("VRMod_Start", "seatedmode", function(ply)
 	if ply ~= LocalPlayer() then return end
 	updateOffsetHook()
