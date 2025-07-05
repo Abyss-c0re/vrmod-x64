@@ -359,6 +359,17 @@ function VRUtilOpenMenu()
 		end
 
 		do
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y + 5)
+			label:SetSize(370, 30)
+			label:SetDark(true)
+			label:SetText("Adjust parameters below if you see borders, start with small values like 0.01")
+			label:SetWrap(true)
+			label:SetAutoStretchVertical(true)
+			y = y + 35
+		end
+
+		do
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
@@ -372,15 +383,29 @@ function VRUtilOpenMenu()
 		end
 
 		do
-			local label = vgui.Create("DLabel", t)
-			label:SetPos(20, y + 5)
-			label:SetSize(370, 30)
-			label:SetDark(true)
-			label:SetText("Adjust this if you see borders")
-			label:SetWrap(true)
-			label:SetAutoStretchVertical(true)
-			label:SetFont("BoldSliderFont")
-			y = y + 35
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetDark(true)
+			s:SetText("Vertical offset")
+			s:SetMin(-1.0)
+			s:SetMax(1.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_verticaloffset")
+			y = y + 40
+		end
+
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetDark(true)
+			s:SetText("Horizontal offset")
+			s:SetMin(-1.0)
+			s:SetMax(1.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_horizontaloffset")
+			y = y + 40
 		end
 
 		local reset = vgui.Create("DButton", t)
@@ -395,6 +420,8 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_fovscale_y", "1.0")
 			RunConsoleCommand("vrmod_znear", "1.0")
 			RunConsoleCommand("vrmod_scalefactor", "1.0")
+			RunConsoleCommand("vrmod_verticaliffset", "0")
+			RunConsoleCommand("vrmod_horizontaloffset", "0")
 		end
 
 		y = y + 50

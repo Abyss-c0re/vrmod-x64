@@ -80,13 +80,13 @@ if CLIENT then
 		local tan_nx = math.abs((-1 - xoffset) / xscale)
 		local tan_py = math.abs((1 - yoffset) / yscale)
 		local tan_ny = math.abs((-1 - yoffset) / yscale)
-		local w = (tan_px + tan_nx) / worldScale -- <-- apply scale
+		local w = (tan_px + tan_nx) / worldScale
 		local h = (tan_py + tan_ny) / worldScale
 		return {
 			HorizontalFOV = math.deg(2 * math.atan(w / 2)),
 			AspectRatio = w / h,
-			HorizontalOffset = xoffset,
-			VerticalOffset = yoffset, -- now unified sign
+			HorizontalOffset = xoffset + convars.vrmod_horizontaloffset:GetFloat(),
+			VerticalOffset = yoffset + convars.vrmod_verticaloffset:GetFloat(),
 			Width = w,
 			Height = h,
 		}
