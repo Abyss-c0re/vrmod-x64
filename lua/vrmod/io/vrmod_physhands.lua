@@ -12,7 +12,7 @@ local function SpawnVRHands(ply)
         if not IsValid(hand) then continue end
         hand:SetModel("models/props_junk/PopCan01a.mdl")
         hand:Spawn()
-        hand:PhysicsInitSphere(3.5, "metal_bouncy")
+        hand:PhysicsInitSphere(2.7, "metal_bouncy")
         hand:SetPersistent(true)
         hand:Activate()
         hand:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
