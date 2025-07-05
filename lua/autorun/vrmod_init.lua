@@ -1,7 +1,9 @@
 AddCSLuaFile()
 
 local files = {
+    
     "vrmod/base/vrmod_api.lua",
+    "vrmod/base/vrmod_startup.lua",
     "vrmod/base/vrmod.lua",
     "vrmod/base/vrmod_network.lua",
     "vrmod/io/vrmod_locomotion.lua",
@@ -37,8 +39,7 @@ local files = {
     "vrmod/ui/vrmod_ui_numpad.lua",
     "vrmod/ui/vrmod_worldtips.lua",
     "vrmod/ui/vrmod_settings.lua",
-    "vrmod/ui/vrmod_ui_buttons.lua",
-    "vrmod/base/vrmod_startup.lua"
+    "vrmod/ui/vrmod_ui_buttons.lua"
 }
 
 for _, path in ipairs(files) do
