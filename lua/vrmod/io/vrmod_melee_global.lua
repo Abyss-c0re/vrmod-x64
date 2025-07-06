@@ -4,7 +4,7 @@
 -- CONVARS -----------------------------
 local cv_allowgunmelee = CreateConVar("vrmod_melee_gunmelee", "1", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "1.2", FCVAR_REPLICATED + FCVAR_ARCHIVE)
-local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "80", FCVAR_REPLICATED + FCVAR_ARCHIVE)
+local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "50", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.15", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_usekick = CreateClientConVar("vrmod_melee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
@@ -185,7 +185,7 @@ if SERVER then
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
         dmgInfo:SetDamage(dmgAmt)
-        dmgInfo:SetDamageType(DMG_CLUB)
+        dmgInfo:SetDamageType(bit.bor(DMG_CLUB, DMG_BLAST))
         dmgInfo:SetDamagePosition(tr.HitPos)
         tr.Entity:TakeDamageInfo(dmgInfo)
         local phys = tr.Entity:GetPhysicsObject()
