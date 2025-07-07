@@ -1,18 +1,9 @@
 if SERVER then return end
 local convars, convarValues = vrmod.GetConvars()
-local rawHeadHeight = nil
 local rt_mirror, mat_mirror = nil, nil
-local function CalculateRawHeadHeight()
-    if not g_VR or not g_VR.tracking or not g_VR.tracking.hmd then return nil end
-    return g_VR.tracking.hmd.pos.z - g_VR.origin.z
-end
-
-local function AutoScaleFromRawHeight()
-    if not rawHeadHeight then rawHeadHeight = CalculateRawHeadHeight() end
-    if rawHeadHeight then
-        g_VR.scale = rawHeadHeight - 30.4
-        convars.vrmod_scale:SetFloat(g_VR.scale)
-    end
+local function AutoScale()
+    g_VR.scale = 66.8 / ((g_VR.tracking.hmd.pos.z - g_VR.origin.z) / g_VR.scale)
+    convars.vrmod_scale:SetFloat(g_VR.scale)
 end
 
 local function RenderMirror()
@@ -126,7 +117,7 @@ function VRUtilOpenHeightMenu()
             text_x = 25,
             text_y = 0,
             enabled = not convarValues.vrmod_seated,
-            fn = function() AutoScaleFromRawHeight() end
+            fn = function() AutoScale() end
         },
         {
             x = 250,
