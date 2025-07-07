@@ -567,7 +567,7 @@ function VRUtilOpenMenu()
 		local t = vgui.Create("DPanel", sheet)
 		sheet:AddSheet("Melee", t, "icon16/asterisk_orange.png")
 		local y = 10
-		local defaultModel = "models/hunter/misc/sphere025x025.mdl"
+		local defaultModel = "models/props_junk/PopCan01a.mdl"
 		local function AddCB(lbl, cv)
 			local cb = t:Add("DCheckBoxLabel")
 			cb:SetDark(true)
