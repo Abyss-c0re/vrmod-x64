@@ -618,463 +618,341 @@ g_VR.bindings_holographic = [[
 --##############################################################################
 g_VR.bindings_touch = [[
    {
-      "action_manifest_version" : 0,
-      "alias_info" : {},
-      "app_key" : "system.generated.gmod.exe",
-      "bindings" : {
-         "/actions/base" : {
-            "chords" : [],
-            "haptics" : [
-               {
-                  "output" : "/actions/base/out/vibration_left",
-                  "path" : "/user/hand/left/output/haptic"
-               },
-               {
-                  "output" : "/actions/base/out/vibration_right",
-                  "path" : "/user/hand/right/output/haptic"
-               }
-            ],
-            "poses" : [
-               {
-                  "output" : "/actions/base/in/pose_lefthand",
-                  "path" : "/user/hand/left/pose/raw"
-               },
-               {
-                  "output" : "/actions/base/in/pose_righthand",
-                  "path" : "/user/hand/right/pose/raw"
-               }
-            ],
-            "skeleton" : [
-               {
-                  "output" : "/actions/base/in/skeleton_lefthand",
-                  "path" : "/user/hand/left/input/skeleton/left"
-               },
-               {
-                  "output" : "/actions/base/in/skeleton_righthand",
-                  "path" : "/user/hand/right/input/skeleton/right"
-               }
-            ],
-            "sources" : []
-         },
-         "/actions/driving" : {
-            "chords" : [
-               {
-                  "inputs" : [
-                     [ "/user/hand/right/input/trigger", "click" ],
-                     [ "/user/hand/left/input/trigger", "click" ]
-                  ],
-                  "output" : "/actions/driving/in/boolean_turret"
-               },
-               {
-                  "inputs" : [
-                  [ "/user/hand/left/input/x", "click" ],
-                  [ "/user/hand/left/input/y", "click" ]
-                  ],
-                  "output" : "/actions/driving/in/boolean_exit"
-               },
-               {
-                  "inputs" : [
-                     [ "/user/hand/right/input/a", "click" ],
-                     [ "/user/hand/right/input/b", "click" ]
-                  ],
-                  "output" : "/actions/driving/in/boolean_exit"
-               }
-            ],
-            "sources" : [
-               {
-                  "inputs" : {
-                     "pull" : {
-                        "output" : "/actions/driving/in/vector1_forward"
-                     }
-                  },
-                  "mode" : "trigger",
-                  "path" : "/user/hand/right/input/trigger"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/driving/in/vector1_reverse"
-                     }
-                  },
-                  "mode" : "trigger",
-                  "path" : "/user/hand/left/input/trigger"
-               },
-               {
-                  "inputs" : {
-                     "position" : {
-                        "output" : "/actions/driving/in/vector2_steer"
-                     }
-                  },
-                  "mode" : "joystick",
-                  "path" : "/user/hand/left/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/driving/in/boolean_turbo"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/right/input/b"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/driving/in/boolean_handbrake"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/right/input/a"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/driving/in/boolean_spawnmenu"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/y"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/driving/in/boolean_handbrake"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/x"
-               },
-               {
-                  "inputs" : {},
-                  "mode" : "trigger",
-                  "path" : "/user/hand/left/input/grip"
-               },
-               {
-                  "inputs" : {
-                     "position" : {
-                        "output" : "/actions/driving/in/vector2_steer"
-                     }
-                  },
-                  "mode" : "joystick",
-                  "path" : "/user/hand/right/input/joystick"
-               },
-               {
-                  "inputs" : {},
-                  "mode" : "trigger",
-                  "path" : "/user/hand/right/input/grip"
-               }
-            ]
-         },
-         "/actions/main" : {
-            "chords" : [
-               {
-                  "inputs" : [
-                     [ "/user/hand/left/input/y", "click" ],
-                     [ "/user/hand/right/input/joystick", "east" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_slot2"
-               },
-               {
-                  "inputs" : [
-                     [ "/user/hand/left/input/y", "click" ],
-                     [ "/user/hand/right/input/joystick", "north" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_slot3"
-               },
-               {
-                  "inputs" : [
-                     [ "/user/hand/left/input/y", "click" ],
-                     [ "/user/hand/right/input/joystick", "west" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_slot6"
-               },
-               {
-                  "inputs" : [
-                     [ "/user/hand/left/input/y", "click" ],
-                     [ "/user/hand/right/input/joystick", "south" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_slot4"
-               },
-               {
-                  "inputs" : [
-                     [ "/user/hand/right/input/joystick", "click" ],
-                     [ "/user/hand/left/input/y", "click" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_slot1"
-               },
-               {
-                  "inputs" : [
-                     [ "/user/hand/left/input/joystick", "click" ],
-                     [ "/user/hand/right/input/joystick", "click" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_chat"
-               },
-               {
-                 "inputs" : [
-                    [ "/user/hand/left/input/joystick", "click" ],
-                    [ "/user/hand/right/input/joystick", "click" ]
-                 ],
-                 "output" : "/actions/main/in/boolean_flashlight"
-              },
-               {
-                  "inputs" : [
-                     [ "/user/hand/left/input/y", "click" ],
-                     [ "/user/hand/left/input/x", "click" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_use"
-               },
-               {
-                  "inputs" : [
-                     [ "/user/hand/right/input/b", "click" ],
-                     [ "/user/hand/right/input/a", "click" ]
-                  ],
-                  "output" : "/actions/main/in/boolean_use"
-               },
-              {
-                 "inputs" : [
-                    [ "/user/hand/left/input/x", "single" ],
-                    [ "/user/hand/left/input/y", "single" ]
-                 ],
-                 "output" : "/actions/main/in/boolean_menucontext"
-              },
-              {
-                 "inputs" : [
-                    [ "/user/hand/left/input/trigger", "single" ],
-                    [ "/user/hand/left/input/grip", "single" ],
-                    [ "/user/hand/right/input/a", "single" ]
-                 ],
-                 "output" : "/actions/main/in/boolean_foregrip"
-               }
-            ],
-            "sources" : [
-               {
-                  "inputs" : {
-                     "position" : {
-                        "output" : "/actions/main/in/vector2_walkdirection"
-                     }
-                  },
-                  "mode" : "joystick",
-                  "parameters" : {
-                     "deadzone_pct" : "10"
-                  },
-                  "path" : "/user/hand/left/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_left_pickup"
-                     },
-                     "touch" : {
-                        "output" : "/actions/main/in/dummy"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/grip"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_primaryfire"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/right/input/trigger"
-               },
-               {
-                  "inputs" : {
-                     "pull" : {
-                        "output" : "/actions/main/in/vector1_primaryfire"
-                     }
-                  },
-                  "mode" : "trigger",
-                  "path" : "/user/hand/right/input/trigger"
-               },
-               {
-                  "inputs" : {
-                     "east" : {
-                        "output" : "/actions/main/in/boolean_turnright"
-                     },
-                     "north" : {
-                        "output" : "/actions/main/in/boolean_sprint"
-                     },
-                     "south" : {
-                        "output" : "/actions/main/in/boolean_walkkey"
-                     },
-                     "west" : {
-                        "output" : "/actions/main/in/boolean_turnleft"
-                     }
-                  },
-                  "mode" : "dpad",
-                  "parameters" : {
-                     "sticky" : "true",
-                     "sub_mode" : "touch"
-                  },
-                  "path" : "/user/hand/right/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_right_pickup"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/right/input/grip"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_left_primaryfire"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/trigger"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_changeweapon"
-                     },
-                     "touch" : {
-                        "output" : "/actions/main/in/lweaponmenu"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/y"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_reload"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/right/input/b"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_secondaryfire"
-                     },
-                     "touch" : {
-                        "output" : "/actions/main/in/dummy"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/right/input/a"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_sprint"
-                     }
-                  },
-                  "mode" : "button",
-                  "parameters" : {
-                     "force_input" : "click",
-                     "touchy_click" : "false"
-                  },
-                  "path" : "/user/hand/right/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_jump"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "east" : {
-                        "output" : "/actions/main/in/boolean_right"
-                     },
-                     "north" : {
-                        "output" : "/actions/main/in/boolean_forword"
-                     },
-                     "south" : {
-                        "output" : "/actions/main/in/boolean_back"
-                     },
-                     "west" : {
-                        "output" : "/actions/main/in/boolean_left"
-                     }
-                  },
-                  "mode" : "dpad",
-                  "parameters" : {
-                     "sub_mode" : "touch"
-                  },
-                  "path" : "/user/hand/left/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "position" : {
-                        "output" : "/actions/main/in/vector2_smoothturn"
-                     }
-                  },
-                  "mode" : "joystick",
-                  "path" : "/user/hand/right/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "touch" : {
-                        "output" : "/actions/main/in/boolean_walk"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/joystick"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_use"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/x"
-               },
-                            {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_spawnmenu"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/y"
-               },
-               {
-                  "inputs" : {
-                     "click" : {
-                        "output" : "/actions/main/in/boolean_left_secondaryfire"
-                     }
-                  },
-                  "mode" : "button",
-                  "path" : "/user/hand/left/input/y"
-              },
-              {
-                 "inputs" : {
-                    "center" : {
-                       "output" : "/actions/main/in/boolean_teleport"
-                    }
-                 },
-                 "mode" : "dpad",
-                 "parameters" : {
-                    "sub_mode" : "click"
-                 },
-                 "path" : "/user/hand/right/input/joystick"
-               }
-            ]
-         }
+   "action_manifest_version" : 0,
+   "alias_info" : {},
+   "app_key" : "steam.app.4000",
+   "bindings" : {
+      "/actions/base" : {
+         "chords" : [],
+         "haptics" : [
+            {
+               "output" : "/actions/base/out/vibration_left",
+               "path" : "/user/hand/left/output/haptic"
+            },
+            {
+               "output" : "/actions/base/out/vibration_right",
+               "path" : "/user/hand/right/output/haptic"
+            }
+         ],
+         "poses" : [
+            {
+               "output" : "/actions/base/in/pose_lefthand",
+               "path" : "/user/hand/left/pose/raw"
+            },
+            {
+               "output" : "/actions/base/in/pose_righthand",
+               "path" : "/user/hand/right/pose/raw"
+            }
+         ],
+         "skeleton" : [
+            {
+               "output" : "/actions/base/in/skeleton_lefthand",
+               "path" : "/user/hand/left/input/skeleton/left"
+            },
+            {
+               "output" : "/actions/base/in/skeleton_righthand",
+               "path" : "/user/hand/right/input/skeleton/right"
+            }
+         ],
+         "sources" : []
       },
-      "category" : "steamvr_input",
-      "controller_type" : "oculus_touch",
-      "description" : "[Y] WEAPON MENU + QUICK Menu \n[X]USE\n--\n[L Stick] Move\n[L Stick PUSH] Jump\n--\n[R Stick PUSH] Sprint\n[R Stick Left Right] Turn\n[R Stick Down] Walk\n[R Stick Up] Sprint\n--\n[R Trigger] Primary Fire / Accel\n[A]RELOAD / HandBrake\n[B]SecondaryFire / Turbo\n[L Trigger] (Left_Primary_fire) / Brake\n--\n[L Grip] Lefthand Pickup\n[R Grip] Righthand Pickup\n--\n[R Stick PUSH] + [L Stick PUSH] Flashlight\n[R Stick PUSH] + [L Stick PUSH] (Chatbutton)",
-      "interaction_profile" : "",
-      "name" : "Gmod-SemiOffcialVersionKeyConfig(Ver6.0)",
-      "options" : {
-         "simulated_controller_type" : "oculus_touch"
+      "/actions/driving" : {
+         "chords" : [],
+         "sources" : [
+            {
+               "inputs" : {
+                  "pull" : {
+                     "output" : "/actions/driving/in/vector1_forward"
+                  }
+               },
+               "mode" : "trigger",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/trigger"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/vector1_reverse"
+                  }
+               },
+               "mode" : "trigger",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/trigger"
+            },
+            {
+               "inputs" : {
+                  "position" : {
+                     "output" : "/actions/driving/in/vector2_steer"
+                  }
+               },
+               "mode" : "joystick",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_turbo"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/b"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_handbrake"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/a"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_spawnmenu"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/y"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_exit"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/x"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_handbrake"
+                  }
+               },
+               "mode" : "trigger",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/grip"
+            },
+            {
+               "inputs" : {
+                  "position" : {
+                     "output" : "/actions/driving/in/vector2_steer"
+                  }
+               },
+               "mode" : "joystick",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_turret"
+                  }
+               },
+               "mode" : "trigger",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/grip"
+            }
+         ]
       },
-      "simulated_actions" : []
-   }
+      "/actions/main" : {
+         "chords" : [
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/thumbrest", "touch" ],
+                  [ "/user/hand/right/input/thumbrest", "touch" ]
+               ],
+               "output" : "/actions/main/in/boolean_reload"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/y", "click" ],
+                  [ "/user/hand/left/input/x", "click" ]
+               ],
+               "output" : "/actions/main/in/boolean_spawnmenu"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/joystick", "held" ],
+                  [ "/user/hand/right/input/thumbrest", "touch" ]
+               ],
+               "output" : "/actions/main/in/boolean_teleport"
+            }
+         ],
+         "sources" : [
+            {
+               "inputs" : {
+                  "position" : {
+                     "output" : "/actions/main/in/vector2_walkdirection"
+                  }
+               },
+               "mode" : "joystick",
+               "parameters" : {
+                  "deadzone_pct" : "10"
+               },
+               "path" : "/user/hand/left/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_left_pickup"
+                  },
+                  "touch" : {
+                     "output" : "/actions/main/in/dummy"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/grip"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_primaryfire"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/trigger"
+            },
+            {
+               "inputs" : {
+                  "pull" : {
+                     "output" : "/actions/main/in/vector1_primaryfire"
+                  }
+               },
+               "mode" : "trigger",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/trigger"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_right_pickup"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/grip"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_left_primaryfire"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/trigger"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_changeweapon"
+                  },
+                  "touch" : {
+                     "output" : "/actions/main/in/lweaponmenu"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/y"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_jump"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/b"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_crouch"
+                  },
+                  "touch" : {
+                     "output" : "/actions/main/in/dummy"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/a"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_secondaryfire"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {
+                  "force_input" : "click",
+                  "touchy_click" : "false"
+               },
+               "path" : "/user/hand/right/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_sprint"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "position" : {
+                     "output" : "/actions/main/in/vector2_smoothturn"
+                  }
+               },
+               "mode" : "joystick",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_use"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/x"
+            },
+            {
+               "inputs" : {},
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/thumbrest"
+            },
+            {
+               "inputs" : {},
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/thumbrest"
+            }
+         ]
+      }
+   },
+   "category" : "steamvr_input",
+   "controller_type" : "oculus_touch",
+   "description" : "---Foot---\n\nTeleport () - Right Joystick + Right Thumb Rest\nReload - Left Thumb Rest + Right Thumb Rest\nWeapon menu - Y\nQuick menu - Y + X\nSprint - Left Joystick\nSecondary fire - Right Joystick\nCrouch - A\nJump - B\n\n----CAR----\n\nForward - Right Trigger\nReverse - Left Trigger\nHand Break - A or Trigger \nTurbo - B\nTurret - Right grip\nExit - X",
+   "interaction_profile" : "",
+   "name" : "Quest 3 GmodX64",
+   "options" : {},
+   "simulated_actions" : []
+}
       
 ]]
 --##############################################################################
@@ -2051,8 +1929,8 @@ local function WriteBindingFiles()
 end
 
 local cv_bindingVersion = CreateClientConVar("vrmod_bindingversion", "0", true, false)
-if cv_bindingVersion:GetInt() < 16 then
-   cv_bindingVersion:SetInt(16)
+if cv_bindingVersion:GetInt() < 17 then
+   cv_bindingVersion:SetInt(17)
    WriteBindingFiles()
 end
 
