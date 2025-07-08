@@ -36,10 +36,7 @@ function g_VR.MenuOpen()
 
 	--
 	local prevHoveredItem = -2
-	local tmp = Angle(0, g_VR.tracking.hmd.ang.yaw - 90, 60) --Forward() = right, Right() = back, Up() = up (relative to panel, panel forward is looking at top of panel from middle of panel, up is normal)
-	local pos, ang = WorldToLocal(g_VR.tracking.pose_righthand.pos + g_VR.tracking.pose_righthand.ang:Forward() * 9 + tmp:Right() * -7.68 + tmp:Forward() * -6.45, tmp, g_VR.origin, g_VR.originAngle)
-	--uid, width, height, panel, attachment, pos, ang, scale, cursorEnabled, closeFunc
-	VRUtilMenuOpen("miscmenu", 512, 512, nil, false, pos, ang, 0.03, true, function()
+	VRUtilMenuOpen("miscmenu", 512, 512, nil, true, Vector(4, 3, 9.5), Angle(0, -90, 60), 0.03, true, function()
 		hook.Remove("PreRender", "vrutil_hook_renderigm")
 		open = false
 		if items[prevHoveredItem] and g_VR.menuItems[items[prevHoveredItem].index] then g_VR.menuItems[items[prevHoveredItem].index].func() end
