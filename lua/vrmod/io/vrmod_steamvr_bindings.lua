@@ -91,18 +91,6 @@ g_VR.action_manifest = [[
 			"type": "boolean"
 		},
 		{
-			"name": "/actions/main/in/boolean_left_primaryfire",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/vector1_left_primaryfire",
-			"type": "vector1"
-		},
-		{
-			"name": "/actions/main/in/boolean_left_secondaryfire",
-			"type": "boolean"
-		},
-		{
 			"name": "/actions/main/in/boolean_changeweapon",
 			"type": "boolean"
 		},
@@ -124,14 +112,6 @@ g_VR.action_manifest = [[
 		},
 		{
 			"name": "/actions/main/in/boolean_flashlight",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/boolean_turnleft",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/boolean_turnright",
 			"type": "boolean"
 		},
 		{
@@ -197,31 +177,6 @@ g_VR.action_manifest = [[
 		},
 		
 		{
-			"name": "/actions/main/in/boolean_slot1",
-			"type": "boolean"
-		},
-		
-		{
-			"name": "/actions/main/in/boolean_slot2",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/boolean_slot3",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/boolean_slot4",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/boolean_slot5",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/boolean_slot6",
-			"type": "boolean"
-		},
-		{
 			"name": "/actions/main/in/boolean_teleport",
 			"type": "boolean"
 		},		
@@ -229,16 +184,7 @@ g_VR.action_manifest = [[
 			"name": "/actions/main/in/boolean_menucontext",
 			"type": "boolean"
 		},
-		{
-			"name": "/actions/main/in/boolean_lefthandmode",
-			"type": "boolean"
-		},
-		{
-			"name": "/actions/main/in/boolean_righthandmode",
-			"type": "boolean"
-		},
-		
-
+	
 		{
 			"name": "/actions/driving/in/vector1_forward",
 			"type": "vector1"
@@ -320,8 +266,6 @@ g_VR.action_manifest = [[
 			"/actions/main/in/vector2_walkdirection" : "Walk Direction",
 			"/actions/main/in/boolean_walk" : "Enable Walking",
 			"/actions/main/in/boolean_flashlight" : "Flashlight",
-			"/actions/main/in/boolean_turnleft" : "Snap Turn Left",
-			"/actions/main/in/boolean_turnright" : "Snap Turn Right",
 			"/actions/main/in/vector2_smoothturn" : "Smooth Turn",
 			"/actions/main/in/boolean_chat" : "chat",
 			"/actions/main/in/boolean_reload" : "Reload",
@@ -335,18 +279,9 @@ g_VR.action_manifest = [[
 			"/actions/main/in/boolean_back" : "Back",
 			"/actions/main/in/boolean_left" : "Left",
 			"/actions/main/in/boolean_right" : "Right",
-			"/actions/main/in/boolean_walkkey" : "walkkey",
-			"/actions/main/in/boolean_slot1" : "slot1",			
-			"/actions/main/in/boolean_slot2" : "slot2",
-			"/actions/main/in/boolean_slot3" : "slot3",			
-			"/actions/main/in/boolean_slot4" : "slot4",			
-			"/actions/main/in/boolean_slot5" : "slot5",			
-			"/actions/main/in/boolean_slot6" : "slot6",			
+			"/actions/main/in/boolean_walkkey" : "walkkey",			
 			"/actions/main/in/boolean_teleport" : "teleport",			
 			"/actions/main/in/boolean_menucontext" : "context menu",
-			"/actions/main/in/boolean_lefthandmode" : "lefthandmode",
-			"/actions/main/in/boolean_righthandmode" : "righthandmode",
-
 
 			"/actions/driving/in/vector1_forward" : "Forward",
 			"/actions/driving/in/vector1_reverse" : "Reverse",
@@ -491,20 +426,20 @@ g_VR.bindings_holographic = [[
             },
             {
                "inputs" : {
-                  "center" : {
-                     "output" : "/actions/main/in/boolean_changeweapon"
-                  },
-                  "east" : {
-                     "output" : "/actions/main/in/boolean_turnright"
-                  },
-                  "north" : {
-                     "output" : "/actions/main/in/boolean_secondaryfire"
-                  },
-                  "south" : {
+                   "center" : {
                      "output" : "/actions/main/in/boolean_flashlight"
                   },
+                  "east" : {
+                     "output" : "/actions/main/in/boolean_changeweapon"
+                  },
+                  "north" : {
+                     "output" : "/actions/main/in/boolean_jump"
+                  },
+                  "south" : {
+                     "output" : "/actions/main/in/boolean_crouch"
+                  },
                   "west" : {
-                     "output" : "/actions/main/in/boolean_turnleft"
+                     "output" : "/actions/main/in/boolean_spawnmenu"
                   }
                },
                "mode" : "dpad",
@@ -1084,19 +1019,19 @@ g_VR.bindings_vive = [[
             {
                "inputs" : {
                   "center" : {
-                     "output" : "/actions/main/in/boolean_changeweapon"
-                  },
-                  "east" : {
-                     "output" : "/actions/main/in/boolean_turnright"
-                  },
-                  "north" : {
-                     "output" : "/actions/main/in/boolean_secondaryfire"
-                  },
-                  "south" : {
                      "output" : "/actions/main/in/boolean_flashlight"
                   },
+                  "east" : {
+                     "output" : "/actions/main/in/boolean_changeweapon"
+                  },
+                  "north" : {
+                     "output" : "/actions/main/in/boolean_jump"
+                  },
+                  "south" : {
+                     "output" : "/actions/main/in/boolean_crouch"
+                  },
                   "west" : {
-                     "output" : "/actions/main/in/boolean_turnleft"
+                     "output" : "/actions/main/in/boolean_spawnmenu"
                   }
                },
                "mode" : "dpad",
@@ -1341,16 +1276,16 @@ g_VR.bindings_knuckles = [[
             {
                "inputs" : {
                   "east" : {
-                     "output" : "/actions/main/in/boolean_turnright"
+                     "output" : "/actions/main/in/boolean_changeweapon"
                   },
                   "north" : {
-                     "output" : "/actions/main/in/boolean_secondaryfire"
+                     "output" : "/actions/main/in/boolean_jump"
                   },
                   "south" : {
-                     "output" : "/actions/main/in/boolean_flashlight"
+                     "output" : "/actions/main/in/boolean_crouch"
                   },
                   "west" : {
-                     "output" : "/actions/main/in/boolean_turnleft"
+                     "output" : "/actions/main/in/boolean_spawnmenu"
                   }
                },
                "mode" : "dpad",
@@ -1706,16 +1641,16 @@ g_VR.bindings_cosmos = [[
             {
                "inputs" : {
                   "east" : {
-                     "output" : "/actions/main/in/boolean_turnright"
+                     "output" : "/actions/main/in/boolean_changeweapon"
                   },
                   "north" : {
-                     "output" : "/actions/main/in/boolean_secondaryfire"
+                     "output" : "/actions/main/in/boolean_jump"
                   },
                   "south" : {
-                     "output" : "/actions/main/in/boolean_flashlight"
+                     "output" : "/actions/main/in/boolean_crouch"
                   },
                   "west" : {
-                     "output" : "/actions/main/in/boolean_turnleft"
+                     "output" : "/actions/main/in/boolean_spawnmenu"
                   }
                },
                "mode" : "dpad",
@@ -1929,8 +1864,8 @@ local function WriteBindingFiles()
 end
 
 local cv_bindingVersion = CreateClientConVar("vrmod_bindingversion", "0", true, false)
-if cv_bindingVersion:GetInt() < 17 then
-   cv_bindingVersion:SetInt(17)
+if cv_bindingVersion:GetInt() < 18 then
+   cv_bindingVersion:SetInt(18)
    WriteBindingFiles()
 end
 
