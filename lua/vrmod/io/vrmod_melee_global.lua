@@ -123,15 +123,16 @@ if CLIENT then
     end
 
     -- Core melee logic
-    local function TryMelee(pos, vel, useWeapon)
+    local function TryMelee(pos, relativeVel, useWeapon)
         local ply = LocalPlayer()
-        local soundType = "fist"
-        local speedRaw = vel:Length()
-        local speedChk = speedRaw / 40
+        if not vrmod or not vrmod.GetHMDVelocity then return end
+        if not IsValid(ply) or not ply:Alive() then return end
         if useWeapon and not IsHoldingValidWeapon(ply) then useWeapon = false end
-        if useWeapon then soundType = "blunt" end
-        if speedChk < cv_meleeVelThreshold:GetFloat() then return end
+        -- Use the velocity passed in directly
+        local relativeSpeed = relativeVel:Length()
+        if relativeSpeed / 40 < cv_meleeVelThreshold:GetFloat() then return end
         if NextMeleeTime > CurTime() then return end
+        -- Determine source trace position
         local tr0 = util.TraceLine({
             start = pos,
             endpos = pos,
@@ -139,7 +140,8 @@ if CLIENT then
         })
 
         local src = tr0.HitPos + tr0.HitNormal * -2
-        local dir = vel:GetNormalized()
+        -- Trace parameters
+        local dir = relativeVel:GetNormalized()
         local reach = useWeapon and 10 or 5
         local radius = GetSweepRadius(useWeapon)
         local tr = util.TraceHull({
@@ -152,9 +154,11 @@ if CLIENT then
         })
 
         if cl_fistvisible:GetBool() then AddDebugSphere(src, radius) end
+        -- Final: Apply melee hit if collision occurs
         if tr.Hit then
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
-            SendMeleeAttack(tr.HitPos, dir, speedRaw, soundType)
+            local soundType = useWeapon and "blunt" or "fist"
+            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, soundType)
         end
     end
 
@@ -176,16 +180,21 @@ if CLIENT then
     hook.Add("VRMod_Tracking", "VRMeleeTrace", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
+        local hmdVel = vrmod.GetHMDVelocity()
+        local leftRelVel = vrmod.GetLeftHandVelocity() - hmdVel
+        local rightRelVel = vrmod.GetRightHandVelocity() - hmdVel
         if cl_usefist:GetBool() then
-            TryMelee(vrmod.GetLeftHandPos(ply), vrmod.GetLeftHandVelocity(ply), false)
-            TryMelee(vrmod.GetRightHandPos(ply), vrmod.GetRightHandVelocity(ply), cv_allowgunmelee:GetBool())
+            TryMelee(vrmod.GetRightHandPos(ply), leftRelVel, false)
+            TryMelee(vrmod.GetLeftHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool())
         end
 
         if cl_usekick:GetBool() and g_VR.sixPoints then
             local data = g_VR.net[ply:SteamID()]
             if data and data.lerpedFrame then
-                TryMelee(data.lerpedFrame.leftfootPos, data.lerpedFrame.leftfootVel, false)
-                TryMelee(data.lerpedFrame.rightfootPos, data.lerpedFrame.rightfootVel, false)
+                local leftFootRelVel = data.lerpedFrame.leftfootVel - hmdVel
+                local rightFootRelVel = data.lerpedFrame.rightfootVel - hmdVel
+                TryMelee(data.lerpedFrame.leftfootPos, leftFootRelVel, false)
+                TryMelee(data.lerpedFrame.rightfootPos, rightFootRelVel, false)
             end
         end
     end)
@@ -215,7 +224,7 @@ if SERVER then
             mask = MASK_SHOT
         })
 
-        if not tr.Hit or not IsValid(tr.Entity) then return end
+        if not tr.Hit then return end
         -- Calculate relative velocity: attacker's swing speed minus target's velocity projected onto swing direction
         local targetVel = tr.Entity.GetVelocity and tr.Entity:GetVelocity() or Vector(0, 0, 0)
         local relativeSpeed = math.max(0, swingSpeed - targetVel:Dot(dir))
