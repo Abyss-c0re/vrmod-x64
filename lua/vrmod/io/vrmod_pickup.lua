@@ -103,6 +103,16 @@ elseif SERVER then
 		return true
 	end
 
+	local function ForwardRagdollDamage(ent, dmginfo)
+		if not (ent:IsRagdoll() and IsValid(ent.vr_original_npc)) then return end
+		local npc = ent.vr_original_npc
+		local dmg = dmginfo:GetDamage()
+		-- Had to use this workaround to avoid respawn
+		local newHealth = npc:Health() - dmg
+		npc:SetHealth(math.max(0, newHealth))
+		return true
+	end
+
 	local function SpawnPickupRagdoll(npc)
 		if not IsValid(npc) then return end
 		-- 1) Create the ragdoll immediately
@@ -134,6 +144,7 @@ elseif SERVER then
 		-- 3) Fully disable & hide the original NPC
 		rag.vr_original_npc = npc
 		rag.vr_dropped_manually = false
+		hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", ForwardRagdollDamage)
 		npc:SetNoDraw(true)
 		npc:SetNotSolid(true)
 		npc:SetMoveType(MOVETYPE_NONE)
@@ -171,6 +182,8 @@ elseif SERVER then
 				-- Rag was gibbed: kill the NPC too
 				npc:Remove()
 			end
+
+			hook.Remove("EntityTakeDamage", "VRMod_ForwardRagdollDamage")
 		end)
 		return rag
 	end
@@ -178,7 +191,14 @@ elseif SERVER then
 	local function IsRagdollGibbed(ent)
 		-- 0) Missing or invalid entity → treat as gibbed
 		if not IsValid(ent) then return true end
-		-- 1) Look for Zippy’s health table, only if it exists
+		-- 0) Zero HP is gibbed too
+		local npc = ent.vr_original_npc
+		if IsValid(npc) and npc:Health() <= 0 then
+			hook.Remove("EntityTakeDamage", "VRMod_ForwardRagdollDamage")
+			return true
+		end
+
+		-- 2) Look for Zippy’s health table, only if it exists
 		local hpTable = ent.ZippyGoreMod3_PhysBoneHPs
 		if type(hpTable) == "table" then
 			for boneIndex, hp in pairs(hpTable) do
@@ -186,7 +206,7 @@ elseif SERVER then
 			end
 		end
 
-		-- 2) Look for Zippy’s gib‑flag table, only if it exists
+		-- 3) Look for Zippy’s gib‑flag table, only if it exists
 		local gibTable = ent.ZippyGoreMod3_GibbedPhysBones
 		if type(gibTable) == "table" then
 			for boneIndex, wasGibbed in pairs(gibTable) do
@@ -194,9 +214,9 @@ elseif SERVER then
 			end
 		end
 
-		-- 3) If neither table is there, Zippy is disabled or not applied—assume “not gibbed”
+		-- 4) If neither table is there, Zippy is disabled or not applied—assume “not gibbed”
 		if hpTable == nil and gibTable == nil then return false end
-		-- 4) Physics‐object count heuristic (only if we have a hpTable)
+		-- 5) Physics‐object count heuristic (only if we have a hpTable)
 		if type(hpTable) == "table" then
 			local expectedBones = table.Count(hpTable)
 			if ent:GetPhysicsObjectCount() < expectedBones then return true end
