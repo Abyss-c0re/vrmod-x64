@@ -198,12 +198,9 @@ if SERVER then
         if not IsValid(ply) or not ply:Alive() then return end
         local src = net.ReadVector()
         local dir = net.ReadVector()
-        local speed = net.ReadFloat()
+        local swingSpeed = net.ReadFloat()
         local soundType = net.ReadString()
         local base = cv_meleeDamage:GetFloat()
-        local scaled = math.Clamp((speed / 80) ^ 2, 0.1, 6.0)
-        local dmgAmt = base * scaled * 0.1
-        if soundType == "blunt" then dmgAmt = dmgAmt * 1.25 end
         local reach = 8
         local radius = 5
         local tr = util.TraceHull({
@@ -218,8 +215,16 @@ if SERVER then
             mask = MASK_SHOT
         })
 
-        if not tr.Hit then return end
+        if not tr.Hit or not IsValid(tr.Entity) then return end
+        -- Calculate relative velocity: attacker's swing speed minus target's velocity projected onto swing direction
+        local targetVel = tr.Entity.GetVelocity and tr.Entity:GetVelocity() or Vector(0, 0, 0)
+        local relativeSpeed = math.max(0, swingSpeed - targetVel:Dot(dir))
+        -- Scale damage based on relative speed
+        local scaled = math.Clamp((relativeSpeed / 80) ^ 2, 0.1, 6.0)
+        local dmgAmt = base * scaled * 0.1
+        if soundType == "blunt" then dmgAmt = dmgAmt * 1.25 end
         -- Apply damage
+        print("Hit! " .. dmgAmt)
         local dmgInfo = DamageInfo()
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
