@@ -69,8 +69,6 @@ if CLIENT then
 		hook.Call("VRMod_Pickup", nil, ply, ent)
 	end)
 elseif SERVER then
-	local ragdollFollows = {}
-	local ragdollFollowHookActive = false
 	util.AddNetworkString("vrmod_pickup")
 	local function IsWeaponEntity(ent)
 		if not IsValid(ent) then return false end
@@ -105,80 +103,21 @@ elseif SERVER then
 		return true
 	end
 
-	function VRMod_EnableRagdollFollow(ply, ent, boneIndex, bLeftHand)
-		if not (IsValid(ply) and IsValid(ent)) then return end
-		boneIndex = boneIndex or 0
-		ragdollFollows[ply] = {
-			ent = ent,
-			boneIndex = boneIndex,
-			bLeftHand = bLeftHand
-		}
-
-		if not ragdollFollowHookActive then
-			ragdollFollowHookActive = true
-			hook.Add("Think", "vrmod_ragdoll_follow_hand", function()
-				for ply, data in pairs(ragdollFollows) do
-					if IsValid(ply) and IsValid(data.ent) then
-						local vr = g_VR[ply]
-						if vr then
-							local handID = data.bLeftHand and 1 or 2
-							local handData = vr.tracking[handID]
-							if handData then
-								local handPos = handData.pos
-								local handAng = handData.ang
-								if handPos and handAng then
-									local physBone = data.ent:TranslateBoneToPhysBone(data.boneIndex)
-									if physBone and physBone >= 0 then
-										local physObj = data.ent:GetPhysicsObjectNum(physBone)
-										if IsValid(physObj) then
-											-- Calculate corrected position with offset to align the bone pivot
-											local offsetPos = Vector(-5, 0, 0) -- tweak this vector to fit your model
-											local correctedPos = handPos + handAng:Forward() * offsetPos.x + handAng:Right() * offsetPos.y + handAng:Up() * offsetPos.z
-											-- Interpolate position and angles for smooth follow
-											local lerpSpeed = 100 -- increase for snappier follow, lower for more lag
-											local curPos = physObj:GetPos()
-											local curAng = physObj:GetAngles()
-											local newPos = LerpVector(FrameTime() * lerpSpeed, curPos, correctedPos)
-											local newAng = LerpAngle(FrameTime() * lerpSpeed, curAng, handAng)
-											physObj:SetPos(newPos)
-											physObj:SetAngles(newAng)
-											physObj:Wake()
-											-- Set entity overall position/angle closer to hand for alignment
-											data.ent:SetPos(handPos)
-											data.ent:SetAngles(handAng)
-										end
-									end
-								end
-							end
-						end
-					else
-						ragdollFollows[ply] = nil
-					end
-				end
-
-				if next(ragdollFollows) == nil then
-					ragdollFollowHookActive = false
-					hook.Remove("Think", "vrmod_ragdoll_follow_hand")
-				end
-			end)
-
-			print("[VRMod] Ragdoll follow hook enabled.")
-		end
-	end
-
-	function VRMod_DisableRagdollFollow(ply)
-		ragdollFollows[ply] = nil
-		print("[VRMod] Ragdoll follow hook disabled.")
-	end
-
 	local function ForwardRagdollDamage(ent, dmginfo)
 		if not (ent:IsRagdoll() and IsValid(ent.vr_original_npc)) then return end
 		local npc = ent.vr_original_npc
 		local dmg = dmginfo:GetDamage()
-		-- Had to use this workaround to avoid respawn
-		local newHealth = npc:Health() - dmg
-		npc:SetHealth(math.max(0, newHealth))
-		return true
+		-- Update NPC health for logic purposes
+		npc:SetHealth(math.max(0, npc:Health() - dmg))
+		-- Apply physical force on ragdoll
+		local force = dmginfo:GetDamageForce() or Vector(0, 0, 0)
+		if force ~= vector_origin then
+			local physCount = ent:GetPhysicsObjectCount()
+			for i = 0, physCount - 1 do
+				local phys = ent:GetPhysicsObjectNum(i)
+				if IsValid(phys) then phys:ApplyForceCenter(force) end
+			end
+		end
 	end
 
 	local function SpawnPickupRagdoll(npc)
@@ -261,11 +200,7 @@ elseif SERVER then
 		if not IsValid(ent) then return true end
 		-- 0) Zero HP is gibbed too
 		local npc = ent.vr_original_npc
-		if IsValid(npc) and npc:Health() <= 0 then
-			hook.Remove("EntityTakeDamage", "VRMod_ForwardRagdollDamage")
-			return true
-		end
-
+		if IsValid(npc) and npc:Health() <= 0 then return true end
 		-- 2) Look for Zippy’s health table, only if it exists
 		local hpTable = ent.ZippyGoreMod3_PhysBoneHPs
 		if type(hpTable) == "table" then
@@ -372,6 +307,8 @@ elseif SERVER then
 						net.WriteBool(true)
 						net.Broadcast()
 					end
+
+					hook.Remove("EntityTakeDamage", "VRMod_ForwardRagdollDamage")
 				elseif IsValid(ent) then
 					-- Normal prop drop
 					if IsValid(t.phys) then
@@ -397,8 +334,6 @@ elseif SERVER then
 				end
 
 				-- Common cleanup
-				local ply = player.GetBySteamID(steamid)
-				VRMod_DisableRagdollFollow(ply)
 				g_VR[steamid].heldItems[bLeft and 1 or 2] = nil
 				table.remove(pickupList, i)
 				pickupCount = pickupCount - 1
@@ -420,26 +355,14 @@ elseif SERVER then
 		local ent = FindPickupTarget(ply, bLeftHand, handPos, handAng)
 		if not IsValid(ent) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then return end
 		-- Ragdoll position fix
-		-- if ent:GetClass() == "prop_ragdoll" then
-		-- 	local delta = handPos - ent:GetPos()
-		-- 	for i = 0, ent:GetPhysicsObjectCount() - 1 do
-		-- 		local phys = ent:GetPhysicsObjectNum(i)
-		-- 		if IsValid(phys) then phys:SetPos(phys:GetPos() - delta) end
-		-- 	end
-		-- 	ent:SetAngles(handAng)
-		-- 	VRMod_EnableRagdollFollow()
-		-- end
 		if ent:GetClass() == "prop_ragdoll" then
-			local boneIndex = 0 -- use the right bone (e.g., head or chest)
-			local phys = ent:GetPhysicsObjectNum(boneIndex)
-			if not IsValid(phys) then return end
-			-- phys:EnableMotion(false)
-			-- phys:SetPos(handPos)
-			-- phys:SetAngles(handAng)
-			-- phys:EnableMotion(true)
-			-- phys:Wake()
-			phys:EnableMotion(false)
-			VRMod_EnableRagdollFollow(ply, ent, boneIndex, bLeftHand) -- if needed
+			local delta = handPos - ent:GetPos()
+			for i = 0, ent:GetPhysicsObjectCount() - 1 do
+				local phys = ent:GetPhysicsObjectNum(i)
+				if IsValid(phys) then phys:SetPos(phys:GetPos() - delta) end
+			end
+
+			ent:SetAngles(handAng)
 		end
 
 		if not IsValid(pickupController) then
