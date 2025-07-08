@@ -118,7 +118,19 @@ function VRUtilOpenMenu()
 	end
 
 	-- Teleportation
+	controlsPanel:CheckBox("Teleportation (Server)", "vrmod_allow_teleport")
 	controlsPanel:CheckBox("Teleportation (Client)", "vrmod_allow_teleport_client")
+	controlsPanel:CheckBox("Use Left hand for Teleportation", "vrmod_teleport_use_left")
+	local maxDistSlider = vgui.Create("DNumSlider")
+	controlsPanel:AddItem(maxDistSlider)
+	maxDistSlider:SetText("Max distance (Server)")
+	maxDistSlider:SetDark(true)
+	-- whole‐number stepping
+	maxDistSlider:SetMin(0)
+	maxDistSlider:SetMax(1000)
+	maxDistSlider:SetDecimals(0)
+	-- tell the slider which ConVar to read/write
+	maxDistSlider:SetConVar("vrmod_teleport_maxdist")
 	-- Alternative head angles
 	local headAngleBox = vgui.Create("DCheckBoxLabel", controlsPanel)
 	controlsPanel:AddItem(headAngleBox)

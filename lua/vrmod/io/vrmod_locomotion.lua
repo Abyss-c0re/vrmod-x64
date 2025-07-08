@@ -1,9 +1,11 @@
-local cv_allowtp = CreateClientConVar("vrmod_allow_teleport", 1, true, FCVAR_REPLICATED)
+local cv_allowtp = CreateConVar("vrmod_allow_teleport", "1", FCVAR_REPLICATED, "Enable teleportation in VRMod", 0, 1)
 local cv_usetp = CreateClientConVar("vrmod_allow_teleport_client", 0, true, FCVAR_ARCHIVE)
 local cl_analogmoveonly = CreateClientConVar("vrmod_test_analogmoveonly", 0, false, FCVAR_ARCHIVE)
+local cv_tp_hand = CreateClientConVar("vrmod_teleport_use_left", 0, true, FCVAR_ARCHIVE)
+local cv_maxTpDist = CreateConVar("vrmod_teleport_maxdist", 50, FCVAR_ARCHIVE + FCVAR_NOTIFY + FCVAR_REPLICATED, "Maximum teleport distance for VRMod")
 if SERVER then
 	util.AddNetworkString("vrmod_teleport")
-	vrmod.NetReceiveLimited("vrmod_teleport", 10, 333, function(len, ply) if cv_allowtp:GetBool() and g_VR[ply:SteamID()] ~= nil and (hook.Run("PlayerNoClip", ply, true) == true or ULib and ULib.ucl.query(ply, "ulx noclip") == true) then ply:SetPos(net.ReadVector()) end end)
+	vrmod.NetReceiveLimited("vrmod_teleport", 10, 100, function(len, ply) if cv_allowtp:GetBool() and g_VR[ply:SteamID()] ~= nil and (hook.Run("PlayerNoClip", ply, true) == true or ULib and ULib.ucl.query(ply, "ulx noclip") == true) then ply:SetPos(net.ReadVector()) end end)
 	return
 end
 
@@ -30,12 +32,19 @@ hook.Add("VRMod_Input", "teleport", function(action, pressed)
 			end
 
 			hook.Add("VRMod_PreRender", "teleport", function()
-				local controllerPos, controllerDir = g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang:Forward()
+				local controllerPos, controllerDir
+				local cv_maxTpDist = cv_maxTpDist:GetInt()
+				if cv_tp_hand:GetBool() then
+					controllerPos, controllerDir = g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang:Forward()
+				else
+					controllerPos, controllerDir = g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang:Forward()
+				end
+
 				prevPos = controllerPos
 				local hit = false
 				for i = 2, 17 do
 					local d = i - 1
-					local nextPos = controllerPos + controllerDir * 50 * d + Vector(0, 0, -d * d * 3)
+					local nextPos = controllerPos + controllerDir * cv_maxTpDist * d + Vector(0, 0, -d * d * 3)
 					local v = nextPos - prevPos
 					if not hit then
 						local tr = util.TraceLine({
