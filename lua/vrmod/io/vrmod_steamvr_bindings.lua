@@ -552,7 +552,7 @@ g_VR.bindings_holographic = [[
 --##############################################################################
 --##############################################################################
 g_VR.bindings_touch = [[
-   {
+{
    "action_manifest_version" : 0,
    "alias_info" : {},
    "app_key" : "steam.app.4000",
@@ -601,7 +601,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "trigger",
-               "parameters" : {},
                "path" : "/user/hand/right/input/trigger"
             },
             {
@@ -611,7 +610,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "trigger",
-               "parameters" : {},
                "path" : "/user/hand/left/input/trigger"
             },
             {
@@ -621,7 +619,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "joystick",
-               "parameters" : {},
                "path" : "/user/hand/left/input/joystick"
             },
             {
@@ -631,7 +628,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/right/input/b"
             },
             {
@@ -641,7 +637,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/right/input/a"
             },
             {
@@ -651,7 +646,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/y"
             },
             {
@@ -661,18 +655,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/x"
-            },
-            {
-               "inputs" : {
-                  "click" : {
-                     "output" : "/actions/driving/in/boolean_handbrake"
-                  }
-               },
-               "mode" : "trigger",
-               "parameters" : {},
-               "path" : "/user/hand/left/input/grip"
             },
             {
                "inputs" : {
@@ -681,7 +664,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "joystick",
-               "parameters" : {},
                "path" : "/user/hand/right/input/joystick"
             },
             {
@@ -690,9 +672,8 @@ g_VR.bindings_touch = [[
                      "output" : "/actions/driving/in/boolean_turret"
                   }
                },
-               "mode" : "trigger",
-               "parameters" : {},
-               "path" : "/user/hand/right/input/grip"
+               "mode" : "button",
+               "path" : "/user/hand/right/input/joystick"
             }
          ]
       },
@@ -704,13 +685,6 @@ g_VR.bindings_touch = [[
                   [ "/user/hand/right/input/thumbrest", "touch" ]
                ],
                "output" : "/actions/main/in/boolean_reload"
-            },
-            {
-               "inputs" : [
-                  [ "/user/hand/left/input/y", "click" ],
-                  [ "/user/hand/left/input/x", "click" ]
-               ],
-               "output" : "/actions/main/in/boolean_spawnmenu"
             },
             {
                "inputs" : [
@@ -743,7 +717,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/grip"
             },
             {
@@ -753,17 +726,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
-               "path" : "/user/hand/right/input/trigger"
-            },
-            {
-               "inputs" : {
-                  "pull" : {
-                     "output" : "/actions/main/in/vector1_primaryfire"
-                  }
-               },
-               "mode" : "trigger",
-               "parameters" : {},
                "path" : "/user/hand/right/input/trigger"
             },
             {
@@ -773,30 +735,27 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/right/input/grip"
             },
             {
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/main/in/boolean_left_primaryfire"
+                     "output" : "/actions/main/in/boolean_secondaryfire"
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/trigger"
             },
             {
                "inputs" : {
                   "click" : {
-                     "output" : "/actions/main/in/boolean_changeweapon"
+                     "output" : "/actions/main/in/boolean_spawnmenu"
                   },
                   "touch" : {
                      "output" : "/actions/main/in/lweaponmenu"
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/y"
             },
             {
@@ -806,7 +765,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/right/input/b"
             },
             {
@@ -819,21 +777,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/right/input/a"
-            },
-            {
-               "inputs" : {
-                  "click" : {
-                     "output" : "/actions/main/in/boolean_secondaryfire"
-                  }
-               },
-               "mode" : "button",
-               "parameters" : {
-                  "force_input" : "click",
-                  "touchy_click" : "false"
-               },
-               "path" : "/user/hand/right/input/joystick"
             },
             {
                "inputs" : {
@@ -842,7 +786,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/joystick"
             },
             {
@@ -852,7 +795,6 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "joystick",
-               "parameters" : {},
                "path" : "/user/hand/right/input/joystick"
             },
             {
@@ -862,29 +804,35 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/x"
             },
             {
                "inputs" : {},
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/left/input/thumbrest"
             },
             {
                "inputs" : {},
                "mode" : "button",
-               "parameters" : {},
                "path" : "/user/hand/right/input/thumbrest"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/main/in/boolean_changeweapon"
+                  }
+               },
+               "mode" : "button",
+               "path" : "/user/hand/right/input/joystick"
             }
          ]
       }
    },
    "category" : "steamvr_input",
    "controller_type" : "oculus_touch",
-   "description" : "---Foot---\n\nTeleport () - Right Joystick + Right Thumb Rest\nReload - Left Thumb Rest + Right Thumb Rest\nWeapon menu - Y\nQuick menu - Y + X\nSprint - Left Joystick\nSecondary fire - Right Joystick\nCrouch - A\nJump - B\n\n----CAR----\n\nForward - Right Trigger\nReverse - Left Trigger\nHand Break - A or Trigger \nTurbo - B\nTurret - Right grip\nExit - X",
+   "description" : "--- On Foot ---\n\nTeleport () - Right Joystick + Right Thumb Rest\nReload - Left Thumb Rest + Right Thumb Rest\nWeapon menu - Right Joystick\nQuick menu - Y\nUse - X\nSprint - Left Joystick\nSecondary fire - Left Trigger\nCrouch - A\nJump - B\n\n--- In Vehicle ---\n\nForward - Right Trigger\nReverse - Left Trigger\nHand Break - A \nTurbo - B\nTurret - Right Joystick\nQuick menu - Y\nExit - X",
    "interaction_profile" : "",
-   "name" : "Quest 3 GmodX64",
+   "name" : "Quest 3 Gmod64 from Doom Slayer",
    "options" : {},
    "simulated_actions" : []
 }
@@ -1864,8 +1812,8 @@ local function WriteBindingFiles()
 end
 
 local cv_bindingVersion = CreateClientConVar("vrmod_bindingversion", "0", true, false)
-if cv_bindingVersion:GetInt() < 18 then
-   cv_bindingVersion:SetInt(18)
+if cv_bindingVersion:GetInt() < 19 then
+   cv_bindingVersion:SetInt(19)
    WriteBindingFiles()
 end
 
