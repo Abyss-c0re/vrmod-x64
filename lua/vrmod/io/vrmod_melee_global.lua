@@ -184,8 +184,8 @@ if CLIENT then
         local leftRelVel = vrmod.GetLeftHandVelocity() - hmdVel
         local rightRelVel = vrmod.GetRightHandVelocity() - hmdVel
         if cl_usefist:GetBool() then
-            TryMelee(vrmod.GetRightHandPos(ply), leftRelVel, false)
-            TryMelee(vrmod.GetLeftHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool())
+            TryMelee(vrmod.GetLeftHandPos(ply), leftRelVel, false)
+            TryMelee(vrmod.GetRightHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool())
         end
 
         if cl_usekick:GetBool() and g_VR.sixPoints then
