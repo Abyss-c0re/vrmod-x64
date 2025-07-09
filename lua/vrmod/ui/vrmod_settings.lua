@@ -481,9 +481,18 @@ function VRUtilOpenMenu()
 
 		AddSl("Pickup weight (server)", "vrmod_pickup_weight", 1, 10000, 0)
 		AddSl("Pickup range  (server)", "vrmod_pickup_range", 0.0, 10.0, 1)
+		AddCB("Flashlight on the left hand", "vrmod_flashlight_attachment")
+		local btn = vgui.Create("DButton", t)
+		btn:SetText("Weapon offset")
+		btn:SetPos(10, y + 45)
+		btn:SetSize(160, 30)
+		function btn:DoClick()
+			RunConsoleCommand("vrmod_weaponconfig")
+		end
+
 		local btn = vgui.Create("DButton", t)
 		btn:SetText("Reset")
-		btn:SetPos(190, 255)
+		btn:SetPos(190, y + 45)
 		btn:SetSize(160, 30)
 		function btn:DoClick()
 			RunConsoleCommand("vrmod_allow_teleport_client", "0")
@@ -495,6 +504,8 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_pickup_limit", "1")
 			RunConsoleCommand("vrmod_pickup_npcs", "0")
 		end
+
+		y = y + 45
 	end
 
 	-- ─────────────── HUD/UI Tab ───────────────
