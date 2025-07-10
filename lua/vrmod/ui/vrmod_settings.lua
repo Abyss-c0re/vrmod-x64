@@ -554,23 +554,43 @@ function VRUtilOpenMenu()
 		cb3:SetText("[Menu & UI Red Outline]")
 		cb3:SetConVar("vrmod_ui_outline")
 		cb3:SizeToContents()
-		-- Beam Color
-		local lbl = vgui.Create("DLabel", t)
-		lbl:SetPos(20, 185)
-		lbl:SetSize(200, 30)
-		surface.SetDrawColor(75, 75, 75, 255)
-		lbl:SetText("Beam color")
-		lbl:SetTextColor(Color(0, 0, 0))
+		-- Dropdown for selecting color target
+		local modeDropdown = vgui.Create("DComboBox", t)
+		modeDropdown:SetPos(20, 185)
+		modeDropdown:SetSize(200, 30)
+		modeDropdown:SetValue("Beam Color") -- default selection
+		modeDropdown:AddChoice("Beam Color")
+		modeDropdown:AddChoice("Laser Color")
+		-- Color mixer
 		local mixer = vgui.Create("DColorMixer", t)
 		mixer:SetPos(20, 220)
 		mixer:SetSize(360, 200)
 		mixer:SetPalette(true)
 		mixer:SetAlphaBar(true)
 		mixer:SetWangs(true)
-		local str = convars.vrmod_beam_color:GetString()
-		local r, g, b, a = string.match(str, "(%d+),(%d+),(%d+),(%d+)")
-		if r and g and b and a then mixer:SetColor(Color(tonumber(r), tonumber(g), tonumber(b), tonumber(a))) end
-		mixer.ValueChanged = function(_, col) RunConsoleCommand("vrmod_beam_color", string.format("%d,%d,%d,%d", col.r, col.g, col.b, col.a)) end
+		-- Utility: function to update mixer color based on selection
+		local function updateMixerColor()
+			local selection = modeDropdown:GetValue()
+			local convar = selection == "Laser Color" and convars.vrmod_laser_color or convars.vrmod_beam_color
+			local str = convar:GetString()
+			local r, g, b, a = string.match(str, "(%d+),(%d+),(%d+),(%d+)")
+			if r and g and b and a then mixer:SetColor(Color(tonumber(r), tonumber(g), tonumber(b), tonumber(a))) end
+		end
+
+		-- Initial color
+		updateMixerColor()
+		-- When dropdown selection changes, update mixer color and command
+		modeDropdown.OnSelect = function(_, _, value) updateMixerColor() end
+		-- Handle mixer color change based on current mode
+		mixer.ValueChanged = function(_, col)
+			local selection = modeDropdown:GetValue()
+			if selection == "Laser Color" then
+				RunConsoleCommand("vrmod_laser_color", string.format("%d,%d,%d,%d", col.r, col.g, col.b, col.a))
+			else
+				RunConsoleCommand("vrmod_beam_color", string.format("%d,%d,%d,%d", col.r, col.g, col.b, col.a))
+			end
+		end
+
 		local btn2 = vgui.Create("DButton", t)
 		btn2:SetText("Set Defaults")
 		btn2:SetPos(190, 450)
@@ -584,6 +604,7 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_hudblacklist", "")
 			RunConsoleCommand("vrmod_hud_visible_quickmenukey", "0")
 			RunConsoleCommand("vrmod_beam_color", "255,0,0,255")
+			RunConsoleCommand("vrmod_laser_color", "255,0,0,255")
 		end
 	end
 

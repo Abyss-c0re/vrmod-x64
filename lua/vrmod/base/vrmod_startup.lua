@@ -33,13 +33,94 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_yaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_roll", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
-    local matLaser = Material("cable/redlaser")
-    local function drawLaser()
-        if g_VR.viewModelMuzzle and not g_VR.menuFocus then
-            render.SetMaterial(matLaser)
-            render.DrawBeam(g_VR.viewModelMuzzle.Pos, g_VR.viewModelMuzzle.Pos + g_VR.viewModelMuzzle.Ang:Forward() * 10000, 1, 0, 1, Color(255, 255, 255, 255))
-        end
+    ----------------------------------------------------------------------------
+    --- LASER POINTER ---
+    -- Default laser color
+    local laserColor = Color(255, 0, 0, 255)
+    -- Custom laser beam material with vertex color support
+    local LaserMaterial = Material("cable/red") -- fallback
+    do
+        local matData = {
+            ["$basetexture"] = "color/white",
+            ["$additive"] = "1", -- Glowing effect
+            ["$vertexcolor"] = "1", -- Use per-vertex color
+            ["$vertexalpha"] = "1", -- Use per-vertex alpha
+            ["$nocull"] = "1", -- Make it visible from both sides
+            ["$ignorez"] = "0", -- Depth-aware (optional)
+        }
+
+        local success, customMat = pcall(CreateMaterial, "CustomLaserMaterial", "UnlitGeneric", matData)
+        if success and customMat then LaserMaterial = customMat end
     end
+
+    -- Glow sprite material
+    local GlowSprite = Material("sprites/glow04_noz")
+    -- Update laserColor from convar string
+    local function UpdateLaserColor(colorString)
+        local r, g, b, a = string.match(colorString, "(%d+),(%d+),(%d+),(%d+)")
+        if not (r and g and b and a) then return end
+        laserColor = Color(tonumber(r), tonumber(g), tonumber(b), tonumber(a))
+    end
+
+    -- ConVar listener for dynamic updates
+    vrmod.AddCallbackedConvar("vrmod_laser_color", nil, "255,0,0,255", nil, "", nil, nil, nil, function(newValue) UpdateLaserColor(newValue) end)
+    -- Flicker width for beam animation
+    local function getFlickerWidth()
+        return 0.05 + math.abs(math.sin(CurTime() * 40)) * 0.05
+    end
+
+    -- Beam + glow rendering
+    local function drawLaser()
+        if not g_VR.viewModelMuzzle or g_VR.menuFocus then return end
+        local startPos = g_VR.viewModelMuzzle.Pos
+        local dir = g_VR.viewModelMuzzle.Ang:Forward()
+        local endPos = startPos + dir * 10000
+        local tr = util.TraceLine({
+            start = startPos,
+            endpos = endPos,
+            filter = LocalPlayer(),
+        })
+
+        local function ScaleAlpha(col, scale)
+            return Color(col.r, col.g, col.b, math.Clamp(col.a * scale, 0, 255))
+        end
+
+        -- Draw laser beam
+        render.SetMaterial(LaserMaterial)
+        render.DrawBeam(startPos, tr.HitPos, getFlickerWidth(), 0, 1, laserColor)
+        -- Draw muzzle glow (slightly smaller)
+        render.SetMaterial(GlowSprite)
+        render.DrawSprite(startPos, 3, 3, laserColor)
+        -- Draw hit glow if beam hits something
+        if tr.Hit then render.DrawSprite(tr.HitPos + tr.HitNormal * 1, 8, 8, ScaleAlpha(laserColor, 1.2)) end
+    end
+
+    local function setLaserEnabled(enabled)
+        if enabled then
+            hook.Add("PostDrawTranslucentRenderables", "vr_laserpointer", drawLaser)
+        else
+            hook.Remove("PostDrawTranslucentRenderables", "vr_laserpointer")
+        end
+
+        -- Persist state in convar
+        RunConsoleCommand("vrmod_laserpointer", enabled and "1" or "0")
+    end
+
+    -- Console command to toggle laser
+    concommand.Add("vrmod_togglelaserpointer", function()
+        local enabled = GetConVar("vrmod_laserpointer"):GetBool()
+        setLaserEnabled(not enabled)
+    end)
+
+    -- Activate laser if convar is set on VR start
+    hook.Add("VRMod_Start", "laserOn", function()
+        timer.Simple(0.1, function()
+            if GetConVar("vrmod_laserpointer"):GetBool() then setLaserEnabled(true) end
+            -- Force update laser color from current convar value
+            local laserColorConvar = GetConVar("vrmod_laser_color")
+            if laserColorConvar then UpdateLaserColor(laserColorConvar:GetString()) end
+        end)
+    end)
 
     concommand.Add("vrmod_start", function(ply, cmd, args)
         if vgui.CursorVisible() then print("vrmod: attempting startup when game is unpaused") end
@@ -141,20 +222,6 @@ if CLIENT then
         banner()
     end)
 
-    local function setLaserEnabled(enabled)
-        if enabled then
-            hook.Add("PostDrawTranslucentRenderables", "vr_laserpointer", drawLaser)
-            if IsValid(LocalPlayer()) then
-                LocalPlayer():ConCommand("vrmod_laserpointer 1")
-            else
-                timer.Simple(0, function() if IsValid(LocalPlayer()) then LocalPlayer():ConCommand("vrmod_laserpointer 1") end end)
-            end
-        else
-            hook.Remove("PostDrawTranslucentRenderables", "vr_laserpointer")
-            if IsValid(LocalPlayer()) then LocalPlayer():ConCommand("vrmod_laserpointer 0") end
-        end
-    end
-
     concommand.Add("vrmod", function(ply, cmd, args)
         if vgui.CursorVisible() then print("vrmod: menu will open when game is unpaused") end
         timer.Create("vrmod_open_menu", 0.1, 0, function()
@@ -163,16 +230,6 @@ if CLIENT then
                 timer.Remove("vrmod_open_menu")
             end
         end)
-    end)
-
-    concommand.Add("vrmod_togglelaserpointer", function()
-        local enabled = GetConVar("vrmod_laserpointer"):GetBool()
-        setLaserEnabled(not enabled)
-    end)
-
-    hook.Add("VRMod_Start", "laserOn", function()
-        timer.Simple(0.1, function() end)
-        if convars.vrmod_laserpointer:GetBool() then setLaserEnabled(true) end
     end)
 elseif SERVER then
     hook.Add("GravGunOnPickedUp", "VR_TrackHeldEntity", function(ply, ent)
