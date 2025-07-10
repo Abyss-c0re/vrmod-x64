@@ -143,33 +143,4 @@ if CLIENT then
             end
         end)
     end)
-elseif SERVER then
-    hook.Add("GravGunOnPickedUp", "VR_TrackHeldEntity", function(ply, ent)
-        if not vrmod.IsPlayerInVR(ply) then return end
-        -- Store held entity
-        ply.VRHeldEnt = ent
-        -- Add Think hook to apply rotation every frame
-        hook.Add("Think", "VR_ApplyRotation_" .. ply:SteamID(), function()
-            if not IsValid(ply) or not IsValid(ply.VRHeldEnt) then
-                -- Remove hook if player or entity is invalid
-                hook.Remove("Think", "VR_ApplyRotation_" .. ply:SteamID())
-                return
-            end
-
-            local phys = ply.VRHeldEnt:GetPhysicsObject()
-            if IsValid(phys) then
-                phys:SetAngleVelocityInstantaneous(Vector(0, 0, 0))
-                phys:SetAngles(vrmod.GetRightHandAng(ply))
-            else
-                ply.VRHeldEnt:SetAngles(vrmod.GetRightHandAng(ply))
-            end
-        end)
-    end)
-
-    hook.Add("GravGunOnDropped", "VR_ClearHeldEntity", function(ply, ent)
-        if ply.VRHeldEnt == ent then
-            ply.VRHeldEnt = nil
-            hook.Remove("Think", "VR_ApplyRotation_" .. ply:SteamID())
-        end
-    end)
 end

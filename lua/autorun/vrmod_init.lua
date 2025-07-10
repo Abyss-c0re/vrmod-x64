@@ -20,6 +20,7 @@ local files = {
     "vrmod/io/vrmod_pickup_arcvr.lua",
     "vrmod/io/vrmod_seated.lua",
     "vrmod/io/vrmod_steamvr_bindings.lua",
+    "vrmod/io/vrmod_gravity_and_physgun.lua",
     "vrmod/view/vrmod_character.lua",
     "vrmod/view/vrmod_character_hands.lua",
     "vrmod/view/vrmod_pmchange.lua",

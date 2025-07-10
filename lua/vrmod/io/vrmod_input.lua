@@ -2,33 +2,7 @@ local cl_bothkey = CreateClientConVar("vrmod_vehicle_bothkeymode", 0, true, FCVA
 local cl_pickupdisable = CreateClientConVar("vr_pickup_disable_client", 0, true, FCVAR_ARCHIVE)
 local cl_hudonlykey = CreateClientConVar("vrmod_hud_visible_quickmenukey", 0, true, FCVAR_ARCHIVE)
 if SERVER then return end
--- Internal state for hand tracking
-local lastHandPos = nil
-local lastHandAng = nil
--- Function to control physgun with hand movement
-local function VRPhysgunControl(cmd)
-	local hand = g_VR.tracking.pose_lefthand
-	if not hand then return end
-	local newPos = hand.pos
-	local newAng = hand.ang
-	local deltaPos = newPos - lastHandPos
-	local deltaAng = Angle(math.AngleDifference(newAng.pitch, lastHandAng.pitch), math.AngleDifference(newAng.yaw, lastHandAng.yaw), math.AngleDifference(newAng.roll, lastHandAng.roll))
-	-- Forward/backward motion detection
-	local forward = EyeAngles():Forward()
-	local forwardDelta = forward:Dot(deltaPos) * 10
-	if forwardDelta > 0.3 then
-		cmd:SetButtons(bit.bor(cmd:GetButtons(), IN_FORWARD))
-	elseif forwardDelta < -0.3 then
-		cmd:SetButtons(bit.bor(cmd:GetButtons(), IN_BACK))
-	end
 
-	-- Mouse movement from hand rotation
-	cmd:SetMouseX(deltaAng.yaw * 50)
-	cmd:SetMouseY(-deltaAng.pitch * 50)
-	-- Update for next frame
-	lastHandPos = newPos
-	lastHandAng = newAng
-end
 
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 	if cl_bothkey:GetBool() then
@@ -80,22 +54,6 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	if action == "boolean_right_pickup" then
 		if cl_pickupdisable:GetBool() then return end
 		vrmod.Pickup(false, not pressed)
-		return
-	end
-
-	if action == "boolean_use" or action == "boolean_exit" then
-		if pressed then
-			LocalPlayer():ConCommand("+use")
-			local wep = LocalPlayer():GetActiveWeapon()
-			if IsValid(wep) and wep:GetClass() == "weapon_physgun" then
-				lastHandPos = g_VR.tracking.pose_lefthand.pos
-				lastHandAng = g_VR.tracking.pose_lefthand.ang
-				hook.Add("CreateMove", "vrutil_hook_cmphysguncontrol", VRPhysgunControl)
-			end
-		else
-			LocalPlayer():ConCommand("-use")
-			hook.Remove("CreateMove", "vrutil_hook_cmphysguncontrol")
-		end
 		return
 	end
 
