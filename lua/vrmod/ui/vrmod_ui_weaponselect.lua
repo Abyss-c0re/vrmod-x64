@@ -2,7 +2,8 @@
 if SERVER then return end
 local ICON_SIZE = 44
 local iconMaterials = {}
-local DEFAULT_ICON = Material("icon32/hand_point_090.png") -- fallback icon
+local DEFAULT_ICON = Material("icon32/hand_point_090.png")
+local DEFAULT_MODEL = "models/dav0r/hoverball.mdl"
 local MODEL_OVERRIDES = {
 	weapon_physgun = "models/weapons/w_physics.mdl",
 	weapon_physcannon = "models/weapons/w_physics.mdl",
@@ -43,47 +44,44 @@ surface.CreateFont("vrmod_font_small", {
 function RenderWeaponToMaterial(className)
 	if iconMaterials[className] then return iconMaterials[className] end
 	local wepDef = weapons.GetStored(className)
-	local model = wepDef and wepDef.WorldModel or MODEL_OVERRIDES[className]
-	if not model then return DEFAULT_ICON end
+	local worldMdl = wepDef and wepDef.WorldModel
+	-- only accept it if it’s non‑nil *and* non‑empty
+	local model = worldMdl and worldMdl ~= "" and worldMdl or MODEL_OVERRIDES[className] or DEFAULT_MODEL
 	util.PrecacheModel(model)
 	local rtName = "vrmod_rt_" .. className
 	local rt = GetRenderTarget(rtName, ICON_SIZE, ICON_SIZE)
 	if not rt then return DEFAULT_ICON end
-	local panel = vgui.Create("DModelPanel")
-	if not IsValid(panel) then return DEFAULT_ICON end
-	panel:SetSize(ICON_SIZE, ICON_SIZE)
-	panel:SetModel(model)
-	panel:SetFOV(90)
-	panel:SetAmbientLight(Color(255, 255, 0)) -- bright yellow ambient light
-	panel:SetDirectionalLight(BOX_TOP, Color(255, 255, 255))
-	panel:SetDirectionalLight(BOX_FRONT, Color(255, 255, 255))
-	panel:SetDirectionalLight(BOX_BOTTOM, Color(255, 255, 255))
-	panel:SetDirectionalLight(BOX_BACK, Color(255, 255, 255))
-	panel:Hide()
-	local ent = panel.Entity
-	if not IsValid(ent) then
-		panel:Remove()
-		return DEFAULT_ICON
-	end
-
+	local ent = ClientsideModel(model, RENDER_GROUP_OPAQUE_ENTITY)
+	if not IsValid(ent) then return DEFAULT_ICON end
+	ent:SetNoDraw(true)
 	local mins, maxs = ent:GetRenderBounds()
 	local center = (mins + maxs) * 0.5
 	local size = maxs - mins
-	local camPos = center + Vector(size:Length() * 0.4, size:Length() * 0.4, size:Length() * 0.4)
+	local radius = size:Length() * 0.5
+	local camPos = center + Vector(radius, radius, radius)
+	local camAng = (center - camPos):Angle()
 	render.PushRenderTarget(rt)
-	cam.Start3D(camPos, (center - camPos):Angle(), 45, 0, 0, ICON_SIZE, ICON_SIZE)
-	render.Clear(0, 0, 0, 0, true, true) -- clear with transparent black
-	render.OverrideDepthEnable(true, false)
-	ent:SetMaterial("models/wireframe") -- keep wireframe for visibility
+	render.Clear(0, 0, 0, 0, true, true)
+	cam.Start3D(camPos, camAng, 35, 0, 0, ICON_SIZE, ICON_SIZE)
+	render.SuppressEngineLighting(true)
+	render.SetColorModulation(3, 3, 0)
+	render.SetBlend(1)
+	local wireMat = CreateMaterial("vrmod_wireframe_yellow", "Wireframe", {
+		["$basetexture"] = "models/debug/debugwhite",
+		["$color"] = "[3 3 0]"
+	})
+
+	render.MaterialOverride(wireMat)
 	ent:DrawModel()
-	--ent:SetMaterial("")
-	render.OverrideDepthEnable(false)
+	render.MaterialOverride(nil)
+	render.SetColorModulation(1, 1, 1)
+	render.SuppressEngineLighting(false)
 	cam.End3D()
 	render.PopRenderTarget()
-	panel:Remove()
+	ent:Remove()
 	local mat = CreateMaterial("vrmod_icon_mat_" .. className, "UnlitGeneric", {
 		["$basetexture"] = rt:GetName(),
-		["$color"] = "[1 1 0]",
+		["$color"] = "[10 10 0]",
 		["$vertexcolor"] = 1,
 		["$vertexalpha"] = 1
 	})
@@ -193,149 +191,152 @@ function VRUtilWeaponMenuOpen()
 
 	hook.Add("PreRender", "vrutil_hook_renderweaponselect", function()
 		if g_VR.menuFocus ~= "weaponmenu" then return end
-		-- Update stats & hover indices (unchanged) …
+		-- ─── Tunable parameters ───────────────────────────────────────
+		local CX, CY = 256, 256 -- center of menu
+		local INNER_R = 60 -- inner ring radius
+		local OUTER_R = 140 -- outer ring radius
+		local SLOT_MIN_DIST = 40 -- dist > this to hover a slot
+		local SLOT_MAX_DIST = INNER_R + 20 -- dist < this to hover a slot
+		local ICON_RADIUS_FACTOR = 0.9 -- iconR = OUTER_R * this
+		local PETAL_HOVER_RADIUS = ICON_SIZE * 0.75 -- for center‑text update only
+		local SLICE_SEGMENTS = 64 -- resolution of slice polygons
+		-- ──────────────────────────────────────────────────────────────
+		-- 1) Gather player stats
 		local values = {
 			hoveredSlot = -1,
 			hoveredItem = -1
 		}
 
 		values.health, values.suit = ply:Health(), ply:Armor()
-		local aw = ply:GetActiveWeapon()
-		if IsValid(aw) then
-			values.clip, values.total, values.alt = aw:Clip1(), ply:GetAmmoCount(aw:GetPrimaryAmmoType()), ply:GetAmmoCount(aw:GetSecondaryAmmoType())
-		else
-			values.clip, values.total, values.alt = 0, 0, 0
+		do
+			local aw = ply:GetActiveWeapon()
+			if IsValid(aw) then
+				values.clip, values.total, values.alt = aw:Clip1(), ply:GetAmmoCount(aw:GetPrimaryAmmoType()), ply:GetAmmoCount(aw:GetSecondaryAmmoType())
+			else
+				values.clip, values.total, values.alt = 0, 0, 0
+			end
 		end
 
-		local cx, cy = 256, 256
-		local dx, dy = g_VR.menuCursorX - cx, g_VR.menuCursorY - cy
-		local dist = math.sqrt(dx * dx + dy * dy)
+		-- 2) Cursor polar coords
+		local dx, dy = g_VR.menuCursorX - CX, g_VR.menuCursorY - CY
+		local dist2 = dx * dx + dy * dy
+		local dist = math.sqrt(dist2)
 		local angDeg = math.deg(math.atan2(dy, dx))
 		if angDeg < 0 then angDeg = angDeg + 360 end
-		local innerR, outerR = 50, 120
-		-- Determine hoveredSlot
-		if dist > 40 and dist < innerR + 20 then
-			local seg = 360 / #slots
-			local idx = math.floor(angDeg / seg) + 1
+		-- 3) Slot hover detection
+		if dist > SLOT_MIN_DIST and dist < SLOT_MAX_DIST then
+			local segSize = 360 / #slots
+			local idx = math.floor(angDeg / segSize) + 1
 			if idx >= 1 and idx <= #slots then
 				values.hoveredSlot = idx
 				chosenSlot = idx
 			end
 		end
 
-		-- Determine hoveredItem (petal) if a slot is chosen
+		-- 4) Petal hover detection (for center‑text only)
 		if chosenSlot then
 			local sel = slots[chosenSlot]
-			local n = #sel.items
-			local totalArc = math.min(90, n * 20)
-			local startAng = (chosenSlot - 1) * 360 / #slots - totalArc / 2
+			local itemCount = #sel.items
+			local arc = math.min(90, itemCount * 20)
+			local startAngle = (chosenSlot - 1) * 360 / #slots - arc / 2
+			local iconR = OUTER_R * ICON_RADIUS_FACTOR
+			local hoverR2 = PETAL_HOVER_RADIUS * PETAL_HOVER_RADIUS
 			for i, item in ipairs(sel.items) do
-				local a = startAng + (n == 1 and 0 or (i - 1) * totalArc / (n - 1))
+				local a = startAngle + (itemCount == 1 and 0 or (i - 1) * arc / (itemCount - 1))
 				local rad = math.rad(a)
-				local rx, ry = cx + math.cos(rad) * outerR, cy + math.sin(rad) * outerR
-				if math.sqrt((g_VR.menuCursorX - rx) ^ 2 + (g_VR.menuCursorY - ry) ^ 2) < 24 then values.hoveredItem = i end
+				local rx = CX + math.cos(rad) * iconR
+				local ry = CY + math.sin(rad) * iconR
+				local ddx = g_VR.menuCursorX - rx
+				local ddy = g_VR.menuCursorY - ry
+				if ddx * ddx + ddy * ddy <= hoverR2 then
+					values.hoveredItem = i
+					break
+				end
 			end
 		end
 
-		-- Only redraw on change
-		local changed = false
+		-- 5) Only redraw on change
+		local dirty = false
 		for k, v in pairs(values) do
 			if prev[k] ~= v then
-				changed = true
+				dirty = true
 				break
 			end
 		end
 
-		if not changed then return end
+		if not dirty then return end
 		prev = values
+		-- 6) Draw everything
 		VRUtilMenuRenderStart("weaponmenu")
-		-- Draw outer & inner rings
+		-- Outer ring
 		surface.SetDrawColor(0, 0, 0, 200)
 		do
-			local bg = {}
+			local poly = {}
 			for i = 0, 32 do
 				local a = math.rad(i / 32 * 360)
-				bg[#bg + 1] = {
-					x = cx + math.cos(a) * (outerR + 20),
-					y = cy + math.sin(a) * (outerR + 20)
+				poly[#poly + 1] = {
+					x = CX + math.cos(a) * (OUTER_R + 20),
+					y = CY + math.sin(a) * (OUTER_R + 20)
 				}
 			end
 
-			surface.DrawPoly(bg)
+			surface.DrawPoly(poly)
 		end
 
+		-- Inner ring
 		surface.SetDrawColor(0, 0, 0, 230)
 		do
-			local bg = {}
+			local poly = {}
 			for i = 0, 64 do
 				local a = math.rad(i / 64 * 360)
-				bg[#bg + 1] = {
-					x = cx + math.cos(a) * innerR,
-					y = cy + math.sin(a) * innerR
+				poly[#poly + 1] = {
+					x = CX + math.cos(a) * INNER_R,
+					y = CY + math.sin(a) * INNER_R
 				}
 			end
 
-			surface.DrawPoly(bg)
+			surface.DrawPoly(poly)
 		end
 
-		-- Draw slot slices
+		-- Slots
 		local sliceAngle = 360 / #slots
 		for i, slot in ipairs(slots) do
-			local startAng = (i - 1) * sliceAngle
-			local endAng = i * sliceAngle
-			local col = values.hoveredSlot == i and Color(255, 255, 0, 100) or Color(0, 0, 0, 150)
-			drawSlice(cx, cy, innerR, innerR + 20, startAng, endAng, 64, col)
-			-- label in the middle of the slice
-			local midAng = (startAng + endAng) * 0.5
-			local rad = math.rad(midAng)
-			local lx, ly = cx + math.cos(rad) * (innerR + 10), cy + math.sin(rad) * (innerR + 10)
-			local textCol = values.hoveredSlot == i and Color(255, 255, 0) or Color(255, 145, 0)
-			draw.SimpleText(slotNames[slot.slot], "vrmod_font_mid", lx, ly, textCol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			local sa, ea = (i - 1) * sliceAngle, i * sliceAngle
+			local col = values.hoveredSlot == i and Color(0, 0, 0, 230) or Color(0, 0, 0, 200)
+			drawSlice(CX, CY, INNER_R, INNER_R + 20, sa, ea, SLICE_SEGMENTS, col)
+			local mid = (sa + ea) / 2
+			local lx = CX + math.cos(math.rad(mid)) * (INNER_R + 10)
+			local ly = CY + math.sin(math.rad(mid)) * (INNER_R + 10)
+			local tcol = values.hoveredSlot == i and Color(255, 255, 255) or Color(255, 255, 0)
+			draw.SimpleText(slotNames[slot.slot], "vrmod_font_mid", lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
 
-		-- Draw petals/items if slot chosen (unchanged) …
+		-- Petal icons (no highlight)
 		if chosenSlot then
 			local sel = slots[chosenSlot]
+			local itemCount = #sel.items
+			local arc = math.min(90, itemCount * 20)
+			local startAng = (chosenSlot - 1) * 360 / #slots - arc / 2
+			local iconR = OUTER_R * ICON_RADIUS_FACTOR
 			for i, item in ipairs(sel.items) do
-				local mat = RenderWeaponToMaterial(item.class)
-				local n = #sel.items
-				local totalArc = math.min(90, n * 20)
-				local startAng = (chosenSlot - 1) * 360 / #slots - totalArc / 2
-				local a = startAng + (n == 1 and 0 or (i - 1) * totalArc / (n - 1))
+				local a = startAng + (itemCount == 1 and 0 or (i - 1) * arc / (itemCount - 1))
 				local rad = math.rad(a)
-				local rx, ry = cx + math.cos(rad) * outerR, cy + math.sin(rad) * outerR
-				-- petal highlight
-				if values.hoveredItem == i then
-					surface.SetDrawColor(255, 255, 255, 100)
-					surface.DrawPoly{
-						{
-							x = rx - 20,
-							y = ry - 20
-						},
-						{
-							x = rx + 20,
-							y = ry - 20
-						},
-						{
-							x = rx + 20,
-							y = ry + 20
-						},
-						{
-							x = rx - 20,
-							y = ry + 20
-						},
-					}
-				end
-
-				-- icon
-				DrawIconLayered(rx, ry, ICON_SIZE, mat, 10, 0, 0)
+				local rx = CX + math.cos(rad) * iconR
+				local ry = CY + math.sin(rad) * iconR
+				local mat = RenderWeaponToMaterial(item.class)
+				DrawIconLayered(rx, ry, ICON_SIZE, mat, 10, 0, 0.01)
 			end
 		end
 
-		-- Center name & stats (unchanged) …
+		-- Center name & stats (text changes only)
 		local name = "Select Slot"
-		if chosenSlot and prev.hoveredItem >= 1 then name = slots[chosenSlot].items[prev.hoveredItem].label end
-		draw.SimpleText(name, "vrmod_font_normal", cx, cy, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		if chosenSlot and prev.hoveredItem >= 1 then
+			name = slots[chosenSlot].items[prev.hoveredItem].label
+		elseif values.hoveredSlot >= 1 then
+			name = slotNames[slots[values.hoveredSlot].slot]
+		end
+
+		draw.SimpleText(name, "vrmod_font_normal", CX, CY, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		local function ds(x, w, label, val, col)
 			draw.RoundedBox(6, x, 20, w, 45, Color(0, 0, 0, 128))
 			draw.SimpleText(label, "vrmod_font_small", x + 10, 50, col)
@@ -343,10 +344,10 @@ function VRUtilWeaponMenuOpen()
 		end
 
 		local ammoText = string.format("%d / %d", prev.clip, prev.total)
-		local ammoColor = Color(255, prev.clip == 0 and prev.total == 0 and 0 or 250, 0, 255)
+		local ammoCol = Color(255, prev.clip == 0 and prev.total == 0 and 0 or 250, 0, 255)
 		ds(20, 120, "HEALTH", prev.health, Color(255, prev.health > 19 and 250 or 0, 0, 255))
 		ds(160, 110, "SUIT", prev.suit, Color(255, 250, 0))
-		ds(290, 130, "AMMO", ammoText, ammoColor)
+		ds(290, 130, "AMMO", ammoText, ammoCol)
 		ds(440, 70, "ALT", prev.alt, Color(255, 250, 0))
 		VRUtilMenuRenderEnd()
 	end)
