@@ -81,7 +81,7 @@ if CLIENT then
         render.DrawBeam(startPos, tr.HitPos, getFlickerWidth(), 0, 1, laserColor)
         -- Draw muzzle glow (slightly smaller)
         render.SetMaterial(GlowSprite)
-        render.DrawSprite(startPos, 3, 3, laserColor)
+        render.DrawSprite(startPos, 1, 1, laserColor)
         -- Draw hit glow if beam hits something
         if tr.Hit then render.DrawSprite(tr.HitPos + tr.HitNormal * 1, 8, 8, ScaleAlpha(laserColor, 1.2)) end
     end
