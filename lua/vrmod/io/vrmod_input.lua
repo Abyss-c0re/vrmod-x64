@@ -151,36 +151,6 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		return
 	end
 
-	if action == "boolean_slot1" then
-		if pressed then LocalPlayer():ConCommand("slot1") end
-		return
-	end
-
-	if action == "boolean_slot2" then
-		if pressed then LocalPlayer():ConCommand("slot2") end
-		return
-	end
-
-	if action == "boolean_slot3" then
-		if pressed then LocalPlayer():ConCommand("slot3") end
-		return
-	end
-
-	if action == "boolean_slot4" then
-		if pressed then LocalPlayer():ConCommand("slot4") end
-		return
-	end
-
-	if action == "boolean_slot5" then
-		if pressed then LocalPlayer():ConCommand("slot5") end
-		return
-	end
-
-	if action == "boolean_slot6" then
-		if pressed then LocalPlayer():ConCommand("slot6") end
-		return
-	end
-
 	for i = 1, #g_VR.CustomActions do
 		if action == g_VR.CustomActions[i][1] then
 			local commands = string.Explode(";", g_VR.CustomActions[i][pressed and 2 or 3], false)
