@@ -74,6 +74,17 @@ if CLIENT then
 		return IsValid(wep) and wep:GetClass() == "weapon_vrmod_empty" or false
 	end
 
+	function vrmod.GetHeldEntity(ply, hand)
+		if not IsValid(ply) or not (hand == "left" or hand == "right") then return nil end
+		local sid = ply:SteamID()
+		local data = g_VR[sid] and g_VR[sid].heldItems
+		if not data then return nil end
+		local slot = hand == "left" and 1 or 2
+		local info = data[slot]
+		if info and IsValid(info.ent) then return info.ent end
+		return nil
+	end
+
 	function vrmod.GetHMDPos(ply)
 		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
 		return t and t.lerpedFrame and t.lerpedFrame.hmdPos or Vector()
@@ -504,6 +515,17 @@ elseif SERVER then
 	function vrmod.UsingEmptyHands(ply)
 		local wep = ply:GetActiveWeapon()
 		return IsValid(wep) and wep:GetClass() == "weapon_vrmod_empty" or false
+	end
+
+	function vrmod.GetHeldEntity(ply, hand)
+		if not IsValid(ply) or not (hand == "left" or hand == "right") then return nil end
+		local sid = ply:SteamID()
+		local data = g_VR[sid] and g_VR[sid].heldItems
+		if not data then return nil end
+		local slot = hand == "left" and 1 or 2
+		local info = data[slot]
+		if info and IsValid(info.ent) then return info.ent end
+		return nil
 	end
 
 	local function UpdateWorldPoses(ply, playerTable)
