@@ -1,5 +1,6 @@
 -- VRMod Weapon Menu UI with Spawnmenu Icons via ContentIcon Cache
 if SERVER then return end
+local lastWeaponClass = nil
 local ICON_SIZE = 44
 local iconMaterials = {}
 local DEFAULT_ICON = Material("icon32/hand_point_090.png")
@@ -131,6 +132,7 @@ local open = false
 function VRUtilWeaponMenuOpen()
 	if open then return end
 	open = true
+	local innerClick = false
 	-- Collect & sort weapons
 	local flatItems = {}
 	for _, wep in ipairs(LocalPlayer():GetWeapons()) do
@@ -184,6 +186,24 @@ function VRUtilWeaponMenuOpen()
 	VRUtilMenuOpen("weaponmenu", 512, 512, nil, false, pos, ang, 0.025, true, function()
 		hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 		open = false
+		local ply = LocalPlayer()
+		-- if we clicked the inner circle, toggle empty ↔ last
+		if innerClick then
+			local aw = ply:GetActiveWeapon()
+			local activeClass = IsValid(aw) and aw:GetClass() or nil
+			if activeClass ~= "weapon_vrmod_empty" then
+				-- store current and switch to empty
+				lastWeaponClass = activeClass
+				local emptyWep = ply:GetWeapon("weapon_vrmod_empty")
+				if IsValid(emptyWep) then input.SelectWeapon(emptyWep) end
+			elseif activeClass == "weapon_vrmod_empty" and lastWeaponClass and lastWeaponClass ~= "weapon_vrmod_empty" then
+				-- switch back to last weapon
+				local prevWep = ply:GetWeapon(lastWeaponClass)
+				if IsValid(prevWep) then input.SelectWeapon(prevWep) end
+			end
+			return
+		end
+
 		local sel = slots[chosenSlot or prev.hoveredSlot]
 		local chosen = sel and sel.items[prev.hoveredItem]
 		if chosen and IsValid(chosen.wep) then input.SelectWeapon(chosen.wep) end
@@ -233,6 +253,7 @@ function VRUtilWeaponMenuOpen()
 			end
 		end
 
+		innerClick = dist <= INNER_R
 		-- 4) Petal hover detection (for center‑text only)
 		if chosenSlot then
 			local sel = slots[chosenSlot]
