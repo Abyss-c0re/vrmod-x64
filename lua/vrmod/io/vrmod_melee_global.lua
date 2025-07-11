@@ -29,11 +29,40 @@ local function IsMagazine(ent)
     return isMag
 end
 
-local function MeleeFilter(ent)
+local function MeleeFilter(ent, ply, hand)
     if not IsValid(ent) then return true end
     if ent:GetNWBool("isVRHand", false) then return false end
     if IsMagazine(ent) then return false end
+    if IsValid(ply) and (hand == "left" or hand == "right") then
+        local held = vrmod.GetHeldEntity(ply, hand)
+        if IsValid(held) and held == ent then return false end
+    end
     return true
+end
+
+local function TraceSphereApprox(data)
+    local best = {
+        Hit = false,
+        Fraction = 1
+    }
+
+    local dirs = {Vector(0, 0, 0), Vector(1, 0, 0), Vector(-1, 0, 0), Vector(0, 1, 0), Vector(0, -1, 0), Vector(0, 0, 1), Vector(0, 0, -1),}
+    -- add more sample points if you like
+    for _, offset in ipairs(dirs) do
+        local origin = data.start + offset * data.radius
+        local tr = util.TraceLine({
+            start = origin,
+            endpos = origin + (data.endpos - data.start):GetNormalized() * (data.endpos - data.start):Length(),
+            filter = data.filter,
+            mask = data.mask,
+        })
+
+        if tr.Hit and tr.Fraction < best.Fraction then
+            best = tr
+            best.Hit = true
+        end
+    end
+    return best
 end
 
 -- CLIENTSIDE --------------------------
@@ -93,12 +122,15 @@ if CLIENT then
     end
 
     -- Send hit data to server
-    local function SendMeleeAttack(src, dir, speed, soundType)
+    local function SendMeleeAttack(src, dir, speed, radius, reach, soundType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
         net.WriteVector(dir)
         net.WriteFloat(speed)
+        net.WriteFloat(radius)
+        net.WriteFloat(reach)
         net.WriteString(soundType)
+        net.WriteString(hand or "") -- send empty string if no hand
         net.SendToServer()
     end
 
@@ -122,17 +154,26 @@ if CLIENT then
         })
     end
 
+    local function EstimateWeaponReach(wep)
+        if not IsValid(wep) then return 5 end
+        local mins, maxs = wep:GetModelBounds()
+        local size = (maxs - mins):Length() * 0.5
+        return math.Clamp(size, 5, 50)
+    end
+
     -- Core melee logic
-    local function TryMelee(pos, relativeVel, useWeapon)
+    local function TryMelee(pos, relativeVel, useWeapon, hand)
         local ply = LocalPlayer()
         if not vrmod or not vrmod.GetHMDVelocity then return end
         if not IsValid(ply) or not ply:Alive() then return end
+        if not MeleeFilter(ent, ply, hand) then return end
         if useWeapon and not IsHoldingValidWeapon(ply) then useWeapon = false end
-        -- Use the velocity passed in directly
+        -- Speed check
         local relativeSpeed = relativeVel:Length()
         if relativeSpeed / 40 < cv_meleeVelThreshold:GetFloat() then return end
+        -- Cooldown
         if NextMeleeTime > CurTime() then return end
-        -- Determine source trace position
+        -- Quick line trace to get a good source point
         local tr0 = util.TraceLine({
             start = pos,
             endpos = pos,
@@ -140,25 +181,25 @@ if CLIENT then
         })
 
         local src = tr0.HitPos + tr0.HitNormal * -2
-        -- Trace parameters
+        -- Build hull trace, passing our filter the optional hand
         local dir = relativeVel:GetNormalized()
-        local reach = useWeapon and 10 or 5
+        local wep = ply:GetActiveWeapon()
+        local reach = EstimateWeaponReach(wep)
         local radius = GetSweepRadius(useWeapon)
-        local tr = util.TraceHull({
+        local tr = TraceSphereApprox{
             start = src,
             endpos = src + dir * reach,
-            mins = Vector(-radius, -radius, -radius),
-            maxs = Vector(radius, radius, radius),
-            filter = MeleeFilter,
+            radius = radius,
+            filter = function(ent) return MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
-        })
+        }
 
         if cl_fistvisible:GetBool() then AddDebugSphere(src, radius) end
-        -- Final: Apply melee hit if collision occurs
+        -- If we hit, send full data including hand
         if tr.Hit then
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
             local soundType = useWeapon and "blunt" or "fist"
-            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, soundType)
+            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, radius, reach, soundType, hand)
         end
     end
 
@@ -184,8 +225,8 @@ if CLIENT then
         local leftRelVel = vrmod.GetLeftHandVelocity() - hmdVel
         local rightRelVel = vrmod.GetRightHandVelocity() - hmdVel
         if cl_usefist:GetBool() then
-            TryMelee(vrmod.GetLeftHandPos(ply), leftRelVel, false)
-            TryMelee(vrmod.GetRightHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool())
+            TryMelee(vrmod.GetLeftHandPos(ply), leftRelVel, false, "left")
+            TryMelee(vrmod.GetRightHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool(), "right")
         end
 
         if cl_usekick:GetBool() and g_VR.sixPoints then
@@ -208,21 +249,40 @@ if SERVER then
         local src = net.ReadVector()
         local dir = net.ReadVector()
         local swingSpeed = net.ReadFloat()
+        local radius = net.ReadFloat()
+        local reach = net.ReadFloat()
         local soundType = net.ReadString()
+        local hand = net.ReadString()
+        if hand == "" then hand = nil end
         local base = cv_meleeDamage:GetFloat()
-        local reach = 8
-        local radius = 5
-        local tr = util.TraceHull({
+        local tr = TraceSphereApprox{
             start = src,
             endpos = src + dir * reach,
-            mins = Vector(-radius, -radius, -radius),
-            maxs = Vector(radius, radius, radius),
+            radius = radius,
             filter = function(ent)
                 if ent == ply then return false end
-                return MeleeFilter(ent)
+                return MeleeFilter(ent, ply, hand)
             end,
             mask = MASK_SHOT
-        })
+        }
+
+        local decalName = "Impact.Concrete"
+        local matType = tr.MatType
+        if matType == MAT_METAL then
+            decalName = "Impact.Metal"
+        elseif matType == MAT_WOOD then
+            decalName = "Impact.Wood"
+        elseif matType == MAT_FLESH then
+            decalName = "Impact.Flesh"
+        elseif matType == MAT_DIRT then
+            decalName = "Impact.Dust"
+        elseif matType == MAT_SAND then
+            decalName = "Impact.Dust"
+        elseif matType == MAT_GLASS then
+            decalName = "GlassBreak"
+        elseif matType == MAT_TILE then
+            decalName = "Impact.Concrete"
+        end
 
         if not tr.Hit then return end
         -- Calculate relative velocity: attacker's swing speed minus target's velocity projected onto swing direction
@@ -233,7 +293,6 @@ if SERVER then
         local dmgAmt = base * scaled * 0.1
         if soundType == "blunt" then dmgAmt = dmgAmt * 1.25 end
         -- Apply damage
-        print("Hit! " .. dmgAmt)
         local dmgInfo = DamageInfo()
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
@@ -250,5 +309,11 @@ if SERVER then
             local snd = list[math.random(#list)]
             sound.Play(snd, tr.HitPos, 75, 100, 1)
         end
+
+        util.Decal(decalName, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2)
+        if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(decalName, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
+        local attackerName = ply:Nick() or "Unknown"
+        local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
+        print(string.format("%s smashed %s for %.1f damage!", attackerName, targetName, dmgAmt))
     end)
 end
