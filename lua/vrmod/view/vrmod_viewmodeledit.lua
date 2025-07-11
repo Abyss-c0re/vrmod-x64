@@ -5,7 +5,6 @@ if CLIENT then
 	local DEFAULT_VIEWMODEL_INFO = {
 		autoOffsetAddPos = Vector(1, 0.2, 0),
 		gmod_tool = {
-			--modelOverride = "models/weapons/w_toolgun.mdl",
 			offsetPos = Vector(-12, 6.5, 7),
 			offsetAng = Angle(0, 0, 0),
 			wrongMuzzleAng = false,
@@ -45,7 +44,7 @@ if CLIENT then
 			offsetPos = Vector(-14.5, 10, 8.5),
 			offsetAng = Angle(0, 0, 0),
 			wrongMuzzleAng = false,
-			noLaser = true
+			noLaser = false
 		},
 		weapon_medkit = {
 			offsetPos = Vector(-23, 10, 5),
@@ -169,7 +168,7 @@ if CLIENT then
 		},
 	}
 
-	local CONFIG_PATH = "vrmod/viewmodelinfo.json"
+	local CONFIG_PATH = "vrmod/vrmod_weapons_config.json"
 	g_VR = g_VR or {}
 	local function SaveViewModelConfig()
 		file.Write(CONFIG_PATH, util.TableToJSON(g_VR.viewModelInfo, true))
@@ -183,86 +182,194 @@ if CLIENT then
 				g_VR.viewModelInfo[cls] = data
 			end
 		else
-			-- If no saved config, merge in defaults
 			for cls, data in pairs(DEFAULT_VIEWMODEL_INFO) do
 				if not g_VR.viewModelInfo[cls] then g_VR.viewModelInfo[cls] = data end
 			end
-
-			-- Save this as the initial config
-			SaveViewModelConfig()
 		end
 
-		-- Reflect g_VR into local viewModelConfig (for editor)
-		viewModelConfig = table.Copy(g_VR.viewModelInfo)
+		SaveViewModelConfig()
 	end
 
 	-- Initialize on VR start
-	hook.Add("VRMod_Start", "InitializeViewModelSettings", function()
-		LoadViewModelConfig()
-		for cls, data in pairs(g_VR.viewModelInfo) do
-			if data.offsetPos and data.offsetAng then vrmod.SetViewModelOffsetForWeaponClass(cls, data.offsetPos, data.offsetAng) end
-			if data.modelOverride then vrmod.SetViewModelModelOverride(cls, data.modelOverride) end
-			if data.wrongMuzzleAng then vrmod.SetViewModelFixMuzzle(cls, data.wrongMuzzleAng) end
-			if data.noLaser then vrmod.SetViewModelNoLaser(cls, data.noLaser) end
-		end
-	end)
-
+	hook.Add("VRMod_Start", "InitializeViewModelSettings", function() LoadViewModelConfig() end)
 	LoadViewModelConfig()
 	function CreateWeaponConfigGUI()
+		RunConsoleCommand("vrmod_vgui_reset")
 		local frame = vgui.Create("DFrame")
-		frame:SetSize(600, 400)
+		frame:SetSize(800, 400)
 		frame:Center()
 		frame:SetTitle("Weapon ViewModel Configuration")
 		frame:MakePopup()
+		frame.OnClose = function() SaveViewModelConfig() end
 		local listview = vgui.Create("DListView", frame)
 		listview:Dock(FILL)
 		listview:AddColumn("Weapon Class")
 		listview:AddColumn("Offset Position")
 		listview:AddColumn("Offset Angle")
+		listview:AddColumn("Wrong Muzzle Ang")
+		listview:AddColumn("No Laser")
 		local function UpdateListView()
 			if not g_VR.viewModelInfo then return end
 			listview:Clear()
 			for class, data in pairs(g_VR.viewModelInfo) do
-				listview:AddLine(class, tostring(data.offsetPos), tostring(data.offsetAng))
+				listview:AddLine(class, tostring(data.offsetPos), tostring(data.offsetAng), tostring(data.wrongMuzzleAng or false), tostring(data.noLaser or false))
 			end
 		end
 
 		UpdateListView()
-		local addButton = vgui.Create("DButton", frame)
-		addButton:SetText("New")
-		addButton:Dock(BOTTOM)
-		addButton.DoClick = function()
-			local currentWeapon = LocalPlayer():GetActiveWeapon()
-			if IsValid(currentWeapon) then
-				CreateAddWeaponConfigGUI(currentWeapon:GetClass())
-				frame:Close()
+		local bottomPanel = vgui.Create("DPanel", frame)
+		bottomPanel:Dock(BOTTOM)
+		bottomPanel:SetTall(50)
+		local leftPanel = vgui.Create("DPanel", bottomPanel)
+		leftPanel:SetWide(frame:GetWide() / 2 - 10)
+		leftPanel:Dock(LEFT)
+		leftPanel:DockMargin(10, 5, 5, 5)
+		local rightPanel = vgui.Create("DPanel", bottomPanel)
+		rightPanel:SetWide(frame:GetWide() / 2 - 10)
+		rightPanel:Dock(RIGHT)
+		rightPanel:DockMargin(5, 5, 10, 5)
+		local function AddButton(parent, txt, func)
+			local btn = vgui.Create("DButton", parent)
+			btn:SetText(txt)
+			btn:SetSize(120, 30)
+			-- Detect parent's docking and dock button accordingly
+			local dock = parent:GetDock()
+			if dock == LEFT then
+				btn:Dock(LEFT)
+				btn:DockMargin(0, 0, 10, 0)
+			elseif dock == RIGHT then
+				btn:Dock(RIGHT)
+				btn:DockMargin(10, 0, 0, 0)
+			else
+				-- fallback to left dock if unknown
+				btn:Dock(LEFT)
+				btn:DockMargin(0, 0, 10, 0)
+			end
+
+			btn.DoClick = func
+			return btn
+		end
+
+		-- Helper: update just one weapon line in listview by class
+		local function UpdateListLine(class)
+			local lines = listview:GetLines()
+			for i, line in ipairs(lines) do
+				if line:GetValue(1) == class then
+					local data = g_VR.viewModelInfo[class]
+					if data then
+						line:SetColumnText(2, tostring(data.offsetPos))
+						line:SetColumnText(3, tostring(data.offsetAng))
+						line:SetColumnText(4, tostring(data.wrongMuzzleAng or false))
+						line:SetColumnText(5, tostring(data.noLaser or false))
+					end
+
+					break
+				end
 			end
 		end
 
-		local editButton = vgui.Create("DButton", frame)
-		editButton:SetText("Edit")
-		editButton:Dock(BOTTOM)
-		editButton.DoClick = function()
+		-- Left-side buttons apply changes directly to current weapon config
+		AddButton(leftPanel, "Add new", function()
+			local wep = LocalPlayer():GetActiveWeapon()
+			if IsValid(wep) then
+				g_VR.viewModelInfo[wep:GetClass()] = {
+					offsetPos = Vector(),
+					offsetAng = Angle()
+				}
+
+				UpdateListView()
+			end
+		end)
+
+		AddButton(leftPanel, "Disable Laser", function()
+			local wep = LocalPlayer():GetActiveWeapon()
+			if not IsValid(wep) then return end
+			local class = wep:GetClass()
+			local data = g_VR.viewModelInfo[class]
+			if not data then return end
+			data.noLaser = not data.noLaser
+			vrmod.SetViewModelNoLaser(class, data.noLaser)
+			UpdateListLine(class)
+		end)
+
+		AddButton(leftPanel, "Fix muzzle", function()
+			local wep = LocalPlayer():GetActiveWeapon()
+			if not IsValid(wep) then return end
+			local class = wep:GetClass()
+			local data = g_VR.viewModelInfo[class]
+			if not data then return end
+			data.wrongMuzzleAng = not data.wrongMuzzleAng
+			vrmod.SetViewModelFixMuzzle(class, data.wrongMuzzleAng)
+			UpdateListLine(class)
+		end)
+
+		-- Right-side buttons (reverded orer)
+		AddButton(rightPanel, "Reset Config", function()
+			local confirm = vgui.Create("DFrame")
+			confirm:SetSize(350, 200)
+			confirm:Center()
+			confirm:SetTitle("Confirm Reset")
+			confirm:MakePopup()
+			local msg = [[This will permanently delete your saved weapon viewmodel configuration file,
+and reset everything to the default values.
+
+You might need to reload the map afterwards in case you use VR specific weapons. 
+
+Are you sure you want to continue?]]
+			local lbl = vgui.Create("DLabel", confirm)
+			lbl:SetText(msg)
+			lbl:SetFont("DermaDefault") -- Optional: Use "DermaLarge" for emphasis
+			lbl:SetContentAlignment(7) -- Top-left
+			lbl:SetWrap(true)
+			lbl:SetAutoStretchVertical(true)
+			lbl:Dock(TOP)
+			lbl:DockMargin(10, 10, 10, 0)
+			local btnPanel = vgui.Create("DPanel", confirm)
+			btnPanel:Dock(BOTTOM)
+			btnPanel:SetTall(40)
+			local function DoReset()
+				if file.Exists(CONFIG_PATH, "DATA") then file.Delete(CONFIG_PATH) end
+				table.Empty(g_VR.viewModelInfo)
+				for cls, data in pairs(DEFAULT_VIEWMODEL_INFO) do
+					g_VR.viewModelInfo[cls] = data
+				end
+
+				SaveViewModelConfig()
+				UpdateListView()
+				confirm:Close()
+			end
+
+			local yesBtn = vgui.Create("DButton", btnPanel)
+			yesBtn:SetText("Yes")
+			yesBtn:SetSize(100, 30)
+			yesBtn:Dock(LEFT)
+			yesBtn:DockMargin(20, 5, 10, 5)
+			yesBtn.DoClick = DoReset
+			local noBtn = vgui.Create("DButton", btnPanel)
+			noBtn:SetText("Cancel")
+			noBtn:SetSize(100, 30)
+			noBtn:Dock(RIGHT)
+			noBtn:DockMargin(10, 5, 20, 5)
+			noBtn.DoClick = function() confirm:Close() end
+		end)
+
+		AddButton(rightPanel, "Delete", function()
+			local selected = listview:GetSelectedLine()
+			if selected then
+				local class = listview:GetLine(selected):GetValue(1)
+				g_VR.viewModelInfo[class] = nil
+				UpdateListView() -- full reload because we remove a line
+			end
+		end)
+
+		AddButton(rightPanel, "Edit offset", function()
 			local selected = listview:GetSelectedLine()
 			if selected then
 				local class = listview:GetLine(selected):GetValue(1)
 				CreateAddWeaponConfigGUI(class, true)
 				frame:Close()
 			end
-		end
-
-		local deleteButton = vgui.Create("DButton", frame)
-		deleteButton:SetText("Delete")
-		deleteButton:Dock(BOTTOM)
-		deleteButton.DoClick = function()
-			local selected = listview:GetSelectedLine()
-			if selected then
-				local class = listview:GetLine(selected):GetValue(1)
-				g_VR.viewModelInfo[class] = nil
-				UpdateListView()
-				SaveViewModelConfig()
-			end
-		end
+		end)
 	end
 
 	function CreateAddWeaponConfigGUI(class, isEditing)

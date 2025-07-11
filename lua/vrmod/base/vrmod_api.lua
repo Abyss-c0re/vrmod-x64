@@ -384,11 +384,6 @@ if CLIENT then
 		g_VR.viewModelInfo[classname].offsetAng = ang
 	end
 
-	function vrmod.SetViewModelModelOverride(classname, modelOverride)
-		g_VR.viewModelInfo[classname] = g_VR.viewModelInfo[classname] or {}
-		g_VR.viewModelInfo[classname].modelOverride = modelOverride
-	end
-
 	function vrmod.SetViewModelFixMuzzle(classname, bool)
 		g_VR.viewModelInfo[classname] = g_VR.viewModelInfo[classname] or {}
 		g_VR.viewModelInfo[classname].wrongMuzzleAng = bool
