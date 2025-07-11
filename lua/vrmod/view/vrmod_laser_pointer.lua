@@ -1,29 +1,5 @@
 if CLIENT then
     local convars = vrmod.GetConvars()
-    local blacklist = {
-        ["arcticvr_hl2_cmbsniper"] = true,
-        ["arcticvr_hl2_crowbar"] = true,
-        ["arcticvr_hl2_stunstick"] = true,
-        ["arcticvr_hl2_rpg"] = true,
-        ["arcticvr_knife"] = true,
-        ["laserpointer"] = true,
-        ["seal6_c4"] = true,
-        ["seal6_bottle"] = true,
-        ["seal6_doritos"] = true,
-        ["weapon_physgun"] = true,
-        ["weapon_newtphysgun"] = true,
-        ["weapon_physcannon"] = true,
-        ["weapon_crowbar"] = true,
-        ["weapon_stunstick"] = true,
-        ["weapon_medkit"] = true,
-        ["weapon_rpg"] = true,
-        ["weapon_extinguisher"] = true,
-        ["weapon_extinguisher_infinte"] = true,
-        ["weapon_bomb"] = true,
-        ["weapon_c4"] = true,
-        ["weapon_vfire_gascan"] = true
-    }
-
     -- Default laser color
     local laserColor = Color(255, 0, 0, 255)
     -- Custom laser beam material with vertex color support
@@ -62,7 +38,7 @@ if CLIENT then
     local function drawLaser()
         if not g_VR.viewModelMuzzle or g_VR.menuFocus then return end
         local wep = LocalPlayer():GetActiveWeapon()
-        if not IsValid(wep) or blacklist[wep:GetClass()] then return end
+        if not IsValid(wep) or g_VR.viewModelInfo[wep:GetClass()].noLaser then return end
         local startPos = g_VR.viewModelMuzzle.Pos
         local dir = g_VR.viewModelMuzzle.Ang:Forward()
         local endPos = startPos + dir * 10000

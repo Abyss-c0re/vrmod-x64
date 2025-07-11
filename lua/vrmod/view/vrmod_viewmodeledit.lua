@@ -1,12 +1,211 @@
+-- vr_viewmodel_config.lua
 if CLIENT then
-	local function LoadViewModelConfig()
-		if file.Exists("vrmod/viewmodelinfo.json", "DATA") then
-			local json = file.Read("vrmod/viewmodelinfo.json", "DATA")
-			viewModelConfig = util.JSONToTable(json)
-		else
-			viewModelConfig = {}
-		end
+	g_VR.viewModelInfo = g_VR.viewModelInfo or {}
+	-- Default hardcoded offsets and overrides
+	local DEFAULT_VIEWMODEL_INFO = {
+		autoOffsetAddPos = Vector(1, 0.2, 0),
+		gmod_tool = {
+			--modelOverride = "models/weapons/w_toolgun.mdl",
+			offsetPos = Vector(-12, 6.5, 7),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = false
+		},
+		weapon_physgun = {
+			offsetPos = Vector(-34.5, 13.4, 14.5),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_physcannon = {
+			offsetPos = Vector(-34.5, 13.4, 10.5),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_shotgun = {
+			offsetPos = Vector(-14.5, 10, 8.5),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = false
+		},
+		weapon_rpg = {
+			offsetPos = Vector(-27.5, 19, 10.5),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		arcticvr_hl2_rpg = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_crossbow = {
+			offsetPos = Vector(-14.5, 10, 8.5),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_medkit = {
+			offsetPos = Vector(-23, 10, 5),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = false
+		},
+		weapon_crowbar = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = true,
+			noLaser = false
+		},
+		arcticvr_hl2_crowbar = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_stunstick = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = true,
+			noLaser = false
+		},
+		arcticvr_hl2_stunstick = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		arcticvr_hl2_knife = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		arcticvr_hl2_cmbsniper = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		laserpointer = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		seal6_c4 = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		seal6_bottle = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		seal6_doritos = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_bomb = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_c4 = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_vfire_gascan = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_extinguisher_infinte = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_extinguisher = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+		weapon_slam = {
+			offsetPos = Vector(),
+			offsetAng = Angle(),
+			wrongMuzzleAng = true,
+			noLaser = false
+		},
+		weapon_microwaverifle = {
+			offsetPos = Vector(-9, 6.5, 10),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = false
+		},
+		weapon_vfirethrower = {
+			offsetPos = Vector(13, 2, -6),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = true,
+			noLaser = false
+		},
+		weapon_newtphysgun = {
+			offsetPos = Vector(-34.5, 13.4, 14.5),
+			offsetAng = Angle(0, 0, 0),
+			wrongMuzzleAng = false,
+			noLaser = true
+		},
+	}
+
+	local CONFIG_PATH = "vrmod/viewmodelinfo.json"
+	g_VR = g_VR or {}
+	local function SaveViewModelConfig()
+		file.Write(CONFIG_PATH, util.TableToJSON(g_VR.viewModelInfo, true))
 	end
+
+	local function LoadViewModelConfig()
+		-- Load saved config (if any)
+		if file.Exists(CONFIG_PATH, "DATA") then
+			local loaded = util.JSONToTable(file.Read(CONFIG_PATH, "DATA")) or {}
+			for cls, data in pairs(loaded) do
+				g_VR.viewModelInfo[cls] = data
+			end
+		else
+			-- If no saved config, merge in defaults
+			for cls, data in pairs(DEFAULT_VIEWMODEL_INFO) do
+				if not g_VR.viewModelInfo[cls] then g_VR.viewModelInfo[cls] = data end
+			end
+
+			-- Save this as the initial config
+			SaveViewModelConfig()
+		end
+
+		-- Reflect g_VR into local viewModelConfig (for editor)
+		viewModelConfig = table.Copy(g_VR.viewModelInfo)
+	end
+
+	-- Initialize on VR start
+	hook.Add("VRMod_Start", "InitializeViewModelSettings", function()
+		LoadViewModelConfig()
+		for cls, data in pairs(g_VR.viewModelInfo) do
+			if data.offsetPos and data.offsetAng then vrmod.SetViewModelOffsetForWeaponClass(cls, data.offsetPos, data.offsetAng) end
+			if data.modelOverride then vrmod.SetViewModelModelOverride(cls, data.modelOverride) end
+			if data.wrongMuzzleAng then vrmod.SetViewModelFixMuzzle(cls, data.wrongMuzzleAng) end
+			if data.noLaser then vrmod.SetViewModelNoLaser(cls, data.noLaser) end
+		end
+	end)
 
 	LoadViewModelConfig()
 	function CreateWeaponConfigGUI()
@@ -21,9 +220,9 @@ if CLIENT then
 		listview:AddColumn("Offset Position")
 		listview:AddColumn("Offset Angle")
 		local function UpdateListView()
-			if not viewModelConfig then return end
+			if not g_VR.viewModelInfo then return end
 			listview:Clear()
-			for class, data in pairs(viewModelConfig) do
+			for class, data in pairs(g_VR.viewModelInfo) do
 				listview:AddLine(class, tostring(data.offsetPos), tostring(data.offsetAng))
 			end
 		end
@@ -59,21 +258,10 @@ if CLIENT then
 			local selected = listview:GetSelectedLine()
 			if selected then
 				local class = listview:GetLine(selected):GetValue(1)
-				viewModelConfig[class] = nil
+				g_VR.viewModelInfo[class] = nil
 				UpdateListView()
 				SaveViewModelConfig()
 			end
-		end
-	end
-
-	-- viewModelConfig
-	viewModelConfig = viewModelConfig or {}
-	local function LoadViewModelConfig()
-		if file.Exists("vrmod/viewmodelinfo.json", "DATA") then
-			local json = file.Read("vrmod/viewmodelinfo.json", "DATA")
-			viewModelConfig = util.JSONToTable(json)
-		else
-			viewModelConfig = {}
 		end
 	end
 
@@ -83,7 +271,7 @@ if CLIENT then
 		frame:Center()
 		frame:SetTitle(isEditing and "Edit ViewModel Config" or "Add ViewModel Config")
 		frame:MakePopup()
-		local data = viewModelConfig[class] or {
+		local data = g_VR.viewModelInfo[class] or {
 			offsetPos = Vector(),
 			offsetAng = Angle()
 		}
@@ -147,13 +335,6 @@ if CLIENT then
 			end
 		end
 
-		-- SaveViewModelConfig
-		local function SaveViewModelConfig()
-			if not viewModelConfig then return end
-			local json = util.TableToJSON(viewModelConfig, true) -- JSON形式で保存
-			file.Write("vrmod/viewmodelinfo.json", json)
-		end
-
 		local applyButton = vgui.Create("DButton", frame)
 		applyButton:SetText("Apply")
 		applyButton:Dock(BOTTOM)
@@ -161,7 +342,7 @@ if CLIENT then
 			data.offsetPos = Vector(posSliders[1]:GetValue(), posSliders[2]:GetValue(), posSliders[3]:GetValue())
 			data.offsetAng = Angle(angSliders[1]:GetValue(), angSliders[2]:GetValue(), angSliders[3]:GetValue())
 			vrmod.SetViewModelOffsetForWeaponClass(class, data.offsetPos, data.offsetAng)
-			viewModelConfig[class] = data
+			g_VR.viewModelInfo[class] = data
 			SaveViewModelConfig()
 			frame:Close()
 		end
@@ -175,16 +356,7 @@ if CLIENT then
 
 	-- GUI
 	concommand.Add("vrmod_weaponconfig", function()
-		if not viewModelConfig then LoadViewModelConfig() end
+		if not g_VR.viewModelInfo then LoadViewModelConfig() end
 		CreateWeaponConfigGUI()
 	end)
-
-	local function InitializeVRModViewModelSettings()
-		LoadViewModelConfig()
-		for classname, settings in pairs(viewModelConfig) do
-			if settings.offsetPos and settings.offsetAng then vrmod.SetViewModelOffsetForWeaponClass(classname, settings.offsetPos, settings.offsetAng) end
-		end
-	end
-
-	hook.Add("VRMod_Start", "InitializeViewModelSettings", InitializeVRModViewModelSettings)
 end

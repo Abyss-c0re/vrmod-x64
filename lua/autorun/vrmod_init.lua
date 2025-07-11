@@ -25,7 +25,6 @@ local files = {
     "vrmod/view/vrmod_character_hands.lua",
     "vrmod/view/vrmod_pmchange.lua",
     "vrmod/view/vrmod_viewmodeledit.lua",
-    "vrmod/view/vrmod_viewmodelinfo.lua",
     "vrmod/view/vrmod_weaponreplacer.lua",
     "vrmod/view/vrmod_laser_pointer.lua",
     "vrmod/ui/vrmod_actioneditor.lua",
