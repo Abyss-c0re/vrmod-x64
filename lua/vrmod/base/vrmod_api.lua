@@ -384,6 +384,21 @@ if CLIENT then
 		g_VR.viewModelInfo[classname].offsetAng = ang
 	end
 
+	function vrmod.SetViewModelModelOverride(classname, modelOverride)
+		g_VR.viewModelInfo[classname] = g_VR.viewModelInfo[classname] or {}
+		g_VR.viewModelInfo[classname].modelOverride = modelOverride
+	end
+
+	function vrmod.SetViewModelFixMuzzle(classname, bool)
+		g_VR.viewModelInfo[classname] = g_VR.viewModelInfo[classname] or {}
+		g_VR.viewModelInfo[classname].wrongMuzzleAng = bool
+	end
+
+	function vrmod.SetViewModelNoLaser(classname, bool)
+		g_VR.viewModelInfo[classname] = g_VR.viewModelInfo[classname] or {}
+		g_VR.viewModelInfo[classname].noLaser = bool
+	end
+
 	vrmod.AddCallbackedConvar("vrmod_locomotion", nil, "1")
 	function vrmod.AddLocomotionOption(name, startfunc, stopfunc, buildcpanelfunc)
 		g_VR.locomotionOptions[#g_VR.locomotionOptions + 1] = {
