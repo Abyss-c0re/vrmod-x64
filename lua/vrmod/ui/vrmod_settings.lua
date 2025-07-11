@@ -487,6 +487,7 @@ function VRUtilOpenMenu()
 		btn:SetPos(10, y + 45)
 		btn:SetSize(160, 30)
 		function btn:DoClick()
+			frame:Close()
 			RunConsoleCommand("vrmod_weaponconfig")
 		end
 
