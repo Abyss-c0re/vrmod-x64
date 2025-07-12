@@ -260,21 +260,15 @@ if CLIENT then
 		if IsValid(g_VR.viewModel) then g_VR.viewModelMuzzle = g_VR.viewModel:GetAttachment(1) end
 	end
 
-	-- Death animation function
 	local function DrawDeathAnimation(rtWidth, rtHeight)
-		-- Initialize animation state if not already set
-		if not g_VR.deathTime then
-			g_VR.deathTime = CurTime()
-			g_VR.fadeAlpha = 0
-		end
-
+		if not g_VR.deathTime then g_VR.deathTime = CurTime() end
+		local fadeAlpha = 0
 		local fadeDuration = 3.5
 		local maxAlpha = 200
 		local progress = math.min((CurTime() - g_VR.deathTime) / fadeDuration, 1)
-		g_VR.fadeAlpha = math.min(progress * maxAlpha, maxAlpha) -- Fade to semi-transparent dark red
+		fadeAlpha = math.min(progress * maxAlpha, maxAlpha)
 		cam.Start2D()
-		-- Draw semi-transparent dark red overlay
-		surface.SetDrawColor(169, 0, 0, g_VR.fadeAlpha)
+		surface.SetDrawColor(120, 0, 0, fadeAlpha)
 		surface.DrawRect(0, 0, rtWidth, rtHeight)
 		cam.End2D()
 	end
@@ -322,9 +316,7 @@ if CLIENT then
 		if not LocalPlayer():Alive() then
 			DrawDeathAnimation(rtWidth, rtHeight)
 		else
-			-- Reset animation state when alive
 			g_VR.deathTime = nil
-			g_VR.fadeAlpha = 0
 		end
 
 		render.PopRenderTarget(g_VR.rt)
