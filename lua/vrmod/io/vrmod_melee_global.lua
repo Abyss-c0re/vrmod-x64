@@ -32,6 +32,7 @@ local impactSounds = {
     -- For explosive or high-impact melee effects, like a rocket hammer
 }
 
+
 -- SHARED CACHE
 local modelRadiusCache = {}
 local collisionSpheres = {}
@@ -179,6 +180,28 @@ if CLIENT then
         local relativeSpeed = relativeVel:Length()
         if relativeSpeed / 40 < cv_meleeVelThreshold:GetFloat() then return end
         if NextMeleeTime > CurTime() then return end
+        -- Handle swing sound with VRMod_MeleeSwing hook
+        local swingSound = nil
+        if useWeapon and IsHoldingValidWeapon(ply) then
+            local wep = ply:GetActiveWeapon()
+            local wepClass = wep:GetClass()
+            -- Default swing sound for crowbar
+            if wepClass == "weapon_crowbar" or wepClass == "arcticvr_hl2_crowbar" then swingSound = "Weapon_Crowbar.Single" end
+            -- Allow overriding via hook
+            local swingData = {
+                Player = ply,
+                Weapon = wep,
+                Hand = hand,
+                Position = pos,
+                RelativeVelocity = relativeVel,
+                RelativeSpeed = relativeSpeed
+            }
+
+            hook.Run("VRMod_MeleeSwing", swingData, function(soundPath) swingSound = soundPath end)
+            -- Play swing sound if defined
+            if swingSound then sound.Play(swingSound, pos, 75, 100, 1) end
+        end
+
         local tr0 = util.TraceLine({
             start = pos,
             endpos = pos,
@@ -426,7 +449,6 @@ if SERVER then
         end
     end)
 end
-
 -- --Example Hook
 -- hook.Add("VRMod_MeleeHit", "CustomStunstickHit", function(hitData, callback)
 --     if hitData.ImpactType == "blunt" and IsValid(hitData.Attacker:GetActiveWeapon()) and hitData.Attacker:GetActiveWeapon():GetClass() == "weapon_stunstick" then
