@@ -164,11 +164,11 @@ if CLIENT then
     end
 
     local function EstimateWeaponReach(ply)
-        if not IsHoldingValidWeapon(ply) then return 5 end
+        if not IsHoldingValidWeapon(ply) then return 6.6 end
         local wep = ply:GetActiveWeapon()
         local mins, maxs = wep:GetModelBounds()
         local size = (maxs - mins):Length() * 0.5
-        return math.Clamp(size, 5, 50)
+        return math.Clamp(size, 6.6, 50)
     end
 
     local function TryMelee(pos, relativeVel, useWeapon, hand)
@@ -182,7 +182,7 @@ if CLIENT then
         if NextMeleeTime > CurTime() then return end
         -- Handle swing sound with VRMod_MeleeSwing hook
         local swingSound = nil
-        if useWeapon and IsHoldingValidWeapon(ply) then
+        if useWeapon then
             local wep = ply:GetActiveWeapon()
             local wepClass = wep:GetClass()
             -- Default swing sound for crowbar
