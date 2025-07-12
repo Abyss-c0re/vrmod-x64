@@ -1,21 +1,38 @@
 ----------------------------------------
--- VRMod Melee System (Trace‑Based)
+-- VRMod Melee System (Trace-Based)
 ----------------------------------------
 -- CONVARS -----------------------------
 local cv_allowgunmelee = CreateConVar("vrmod_melee_gunmelee", "1", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "1.5", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "100", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
+local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_usekick = CreateClientConVar("vrmod_melee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+local cv_meleeDebug = CreateConVar("vrmod_melee_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
+local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+-- Updated impactSounds with verified sound paths
 local impactSounds = {
-    fist = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav",},
-    blunt = {"physics/metal/metal_barrel_impact_hard1.wav", "physics/metal/metal_barrel_impact_hard2.wav", "physics/metal/metal_solid_impact_hard1.wav",},
+    fist = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_soft1.wav"},
+    -- Suitable for unarmed punches or light hand strikes
+    blunt = {"physics/metal/metal_box_impact_hard1.wav", "physics/metal/metal_box_impact_hard2.wav", "physics/metal/metal_box_impact_hard3.wav"},
+    -- For clubs, hammers, crowbars, or other heavy, non-sharp weapons
+    stunstick = {"weapons/stunstick/stunstick_impact1.wav", "weapons/stunstick/stunstick_impact2.wav", "weapons/stunstick/stunstick_fleshhit1.wav", "weapons/stunstick/stunstick_fleshhit2.wav"},
+    -- For Combine stun batons, with electric, high-tech impact sounds
+    sharp = {"physics/flesh/flesh_squishy_impact_hard1.wav", "physics/flesh/flesh_squishy_impact_hard2.wav", "weapons/knife/knife_hit1.wav", "weapons/knife/knife_hit2.wav"},
+    -- For swords, knives, or other bladed weapons with cutting/slicing effects
+    piercing = {"physics/flesh/flesh_bloody_impact_hard1.wav", "physics/flesh/flesh_bloody_impact_hard2.wav", "weapons/crossbow/hitbod1.wav", "weapons/crossbow/hitbod2.wav"},
+    -- For spears, arrows, or other penetrating weapons
+    heavy = {"physics/metal/metal_barrel_impact_hard1.wav", "physics/metal/metal_barrel_impact_hard2.wav", "physics/concrete/concrete_impact_hard1.wav", "physics/concrete/concrete_impact_hard2.wav"},
+    -- For massive weapons like sledgehammers or large melee objects
+    energy = {"weapons/physcannon/energy_bounce1.wav", "weapons/physcannon/energy_bounce2.wav", "weapons/physcannon/energy_sing_flyby1.wav", "weapons/physcannon/energy_sing_flyby2.wav"},
+    -- For sci-fi/energy-based weapons, like plasma blades or magical effects
+    explosive = {"weapons/explode3.wav", "weapons/explode4.wav", "ambient/explosions/explode_1.wav", "ambient/explosions/explode_2.wav"}
+    -- For explosive or high-impact melee effects, like a rocket hammer
 }
 
---SHARED CACHE
+-- SHARED CACHE
 local modelRadiusCache = {}
 local collisionSpheres = {}
 local pending = {}
@@ -46,8 +63,7 @@ local function TraceSphereApprox(data)
         Fraction = 1
     }
 
-    local dirs = {Vector(0, 0, 0), Vector(1, 0, 0), Vector(-1, 0, 0), Vector(0, 1, 0), Vector(0, -1, 0), Vector(0, 0, 1), Vector(0, 0, -1),}
-    -- add more sample points if you like
+    local dirs = {Vector(0, 0, 0), Vector(1, 0, 0), Vector(-1, 0, 0), Vector(0, 1, 0), Vector(0, -1, 0), Vector(0, 0, 1), Vector(0, 0, -1)}
     for _, offset in ipairs(dirs) do
         local origin = data.start + offset * data.radius
         local tr = util.TraceLine({
@@ -73,7 +89,6 @@ if CLIENT then
         return IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty"
     end
 
-    -- Internal: runs off‑render to compute & cache
     local function ComputePhysicsRadius(modelPath)
         local prop = ents.CreateClientProp(modelPath)
         if not IsValid(prop) then
@@ -90,12 +105,11 @@ if CLIENT then
         local phys = prop:GetPhysicsObject()
         if IsValid(phys) then
             local amin, amax = phys:GetAABB()
-            -- schedule removal next tick to avoid render‑time errors
             timer.Simple(0, function() if IsValid(prop) then prop:Remove() end end)
             if amin:Length() > 0 and amax:Length() > 0 then
                 local r = (amax - amin):Length() * 0.5
                 modelRadiusCache[modelPath] = r
-                print(string.format("[ModelRadius][Deferred] physics‑prop AABB → %s  Radius: %.2f", tostring(amin) .. " / " .. tostring(amax), r))
+                print(string.format("[ModelRadius][Deferred] physics-prop AABB → %s  Radius: %.2f", tostring(amin) .. " / " .. tostring(amax), r))
             else
                 modelRadiusCache[modelPath] = 5
                 print("[ModelRadius][Deferred] zero AABB → default 5 for", modelPath)
@@ -110,31 +124,26 @@ if CLIENT then
     end
 
     local function GetModelRadius(modelPath)
-        -- 1) Immediate cache hit?
         if modelRadiusCache[modelPath] then return modelRadiusCache[modelPath] end
-        -- 2) If not already computing, defer it
         if not pending[modelPath] then
             pending[modelPath] = true
             timer.Simple(0, function() ComputePhysicsRadius(modelPath) end)
         end
-        -- 3) Return a small provisional sphere
         return 5
     end
 
-    -- Send hit data to server
-    local function SendMeleeAttack(src, dir, speed, radius, reach, soundType, hand)
+    local function SendMeleeAttack(src, dir, speed, radius, reach, impactType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
         net.WriteVector(dir)
         net.WriteFloat(speed)
         net.WriteFloat(radius)
         net.WriteFloat(reach)
-        net.WriteString(soundType)
-        net.WriteString(hand or "") -- send empty string if no hand
+        net.WriteString(impactType)
+        net.WriteString(hand or "")
         net.SendToServer()
     end
 
-    -- Determine sweep radius
     local function GetSweepRadius(useWeapon)
         local ply = LocalPlayer()
         local model = cl_effectmodel:GetString()
@@ -145,7 +154,6 @@ if CLIENT then
         return GetModelRadius(model)
     end
 
-    -- Add wireframe sphere to be drawn
     local function AddDebugSphere(pos, radius)
         table.insert(collisionSpheres, {
             pos = pos,
@@ -154,26 +162,23 @@ if CLIENT then
         })
     end
 
-    local function EstimateWeaponReach(wep)
-        if not IsValid(wep) then return 5 end
+    local function EstimateWeaponReach(ply)
+        if not IsHoldingValidWeapon(ply) then return 5 end
+        local wep = ply:GetActiveWeapon()
         local mins, maxs = wep:GetModelBounds()
         local size = (maxs - mins):Length() * 0.5
         return math.Clamp(size, 5, 50)
     end
 
-    -- Core melee logic
     local function TryMelee(pos, relativeVel, useWeapon, hand)
         local ply = LocalPlayer()
         if not vrmod or not vrmod.GetHMDVelocity then return end
         if not IsValid(ply) or not ply:Alive() then return end
-        if not MeleeFilter(ent, ply, hand) then return end
+        if not MeleeFilter(ply, ply, hand) then return end
         if useWeapon and not IsHoldingValidWeapon(ply) then useWeapon = false end
-        -- Speed check
         local relativeSpeed = relativeVel:Length()
         if relativeSpeed / 40 < cv_meleeVelThreshold:GetFloat() then return end
-        -- Cooldown
         if NextMeleeTime > CurTime() then return end
-        -- Quick line trace to get a good source point
         local tr0 = util.TraceLine({
             start = pos,
             endpos = pos,
@@ -181,10 +186,8 @@ if CLIENT then
         })
 
         local src = tr0.HitPos + tr0.HitNormal * -2
-        -- Build hull trace, passing our filter the optional hand
         local dir = relativeVel:GetNormalized()
-        local wep = ply:GetActiveWeapon()
-        local reach = EstimateWeaponReach(wep)
+        local reach = EstimateWeaponReach(ply)
         local radius = GetSweepRadius(useWeapon)
         local tr = TraceSphereApprox{
             start = src,
@@ -195,15 +198,13 @@ if CLIENT then
         }
 
         if cl_fistvisible:GetBool() then AddDebugSphere(src, radius) end
-        -- If we hit, send full data including hand
         if tr.Hit then
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
-            local soundType = useWeapon and "blunt" or "fist"
-            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, radius, reach, soundType, hand)
+            local impactType = useWeapon and "blunt" or "fist"
+            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, radius, reach, impactType, hand)
         end
     end
 
-    -- Draw wireframe debug spheres
     hook.Add("PostDrawOpaqueRenderables", "VRMeleeDebugSpheres", function()
         local now = CurTime()
         for i = #collisionSpheres, 1, -1 do
@@ -217,7 +218,6 @@ if CLIENT then
         end
     end)
 
-    -- Hook into VRMod
     hook.Add("VRMod_Tracking", "VRMeleeTrace", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
@@ -251,10 +251,10 @@ if SERVER then
         local swingSpeed = net.ReadFloat()
         local radius = net.ReadFloat()
         local reach = net.ReadFloat()
-        local soundType = net.ReadString()
+        local impactType = net.ReadString()
         local hand = net.ReadString()
         if hand == "" then hand = nil end
-        local base = cv_meleeDamage:GetFloat()
+        -- Perform the trace with initial radius and reach
         local tr = TraceSphereApprox{
             start = src,
             endpos = src + dir * reach,
@@ -266,6 +266,8 @@ if SERVER then
             mask = MASK_SHOT
         }
 
+        if not tr.Hit then return end
+        -- Default decal based on material type
         local decalName = "Impact.Concrete"
         local matType = tr.MatType
         if matType == MAT_METAL then
@@ -284,36 +286,159 @@ if SERVER then
             decalName = "Impact.Concrete"
         end
 
-        if not tr.Hit then return end
-        -- Calculate relative velocity: attacker's swing speed minus target's velocity projected onto swing direction
+        -- Damage calculation with linear scaling and cap
+        local base = cv_meleeDamage:GetFloat() -- Default 5
         local targetVel = tr.Entity.GetVelocity and tr.Entity:GetVelocity() or Vector(0, 0, 0)
-        local relativeSpeed = math.max(0, swingSpeed - targetVel:Dot(dir))
-        -- Scale damage based on relative speed
-        local scaled = math.Clamp((relativeSpeed / 80) ^ 2, 0.1, 6.0)
-        local dmgAmt = base * scaled * 0.1
-        if soundType == "blunt" then dmgAmt = dmgAmt * 1.25 end
+        local relativeSpeed = math.max(0, swingSpeed) -- Ignore target velocity
+        local speedScale = cv_meleeSpeedScale:GetFloat() -- Default 0.03
+        local damageMultiplier = 1.0
+        local damageType = bit.bor(DMG_CLUB, DMG_BLAST)
+        if impactType == "blunt" then
+            damageMultiplier = 1.25
+        elseif impactType == "stunstick" then
+            damageMultiplier = 1.1
+            damageType = bit.bor(DMG_CLUB, DMG_SHOCK)
+        elseif impactType == "sharp" then
+            damageMultiplier = 1.5
+            damageType = DMG_SLASH
+        elseif impactType == "piercing" then
+            damageMultiplier = 1.3
+            damageType = DMG_BULLET
+        elseif impactType == "heavy" then
+            damageMultiplier = 2.0
+            damageType = bit.bor(DMG_CLUB, DMG_CRUSH)
+        elseif impactType == "energy" then
+            damageMultiplier = 1.4
+            damageType = bit.bor(DMG_ENERGYBEAM, DMG_SHOCK)
+        elseif impactType == "explosive" then
+            damageMultiplier = 2.5
+            damageType = bit.bor(DMG_BLAST, DMG_CLUB)
+        end
+
+        local speedFactor = math.min(5.0, 1.0 + relativeSpeed * speedScale)
+        local dmgAmt = base * speedFactor * damageMultiplier
+        -- Universal hook for customizing melee hit
+        local customSound = nil
+        local customDecal = decalName
+        local customDamage = dmgAmt
+        local customDamageMultiplier = damageMultiplier
+        local customDamageType = damageType
+        local customReach = reach
+        local customRadius = radius
+        local customImpactType = impactType
+        local hitData = {
+            Attacker = ply,
+            HitEntity = tr.Entity,
+            HitPos = tr.HitPos,
+            Damage = dmgAmt,
+            ImpactType = impactType,
+            Hand = hand,
+            RelativeSpeed = relativeSpeed,
+            MaterialType = matType,
+            DecalName = decalName,
+            DamageMultiplier = damageMultiplier,
+            DamageType = damageType,
+            Reach = reach,
+            Radius = radius
+        }
+
+        hook.Run("VRMod_MeleeHit", hitData, function(soundPath, newDecal, newDamage, newDamageMultiplier, newDamageType, newReach, newRadius, newImpactType)
+            if soundPath then customSound = soundPath end
+            if newDecal then customDecal = newDecal end
+            if newDamage then customDamage = newDamage end
+            if newDamageMultiplier then customDamageMultiplier = newDamageMultiplier end
+            if newDamageType then customDamageType = newDamageType end
+            if newReach then customReach = newReach end
+            if newRadius then customRadius = newRadius end
+            if newImpactType then customImpactType = newImpactType end
+        end)
+
+        -- Recalculate damage if impactType or multiplier was overridden
+        if customImpactType ~= impactType or customDamageMultiplier ~= damageMultiplier or customDamage ~= dmgAmt then
+            if customImpactType ~= impactType and not customDamageMultiplier and not customDamageType then
+                if customImpactType == "blunt" then
+                    customDamageMultiplier = 1.25
+                    customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
+                elseif customImpactType == "stunstick" then
+                    customDamageMultiplier = 1.1
+                    customDamageType = bit.bor(DMG_CLUB, DMG_SHOCK)
+                elseif customImpactType == "sharp" then
+                    customDamageMultiplier = 1.5
+                    customDamageType = DMG_SLASH
+                elseif customImpactType == "piercing" then
+                    customDamageMultiplier = 1.3
+                    customDamageType = DMG_BULLET
+                elseif customImpactType == "heavy" then
+                    customDamageMultiplier = 2.0
+                    customDamageType = bit.bor(DMG_CLUB, DMG_CRUSH)
+                elseif customImpactType == "energy" then
+                    customDamageMultiplier = 1.4
+                    customDamageType = bit.bor(DMG_ENERGYBEAM, DMG_SHOCK)
+                elseif customImpactType == "explosive" then
+                    customDamageMultiplier = 2.5
+                    customDamageType = bit.bor(DMG_BLAST, DMG_CLUB)
+                else
+                    customDamageMultiplier = 1.0
+                    customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
+                end
+            end
+
+            customDamage = customDamage or base * speedFactor * customDamageMultiplier -- Unified linear scaling
+        end
+
         -- Apply damage
         local dmgInfo = DamageInfo()
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
-        dmgInfo:SetDamage(dmgAmt)
-        dmgInfo:SetDamageType(bit.bor(DMG_CLUB, DMG_BLAST))
+        dmgInfo:SetDamage(customDamage)
+        dmgInfo:SetDamageType(customDamageType)
         dmgInfo:SetDamagePosition(tr.HitPos)
         tr.Entity:TakeDamageInfo(dmgInfo)
         -- Apply physics force
         local phys = tr.Entity:GetPhysicsObject()
-        if IsValid(phys) then phys:ApplyForceCenter(dir * dmgAmt) end
+        if IsValid(phys) then phys:ApplyForceCenter(dir * customDamage * 10) end
         -- Play impact sound
-        local list = impactSounds[soundType]
-        if list then
-            local snd = list[math.random(#list)]
-            sound.Play(snd, tr.HitPos, 75, 100, 1)
+        local snd
+        if customSound then
+            snd = customSound
+        else
+            local list = impactSounds[customImpactType]
+            if not list then
+                list = impactSounds.fist
+                print("[VRMod_Melee] Warning: Invalid impactType '" .. tostring(customImpactType) .. "', falling back to 'fist'")
+            end
+
+            snd = list[math.random(#list)]
         end
 
-        util.Decal(decalName, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2)
-        if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(decalName, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
+        sound.Play(snd, tr.HitPos, 75, 100, 1)
+        -- Apply decal
+        util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2)
+        if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
+        -- Log the hit with enhanced debugging
         local attackerName = ply:Nick() or "Unknown"
         local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
-        print(string.format("%s smashed %s for %.1f damage!", attackerName, targetName, dmgAmt))
+        if cv_meleeDebug:GetBool() then
+            local targetVelDot = targetVel:Dot(dir)
+            print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
+        else
+            print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
+        end
     end)
 end
+
+-- --Example Hook
+-- hook.Add("VRMod_MeleeHit", "CustomStunstickHit", function(hitData, callback)
+--     if hitData.ImpactType == "blunt" and IsValid(hitData.Attacker:GetActiveWeapon()) and hitData.Attacker:GetActiveWeapon():GetClass() == "weapon_stunstick" then
+--         callback(
+--             nil,                     -- Use default stunstick sound
+--             "Impact.Metal",          -- Custom decal
+--             nil,                     -- Keep calculated damage (~13.75–27.5)
+--             nil,                     -- Keep default multiplier (1.1)
+--             nil,                     -- Keep default damage type
+--             hitData.Reach * 1.1,     -- Slightly increase reach
+--             hitData.Radius,          -- Keep default radius
+--             "stunstick"              -- Override to stunstick
+--         )
+--     end
+-- end)
