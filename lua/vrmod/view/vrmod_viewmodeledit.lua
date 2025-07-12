@@ -1,5 +1,6 @@
 -- vr_viewmodel_config.lua
 if CLIENT then
+	local CONFIG_PATH = "vrmod/vrmod_weapons_config.json"
 	g_VR.viewModelInfo = g_VR.viewModelInfo or {}
 	-- Default hardcoded offsets and overrides
 	local DEFAULT_VIEWMODEL_INFO = {
@@ -7,184 +8,147 @@ if CLIENT then
 		gmod_tool = {
 			offsetPos = Vector(-12, 6.5, 7),
 			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
-			noLaser = false
 		},
 		weapon_physgun = {
 			offsetPos = Vector(-34.5, 13.4, 14.5),
 			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_physcannon = {
 			offsetPos = Vector(-34.5, 13.4, 10.5),
 			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_shotgun = {
 			offsetPos = Vector(-14.5, 10, 8.5),
 			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
-			noLaser = false
 		},
 		weapon_rpg = {
 			offsetPos = Vector(-27.5, 19, 10.5),
 			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		arcticvr_hl2_rpg = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_crossbow = {
 			offsetPos = Vector(-14.5, 10, 8.5),
 			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
-			noLaser = false
 		},
 		weapon_medkit = {
 			offsetPos = Vector(-23, 10, 5),
-			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
-			noLaser = false
+			offsetAng = Angle(0, 0, 0)
 		},
 		weapon_crowbar = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
 			wrongMuzzleAng = true,
-			noLaser = false
 		},
 		arcticvr_hl2_crowbar = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_stunstick = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = true,
-			noLaser = false
+			offsetPos = Vector(3.35, 1.5, 2.5),
+			offsetAng = Angle(0, -90, 0),
+			wrongMuzzleAng = true
 		},
 		arcticvr_hl2_stunstick = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
+			offsetPos = Vector(0, 0, -3),
+			offsetAng = Angle(90, 0, 0),
 			noLaser = true
 		},
 		arcticvr_hl2_knife = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		arcticvr_hl2_cmbsniper = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		laserpointer = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		seal6_c4 = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		seal6_bottle = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		seal6_doritos = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_bomb = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_c4 = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_vfire_gascan = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_extinguisher_infinte = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_extinguisher = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 		weapon_slam = {
-			offsetPos = Vector(),
-			offsetAng = Angle(),
 			wrongMuzzleAng = true,
-			noLaser = false
 		},
 		weapon_microwaverifle = {
 			offsetPos = Vector(-9, 6.5, 10),
-			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
-			noLaser = false
+			offsetAng = Angle(0, 0, 0)
 		},
 		weapon_vfirethrower = {
 			offsetPos = Vector(13, 2, -6),
 			offsetAng = Angle(0, 0, 0),
 			wrongMuzzleAng = true,
-			noLaser = false
 		},
 		weapon_newtphysgun = {
 			offsetPos = Vector(-34.5, 13.4, 14.5),
 			offsetAng = Angle(0, 0, 0),
-			wrongMuzzleAng = false,
 			noLaser = true
 		},
 	}
 
-	local CONFIG_PATH = "vrmod/vrmod_weapons_config.json"
-	g_VR = g_VR or {}
 	local function SaveViewModelConfig()
 		file.Write(CONFIG_PATH, util.TableToJSON(g_VR.viewModelInfo, true))
 	end
 
+	-- Custom deep copy function to handle Vector and Angle
+	local function DeepCopy(orig)
+		if type(orig) == "table" then
+			local copy = {}
+			for k, v in pairs(orig) do
+				copy[k] = DeepCopy(v)
+			end
+			return copy
+		elseif type(orig) == "Vector" then
+			return Vector(orig.x, orig.y, orig.z)
+		elseif type(orig) == "Angle" then
+			return Angle(orig.p, orig.y, orig.r)
+		else
+			return orig -- Return non-table, non-userdata values as-is
+		end
+	end
+
 	local function LoadViewModelConfig()
+		-- Initialize g_VR.viewModelInfo if empty
+		if not next(g_VR.viewModelInfo) then
+			g_VR.viewModelInfo = DeepCopy(DEFAULT_VIEWMODEL_INFO) -- Copy entire default table
+		end
+
 		-- Load saved config (if any)
 		if file.Exists(CONFIG_PATH, "DATA") then
 			local loaded = util.JSONToTable(file.Read(CONFIG_PATH, "DATA")) or {}
-			for cls, data in pairs(loaded) do
-				g_VR.viewModelInfo[cls] = data
+			for cls, loadedData in pairs(loaded) do
+				-- Ensure the class exists in viewModelInfo, using defaults if not
+				if not g_VR.viewModelInfo[cls] then g_VR.viewModelInfo[cls] = DeepCopy(DEFAULT_VIEWMODEL_INFO[cls] or {}) end
+				-- Merge loaded data, only updating fields that exist
+				if loadedData.offsetPos and type(loadedData.offsetPos) == "table" then g_VR.viewModelInfo[cls].offsetPos = Vector(loadedData.offsetPos[1] or 0, loadedData.offsetPos[2] or 0, loadedData.offsetPos[3] or 0) end
+				if loadedData.offsetAng and type(loadedData.offsetAng) == "table" then g_VR.viewModelInfo[cls].offsetAng = Angle(loadedData.offsetAng[1] or 0, loadedData.offsetAng[2] or 0, loadedData.offsetAng[3] or 0) end
+				if loadedData.wrongMuzzleAng ~= nil then g_VR.viewModelInfo[cls].wrongMuzzleAng = loadedData.wrongMuzzleAng end
+				if loadedData.noLaser ~= nil then g_VR.viewModelInfo[cls].noLaser = loadedData.noLaser end
 			end
-		else
-			for cls, data in pairs(DEFAULT_VIEWMODEL_INFO) do
-				if not g_VR.viewModelInfo[cls] then g_VR.viewModelInfo[cls] = data end
-			end
+
+			-- Handle autoOffsetAddPos separately if present in loaded config
+			if loaded.autoOffsetAddPos and type(loaded.autoOffsetAddPos) == "table" then g_VR.viewModelInfo.autoOffsetAddPos = Vector(loaded.autoOffsetAddPos[1] or 0, loaded.autoOffsetAddPos[2] or 0, loaded.autoOffsetAddPos[3] or 0) end
 		end
 
 		SaveViewModelConfig()
