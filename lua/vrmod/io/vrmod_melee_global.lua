@@ -24,8 +24,9 @@ local impactSounds = {
 }
 
 -- SHARED CACHE
-local modelRadiusCache = {}
+local modelCache = {} -- Now stores {radius, reach, mins, maxs, angles, computed} for weapons, {radius, reach, computed} for fists
 local collisionSpheres = {}
+local collisionBoxes = {} -- Added for box visualization
 local pending = {}
 -- SHARED FILTER
 local magCache = {}
@@ -53,39 +54,72 @@ local function MeleeFilter(ent, ply, hand)
     return true
 end
 
-local function TraceSphereApprox(data)
+-- Modified to handle both sphere and box traces
+local function TraceBoxOrSphere(data)
     local best = {
         Hit = false,
         Fraction = 1
     }
 
-    local dirs = {Vector(0, 0, 0), Vector(1, 0, 0), Vector(-1, 0, 0), Vector(0, 1, 0), Vector(0, -1, 0), Vector(0, 0, 1), Vector(0, 0, -1)}
-    for _, offset in ipairs(dirs) do
-        local origin = data.start + offset * data.radius
-        local tr = util.TraceLine({
-            start = origin,
-            endpos = origin + (data.endpos - data.start):GetNormalized() * (data.endpos - data.start):Length(),
+    if data.mins and data.maxs then
+        -- Box trace for weapons
+        local tr = util.TraceHull({
+            start = data.start,
+            endpos = data.endpos,
+            mins = data.mins,
+            maxs = data.maxs,
             filter = data.filter,
             mask = data.mask
         })
 
-        if tr.Hit and tr.Fraction < best.Fraction then
+        if tr.Hit then
             best = tr
             best.Hit = true
+        end
+    else
+        -- Sphere trace approximation for hands
+        local dirs = {Vector(0, 0, 0), Vector(1, 0, 0), Vector(-1, 0, 0), Vector(0, 1, 0), Vector(0, -1, 0), Vector(0, 0, 1), Vector(0, 0, -1)}
+        for _, offset in ipairs(dirs) do
+            local origin = data.start + offset * data.radius
+            local tr = util.TraceLine({
+                start = origin,
+                endpos = origin + (data.endpos - data.start):GetNormalized() * (data.endpos - data.start):Length(),
+                filter = data.filter,
+                mask = data.mask
+            })
+
+            if tr.Hit and tr.Fraction < best.Fraction then
+                best = tr
+                best.Hit = true
+            end
         end
     end
     return best
 end
 
-local function ComputePhysicsRadius(modelPath)
+-- Integrated ApplyBoxFromRadius for weapons
+local function ApplyBoxFromRadius(radius, ply, wep)
+    local forward = radius
+    local side = radius * 0.15
+    local mins = Vector(-forward * 0.35, -side, -side)
+    local maxs = Vector(forward * 2.4, side, side)
+    local vmInfo = g_VR.viewModelInfo[wep]
+    local offsetAng = vmInfo and vmInfo.offsetAng
+    local handAng = vrmod.GetRightHandAng(ply)
+    local angle = offsetAng and handAng + offsetAng or handAng
+    if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Forward-aligned mins: %s, maxs: %s, angles: %s", radius, tostring(mins), tostring(maxs), tostring(angle))) end
+    return mins, maxs, angle
+end
+
+local function ComputePhysicsRadius(modelPath, ply, wep)
     if not modelPath or modelPath == "" then
         if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Invalid or empty model path, skipping") end
         return
     end
 
-    if modelRadiusCache[modelPath] and modelRadiusCache[modelPath].computed then return end
+    if modelCache[modelPath] and modelCache[modelPath].computed then return end
     if pending[modelPath] and pending[modelPath].attempts >= 3 then
-        modelRadiusCache[modelPath] = {
+        modelCache[modelPath] = {
             radius = 5,
             reach = 6.6,
             computed = true
@@ -121,13 +155,17 @@ local function ComputePhysicsRadius(modelPath)
         if amin:Length() > 0 and amax:Length() > 0 then
             local radius = (amax - amin):Length() * 0.5
             local reach = math.Clamp(radius, 6.6, 50)
-            modelRadiusCache[modelPath] = {
+            local mins, maxs, angles = ApplyBoxFromRadius(radius, ply, wep)
+            modelCache[modelPath] = {
                 radius = radius,
                 reach = reach,
+                mins = mins,
+                maxs = maxs,
+                angles = angles,
                 computed = true
             }
 
-            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, modelPath)) end
+            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s, Angles: %s for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), tostring(angles), modelPath)) end
         else
             if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Zero AABB for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
         end
@@ -139,26 +177,31 @@ local function ComputePhysicsRadius(modelPath)
     pending[modelPath].lastAttempt = CurTime()
 end
 
-local function GetModelRadius(modelPath)
-    if modelRadiusCache[modelPath] and modelRadiusCache[modelPath].computed then return modelRadiusCache[modelPath].radius, modelRadiusCache[modelPath].reach end
+local function GetModelRadius(modelPath, ply, wep)
+    if modelCache[modelPath] and modelCache[modelPath].computed then return modelCache[modelPath].radius, modelCache[modelPath].reach, modelCache[modelPath].mins, modelCache[modelPath].maxs, modelCache[modelPath].angles end
     if not modelPath or modelPath == "" then return 5, 6.6 end
     if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
         pending[modelPath] = {
             attempts = 0
         }
 
-        timer.Simple(0, function() ComputePhysicsRadius(modelPath) end)
+        timer.Simple(0, function() ComputePhysicsRadius(modelPath, ply, wep) end)
     end
     return 5, 6.6
 end
 
-function GetWeaponMeleeParams(wep)
+function GetWeaponMeleeParams(wep, ply, hand)
     local model = cl_effectmodel:GetString()
-    local radius, reach = 5, 6.6
-    if IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then model = wep:GetWeaponWorldModel() or wep:GetModel() or model end
-    radius, reach = GetModelRadius(model)
-    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, radius=%.2f, reach=%.2f, model=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", radius, reach, model)) end
-    return radius, reach
+    local radius, reach, mins, maxs, angles
+    if hand == "right" and IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then
+        model = wep:GetWeaponWorldModel() or wep:GetModel() or model
+        radius, reach, mins, maxs, angles = GetModelRadius(model, ply, wep)
+    else
+        radius, reach = GetModelRadius(model)
+    end
+
+    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), model)) end
+    return radius, reach, mins, maxs, angles
 end
 
 -- CLIENTSIDE --------------------------
@@ -166,24 +209,37 @@ if CLIENT then
     local NextMeleeTime = 0
     local lastWeapon = nil
     local lastWeaponCheck = 0
-    local function SendMeleeAttack(src, dir, speed, radius, reach, impactType, hand)
+    local function SendMeleeAttack(src, dir, speed, radius, reach, mins, maxs, angles, impactType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
         net.WriteVector(dir)
         net.WriteFloat(speed)
         net.WriteFloat(radius)
         net.WriteFloat(reach)
+        net.WriteVector(mins or Vector(0, 0, 0))
+        net.WriteVector(maxs or Vector(0, 0, 0))
+        net.WriteAngle(angles or Angle(0, 0, 0))
         net.WriteString(impactType)
         net.WriteString(hand or "")
         net.SendToServer()
     end
 
-    local function AddDebugSphere(pos, radius)
-        table.insert(collisionSpheres, {
-            pos = pos,
-            radius = radius,
-            die = CurTime() + 0.15
-        })
+    local function AddDebugShape(pos, radius, mins, maxs, angles)
+        if mins and maxs and angles then
+            table.insert(collisionBoxes, {
+                pos = pos,
+                mins = mins,
+                maxs = maxs,
+                angles = angles,
+                die = CurTime() + 0.15
+            })
+        else
+            table.insert(collisionSpheres, {
+                pos = pos,
+                radius = radius,
+                die = CurTime() + 0.15
+            })
+        end
     end
 
     local function TryMelee(pos, relativeVel, useWeapon, hand)
@@ -221,24 +277,27 @@ if CLIENT then
 
         local src = tr0.HitPos + tr0.HitNormal * -2
         local dir = relativeVel:GetNormalized()
-        local radius, reach = GetWeaponMeleeParams(wep)
-        local tr = TraceSphereApprox{
+        local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(wep, ply, hand)
+        local traceData = {
             start = src,
             endpos = src + dir * reach,
             radius = radius,
+            mins = mins,
+            maxs = maxs,
             filter = function(ent) return MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
         }
 
-        if cl_fistvisible:GetBool() then AddDebugSphere(src, radius) end
+        local tr = TraceBoxOrSphere(traceData)
+        if cl_fistvisible:GetBool() then AddDebugShape(src, radius, mins, maxs, angles) end
         if tr.Hit then
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
             local impactType = useWeapon and "blunt" or "fist"
-            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, radius, reach, impactType, hand)
+            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, radius, reach, mins, maxs, angles, impactType, hand)
         end
     end
 
-    hook.Add("PostDrawOpaqueRenderables", "VRMeleeDebugSpheres", function()
+    hook.Add("PostDrawOpaqueRenderables", "VRMeleeDebugShapes", function()
         local now = CurTime()
         for i = #collisionSpheres, 1, -1 do
             local s = collisionSpheres[i]
@@ -247,6 +306,16 @@ if CLIENT then
             else
                 render.SetColorMaterial()
                 render.DrawWireframeSphere(s.pos, s.radius, 16, 16, Color(255, 0, 0, 150))
+            end
+        end
+
+        for i = #collisionBoxes, 1, -1 do
+            local b = collisionBoxes[i]
+            if now > b.die then
+                table.remove(collisionBoxes, i)
+            else
+                render.SetColorMaterial()
+                render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(0, 255, 0, 150))
             end
         end
     end)
@@ -263,21 +332,17 @@ if CLIENT then
         end
     end)
 
-    -- Monitor active weapon changes
     hook.Add("Think", "VRMod_MeleeWeaponMonitor", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
-        if CurTime() < lastWeaponCheck + 0.5 then -- Check every 0.5 seconds
-            return
-        end
-
+        if CurTime() < lastWeaponCheck + 0.5 then return end
         local wep = IsHoldingValidWeapon(ply)
         if wep ~= lastWeapon then
             if IsValid(wep) then
                 local model = wep:GetModel() or wep:GetWeaponWorldModel()
                 if model and model ~= "" then
                     if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] Weapon changed to", wep:GetClass(), "model:", model) end
-                    ComputePhysicsRadius(model)
+                    ComputePhysicsRadius(model, ply, wep)
                 else
                     if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] No valid model for weapon:", wep:GetClass()) end
                 end
@@ -300,14 +365,18 @@ if SERVER then
         local swingSpeed = net.ReadFloat()
         local radius = net.ReadFloat()
         local reach = net.ReadFloat()
+        local mins = net.ReadVector()
+        local maxs = net.ReadVector()
+        local angles = net.ReadAngle()
         local impactType = net.ReadString()
         local hand = net.ReadString()
         if hand == "" then hand = nil end
-        -- Perform the trace with initial radius and reach
-        local tr = TraceSphereApprox{
+        local traceData = {
             start = src,
             endpos = src + dir * reach,
             radius = radius,
+            mins = mins ~= Vector(0, 0, 0) and mins or nil,
+            maxs = maxs ~= Vector(0, 0, 0) and maxs or nil,
             filter = function(ent)
                 if ent == ply then return false end
                 return MeleeFilter(ent, ply, hand)
@@ -315,8 +384,8 @@ if SERVER then
             mask = MASK_SHOT
         }
 
+        local tr = TraceBoxOrSphere(traceData)
         if not tr.Hit then return end
-        -- Default decal based on material type
         local decalName = "Impact.Concrete"
         local matType = tr.MatType
         if matType == MAT_METAL then
@@ -335,11 +404,10 @@ if SERVER then
             decalName = "Impact.Concrete"
         end
 
-        -- Damage calculation with linear scaling and cap
-        local base = cv_meleeDamage:GetFloat() -- Default 5
+        local base = cv_meleeDamage:GetFloat()
         local targetVel = tr.Entity.GetVelocity and tr.Entity:GetVelocity() or Vector(0, 0, 0)
-        local relativeSpeed = math.max(0, swingSpeed) -- Ignore target velocity
-        local speedScale = cv_meleeSpeedScale:GetFloat() -- Default 0.03
+        local relativeSpeed = math.max(0, swingSpeed)
+        local speedScale = cv_meleeSpeedScale:GetFloat()
         local damageMultiplier = 1.0
         local damageType = bit.bor(DMG_CLUB, DMG_BLAST)
         if impactType == "blunt" then
@@ -366,7 +434,6 @@ if SERVER then
 
         local speedFactor = math.min(5.0, 1.0 + relativeSpeed * speedScale)
         local dmgAmt = base * speedFactor * damageMultiplier
-        -- Universal hook for customizing melee hit
         local customSound = nil
         local customDecal = decalName
         local customDamage = dmgAmt
@@ -402,7 +469,6 @@ if SERVER then
             if newImpactType then customImpactType = newImpactType end
         end)
 
-        -- Recalculate damage if impactType or multiplier was overridden
         if customImpactType ~= impactType or customDamageMultiplier ~= damageMultiplier or customDamage ~= dmgAmt then
             if customImpactType ~= impactType and not customDamageMultiplier and not customDamageType then
                 if customImpactType == "blunt" then
@@ -432,10 +498,9 @@ if SERVER then
                 end
             end
 
-            customDamage = customDamage or base * speedFactor * customDamageMultiplier -- Unified linear scaling
+            customDamage = customDamage or base * speedFactor * customDamageMultiplier
         end
 
-        -- Apply damage
         local dmgInfo = DamageInfo()
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
@@ -443,10 +508,8 @@ if SERVER then
         dmgInfo:SetDamageType(customDamageType)
         dmgInfo:SetDamagePosition(tr.HitPos)
         tr.Entity:TakeDamageInfo(dmgInfo)
-        -- Apply physics force
         local phys = tr.Entity:GetPhysicsObject()
         if IsValid(phys) then phys:ApplyForceCenter(dir * customDamage * 10) end
-        -- Play impact sound
         local snd
         if customSound then
             snd = customSound
@@ -461,15 +524,13 @@ if SERVER then
         end
 
         sound.Play(snd, tr.HitPos, 75, 100, 1)
-        -- Apply decal
         util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2)
         if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
-        -- Log the hit with enhanced debugging
         local attackerName = ply:Nick() or "Unknown"
         local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
         if cv_meleeDebug:GetBool() then
             local targetVelDot = targetVel:Dot(dir)
-            print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
+            print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
         else
             print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
         end
@@ -481,13 +542,11 @@ if SERVER then
         if wep then
             local model = wep:GetModel() or wep:GetWeaponWorldModel()
             if model and model ~= "" then
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged triggered for", wep:GetClass(), "model:", model, "hand:", hand) end
-                ComputePhysicsRadius(model)
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server] Weapon changed to", wep:GetClass(), "model:", model) end
+                ComputePhysicsRadius(model, ply, wep)
             else
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] No valid model for weapon:", wep:GetClass(), "hand:", hand) end
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server] No valid model for weapon:", wep:GetClass()) end
             end
-        else
-            if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged: no valid weapon, hand:", hand) end
         end
     end)
 end

@@ -109,44 +109,16 @@ hook.Add("VRMod_Drop", "VRHand_AVRMagRestore", function(ply, ent)
     if hands and hands.left and IsValid(hands.left.ent) then hands.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
 end)
 
-hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep, newWep)
+-- Modified hook to use GetWeaponMeleeParams directly
+hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, newWep)
     if not vrmod.IsPlayerInVR(ply) then return end
-    if not IsValid(newWep) then return end
     local hands = vrHands[ply]
     if not hands or not hands.right then return end
     local rightHand = hands.right.ent
-    if not IsValid(rightHand) then return end
+    if not IsValid(rightHand) or not IsValid(ply) then return end
     local function ApplySphere(radius)
         print("[VRHand] Applying SPHERE radius:", radius)
         rightHand:PhysicsInitSphere(radius, "metal_bouncy")
-        local phys = rightHand:GetPhysicsObject()
-        if IsValid(phys) then
-            phys:SetMass(20)
-            hands.right.phys = phys
-        end
-    end
-
-    local function ApplyBoxFromRadius(radius)
-        local forward = radius
-        local side = radius * 0.15
-        local mins = Vector(-forward * 0.35, -side, -side)
-        local maxs = Vector(forward * 2.3, side, side)
-        print(string.format("[VRHand] BOX radius %.2f | Forward-aligned mins: %s, maxs: %s", radius, tostring(mins), tostring(maxs)))
-        rightHand:PhysicsInitBox(mins, maxs)
-        -- Rotate so the long side (Z axis) aligns with local +X (GMod default forward)
-        local vmInfo = g_VR.viewModelInfo[newWep]
-        local offsetAng = vmInfo and vmInfo.offsetAng
-        local handAng = vrmod.GetRightHandAng(ply)
-        -- Combine if both are valid
-        local angle
-        if offsetAng then
-            angle = handAng + offsetAng
-        else
-            angle = handAng
-        end
-
-        if angle then rightHand:SetAngles(angle) end
-        -- Adjust if needed to match actual hand orientation
         local phys = rightHand:GetPhysicsObject()
         if IsValid(phys) then
             phys:SetMass(20)
@@ -160,24 +132,52 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep,
         return
     end
 
-    local radius, reach = GetWeaponMeleeParams(newWep)
     local function ApplyBestShape()
-        if not IsValid(ply) or not IsValid(ply:GetActiveWeapon()) then return end
+        if not IsValid(ply) or not IsValid(ply:GetActiveWeapon()) or not IsValid(rightHand) then return end
         if ply:GetActiveWeapon():GetClass() == "weapon_vrmod_empty" then
             ApplySphere(2.5)
             return
         end
 
-        local r, re = GetWeaponMeleeParams(ply:GetActiveWeapon())
-        local best = math.max(1.1 * (r or 2.5), 1.1 * (re or 2.5))
-        ApplyBoxFromRadius(best)
+        local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(ply:GetActiveWeapon(), ply, "right")
+        if not mins or not maxs or not angles then
+            -- Retry next frame if box parameters are not ready
+            timer.Simple(0, ApplyBestShape)
+            return
+        end
+
+        -- Apply box collision
+        rightHand:PhysicsInitBox(mins, maxs)
+        rightHand:SetAngles(angles)
+        local phys = rightHand:GetPhysicsObject()
+        if IsValid(phys) then
+            phys:SetMass(20)
+            hands.right.phys = phys
+        end
+
+       
     end
 
-    -- Retry next frame if defaults detected
-    if radius == 5 and reach == 6.6 then
+    -- Get parameters from GetWeaponMeleeParams
+    local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(newWep, ply, "right")
+    if radius == 5 and reach == 6.6 and not mins and not maxs then
+        -- Retry if default values are detected (indicating model radius not yet computed)
         timer.Simple(0, ApplyBestShape)
     else
-        local best = math.max(1.1 * radius, 1.1 * reach)
-        ApplyBoxFromRadius(best)
+        if mins and maxs and angles then
+            -- Apply box collision directly
+            rightHand:PhysicsInitBox(mins, maxs)
+            rightHand:SetAngles(angles)
+            local phys = rightHand:GetPhysicsObject()
+            if IsValid(phys) then
+                phys:SetMass(20)
+                hands.right.phys = phys
+            end
+
+
+        else
+            -- Fallback to sphere if box parameters are not ready
+            ApplySphere(2.5)
+        end
     end
 end)
