@@ -274,7 +274,7 @@ if CLIENT then
         local wep = IsHoldingValidWeapon(ply)
         if wep ~= lastWeapon then
             if IsValid(wep) then
-                local model = wep:GetWeaponWorldModel() or wep:GetModel()
+                local model = wep:GetModel() or wep:GetWeaponWorldModel()
                 if model and model ~= "" then
                     if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] Weapon changed to", wep:GetClass(), "model:", model) end
                     ComputePhysicsRadius(model)
@@ -287,27 +287,6 @@ if CLIENT then
         end
 
         lastWeaponCheck = CurTime()
-    end)
-
-    -- Keep VRMod_HeldEntityChanged for VR-specific weapon changes
-    hook.Add("VRMod_HeldEntityChanged", "VRMod_MeleePrecomputeVRWeapon", function(ply, hand, oldEnt, newEnt)
-        if not vrmod.IsPlayerInVR(ply) or ply ~= LocalPlayer() then
-            if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged skipped: not in VR or not local player") end
-            return
-        end
-
-        local wep = IsHoldingValidWeapon(ply)
-        if wep then
-            local model = wep:GetWeaponWorldModel() or wep:GetModel()
-            if model and model ~= "" then
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged triggered for", wep:GetClass(), "model:", model, "hand:", hand) end
-                ComputePhysicsRadius(model)
-            else
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] No valid model for weapon:", wep:GetClass(), "hand:", hand) end
-            end
-        else
-            if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged: no valid weapon, hand:", hand) end
-        end
     end)
 end
 
@@ -493,6 +472,22 @@ if SERVER then
             print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
         else
             print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
+        end
+    end)
+
+    hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep, newWep)
+        if not vrmod.IsPlayerInVR(ply) then return end
+        local wep = IsHoldingValidWeapon(ply)
+        if wep then
+            local model = wep:GetModel() or wep:GetWeaponWorldModel()
+            if model and model ~= "" then
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged triggered for", wep:GetClass(), "model:", model, "hand:", hand) end
+                ComputePhysicsRadius(model)
+            else
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] No valid model for weapon:", wep:GetClass(), "hand:", hand) end
+            end
+        else
+            if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged: no valid weapon, hand:", hand) end
         end
     end)
 end
