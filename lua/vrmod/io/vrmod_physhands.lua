@@ -116,8 +116,8 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep,
     if not hands or not hands.right then return end
     local rightHand = hands.right.ent
     if not IsValid(rightHand) then return end
-    local function ApplyRadius(radius)
-        print("[VRHand] Applying radius:", radius)
+    local function ApplySphere(radius)
+        print("[VRHand] Applying SPHERE radius:", radius)
         rightHand:PhysicsInitSphere(radius, "metal_bouncy")
         local phys = rightHand:GetPhysicsObject()
         if IsValid(phys) then
@@ -126,28 +126,58 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep,
         end
     end
 
+    local function ApplyBoxFromRadius(radius)
+        local forward = radius
+        local side = radius * 0.15
+        local mins = Vector(-forward * 0.35, -side, -side)
+        local maxs = Vector(forward * 2.3, side, side)
+        print(string.format("[VRHand] BOX radius %.2f | Forward-aligned mins: %s, maxs: %s", radius, tostring(mins), tostring(maxs)))
+        rightHand:PhysicsInitBox(mins, maxs)
+        -- Rotate so the long side (Z axis) aligns with local +X (GMod default forward)
+        local vmInfo = g_VR.viewModelInfo[newWep]
+        local offsetAng = vmInfo and vmInfo.offsetAng
+        local handAng = vrmod.GetRightHandAng(ply)
+        -- Combine if both are valid
+        local angle
+        if offsetAng then
+            angle = handAng + offsetAng
+        else
+            angle = handAng
+        end
+
+        if angle then rightHand:SetAngles(angle) end
+        -- Adjust if needed to match actual hand orientation
+        local phys = rightHand:GetPhysicsObject()
+        if IsValid(phys) then
+            phys:SetMass(20)
+            hands.right.phys = phys
+        end
+    end
+
+    -- Revert to sphere if weapon is empty
     if newWep:GetClass() == "weapon_vrmod_empty" then
-        ApplyRadius(2.5)
+        ApplySphere(2.5)
         return
     end
 
     local radius, reach = GetWeaponMeleeParams(newWep)
-    -- If radius and reach are default values, retry once next frame
-    if radius == 5 and reach == 6.6 then
-        timer.Simple(0, function()
-            if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
-            if not IsValid(ply:GetActiveWeapon()) then return end
-            if ply:GetActiveWeapon():GetClass() == "weapon_vrmod_empty" then
-                ApplyRadius(2.5)
-                return
-            end
+    local function ApplyBestShape()
+        if not IsValid(ply) or not IsValid(ply:GetActiveWeapon()) then return end
+        if ply:GetActiveWeapon():GetClass() == "weapon_vrmod_empty" then
+            ApplySphere(2.5)
+            return
+        end
 
-            local newRadius, newReach = GetWeaponMeleeParams(newWep)
-            local finalRadius = math.max(1.1 * newRadius or 2.5, 1.1 * newReach or 2.5)
-            ApplyRadius(finalRadius)
-        end)
+        local r, re = GetWeaponMeleeParams(ply:GetActiveWeapon())
+        local best = math.max(1.1 * (r or 2.5), 1.1 * (re or 2.5))
+        ApplyBoxFromRadius(best)
+    end
+
+    -- Retry next frame if defaults detected
+    if radius == 5 and reach == 6.6 then
+        timer.Simple(0, ApplyBestShape)
     else
-        local finalRadius = math.max(1.1 * radius, 1.1 * reach)
-        ApplyRadius(finalRadius)
+        local best = math.max(1.1 * radius, 1.1 * reach)
+        ApplyBoxFromRadius(best)
     end
 end)
