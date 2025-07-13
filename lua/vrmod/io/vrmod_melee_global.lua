@@ -8,7 +8,7 @@ local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "100", FCVAR_REPLICATE
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cl_usekick = CreateClientConVar("vrmod_melee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+--local cl_usekick = CreateClientConVar("vrmod_melee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cv_meleeDebug = CreateConVar("vrmod_melee_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
 local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
@@ -251,16 +251,16 @@ if CLIENT then
             TryMelee(vrmod.GetLeftHandPos(ply), leftRelVel, false, "left")
             TryMelee(vrmod.GetRightHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool(), "right")
         end
-
-        if cl_usekick:GetBool() and g_VR.sixPoints then
-            local data = g_VR.net[ply:SteamID()]
-            if data and data.lerpedFrame then
-                local leftFootRelVel = data.lerpedFrame.leftfootVel - hmdVel
-                local rightFootRelVel = data.lerpedFrame.rightfootVel - hmdVel
-                TryMelee(data.lerpedFrame.leftfootPos, leftFootRelVel, false)
-                TryMelee(data.lerpedFrame.rightfootPos, rightFootRelVel, false)
-            end
-        end
+        -- I don't have FBT, so can't do much in here.
+        -- if cl_usekick:GetBool() and g_VR.sixPoints then
+        --     local data = g_VR.net[ply:SteamID()]
+        --     if data and data.lerpedFrame then
+        --         local leftFootRelVel = data.lerpedFrame.leftfootVel - hmdVel
+        --         local rightFootRelVel = data.lerpedFrame.rightfootVel - hmdVel
+        --         TryMelee(data.lerpedFrame.leftfootPos, leftFootRelVel, false)
+        --         TryMelee(data.lerpedFrame.rightfootPos, rightFootRelVel, false)
+        --     end
+        -- end
     end)
 end
 
