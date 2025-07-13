@@ -152,7 +152,7 @@ local function GetModelRadius(modelPath)
     return 5, 6.6
 end
 
-local function GetWeaponMeleeParams(wep)
+function GetWeaponMeleeParams(wep)
     local model = cl_effectmodel:GetString()
     local radius, reach = 5, 6.6
     if IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then model = wep:GetWeaponWorldModel() or wep:GetModel() or model end
@@ -496,18 +496,3 @@ if SERVER then
         end
     end)
 end
--- --Example Hook
--- hook.Add("VRMod_MeleeHit", "CustomStunstickHit", function(hitData, callback)
---     if hitData.ImpactType == "blunt" and IsValid(hitData.Attacker:GetActiveWeapon()) and hitData.Attacker:GetActiveWeapon():GetClass() == "weapon_stunstick" then
---         callback(
---             nil,                     -- Use default stunstick sound
---             "Impact.Metal",          -- Custom decal
---             nil,                     -- Keep calculated damage (~13.75–27.5)
---             nil,                     -- Keep default multiplier (1.1)
---             nil,                     -- Keep default damage type
---             hitData.Reach * 1.1,     -- Slightly increase reach
---             hitData.Radius,          -- Keep default radius
---             "stunstick"              -- Override to stunstick
---         )
---     end
--- end)

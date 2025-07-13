@@ -18,7 +18,7 @@ local function SpawnVRHands(ply)
         hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
         hand:SetPos(ply:GetPos())
         hand:SetNoDraw(true)
-        hand:SetNWBool("isVRHand", true) 
+        hand:SetNWBool("isVRHand", true)
         local phys = hand:GetPhysicsObject()
         if IsValid(phys) then phys:SetMass(20) end
         hands[side] = {
@@ -69,7 +69,6 @@ hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
     end
 end)
 
-
 -- Prevent pickup of hand entities
 hook.Add("VRMod_Pickup", "VRHand_BlockPickup", function(ply, ent)
     local hands = vrHands[ply]
@@ -108,4 +107,47 @@ hook.Add("VRMod_Drop", "VRHand_AVRMagRestore", function(ply, ent)
     if not string.match(ent:GetClass(), "avrmag_") then return end
     local hands = vrHands[ply]
     if hands and hands.left and IsValid(hands.left.ent) then hands.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
+end)
+
+hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep, newWep)
+    if not vrmod.IsPlayerInVR(ply) then return end
+    if not IsValid(newWep) then return end
+    local hands = vrHands[ply]
+    if not hands or not hands.right then return end
+    local rightHand = hands.right.ent
+    if not IsValid(rightHand) then return end
+    local function ApplyRadius(radius)
+        print("[VRHand] Applying radius:", radius)
+        rightHand:PhysicsInitSphere(radius, "metal_bouncy")
+        local phys = rightHand:GetPhysicsObject()
+        if IsValid(phys) then
+            phys:SetMass(20)
+            hands.right.phys = phys
+        end
+    end
+
+    if newWep:GetClass() == "weapon_vrmod_empty" then
+        ApplyRadius(2.5)
+        return
+    end
+
+    local radius, reach = GetWeaponMeleeParams(newWep)
+    -- If radius and reach are default values, retry once next frame
+    if radius == 5 and reach == 6.6 then
+        timer.Simple(0, function()
+            if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+            if not IsValid(ply:GetActiveWeapon()) then return end
+            if ply:GetActiveWeapon():GetClass() == "weapon_vrmod_empty" then
+                ApplyRadius(2.5)
+                return
+            end
+
+            local newRadius, newReach = GetWeaponMeleeParams(newWep)
+            local finalRadius = math.max(1.1 * newRadius or 2.5, 1.1 * newReach or 2.5)
+            ApplyRadius(finalRadius)
+        end)
+    else
+        local finalRadius = math.max(1.1 * radius, 1.1 * reach)
+        ApplyRadius(finalRadius)
+    end
 end)
