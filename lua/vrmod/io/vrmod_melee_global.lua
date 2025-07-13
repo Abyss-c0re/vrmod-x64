@@ -8,30 +8,20 @@ local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "100", FCVAR_REPLICATE
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
---local cl_usekick = CreateClientConVar("vrmod_melee_usekick", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cv_meleeDebug = CreateConVar("vrmod_melee_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
 local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 -- Updated impactSounds with verified sound paths
 local impactSounds = {
     fist = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_soft1.wav"},
-    -- Suitable for unarmed punches or light hand strikes
     blunt = {"physics/metal/metal_box_impact_hard1.wav", "physics/metal/metal_box_impact_hard2.wav", "physics/metal/metal_box_impact_hard3.wav"},
-    -- For clubs, hammers, crowbars, or other heavy, non-sharp weapons
     stunstick = {"weapons/stunstick/stunstick_impact1.wav", "weapons/stunstick/stunstick_impact2.wav", "weapons/stunstick/stunstick_fleshhit1.wav", "weapons/stunstick/stunstick_fleshhit2.wav"},
-    -- For Combine stun batons, with electric, high-tech impact sounds
     sharp = {"physics/flesh/flesh_squishy_impact_hard1.wav", "physics/flesh/flesh_squishy_impact_hard2.wav", "weapons/knife/knife_hit1.wav", "weapons/knife/knife_hit2.wav"},
-    -- For swords, knives, or other bladed weapons with cutting/slicing effects
     piercing = {"physics/flesh/flesh_bloody_impact_hard1.wav", "physics/flesh/flesh_bloody_impact_hard2.wav", "weapons/crossbow/hitbod1.wav", "weapons/crossbow/hitbod2.wav"},
-    -- For spears, arrows, or other penetrating weapons
     heavy = {"physics/metal/metal_barrel_impact_hard1.wav", "physics/metal/metal_barrel_impact_hard2.wav", "physics/concrete/concrete_impact_hard1.wav", "physics/concrete/concrete_impact_hard2.wav"},
-    -- For massive weapons like sledgehammers or large melee objects
     energy = {"weapons/physcannon/energy_bounce1.wav", "weapons/physcannon/energy_bounce2.wav", "weapons/physcannon/energy_sing_flyby1.wav", "weapons/physcannon/energy_sing_flyby2.wav"},
-    -- For sci-fi/energy-based weapons, like plasma blades or magical effects
     explosive = {"weapons/explode3.wav", "weapons/explode4.wav", "ambient/explosions/explode_1.wav", "ambient/explosions/explode_2.wav"}
-    -- For explosive or high-impact melee effects, like a rocket hammer
 }
-
 
 -- SHARED CACHE
 local modelRadiusCache = {}
@@ -39,6 +29,11 @@ local collisionSpheres = {}
 local pending = {}
 -- SHARED FILTER
 local magCache = {}
+local function IsHoldingValidWeapon(ply)
+    local wep = ply:GetActiveWeapon()
+    return IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" and wep or false
+end
+
 local function IsMagazine(ent)
     local class = ent:GetClass()
     if magCache[class] ~= nil then return magCache[class] end
@@ -71,7 +66,7 @@ local function TraceSphereApprox(data)
             start = origin,
             endpos = origin + (data.endpos - data.start):GetNormalized() * (data.endpos - data.start):Length(),
             filter = data.filter,
-            mask = data.mask,
+            mask = data.mask
         })
 
         if tr.Hit and tr.Fraction < best.Fraction then
@@ -82,57 +77,95 @@ local function TraceSphereApprox(data)
     return best
 end
 
+local function ComputePhysicsRadius(modelPath)
+    if not modelPath or modelPath == "" then
+        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Invalid or empty model path, skipping") end
+        return
+    end
+
+    if modelRadiusCache[modelPath] and modelRadiusCache[modelPath].computed then return end
+    if pending[modelPath] and pending[modelPath].attempts >= 3 then
+        modelRadiusCache[modelPath] = {
+            radius = 5,
+            reach = 6.6,
+            computed = true
+        }
+
+        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Max retries reached for", modelPath, "caching defaults radius=5, reach=6.6") end
+        pending[modelPath] = nil
+        return
+    end
+
+    pending[modelPath] = pending[modelPath] or {
+        attempts = 0
+    }
+
+    pending[modelPath].attempts = pending[modelPath].attempts + 1
+    local isClient = CLIENT
+    util.PrecacheModel(modelPath)
+    local ent = isClient and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
+    if not IsValid(ent) then
+        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Spawn failed for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
+        pending[modelPath].lastAttempt = CurTime()
+        return
+    end
+
+    ent:SetModel(modelPath)
+    ent:SetNoDraw(true)
+    ent:PhysicsInit(SOLID_VPHYSICS)
+    ent:SetMoveType(MOVETYPE_NONE)
+    ent:Spawn()
+    local phys = ent:GetPhysicsObject()
+    if IsValid(phys) then
+        local amin, amax = phys:GetAABB()
+        if amin:Length() > 0 and amax:Length() > 0 then
+            local radius = (amax - amin):Length() * 0.5
+            local reach = math.Clamp(radius, 6.6, 50)
+            modelRadiusCache[modelPath] = {
+                radius = radius,
+                reach = reach,
+                computed = true
+            }
+
+            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, modelPath)) end
+        else
+            if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Zero AABB for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
+        end
+    else
+        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] No physobj for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
+    end
+
+    timer.Simple(0, function() if IsValid(ent) then ent:Remove() end end)
+    pending[modelPath].lastAttempt = CurTime()
+end
+
+local function GetModelRadius(modelPath)
+    if modelRadiusCache[modelPath] and modelRadiusCache[modelPath].computed then return modelRadiusCache[modelPath].radius, modelRadiusCache[modelPath].reach end
+    if not modelPath or modelPath == "" then return 5, 6.6 end
+    if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
+        pending[modelPath] = {
+            attempts = 0
+        }
+
+        timer.Simple(0, function() ComputePhysicsRadius(modelPath) end)
+    end
+    return 5, 6.6
+end
+
+local function GetWeaponMeleeParams(wep)
+    local model = cl_effectmodel:GetString()
+    local radius, reach = 5, 6.6
+    if IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then model = wep:GetWeaponWorldModel() or wep:GetModel() or model end
+    radius, reach = GetModelRadius(model)
+    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, radius=%.2f, reach=%.2f, model=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", radius, reach, model)) end
+    return radius, reach
+end
+
 -- CLIENTSIDE --------------------------
 if CLIENT then
     local NextMeleeTime = 0
-    local function IsHoldingValidWeapon(ply)
-        local wep = ply:GetActiveWeapon()
-        return IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty"
-    end
-
-    local function ComputePhysicsRadius(modelPath)
-        local prop = ents.CreateClientProp(modelPath)
-        if not IsValid(prop) then
-            modelRadiusCache[modelPath] = 5
-            print("[ModelRadius][Deferred] spawn failed → default 5 for", modelPath)
-            pending[modelPath] = nil
-            return
-        end
-
-        prop:SetNoDraw(true)
-        prop:PhysicsInit(SOLID_VPHYSICS)
-        prop:SetMoveType(MOVETYPE_NONE)
-        prop:Spawn()
-        local phys = prop:GetPhysicsObject()
-        if IsValid(phys) then
-            local amin, amax = phys:GetAABB()
-            timer.Simple(0, function() if IsValid(prop) then prop:Remove() end end)
-            if amin:Length() > 0 and amax:Length() > 0 then
-                local r = (amax - amin):Length() * 0.5
-                modelRadiusCache[modelPath] = r
-                print(string.format("[ModelRadius][Deferred] physics-prop AABB → %s  Radius: %.2f", tostring(amin) .. " / " .. tostring(amax), r))
-            else
-                modelRadiusCache[modelPath] = 5
-                print("[ModelRadius][Deferred] zero AABB → default 5 for", modelPath)
-            end
-        else
-            prop:Remove()
-            modelRadiusCache[modelPath] = 5
-            print("[ModelRadius][Deferred] no physobj → default 5 for", modelPath)
-        end
-
-        pending[modelPath] = nil
-    end
-
-    local function GetModelRadius(modelPath)
-        if modelRadiusCache[modelPath] then return modelRadiusCache[modelPath] end
-        if not pending[modelPath] then
-            pending[modelPath] = true
-            timer.Simple(0, function() ComputePhysicsRadius(modelPath) end)
-        end
-        return 5
-    end
-
+    local lastWeapon = nil
+    local lastWeaponCheck = 0
     local function SendMeleeAttack(src, dir, speed, radius, reach, impactType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
@@ -145,16 +178,6 @@ if CLIENT then
         net.SendToServer()
     end
 
-    local function GetSweepRadius(useWeapon)
-        local ply = LocalPlayer()
-        local model = cl_effectmodel:GetString()
-        if useWeapon and IsHoldingValidWeapon(ply) then
-            local wep = ply:GetActiveWeapon()
-            model = wep:GetWeaponWorldModel() or wep:GetModel()
-        end
-        return GetModelRadius(model)
-    end
-
     local function AddDebugSphere(pos, radius)
         table.insert(collisionSpheres, {
             pos = pos,
@@ -163,31 +186,20 @@ if CLIENT then
         })
     end
 
-    local function EstimateWeaponReach(ply)
-        if not IsHoldingValidWeapon(ply) then return 6.6 end
-        local wep = ply:GetActiveWeapon()
-        local mins, maxs = wep:GetModelBounds()
-        local size = (maxs - mins):Length() * 0.5
-        return math.Clamp(size, 6.6, 50)
-    end
-
     local function TryMelee(pos, relativeVel, useWeapon, hand)
         local ply = LocalPlayer()
         if not vrmod or not vrmod.GetHMDVelocity then return end
         if not IsValid(ply) or not ply:Alive() then return end
         if not MeleeFilter(ply, ply, hand) then return end
-        if useWeapon and not IsHoldingValidWeapon(ply) then useWeapon = false end
+        local wep = IsHoldingValidWeapon(ply)
+        if useWeapon and not wep then useWeapon = false end
         local relativeSpeed = relativeVel:Length()
         if relativeSpeed / 40 < cv_meleeVelThreshold:GetFloat() then return end
         if NextMeleeTime > CurTime() then return end
-        -- Handle swing sound with VRMod_MeleeSwing hook
-        local swingSound = nil
-        if useWeapon then
-            local wep = ply:GetActiveWeapon()
+        local swingSound
+        if useWeapon and IsValid(wep) then
             local wepClass = wep:GetClass()
-            -- Default swing sound for crowbar
             if wepClass == "weapon_crowbar" or wepClass == "arcticvr_hl2_crowbar" then swingSound = "Weapon_Crowbar.Single" end
-            -- Allow overriding via hook
             local swingData = {
                 Player = ply,
                 Weapon = wep,
@@ -198,7 +210,6 @@ if CLIENT then
             }
 
             hook.Run("VRMod_MeleeSwing", swingData, function(soundPath) swingSound = soundPath end)
-            -- Play swing sound if defined
             if swingSound then sound.Play(swingSound, pos, 75, 100, 1) end
         end
 
@@ -210,8 +221,7 @@ if CLIENT then
 
         local src = tr0.HitPos + tr0.HitNormal * -2
         local dir = relativeVel:GetNormalized()
-        local reach = EstimateWeaponReach(ply)
-        local radius = GetSweepRadius(useWeapon)
+        local radius, reach = GetWeaponMeleeParams(wep)
         local tr = TraceSphereApprox{
             start = src,
             endpos = src + dir * reach,
@@ -251,16 +261,53 @@ if CLIENT then
             TryMelee(vrmod.GetLeftHandPos(ply), leftRelVel, false, "left")
             TryMelee(vrmod.GetRightHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool(), "right")
         end
-        -- I don't have FBT, so can't do much in here.
-        -- if cl_usekick:GetBool() and g_VR.sixPoints then
-        --     local data = g_VR.net[ply:SteamID()]
-        --     if data and data.lerpedFrame then
-        --         local leftFootRelVel = data.lerpedFrame.leftfootVel - hmdVel
-        --         local rightFootRelVel = data.lerpedFrame.rightfootVel - hmdVel
-        --         TryMelee(data.lerpedFrame.leftfootPos, leftFootRelVel, false)
-        --         TryMelee(data.lerpedFrame.rightfootPos, rightFootRelVel, false)
-        --     end
-        -- end
+    end)
+
+    -- Monitor active weapon changes
+    hook.Add("Think", "VRMod_MeleeWeaponMonitor", function()
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+        if CurTime() < lastWeaponCheck + 0.5 then -- Check every 0.5 seconds
+            return
+        end
+
+        local wep = IsHoldingValidWeapon(ply)
+        if wep ~= lastWeapon then
+            if IsValid(wep) then
+                local model = wep:GetWeaponWorldModel() or wep:GetModel()
+                if model and model ~= "" then
+                    if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] Weapon changed to", wep:GetClass(), "model:", model) end
+                    ComputePhysicsRadius(model)
+                else
+                    if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] No valid model for weapon:", wep:GetClass()) end
+                end
+            end
+
+            lastWeapon = wep
+        end
+
+        lastWeaponCheck = CurTime()
+    end)
+
+    -- Keep VRMod_HeldEntityChanged for VR-specific weapon changes
+    hook.Add("VRMod_HeldEntityChanged", "VRMod_MeleePrecomputeVRWeapon", function(ply, hand, oldEnt, newEnt)
+        if not vrmod.IsPlayerInVR(ply) or ply ~= LocalPlayer() then
+            if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged skipped: not in VR or not local player") end
+            return
+        end
+
+        local wep = IsHoldingValidWeapon(ply)
+        if wep then
+            local model = wep:GetWeaponWorldModel() or wep:GetModel()
+            if model and model ~= "" then
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged triggered for", wep:GetClass(), "model:", model, "hand:", hand) end
+                ComputePhysicsRadius(model)
+            else
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] No valid model for weapon:", wep:GetClass(), "hand:", hand) end
+            end
+        else
+            if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] VRMod_HeldEntityChanged: no valid weapon, hand:", hand) end
+        end
     end)
 end
 
