@@ -2,6 +2,8 @@ print("Running VR physical hands system.")
 if CLIENT then return end
 -- Per-player hand tracking
 local vrHands = {}
+local offsetAng = Angle(0, 0, 0)
+local offsetPos = Vector(0, 0, 0)
 -- Spawns invisible physical hands for a player
 local function SpawnVRHands(ply)
     if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
@@ -61,7 +63,7 @@ hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
         data.phys:AddAngleVelocity(targetAngVel - data.phys:GetAngleVelocity())
     end
 
-    UpdateHand("right", vrmod.GetRightHandPos, vrmod.GetRightHandAng)
+    UpdateHand("right", function(ply) return vrmod.GetRightHandPos(ply) + offsetPos end, function(ply) return vrmod.GetRightHandAng(ply) + offsetAng end)
     UpdateHand("left", vrmod.GetLeftHandPos, vrmod.GetLeftHandAng)
     if ply:GetPos():DistToSqr(hands.right.ent:GetPos()) > 10000 then
         hands.right.ent:SetPos(ply:GetPos())
@@ -116,6 +118,10 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
     if not hands or not hands.right then return end
     local rightHand = hands.right.ent
     if not IsValid(rightHand) or not IsValid(ply) then return end
+    local class = newWep:GetClass()
+    local vmInfo = g_VR.viewModelInfo[class]
+    offsetAng = vmInfo and vmInfo.offsetAng or Angle(0, 0, 0)
+    offsetPos = vmInfo and vmInfo.offsetPos or Vector(0, 0, 0)
     local function ApplySphere(radius)
         print("[VRHand] Applying SPHERE radius:", radius)
         rightHand:PhysicsInitSphere(radius, "metal_bouncy")
@@ -129,18 +135,22 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
     -- Revert to sphere if weapon is empty
     if newWep:GetClass() == "weapon_vrmod_empty" then
         ApplySphere(2.5)
+        offsetAng = Angle(0, 0, 0)
+        offsetPos = Vector(0, 0, 0)
         return
     end
 
     local function ApplyBestShape()
-        if not IsValid(ply) or not IsValid(ply:GetActiveWeapon()) or not IsValid(rightHand) then return end
-        if ply:GetActiveWeapon():GetClass() == "weapon_vrmod_empty" then
+        if not IsValid(ply) or not IsValid(newWep) or not IsValid(rightHand) then return end
+        if newWep == "weapon_vrmod_empty" then
             ApplySphere(2.5)
+            offsetAng = Angle(0, 0, 0)
+            offsetPos = Vector(0, 0, 0)
             return
         end
 
-        local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(ply:GetActiveWeapon(), ply, "right")
-        if radius == 5 and reach == 6.6  then
+        local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(newWep, ply, "right")
+        if radius == 5 and reach == 6.6 then
             -- Retry next frame if box parameters are not ready
             timer.Simple(0, ApplyBestShape)
             return
@@ -158,7 +168,7 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
 
     -- Get parameters from GetWeaponMeleeParams
     local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(newWep, ply, "right")
-    if radius == 5 and reach == 6.6  then
+    if radius == 5 and reach == 6.6 then
         -- Retry if default values are detected (indicating model radius not yet computed)
         timer.Simple(0, ApplyBestShape)
     else

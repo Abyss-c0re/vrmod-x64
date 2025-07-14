@@ -65,8 +65,8 @@ local function TraceBoxOrSphere(data)
         local tr = util.TraceHull({
             start = data.start,
             endpos = data.endpos,
-            mins = data.worldMins,
-            maxs = data.worldMaxs,
+            mins = data.mins,
+            maxs = data.maxs,
             filter = data.filter,
             mask = data.mask
         })
@@ -97,46 +97,27 @@ local function TraceBoxOrSphere(data)
 end
 
 -- Integrated ApplyBoxFromRadius for weapons
-local function ApplyBoxFromRadius(radius, ply, wep, pos)
+local function ApplyBoxFromRadius(radius, ply, wep, pos, offsetAng)
     if not IsValid(wep) then return end
     local forward = radius
     local side = radius * 0.15
-    local class = wep:GetClass()
-    local vmInfo = g_VR.viewModelInfo[class]
-    local offsetAng = vmInfo and vmInfo.offsetAng or Angle(0, 0, 0)
-    local handAng = vrmod.GetRightHandAng(ply)
-    local hmdAng = vrmod.GetHMDAng(ply)
     -- Compute angle
-    local angle = handAng + offsetAng
+    local angle = vrmod.GetRightHandAng(ply) + offsetAng
     -- Determine box alignment based on yaw
     local yaw = math.abs(math.NormalizeAngle(offsetAng.y))
     local mins, maxs
     if yaw > 45 and yaw < 135 then
         -- Vertical alignment (z-axis) for crowbar-like weapons
-        mins = Vector(-side, -side, -forward * 0.35)
-        maxs = Vector(side, side, forward * 2.4)
-        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° detected, vertical-aligned (z-axis) | Mins: %s, Maxs: %s, OffsetAng: %s, Total Angle: %s, HMDAng: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle), tostring(hmdAng))) end
+        mins = Vector(-side, -side, -forward * 0.25)
+        maxs = Vector(side, side, forward * 2.2)
+        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° detected, vertical-aligned (z-axis) | Mins: %s, Maxs: %s, OffsetAng: %s, Total Angle: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle))) end
     else
-        -- Forward alignment (x-axis) for other weapons
+        --Forward alignment (x-axis) for other weapons
         mins = Vector(-forward * 0.35, -side, -side)
-        maxs = Vector(forward * 2.4, side, side)
-        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° | Forward-aligned (x-axis) mins: %s, maxs: %s, OffsetAng: %s, Total Angle: %s, HMDAng: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle), tostring(hmdAng))) end
+        maxs = Vector(forward * 2.2, side, side)
+        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° | Forward-aligned (x-axis) mins: %s, maxs: %s, OffsetAng: %s, Total Angle: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle))) end
     end
-
-    -- Transform mins and maxs to world space for collisions
-    local forwardVec, rightVec, upVec = angle:Forward(), angle:Right(), angle:Up()
-    local corners = {Vector(mins.x, mins.y, mins.z), Vector(mins.x, mins.y, maxs.z), Vector(mins.x, maxs.y, mins.z), Vector(mins.x, maxs.y, maxs.z), Vector(maxs.x, mins.y, mins.z), Vector(maxs.x, mins.y, maxs.z), Vector(maxs.x, maxs.y, mins.z), Vector(maxs.x, maxs.y, maxs.z)}
-    local worldMins, worldMaxs = Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)
-    for _, corner in ipairs(corners) do
-        local worldCorner = pos + corner.x * forwardVec + corner.y * rightVec + corner.z * upVec
-        worldMins.x = math.min(worldMins.x, worldCorner.x)
-        worldMins.y = math.min(worldMins.y, worldCorner.y)
-        worldMins.z = math.min(worldMins.z, worldCorner.z)
-        worldMaxs.x = math.max(worldMaxs.x, worldCorner.x)
-        worldMaxs.y = math.max(worldMaxs.y, worldCorner.y)
-        worldMaxs.z = math.max(worldMaxs.z, worldCorner.z)
-    end
-    return mins, maxs, angle, worldMins, worldMaxs
+    return mins, maxs, angle
 end
 
 local function ComputePhysicsRadius(modelPath, ply, wep)
@@ -201,12 +182,11 @@ local function ComputePhysicsRadius(modelPath, ply, wep)
     pending[modelPath].lastAttempt = CurTime()
 end
 
-local function GetModelRadius(modelPath, ply, wep)
+local function GetModelRadius(modelPath, ply, wep, pos, offsetAng)
     if modelCache[modelPath] and modelCache[modelPath].computed then
         local radius, reach = modelCache[modelPath].radius, modelCache[modelPath].reach
-        local pos = vrmod.GetRightHandPos(ply)
-        local mins, maxs, angles, worldMins, worldMaxs = ApplyBoxFromRadius(radius, ply, wep, pos)
-        return radius, reach, mins, maxs, angles, worldMins, worldMaxs
+        local mins, maxs, angles = ApplyBoxFromRadius(radius, ply, wep, pos, offsetAng)
+        return radius, reach, mins, maxs, angles
     end
 
     if not modelPath or modelPath == "" then return 5, 6.6 end
@@ -222,16 +202,25 @@ end
 
 function GetWeaponMeleeParams(wep, ply, hand)
     local model = cl_effectmodel:GetString()
-    local radius, reach, mins, maxs, angles, worldMins, worldMaxs
+    local radius, reach, mins, maxs, angles
+    local pos = vrmod.GetRightHandPos(ply)
+    local offsetAng = Angle(0, 0, 0)
+    local offsetPos = Vector(0, 0, 0)
     if hand == "right" and IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then
         model = wep:GetWeaponWorldModel() or wep:GetModel() or model
-        radius, reach, mins, maxs, angles, worldMins, worldMaxs = GetModelRadius(model, ply, wep)
+        local class = wep:GetClass()
+        local vmInfo = g_VR.viewModelInfo[class]
+        offsetAng = vmInfo and vmInfo.offsetAng or Angle(0, 0, 0)
+        offsetPos = vmInfo and vmInfo.offsetPos or Vector(0, 0, 0)
+        radius, reach, mins, maxs, angles = GetModelRadius(model, ply, wep, pos, offsetAng)
+        if offsetAng and angles then angles = angles + offsetAng end
+        if offsetPos and pos then pos = pos + offsetPos end
     else
-        radius, reach = GetModelRadius(model, ply, wep)
+        radius, reach = GetModelRadius(model, ply, wep, pos, offsetAng)
     end
 
-    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s, worldMins=%s, worldMaxs=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), model, tostring(worldMins or Vector(0, 0, 0)), tostring(worldMaxs or Vector(0, 0, 0)))) end
-    return radius, reach, mins, maxs, angles, worldMins, worldMaxs
+    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), model or "nil")) end
+    return radius, reach, mins, maxs, angles
 end
 
 -- CLIENTSIDE --------------------------
@@ -310,8 +299,8 @@ if CLIENT then
             start = src,
             endpos = src + dir * reach,
             radius = radius,
-            worldMins = mins, -- Use world-space mins/maxs
-            worldMaxs = maxs,
+            mins = mins,
+            maxs = maxs,
             filter = function(ent) return MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
         }
@@ -381,8 +370,8 @@ if SERVER then
             start = src,
             endpos = src + dir * reach,
             radius = radius,
-            worldMins = mins, -- Use world-space mins/maxs
-            worldMaxs = maxs,
+            mins = mins, -- Use world-space mins/maxs
+            max = maxs,
             filter = function(ent)
                 if ent == ply then return false end
                 return MeleeFilter(ent, ply, hand)
