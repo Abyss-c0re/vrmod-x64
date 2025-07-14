@@ -24,12 +24,23 @@ local impactSounds = {
 }
 
 -- SHARED CACHE
-local modelCache = {} -- Now stores {radius, reach, mins, maxs, angles, computed} for weapons, {radius, reach, computed} for fists
+local modelCache = {} -- Stores {radius, reach, mins, maxs, angles, computed, isVertical} for weapons, {radius, reach, computed} for fists
 local collisionSpheres = {}
-local collisionBoxes = {} -- Added for box visualization
+local collisionBoxes = {} -- For box visualization
 local pending = {}
--- SHARED FILTER
 local magCache = {}
+-- Constants for defaults
+local DEFAULT_RADIUS = 5
+local DEFAULT_REACH = 6.6
+local DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
+local DEFAULT_MAXS = Vector(0.75, 0.75, 11)
+local DEFAULT_ANGLES = Angle(0, 0, 0)
+local DEFAULT_VECTOR = Vector(0, 0, 0)
+-- Utility for debug printing
+local function DebugPrint(fmt, ...)
+    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
+end
+
 local function IsHoldingValidWeapon(ply)
     local wep = ply:GetActiveWeapon()
     return IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" and wep or false
@@ -61,7 +72,7 @@ local function TraceBoxOrSphere(data)
     }
 
     if data.mins and data.maxs then
-        -- Box trace using world-space mins and maxs
+        -- Box trace
         local tr = util.TraceHull({
             start = data.start,
             endpos = data.endpos,
@@ -76,65 +87,97 @@ local function TraceBoxOrSphere(data)
             best.Hit = true
         end
     else
-        -- Sphere trace approximation for hands
-        local dirs = {Vector(0, 0, 0), Vector(1, 0, 0), Vector(-1, 0, 0), Vector(0, 1, 0), Vector(0, -1, 0), Vector(0, 0, 1), Vector(0, 0, -1)}
-        for _, offset in ipairs(dirs) do
-            local origin = data.start + offset * data.radius
-            local tr = util.TraceLine({
-                start = origin,
-                endpos = origin + (data.endpos - data.start):GetNormalized() * (data.endpos - data.start):Length(),
-                filter = data.filter,
-                mask = data.mask
-            })
+        -- Sphere approximation with single hull trace
+        local radius = data.radius or DEFAULT_RADIUS
+        local tr = util.TraceHull({
+            start = data.start,
+            endpos = data.endpos,
+            mins = Vector(-radius, -radius, -radius),
+            maxs = Vector(radius, radius, radius),
+            filter = data.filter,
+            mask = data.mask
+        })
 
-            if tr.Hit and tr.Fraction < best.Fraction then
-                best = tr
-                best.Hit = true
-            end
+        if tr.Hit then
+            best = tr
+            best.Hit = true
         end
     end
     return best
 end
 
--- Integrated ApplyBoxFromRadius for weapons
-local function ApplyBoxFromRadius(radius, ply, wep, pos, offsetAng)
-    if not IsValid(wep) then return end
+local function ApplyBoxFromRadius(radius, yaw)
     local forward = radius
     local side = radius * 0.15
-    -- Compute angle
-    local angle = vrmod.GetRightHandAng(ply) + offsetAng
-    -- Determine box alignment based on yaw
-    local yaw = math.abs(math.NormalizeAngle(offsetAng.y))
+    local isVertical = yaw > 45 and yaw < 135
     local mins, maxs
-    if yaw > 45 and yaw < 135 then
-        -- Vertical alignment (z-axis) for crowbar-like weapons
+    if isVertical then
         mins = Vector(-side, -side, -forward * 0.25)
         maxs = Vector(side, side, forward * 2.2)
-        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° detected, vertical-aligned (z-axis) | Mins: %s, Maxs: %s, OffsetAng: %s, Total Angle: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle))) end
+        DebugPrint("ApplyBoxFromRadius: radius %.2f | Yaw %.2f° | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, yaw, tostring(mins), tostring(maxs))
     else
-        --Forward alignment (x-axis) for other weapons
         mins = Vector(-forward * 0.35, -side, -side)
         maxs = Vector(forward * 2.2, side, side)
-        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° | Forward-aligned (x-axis) mins: %s, maxs: %s, OffsetAng: %s, Total Angle: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle))) end
+        DebugPrint("ApplyBoxFromRadius: radius %.2f | Yaw %.2f° | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, yaw, tostring(mins), tostring(maxs))
     end
-    return mins, maxs, angle
+    return mins, maxs, isVertical
 end
 
-local function ComputePhysicsRadius(modelPath, ply, wep)
+local function GetModelRadius(modelPath, ply, pos, offsetAng)
+    local yaw = math.abs(math.NormalizeAngle(offsetAng and offsetAng.y or 0))
+    DebugPrint("GetModelRadius: offsetAng=%s, offsetAng.y=%.2f, Normalized yaw=%.2f", tostring(offsetAng), offsetAng and offsetAng.y or 0, yaw)
+    local isVertical = yaw > 45 and yaw < 135
+    DebugPrint("GetModelRadius: isVertical=%s (yaw %.2f > 45 and < 135)", tostring(isVertical), yaw)
+    if modelCache[modelPath] and modelCache[modelPath].computed then
+        local cache = modelCache[modelPath]
+        DebugPrint("GetModelRadius: Cache found for %s, cached isVertical=%s", modelPath, tostring(cache.isVertical))
+        -- if isVertical ~= cache.isVertical then
+        --     DebugPrint("GetModelRadius: Alignment mismatch (isVertical=%s, cache.isVertical=%s), recalculating mins/maxs", tostring(isVertical), tostring(cache.isVertical))
+        --     local mins, maxs = ApplyBoxFromRadius(cache.radius, yaw)
+        --     return cache.radius, cache.reach, mins, maxs, vrmod.GetRightHandAng(ply) + (offsetAng or DEFAULT_ANGLES)
+        -- end
+        return cache.radius, cache.reach, cache.mins, cache.maxs, vrmod.GetRightHandAng(ply) + (offsetAng or DEFAULT_ANGLES)
+    end
+
+    DebugPrint("GetModelRadius: No cache for %s, scheduling computation", modelPath)
+    if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
+        pending[modelPath] = {
+            attempts = 0
+        }
+
+        timer.Simple(0, function() ComputePhysicsRadius(modelPath, ply) end)
+    end
+    return DEFAULT_RADIUS, DEFAULT_REACH, DEFAULT_MINS, DEFAULT_MAXS, vrmod.GetRightHandAng(ply) + (offsetAng or DEFAULT_ANGLES)
+end
+
+local function ComputePhysicsRadius(modelPath, ply)
     if not modelPath or modelPath == "" then
-        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Invalid or empty model path, skipping") end
+        DebugPrint("Invalid or empty model path, caching defaults")
+        modelCache[modelPath] = {
+            radius = DEFAULT_RADIUS,
+            reach = DEFAULT_REACH,
+            mins = DEFAULT_MINS,
+            maxs = DEFAULT_MAXS,
+            angles = DEFAULT_ANGLES,
+            isVertical = false,
+            computed = true
+        }
         return
     end
 
     if modelCache[modelPath] and modelCache[modelPath].computed then return end
     if pending[modelPath] and pending[modelPath].attempts >= 3 then
         modelCache[modelPath] = {
-            radius = 5,
-            reach = 6.6,
+            radius = DEFAULT_RADIUS,
+            reach = DEFAULT_REACH,
+            mins = DEFAULT_MINS,
+            maxs = DEFAULT_MAXS,
+            angles = DEFAULT_ANGLES,
+            isVertical = false,
             computed = true
         }
 
-        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Max retries reached for", modelPath, "caching defaults radius=5, reach=6.6") end
+        DebugPrint("Max retries reached for %s, caching defaults radius=%.2f, reach=%.2f, mins=%s, maxs=%s", modelPath, DEFAULT_RADIUS, DEFAULT_REACH, tostring(DEFAULT_MINS), tostring(DEFAULT_MAXS))
         pending[modelPath] = nil
         return
     end
@@ -148,7 +191,7 @@ local function ComputePhysicsRadius(modelPath, ply, wep)
     util.PrecacheModel(modelPath)
     local ent = isClient and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
     if not IsValid(ent) then
-        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Spawn failed for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
+        DebugPrint("Spawn failed for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
         pending[modelPath].lastAttempt = CurTime()
         return
     end
@@ -164,62 +207,74 @@ local function ComputePhysicsRadius(modelPath, ply, wep)
         if amin:Length() > 0 and amax:Length() > 0 then
             local radius = (amax - amin):Length() * 0.5
             local reach = math.Clamp(radius, 6.6, 50)
+            local yaw = 0 -- Default yaw for caching
+            local mins, maxs, isVertical = ApplyBoxFromRadius(radius, yaw)
             modelCache[modelPath] = {
                 radius = radius,
                 reach = reach,
+                mins = mins or DEFAULT_MINS,
+                maxs = maxs or DEFAULT_MAXS,
+                angles = DEFAULT_ANGLES, -- Base angles, adjusted at runtime
+                isVertical = isVertical,
                 computed = true
             }
 
-            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, modelPath)) end
+            DebugPrint("AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s, IsVertical: %s for %s", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), tostring(isVertical), modelPath)
         else
-            if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Zero AABB for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
+            DebugPrint("Zero AABB for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
         end
     else
-        if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] No physobj for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
+        DebugPrint("No physobj for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
     end
 
     timer.Simple(0, function() if IsValid(ent) then ent:Remove() end end)
     pending[modelPath].lastAttempt = CurTime()
 end
 
-local function GetModelRadius(modelPath, ply, wep, pos, offsetAng)
+local function GetModelRadius(modelPath, ply, pos, offsetAng)
     if modelCache[modelPath] and modelCache[modelPath].computed then
-        local radius, reach = modelCache[modelPath].radius, modelCache[modelPath].reach
-        local mins, maxs, angles = ApplyBoxFromRadius(radius, ply, wep, pos, offsetAng)
-        return radius, reach, mins, maxs, angles
+        local cache = modelCache[modelPath]
+        -- Recalculate mins/maxs if offsetAng yaw changes alignment
+        local yaw = math.abs(math.NormalizeAngle(offsetAng and offsetAng.y or 0))
+        local isVertical = yaw > 45 and yaw < 135
+        if isVertical ~= cache.isVertical then
+            local mins, maxs = ApplyBoxFromRadius(cache.radius, yaw)
+            return cache.radius, cache.reach, mins, maxs, vrmod.GetRightHandAng(ply) + (offsetAng or DEFAULT_ANGLES)
+        end
+        return cache.radius, cache.reach, cache.mins, cache.maxs, vrmod.GetRightHandAng(ply) + (offsetAng or DEFAULT_ANGLES)
     end
 
-    if not modelPath or modelPath == "" then return 5, 6.6 end
+    -- Schedule computation if not cached
     if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
         pending[modelPath] = {
             attempts = 0
         }
 
-        timer.Simple(0, function() ComputePhysicsRadius(modelPath, ply, wep) end)
+        timer.Simple(0, function() ComputePhysicsRadius(modelPath, ply) end)
     end
-    return 5, 6.6
+    return DEFAULT_RADIUS, DEFAULT_REACH, DEFAULT_MINS, DEFAULT_MAXS, vrmod.GetRightHandAng(ply) + (offsetAng or DEFAULT_ANGLES)
 end
 
 function GetWeaponMeleeParams(wep, ply, hand)
     local model = cl_effectmodel:GetString()
     local radius, reach, mins, maxs, angles
     local pos = vrmod.GetRightHandPos(ply)
-    local offsetAng = Angle(0, 0, 0)
-    local offsetPos = Vector(0, 0, 0)
-    if hand == "right" and IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then
-        model = wep:GetWeaponWorldModel() or wep:GetModel() or model
+    local offsetAng = DEFAULT_ANGLES
+    local offsetPos = DEFAULT_VECTOR
+    if hand == "right" and IsHoldingValidWeapon(ply) then
+        wep = ply:GetActiveWeapon()
+        model = wep:GetModel() or wep:GetWeaponWorldModel() or model
         local class = wep:GetClass()
         local vmInfo = g_VR.viewModelInfo[class]
-        offsetAng = vmInfo and vmInfo.offsetAng or Angle(0, 0, 0)
-        offsetPos = vmInfo and vmInfo.offsetPos or Vector(0, 0, 0)
-        radius, reach, mins, maxs, angles = GetModelRadius(model, ply, wep, pos, offsetAng)
-        if offsetAng and angles then angles = angles + offsetAng end
-        if offsetPos and pos then pos = pos + offsetPos end
+        offsetAng = vmInfo and vmInfo.offsetAng or DEFAULT_ANGLES
+        offsetPos = vmInfo and vmInfo.offsetPos or DEFAULT_VECTOR
+        pos = pos + offsetPos
+        radius, reach, mins, maxs, angles = GetModelRadius(model, ply, pos, offsetAng)
     else
-        radius, reach = GetModelRadius(model, ply, wep, pos, offsetAng)
+        radius, reach = GetModelRadius(model, ply, pos, offsetAng)
     end
 
-    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), model or "nil")) end
+    DebugPrint("Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or DEFAULT_ANGLES), model or "nil")
     return radius, reach, mins, maxs, angles
 end
 
@@ -536,14 +591,14 @@ if SERVER then
         if not IsValid(newWep) then return end
         timer.Simple(0, function()
             if not IsValid(ply) or not IsValid(newWep) then return end
-            local wep = IsHoldingValidWeapon(ply)
-            if not wep then return end
-            local model = wep:GetWeaponWorldModel() or wep:GetModel()
+            local class = newWep:GetClass()
+            if class == "weapon_vrmod_empty" then return end
+            local model = newWep:GetModel() or newWep:GetWeaponWorldModel()
             if model and model ~= "" then
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] Weapon changed to", wep:GetClass(), "model:", model) end
-                ComputePhysicsRadius(model, ply, wep)
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] Weapon changed to", class, "model:", model) end
+                ComputePhysicsRadius(model, ply)
             else
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] No valid model for weapon:", wep:GetClass()) end
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] No valid model for weapon:", class) end
             end
         end)
     end)
