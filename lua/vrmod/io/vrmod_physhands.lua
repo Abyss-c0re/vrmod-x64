@@ -63,7 +63,7 @@ hook.Add("PlayerTick", "VRHand_PhysicsUpdate", function(ply)
         data.phys:AddAngleVelocity(targetAngVel - data.phys:GetAngleVelocity())
     end
 
-    UpdateHand("right", function(ply) return vrmod.GetRightHandPos(ply) + offsetPos end, function(ply) return vrmod.GetRightHandAng(ply) + offsetAng end)
+    UpdateHand("right", vrmod.GetRightHandPos, vrmod.GetRightHandAng)
     UpdateHand("left", vrmod.GetLeftHandPos, vrmod.GetLeftHandAng)
     if ply:GetPos():DistToSqr(hands.right.ent:GetPos()) > 10000 then
         hands.right.ent:SetPos(ply:GetPos())
