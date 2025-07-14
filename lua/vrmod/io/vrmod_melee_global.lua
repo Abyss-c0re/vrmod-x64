@@ -54,7 +54,6 @@ local function MeleeFilter(ent, ply, hand)
     return true
 end
 
--- Modified to handle both sphere and box traces
 local function TraceBoxOrSphere(data)
     local best = {
         Hit = false,
@@ -62,12 +61,12 @@ local function TraceBoxOrSphere(data)
     }
 
     if data.mins and data.maxs then
-        -- Box trace for weapons
+        -- Box trace using world-space mins and maxs
         local tr = util.TraceHull({
             start = data.start,
             endpos = data.endpos,
-            mins = data.mins,
-            maxs = data.maxs,
+            mins = data.worldMins,
+            maxs = data.worldMaxs,
             filter = data.filter,
             mask = data.mask
         })
@@ -98,17 +97,45 @@ local function TraceBoxOrSphere(data)
 end
 
 -- Integrated ApplyBoxFromRadius for weapons
-local function ApplyBoxFromRadius(radius, ply, wep)
+local function ApplyBoxFromRadius(radius, ply, wep, pos)
     local forward = radius
     local side = radius * 0.15
-    local mins = Vector(-forward * 0.35, -side, -side)
-    local maxs = Vector(forward * 2.4, side, side)
-    local vmInfo = g_VR.viewModelInfo[wep]
-    local offsetAng = vmInfo and vmInfo.offsetAng
+    local class = wep:GetClass()
+    local vmInfo = g_VR.viewModelInfo[class]
+    local offsetAng = vmInfo and vmInfo.offsetAng or Angle(0, 0, 0)
     local handAng = vrmod.GetRightHandAng(ply)
-    local angle = offsetAng and handAng + offsetAng or handAng
-    if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Forward-aligned mins: %s, maxs: %s, angles: %s", radius, tostring(mins), tostring(maxs), tostring(angle))) end
-    return mins, maxs, angle
+    local hmdAng = vrmod.GetHMDAng(ply)
+    -- Compute angle
+    local angle = handAng + offsetAng
+    -- Determine box alignment based on yaw
+    local yaw = math.abs(math.NormalizeAngle(offsetAng.y))
+    local mins, maxs
+    if yaw > 45 and yaw < 135 then
+        -- Vertical alignment (z-axis) for crowbar-like weapons
+        mins = Vector(-side, -side, -forward * 0.35)
+        maxs = Vector(side, side, forward * 2.4)
+        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° detected, vertical-aligned (z-axis) | Mins: %s, Maxs: %s, OffsetAng: %s, Total Angle: %s, HMDAng: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle), tostring(hmdAng))) end
+    else
+        -- Forward alignment (x-axis) for other weapons
+        mins = Vector(-forward * 0.35, -side, -side)
+        maxs = Vector(forward * 2.4, side, side)
+        if cv_meleeDebug:GetBool() then print(string.format("[VRHand] BOX radius %.2f | Yaw %.2f° | Forward-aligned (x-axis) mins: %s, maxs: %s, OffsetAng: %s, Total Angle: %s, HMDAng: %s", radius, yaw, tostring(mins), tostring(maxs), tostring(offsetAng), tostring(angle), tostring(hmdAng))) end
+    end
+
+    -- Transform mins and maxs to world space for collisions
+    local forwardVec, rightVec, upVec = angle:Forward(), angle:Right(), angle:Up()
+    local corners = {Vector(mins.x, mins.y, mins.z), Vector(mins.x, mins.y, maxs.z), Vector(mins.x, maxs.y, mins.z), Vector(mins.x, maxs.y, maxs.z), Vector(maxs.x, mins.y, mins.z), Vector(maxs.x, mins.y, maxs.z), Vector(maxs.x, maxs.y, mins.z), Vector(maxs.x, maxs.y, maxs.z)}
+    local worldMins, worldMaxs = Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)
+    for _, corner in ipairs(corners) do
+        local worldCorner = pos + corner.x * forwardVec + corner.y * rightVec + corner.z * upVec
+        worldMins.x = math.min(worldMins.x, worldCorner.x)
+        worldMins.y = math.min(worldMins.y, worldCorner.y)
+        worldMins.z = math.min(worldMins.z, worldCorner.z)
+        worldMaxs.x = math.max(worldMaxs.x, worldCorner.x)
+        worldMaxs.y = math.max(worldMaxs.y, worldCorner.y)
+        worldMaxs.z = math.max(worldMaxs.z, worldCorner.z)
+    end
+    return mins, maxs, angle, worldMins, worldMaxs
 end
 
 local function ComputePhysicsRadius(modelPath, ply, wep)
@@ -155,17 +182,16 @@ local function ComputePhysicsRadius(modelPath, ply, wep)
         if amin:Length() > 0 and amax:Length() > 0 then
             local radius = (amax - amin):Length() * 0.5
             local reach = math.Clamp(radius, 6.6, 50)
-            local mins, maxs, angles = ApplyBoxFromRadius(radius, ply, wep)
+            local mins, maxs, angles = ApplyBoxFromRadius(radius, ply, wep, Vector(0, 0, 0))
             modelCache[modelPath] = {
                 radius = radius,
                 reach = reach,
                 mins = mins,
                 maxs = maxs,
-                angles = angles,
                 computed = true
             }
 
-            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s, Angles: %s for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), tostring(angles), modelPath)) end
+            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), modelPath)) end
         else
             if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Zero AABB for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
         end
@@ -178,7 +204,13 @@ local function ComputePhysicsRadius(modelPath, ply, wep)
 end
 
 local function GetModelRadius(modelPath, ply, wep)
-    if modelCache[modelPath] and modelCache[modelPath].computed then return modelCache[modelPath].radius, modelCache[modelPath].reach, modelCache[modelPath].mins, modelCache[modelPath].maxs, modelCache[modelPath].angles end
+    if modelCache[modelPath] and modelCache[modelPath].computed then
+        local radius, reach, mins, maxs = modelCache[modelPath].radius, modelCache[modelPath].reach, modelCache[modelPath].mins, modelCache[modelPath].maxs
+        local angles = vrmod.GetRightHandAng(ply) + (g_VR.viewModelInfo[wep] and g_VR.viewModelInfo[wep].offsetAng or Angle(0, 0, 0))
+        if math.abs(math.NormalizeAngle(angles.y)) > 45 and math.abs(math.NormalizeAngle(angles.y)) < 135 then angles = angles + Angle(0, -90, 0) end
+        return radius, reach, mins, maxs, angles
+    end
+
     if not modelPath or modelPath == "" then return 5, 6.6 end
     if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
         pending[modelPath] = {
@@ -197,7 +229,7 @@ function GetWeaponMeleeParams(wep, ply, hand)
         model = wep:GetWeaponWorldModel() or wep:GetModel() or model
         radius, reach, mins, maxs, angles = GetModelRadius(model, ply, wep)
     else
-        radius, reach = GetModelRadius(model)
+        radius, reach = GetModelRadius(model, ply, wep)
     end
 
     if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), model)) end
@@ -207,8 +239,6 @@ end
 -- CLIENTSIDE --------------------------
 if CLIENT then
     local NextMeleeTime = 0
-    local lastWeapon = nil
-    local lastWeaponCheck = 0
     local function SendMeleeAttack(src, dir, speed, radius, reach, mins, maxs, angles, impactType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
@@ -282,8 +312,8 @@ if CLIENT then
             start = src,
             endpos = src + dir * reach,
             radius = radius,
-            mins = mins,
-            maxs = maxs,
+            worldMins = mins, -- Use world-space mins/maxs
+            worldMaxs = maxs,
             filter = function(ent) return MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
         }
@@ -331,28 +361,6 @@ if CLIENT then
             TryMelee(vrmod.GetRightHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool(), "right")
         end
     end)
-
-    hook.Add("Think", "VRMod_MeleeWeaponMonitor", function()
-        local ply = LocalPlayer()
-        if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
-        if CurTime() < lastWeaponCheck + 0.5 then return end
-        local wep = IsHoldingValidWeapon(ply)
-        if wep ~= lastWeapon then
-            if IsValid(wep) then
-                local model = wep:GetModel() or wep:GetWeaponWorldModel()
-                if model and model ~= "" then
-                    if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] Weapon changed to", wep:GetClass(), "model:", model) end
-                    ComputePhysicsRadius(model, ply, wep)
-                else
-                    if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Client] No valid model for weapon:", wep:GetClass()) end
-                end
-            end
-
-            lastWeapon = wep
-        end
-
-        lastWeaponCheck = CurTime()
-    end)
 end
 
 -- SERVERSIDE --------------------------
@@ -375,8 +383,8 @@ if SERVER then
             start = src,
             endpos = src + dir * reach,
             radius = radius,
-            mins = mins ~= Vector(0, 0, 0) and mins or nil,
-            maxs = maxs ~= Vector(0, 0, 0) and maxs or nil,
+            worldMins = mins, -- Use world-space mins/maxs
+            worldMaxs = maxs,
             filter = function(ent)
                 if ent == ply then return false end
                 return MeleeFilter(ent, ply, hand)
@@ -538,15 +546,18 @@ if SERVER then
 
     hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep, newWep)
         if not vrmod.IsPlayerInVR(ply) then return end
-        local wep = IsHoldingValidWeapon(ply)
-        if wep then
-            local model = wep:GetModel() or wep:GetWeaponWorldModel()
+        if not IsValid(newWep) then return end
+        timer.Simple(0, function()
+            if not IsValid(ply) or not IsValid(newWep) then return end
+            local wep = IsHoldingValidWeapon(ply)
+            if not wep then return end
+            local model = wep:GetWeaponWorldModel() or wep:GetModel()
             if model and model ~= "" then
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server] Weapon changed to", wep:GetClass(), "model:", model) end
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] Weapon changed to", wep:GetClass(), "model:", model) end
                 ComputePhysicsRadius(model, ply, wep)
             else
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server] No valid model for weapon:", wep:GetClass()) end
+                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] No valid model for weapon:", wep:GetClass()) end
             end
-        end
+        end)
     end)
 end
