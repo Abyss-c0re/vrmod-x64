@@ -98,6 +98,7 @@ end
 
 -- Integrated ApplyBoxFromRadius for weapons
 local function ApplyBoxFromRadius(radius, ply, wep, pos)
+    if not IsValid(wep) then return end
     local forward = radius
     local side = radius * 0.15
     local class = wep:GetClass()
@@ -182,16 +183,13 @@ local function ComputePhysicsRadius(modelPath, ply, wep)
         if amin:Length() > 0 and amax:Length() > 0 then
             local radius = (amax - amin):Length() * 0.5
             local reach = math.Clamp(radius, 6.6, 50)
-            local mins, maxs, angles = ApplyBoxFromRadius(radius, ply, wep, Vector(0, 0, 0))
             modelCache[modelPath] = {
                 radius = radius,
                 reach = reach,
-                mins = mins,
-                maxs = maxs,
                 computed = true
             }
 
-            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), modelPath)) end
+            if cv_meleeDebug:GetBool() then print(string.format("[ModelRadius][%s] AABB → %s Radius: %.2f, Reach: %.2f for %s", isClient and "Client" or "Server", tostring(amin) .. " / " .. tostring(amax), radius, reach, modelPath)) end
         else
             if cv_meleeDebug:GetBool() then print("[ModelRadius][Deferred] Zero AABB for", modelPath, "attempt", pending[modelPath].attempts, "of 3") end
         end
@@ -205,10 +203,10 @@ end
 
 local function GetModelRadius(modelPath, ply, wep)
     if modelCache[modelPath] and modelCache[modelPath].computed then
-        local radius, reach, mins, maxs = modelCache[modelPath].radius, modelCache[modelPath].reach, modelCache[modelPath].mins, modelCache[modelPath].maxs
-        local angles = vrmod.GetRightHandAng(ply) + (g_VR.viewModelInfo[wep] and g_VR.viewModelInfo[wep].offsetAng or Angle(0, 0, 0))
-        if math.abs(math.NormalizeAngle(angles.y)) > 45 and math.abs(math.NormalizeAngle(angles.y)) < 135 then angles = angles + Angle(0, -90, 0) end
-        return radius, reach, mins, maxs, angles
+        local radius, reach = modelCache[modelPath].radius, modelCache[modelPath].reach
+        local pos = vrmod.GetRightHandPos(ply)
+        local mins, maxs, angles, worldMins, worldMaxs = ApplyBoxFromRadius(radius, ply, wep, pos)
+        return radius, reach, mins, maxs, angles, worldMins, worldMaxs
     end
 
     if not modelPath or modelPath == "" then return 5, 6.6 end
@@ -224,16 +222,16 @@ end
 
 function GetWeaponMeleeParams(wep, ply, hand)
     local model = cl_effectmodel:GetString()
-    local radius, reach, mins, maxs, angles
+    local radius, reach, mins, maxs, angles, worldMins, worldMaxs
     if hand == "right" and IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" then
         model = wep:GetWeaponWorldModel() or wep:GetModel() or model
-        radius, reach, mins, maxs, angles = GetModelRadius(model, ply, wep)
+        radius, reach, mins, maxs, angles, worldMins, worldMaxs = GetModelRadius(model, ply, wep)
     else
         radius, reach = GetModelRadius(model, ply, wep)
     end
 
-    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), model)) end
-    return radius, reach, mins, maxs, angles
+    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s, worldMins=%s, worldMaxs=%s", CLIENT and "Client" or "Server", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), model, tostring(worldMins or Vector(0, 0, 0)), tostring(worldMaxs or Vector(0, 0, 0)))) end
+    return radius, reach, mins, maxs, angles, worldMins, worldMaxs
 end
 
 -- CLIENTSIDE --------------------------

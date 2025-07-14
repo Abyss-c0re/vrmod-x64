@@ -140,7 +140,7 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
         end
 
         local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(ply:GetActiveWeapon(), ply, "right")
-        if radius == 5 and reach == 6.6 then
+        if radius == 5 and reach == 6.6  then
             -- Retry next frame if box parameters are not ready
             timer.Simple(0, ApplyBestShape)
             return
@@ -158,7 +158,7 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
 
     -- Get parameters from GetWeaponMeleeParams
     local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(newWep, ply, "right")
-    if radius == 5 and reach == 6.6 then
+    if radius == 5 and reach == 6.6  then
         -- Retry if default values are detected (indicating model radius not yet computed)
         timer.Simple(0, ApplyBestShape)
     else
