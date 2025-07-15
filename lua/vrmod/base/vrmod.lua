@@ -28,22 +28,36 @@ if CLIENT then
 	local lastPosePos = {}
 	local currentViewEnt, pos1, ang1
 	local convarOverrides = {}
+	local moduleFile
 	if system.IsLinux() then
 		moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
+	elseif system.IsWindows() then
+		if file.Exists("lua/bin/gmcl_vrmod_win64.dll", "GAME") then
+			moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
+		elseif file.Exists("lua/bin/gmcl_vrmod_win32.dll", "GAME") then
+			moduleFile = "lua/bin/gmcl_vrmod_win32.dll"
+		end
 	else
-		moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
+		error("[VRMod] Unsupported OS.")
 	end
 
-	if file.Exists(moduleFile, "GAME") then
+	if moduleFile then
 		local tmp = vrmod
 		vrmod = {}
-		moduleLoaded = pcall(function() require("vrmod") end)
-		for k, v in pairs(vrmod) do
-			_G["VRMOD_" .. k] = v
+		local success, err = pcall(function() require("vrmod") end)
+		if success then
+			for k, v in pairs(vrmod) do
+				_G["VRMOD_" .. k] = v
+			end
+
+			g_VR.moduleVersion = VRMOD_GetVersion and VRMOD_GetVersion() or 0
+		else
+			print("[VRMod] Failed to load module:", err)
 		end
 
 		vrmod = tmp
-		g_VR.moduleVersion = moduleLoaded and VRMOD_GetVersion and VRMOD_GetVersion() or 0
+	else
+		print("[VRMod] No compatible module file found.")
 	end
 
 	-- 0) Helper functions

@@ -401,7 +401,7 @@ if SERVER then
             start = src,
             endpos = src + dir * reach,
             radius = radius,
-            mins = mins, -- Use world-space mins/maxs
+            mins = mins,
             max = maxs,
             filter = function(ent)
                 if ent == ply then return false end
