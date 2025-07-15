@@ -51,8 +51,6 @@ if CLIENT then
 			wrongMuzzleAng = true
 		},
 		arcticvr_hl2_stunstick = {
-			offsetPos = Vector(0, 0, -3),
-			offsetAng = Angle(90, 0, 0),
 			noLaser = true
 		},
 		arcticvr_hl2_knife = {
