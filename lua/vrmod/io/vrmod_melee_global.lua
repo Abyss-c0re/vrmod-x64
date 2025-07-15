@@ -495,38 +495,36 @@ if SERVER then
             if newImpactType then customImpactType = newImpactType end
         end)
 
-        if customImpactType ~= impactType or customDamageMultiplier ~= damageMultiplier or customDamage ~= dmgAmt then
-            if customImpactType ~= impactType and not customDamageMultiplier and not customDamageType then
-                if customImpactType == "blunt" then
-                    customDamageMultiplier = 1.25
-                    customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
-                elseif customImpactType == "stunstick" then
-                    customDamageMultiplier = 1.1
-                    customDamageType = bit.bor(DMG_CLUB, DMG_SHOCK)
-                elseif customImpactType == "sharp" then
-                    customDamageMultiplier = 1.5
-                    customDamageType = DMG_SLASH
-                elseif customImpactType == "piercing" then
-                    customDamageMultiplier = 1.3
-                    customDamageType = DMG_BULLET
-                elseif customImpactType == "heavy" then
-                    customDamageMultiplier = 2.0
-                    customDamageType = bit.bor(DMG_CLUB, DMG_CRUSH)
-                elseif customImpactType == "energy" then
-                    customDamageMultiplier = 1.4
-                    customDamageType = bit.bor(DMG_ENERGYBEAM, DMG_SHOCK)
-                elseif customImpactType == "explosive" then
-                    customDamageMultiplier = 2.5
-                    customDamageType = bit.bor(DMG_BLAST, DMG_CLUB)
-                else
-                    customDamageMultiplier = 1.0
-                    customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
-                end
+        if not customDamageType and customImpactType then
+            if customImpactType == "blunt" then
+                customDamageMultiplier = customDamageMultiplier or 1.25
+                customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
+            elseif customImpactType == "stunstick" then
+                customDamageMultiplier = customDamageMultiplier or 1.1
+                customDamageType = bit.bor(DMG_CLUB, DMG_SHOCK)
+            elseif customImpactType == "sharp" then
+                customDamageMultiplier = customDamageMultiplier or 1.5
+                customDamageType = DMG_SLASH
+            elseif customImpactType == "piercing" then
+                customDamageMultiplier = customDamageMultiplier or 1.3
+                customDamageType = DMG_BULLET
+            elseif customImpactType == "heavy" then
+                customDamageMultiplier = customDamageMultiplier or 2.0
+                customDamageType = bit.bor(DMG_CLUB, DMG_CRUSH)
+            elseif customImpactType == "energy" then
+                customDamageMultiplier = customDamageMultiplier or 1.4
+                customDamageType = bit.bor(DMG_ENERGYBEAM, DMG_SHOCK)
+            elseif customImpactType == "explosive" then
+                customDamageMultiplier = customDamageMultiplier or 2.5
+                customDamageType = bit.bor(DMG_BLAST, DMG_CLUB)
+            else
+                customDamageMultiplier = customDamageMultiplier or 1.0
+                customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
             end
-
-            customDamage = customDamage or base * speedFactor * customDamageMultiplier
         end
 
+        -- Always recalculate damage if not explicitly set
+        customDamage = base * speedFactor * (customDamageMultiplier or 1.0)
         local dmgInfo = DamageInfo()
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
