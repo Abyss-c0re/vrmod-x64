@@ -105,19 +105,18 @@ local function TraceBoxOrSphere(data)
     return best
 end
 
-local function ApplyBoxFromRadius(radius, yaw)
+local function ApplyBoxFromRadius(radius, isVertical)
     local forward = radius
     local side = radius * 0.15
-    local isVertical = yaw > 45 and yaw < 135
     local mins, maxs
     if isVertical then
         mins = Vector(-side, -side, -forward * 0.25)
         maxs = Vector(side, side, forward * 2.3)
-        DebugPrint("ApplyBoxFromRadius: radius %.2f | Yaw %.2f° | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, yaw, tostring(mins), tostring(maxs))
+        DebugPrint("ApplyBoxFromRadius: radius %.2f | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
     else
         mins = Vector(-forward * 0.35, -side, -side)
         maxs = Vector(forward * 2.3, side, side)
-        DebugPrint("ApplyBoxFromRadius: radius %.2f | Yaw %.2f° | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, yaw, tostring(mins), tostring(maxs))
+        DebugPrint("ApplyBoxFromRadius: radius %.2f | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
     end
     return mins, maxs, isVertical
 end
@@ -179,14 +178,14 @@ local function ComputePhysicsRadius(modelPath, ply)
         if amin:Length() > 0 and amax:Length() > 0 then
             local radius = (amax - amin):Length() * 0.5
             local reach = math.Clamp(radius, 6.6, 50)
-            local yaw = 0 -- Default yaw for caching
-            local mins, maxs, isVertical = ApplyBoxFromRadius(radius, yaw)
+            local isVertical = false -- Default to false, will be updated at runtime
+            local mins, maxs = ApplyBoxFromRadius(radius, isVertical)
             modelCache[modelPath] = {
                 radius = radius,
                 reach = reach,
                 mins = mins or DEFAULT_MINS,
                 maxs = maxs or DEFAULT_MAXS,
-                angles = DEFAULT_ANGLES, -- Base angles, adjusted at runtime
+                angles = DEFAULT_ANGLES,
                 isVertical = isVertical,
                 computed = true
             }
@@ -204,17 +203,22 @@ local function ComputePhysicsRadius(modelPath, ply)
 end
 
 local function GetModelRadius(modelPath, ply, offsetAng)
-    ang = vrmod.GetRightHandAng(ply)
-    local yaw = math.abs(math.NormalizeAngle(offsetAng and offsetAng.y or 0))
-    DebugPrint("GetModelRadius: offsetAng=%s, offsetAng.y=%.2f, Normalized yaw=%.2f", tostring(offsetAng), offsetAng and offsetAng.y or 0, yaw)
-    local isVertical = yaw > 45 and yaw < 135
-    DebugPrint("GetModelRadius: isVertical=%s (yaw %.2f > 45 and < 135)", tostring(isVertical), yaw)
+    local ang = vrmod.GetRightHandAng(ply)
+    -- Check for significant offset in any direction (pitch, yaw, or roll)
+    local isVertical = offsetAng and (math.abs(math.NormalizeAngle(offsetAng.x)) > 45 or math.abs(
+        -- Pitch
+        math.NormalizeAngle(offsetAng.y)) > 45 or math.abs(
+        -- Yaw
+        math.NormalizeAngle(offsetAng.z)) > 45) or false
+
+    -- Roll
+    DebugPrint("GetModelRadius: offsetAng=%s, isVertical=%s (pitch=%.2f, yaw=%.2f, roll=%.2f)", tostring(offsetAng), tostring(isVertical), offsetAng and math.abs(math.NormalizeAngle(offsetAng.x)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.y)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.z)) or 0)
     if modelCache[modelPath] and modelCache[modelPath].computed then
         local cache = modelCache[modelPath]
         DebugPrint("GetModelRadius: Cache found for %s, cached isVertical=%s", modelPath, tostring(cache.isVertical))
         if isVertical ~= cache.isVertical then
             DebugPrint("GetModelRadius: Alignment mismatch (isVertical=%s, cache.isVertical=%s), recalculating mins/maxs", tostring(isVertical), tostring(cache.isVertical))
-            local mins, maxs = ApplyBoxFromRadius(cache.radius, yaw)
+            local mins, maxs = ApplyBoxFromRadius(cache.radius, isVertical)
             return cache.radius, cache.reach, mins, maxs, ang
         end
         return cache.radius, cache.reach, cache.mins, cache.maxs, ang
