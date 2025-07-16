@@ -17,6 +17,7 @@ if CLIENT then
 	g_VR.changedInputs = {}
 	g_VR.errorText = ""
 	g_VR.moduleVersion = 0
+	local moduleLoaded = false
 	local rtWidth, rtHeight
 	local hfovLeft, hfovRight
 	local aspectLeft, aspectRight
@@ -27,7 +28,6 @@ if CLIENT then
 	local lastPosePos = {}
 	local currentViewEnt, pos1, ang1
 	local convarOverrides = {}
-	local rHandBoneIndex = nil
 	local moduleFile
 	if system.IsLinux() then
 		moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
@@ -251,24 +251,27 @@ if CLIENT then
 	end
 
 	local function UpdateViewModel(netFrame)
-		if not g_VR.currentvmi or not IsValid(g_VR.viewModel) then return end
-		-- Update viewmodel position and angles
-		local pos, ang = LocalToWorld(g_VR.currentvmi.offsetPos, g_VR.currentvmi.offsetAng, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-		g_VR.viewModelPos = pos
-		g_VR.viewModelAng = ang
-		if not g_VR.usingWorldModels then
-			g_VR.viewModel:SetPos(pos)
-			g_VR.viewModel:SetAngles(ang)
+		if g_VR.currentvmi then
+			local pos, ang = LocalToWorld(g_VR.currentvmi.offsetPos, g_VR.currentvmi.offsetAng, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+			g_VR.viewModelPos = pos
+			g_VR.viewModelAng = ang
+		end
+
+		if IsValid(g_VR.viewModel) and not g_VR.usingWorldModels then
+			g_VR.viewModel:SetPos(g_VR.viewModelPos)
+			g_VR.viewModel:SetAngles(g_VR.viewModelAng)
 			g_VR.viewModel:SetupBones()
-			if netFrame and rHandBoneIndex == nil then rHandBoneIndex = g_VR.viewModel:LookupBone("ValveBiped.Bip01_R_Hand") end
-			if netFrame and rHandBoneIndex then
-				local mtx = g_VR.viewModel:GetBoneMatrix(rHandBoneIndex)
-				netFrame.righthandPos = mtx:GetTranslation()
-				netFrame.righthandAng = mtx:GetAngles() - Angle(0, 0, 180)
+			if netFrame then
+				local b = g_VR.viewModel:LookupBone("ValveBiped.Bip01_R_Hand")
+				if b then
+					local mtx = g_VR.viewModel:GetBoneMatrix(b)
+					netFrame.righthandPos = mtx:GetTranslation()
+					netFrame.righthandAng = mtx:GetAngles() - Angle(0, 0, 180)
+				end
 			end
 		end
 
-		g_VR.viewModelMuzzle = g_VR.viewModel:GetAttachment(1)
+		if IsValid(g_VR.viewModel) then g_VR.viewModelMuzzle = g_VR.viewModel:GetAttachment(1) end
 	end
 
 	local function DrawDeathAnimation(rtWidth, rtHeight)
