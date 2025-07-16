@@ -2,8 +2,6 @@ print("Running VR physical hands system.")
 if CLIENT then return end
 -- Per-player hand tracking
 local vrHands = {}
-local offsetAng = Angle(0, 0, 0)
-local offsetPos = Vector(0, 0, 0)
 -- Spawns invisible physical hands for a player
 local function SpawnVRHands(ply)
     if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
@@ -135,8 +133,6 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
     -- Revert to sphere if weapon is empty
     if newWep:GetClass() == "weapon_vrmod_empty" then
         ApplySphere(2.5)
-        offsetAng = Angle(0, 0, 0)
-        offsetPos = Vector(0, 0, 0)
         return
     end
 
@@ -144,8 +140,6 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
         if not IsValid(ply) or not IsValid(newWep) or not IsValid(rightHand) then return end
         if newWep == "weapon_vrmod_empty" then
             ApplySphere(2.5)
-            offsetAng = Angle(0, 0, 0)
-            offsetPos = Vector(0, 0, 0)
             return
         end
 

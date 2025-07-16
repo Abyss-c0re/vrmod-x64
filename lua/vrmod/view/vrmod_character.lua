@@ -2,6 +2,19 @@ if CLIENT then
 	g_VR = g_VR or {}
 	g_VR.characterYaw = 0
 	local convars = vrmod.GetConvars()
+	-- Constants
+	local DEFAULT_EYE_HEIGHT = 66.8
+	local DEFAULT_HEAD_TO_HMD_DIST = 6.3
+	local NUM_FINGER_BONES = 30
+	local ZERO_VEC = Vector()
+	local ZERO_ANG = Angle()
+	local RIGHT_HAND_OFFSET = Angle(0, 0, 180)
+	-- Generate hand angles
+	g_VR.zeroHandAngles = {}
+	for i = 1, NUM_FINGER_BONES do
+		g_VR.zeroHandAngles[i] = Angle(0, 0, 0)
+	end
+
 	g_VR.defaultOpenHandAngles = {
 		-- LEFT HAND
 		-- Thumb
@@ -48,46 +61,56 @@ if CLIENT then
 	}
 
 	g_VR.defaultClosedHandAngles = {
+		-- LEFT HAND
+		-- Thumb
 		Angle(30, 0, 0),
 		Angle(0, 0, 0),
 		Angle(0, 30, 0),
+		-- Index
 		Angle(0, -50, -10),
 		Angle(0, -90, 0),
 		Angle(0, -70, 0),
-		Angle(0, -35. - 8, 0),
-		Angle(0, -80, 0),
-		Angle(0, -70, 0),
-		Angle(0, -26.5, 4.8),
-		Angle(0, -70, 0),
-		Angle(0, -70, 0),
-		Angle(0, -30, 12.7),
-		Angle(0, -70, 0),
-		Angle(0, -70, 0),
-		--
-		Angle(-30, 0, 0),
-		Angle(0, 0, 0),
-		Angle(0, 30, 0),
-		Angle(0, -50, 10),
-		Angle(0, -90, 0),
-		Angle(0, -70, 0),
+		-- Middle
 		Angle(0, -35.8, 0),
 		Angle(0, -80, 0),
 		Angle(0, -70, 0),
+		-- Ring
+		Angle(0, -26.5, 4.8),
+		Angle(0, -70, 0),
+		Angle(0, -70, 0),
+		-- Pinky
+		Angle(0, -30, 12.7),
+		Angle(0, -70, 0),
+		Angle(0, -70, 0),
+		-- RIGHT HAND
+		-- Thumb
+		Angle(-30, 0, 0),
+		Angle(0, 0, 0),
+		Angle(0, 30, 0),
+		-- Index
+		Angle(0, -50, 10),
+		Angle(0, -90, 0),
+		Angle(0, -70, 0),
+		-- Middle
+		Angle(0, -35.8, 0),
+		Angle(0, -80, 0),
+		Angle(0, -70, 0),
+		-- Ring
 		Angle(0, -26.5, -4.8),
 		Angle(0, -70, 0),
 		Angle(0, -70, 0),
+		-- Pinky
 		Angle(0, -30, -12.7),
 		Angle(0, -70, 0),
 		Angle(0, -70, 0),
 	}
 
-	g_VR.zeroHandAngles = {Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0), Angle(0, 0, 0),}
 	g_VR.openHandAngles = g_VR.defaultOpenHandAngles
 	g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
 	----------------------------------------------------------------------------------------------------------------------------------------------------
 	local characterInfo = {}
 	local activePlayers = {}
-	local zeroVec, zeroAng = Vector(), Angle()
+	local zeroVec, zeroAng = ZERO_VEC, ZERO_ANG
 	local function RecursiveBoneTable2(ent, parentbone, infotab, ordertab, notfirst)
 		local bones = notfirst and ent:GetChildBones(parentbone) or {parentbone}
 		for k, v in pairs(bones) do
@@ -171,7 +194,7 @@ if CLIENT then
 		local L_TargetPos = frame.lefthandPos
 		local L_TargetAng = frame.lefthandAng
 		local mtx = ply:GetBoneMatrix(bones.b_leftClavicle)
-		local L_ClaviclePos = mtx and mtx:GetTranslation() or Vector()
+		local L_ClaviclePos = mtx and mtx:GetTranslation() or ZERO_VEC
 		charinfo.L_ClaviclePos = L_ClaviclePos
 		--Calculate LEFT clavicle target angle
 		local tmp1 = L_ClaviclePos + plyAng:Right() * -charinfo.clavicleLen --neutral shoulder position
@@ -193,7 +216,7 @@ if CLIENT then
 			L_TargetVecAng = L_TargetVec:Angle()
 		else
 			L_TargetVecAngLocal = WorldToLocal(L_TargetVec, zeroAng, zeroVec, plyAng):Angle()
-			_, L_TargetVecAng = LocalToWorld(Vector(), L_TargetVecAngLocal, zeroVec, plyAng)
+			_, L_TargetVecAng = LocalToWorld(ZERO_VEC, L_TargetVecAngLocal, zeroVec, plyAng)
 		end
 
 		--Calculate LEFT upperarm target angle
@@ -202,7 +225,7 @@ if CLIENT then
 		if not inVehicle then
 			tmp = Angle(L_TargetVecAng.pitch, frame.characterYaw, -90)
 		else
-			_, tmp = LocalToWorld(Vector(), Angle(L_TargetVecAngLocal.pitch, 0, -90), zeroVec, plyAng)
+			_, tmp = LocalToWorld(ZERO_VEC, Angle(L_TargetVecAngLocal.pitch, 0, -90), zeroVec, plyAng)
 		end
 
 		local tpos, tang = WorldToLocal(zeroVec, tmp, zeroVec, L_TargetVecAng)
@@ -232,7 +255,7 @@ if CLIENT then
 		local R_TargetPos = frame.righthandPos
 		local R_TargetAng = frame.righthandAng
 		local mtx = ply:GetBoneMatrix(bones.b_rightClavicle)
-		local R_ClaviclePos = mtx and mtx:GetTranslation() or Vector()
+		local R_ClaviclePos = mtx and mtx:GetTranslation() or ZERO_VEC
 		charinfo.R_ClaviclePos = R_ClaviclePos
 		--Calculate RIGHT clavicle target angle
 		local tmp1 = R_ClaviclePos + plyAng:Right() * charinfo.clavicleLen
@@ -241,7 +264,7 @@ if CLIENT then
 		if not inVehicle then
 			R_ClavicleTargetAng = (tmp2 - R_ClaviclePos):Angle()
 		else
-			_, R_ClavicleTargetAng = LocalToWorld(Vector(), WorldToLocal(tmp2 - R_ClaviclePos, zeroAng, zeroVec, plyAng):Angle(), zeroVec, plyAng)
+			_, R_ClavicleTargetAng = LocalToWorld(ZERO_VEC, WorldToLocal(tmp2 - R_ClaviclePos, zeroAng, zeroVec, plyAng):Angle(), zeroVec, plyAng)
 		end
 
 		R_ClavicleTargetAng:RotateAroundAxis(R_ClavicleTargetAng:Forward(), 90)
@@ -254,7 +277,7 @@ if CLIENT then
 			R_TargetVecAng = R_TargetVec:Angle()
 		else
 			R_TargetVecAngLocal = WorldToLocal(R_TargetVec, zeroAng, zeroVec, plyAng):Angle()
-			_, R_TargetVecAng = LocalToWorld(Vector(), R_TargetVecAngLocal, zeroVec, plyAng)
+			_, R_TargetVecAng = LocalToWorld(ZERO_VEC, R_TargetVecAngLocal, zeroVec, plyAng)
 		end
 
 		--Calculate RIGHT upperarm target angle
@@ -264,7 +287,7 @@ if CLIENT then
 		if not inVehicle then
 			tmp = Angle(R_TargetVecAng.pitch, frame.characterYaw, 90)
 		else
-			_, tmp = LocalToWorld(Vector(), Angle(R_TargetVecAngLocal.pitch, 0, 90), zeroVec, plyAng)
+			_, tmp = LocalToWorld(ZERO_VEC, Angle(R_TargetVecAngLocal.pitch, 0, 90), zeroVec, plyAng)
 		end
 
 		local tpos, tang = WorldToLocal(zeroVec, tmp, zeroVec, R_TargetVecAng)
@@ -296,7 +319,7 @@ if CLIENT then
 		boneinfo[bones.b_leftHand].overrideAng = L_TargetAng
 		boneinfo[bones.b_rightClavicle].overrideAng = R_ClavicleTargetAng
 		boneinfo[bones.b_rightUpperarm].overrideAng = R_UpperarmTargetAng
-		boneinfo[bones.b_rightHand].overrideAng = R_TargetAng + Angle(0, 0, 180)
+		boneinfo[bones.b_rightHand].overrideAng = R_TargetAng + RIGHT_HAND_OFFSET
 		if bones.b_leftWrist and boneinfo[bones.b_leftWrist] and bones.b_leftUlna and boneinfo[bones.b_leftUlna] then
 			boneinfo[bones.b_leftForearm].overrideAng = L_ForearmTargetAng
 			boneinfo[bones.b_leftWrist].overrideAng = L_WristTargetAng
@@ -450,8 +473,8 @@ if CLIENT then
 		--	characterInfo[steamid].characterEyeHeight = headPos.z
 		--	characterInfo[steamid].characterHeadToHmdDist = 7
 		--end
-		characterInfo[steamid].characterEyeHeight = 66.8
-		characterInfo[steamid].characterHeadToHmdDist = 6.3
+		characterInfo[steamid].characterEyeHeight = DEFAULT_EYE_HEIGHT
+		characterInfo[steamid].characterHeadToHmdDist = DEFAULT_HEAD_TO_HMD_DIST
 		characterInfo[steamid].spineLen = (cm:GetPos().z + characterInfo[steamid].characterEyeHeight) - spinePos.z
 		cm:Remove()
 	end
@@ -460,7 +483,7 @@ if CLIENT then
 	local function BoneCallbackFunc(ply, numbones)
 		local steamid = ply:SteamID()
 		if not activePlayers[steamid] or not g_VR.net[steamid].lerpedFrame or ply:InVehicle() and ply:GetVehicle():GetClass() ~= "prop_vehicle_prisoner_pod" then return end
-		if ply:GetBoneMatrix(characterInfo[steamid].bones.b_rightHand) then ply:SetBonePosition(characterInfo[steamid].bones.b_rightHand, g_VR.net[steamid].lerpedFrame.righthandPos, g_VR.net[steamid].lerpedFrame.righthandAng + Angle(0, 0, 180)) end
+		if ply:GetBoneMatrix(characterInfo[steamid].bones.b_rightHand) then ply:SetBonePosition(characterInfo[steamid].bones.b_rightHand, g_VR.net[steamid].lerpedFrame.righthandPos, g_VR.net[steamid].lerpedFrame.righthandAng + RIGHT_HAND_OFFSET) end
 		if not g_VR.net[steamid].characterAltHead then
 			local _, targetAng = LocalToWorld(zeroVec, Angle(-80, 0, 90), zeroVec, g_VR.net[steamid].lerpedFrame.hmdAng)
 			local mtx = ply:GetBoneMatrix(characterInfo[steamid].bones.b_head)
