@@ -111,6 +111,12 @@ local function netWriteFrame(frame)
 end
 
 if CLIENT then
+	local netConfig = {
+		delay = convarValues.vrmod_net_delay,
+		delayMax = convarValues.vrmod_net_delaymax,
+		storedFrames = convarValues.vrmod_net_storedframes
+	}
+
 	vrmod.AddCallbackedConvar("vrmod_net_delay", nil, "0.1", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_delaymax", nil, "0.2", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_storedframes", nil, "15", nil, nil, nil, nil, tonumber, nil)
@@ -205,83 +211,75 @@ if CLIENT then
 
 	-- update all lerpedFrames, except for the local player (this function will be hooked to PreRender)
 	local function LerpOtherVRPlayers()
-		local lerpDelay = convarValues.vrmod_net_delay
-		local lerpDelayMax = convarValues.vrmod_net_delaymax
-		for k, v in pairs(g_VR.net) do
-			local ply = player.GetBySteamID(k)
-			if #v.frames < 2 or not ply then --len check discards the localplayer, ply might be invalid for a few frames before exit msg upon disconnect
-				continue
-			end
-
+		for steamID, v in pairs(g_VR.net) do
+			local ply = player.GetBySteamID(steamID)
+			if not ply or #v.frames < 2 then continue end
+			-- Cache player position and angles
+			local plyPos, plyAng = ply:GetPos(), ply:InVehicle() and ply:GetVehicle():GetAngles() or Angle()
+			local frameCount = #v.frames
 			if v.buffering then
-				if not (v.playbackTime > v.frames[v.latestFrameIndex].ts - lerpDelay) then
+				if v.playbackTime <= v.frames[v.latestFrameIndex].ts - netConfig.delay then
 					v.buffering = false
 					v.sysTime = SysTime()
 					v.debugState = "playing"
 				end
 			else
-				--advance playhead
 				v.playbackTime = v.playbackTime + SysTime() - v.sysTime
 				v.sysTime = SysTime()
-				--check if we reached the end
 				if v.playbackTime > v.frames[v.latestFrameIndex].ts then
 					v.buffering = true
 					v.debugState = "buffering (reached end)"
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
-				end
-
-				--check if we're too far behind
-				if v.frames[v.latestFrameIndex].ts - v.playbackTime > lerpDelayMax then
+				elseif v.frames[v.latestFrameIndex].ts - v.playbackTime > netConfig.delayMax then
 					v.buffering = true
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
 					v.debugState = "buffering (catching up)"
 				end
 			end
 
-			--lerp according to current playhead pos
-			for i = 1, #v.frames do
-				local nextFrame = i
-				local previousFrame = i - 1
-				if previousFrame == 0 then previousFrame = #v.frames end
-				if v.frames[nextFrame].ts >= v.playbackTime and v.frames[previousFrame].ts <= v.playbackTime then
-					local fraction = (v.playbackTime - v.frames[previousFrame].ts) / (v.frames[nextFrame].ts - v.frames[previousFrame].ts)
-					--
-					v.debugNextFrame = nextFrame
-					v.debugPreviousFrame = previousFrame
+			-- Find interpolation frames efficiently
+			local previousFrame, nextFrame, fraction
+			for i = 1, frameCount do
+				local curr = v.frames[i]
+				local prev = v.frames[i == 1 and frameCount or i - 1]
+				if curr.ts >= v.playbackTime and prev.ts <= v.playbackTime then
+					previousFrame, nextFrame = prev, curr
+					fraction = (v.playbackTime - prev.ts) / (curr.ts - prev.ts)
+					v.debugNextFrame = i
+					v.debugPreviousFrame = i == 1 and frameCount or i - 1
 					v.debugFraction = fraction
-					--
-					v.lerpedFrame = {}
-					for k2, v2 in pairs(v.frames[previousFrame]) do
-						if k2 == "characterYaw" then
-							v.lerpedFrame[k2] = LerpAngle(fraction, Angle(0, v2, 0), Angle(0, v.frames[nextFrame][k2], 0)).yaw
-						elseif isnumber(v2) then
-							v.lerpedFrame[k2] = Lerp(fraction, v2, v.frames[nextFrame][k2])
-						elseif isvector(v2) then
-							v.lerpedFrame[k2] = LerpVector(fraction, v2, v.frames[nextFrame][k2])
-						elseif isangle(v2) then
-							v.lerpedFrame[k2] = LerpAngle(fraction, v2, v.frames[nextFrame][k2])
-						end
-					end
-
-					--
-					local plyPos, plyAng = ply:GetPos(), Angle()
-					if ply:InVehicle() then
-						plyAng = ply:GetVehicle():GetAngles()
-						local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
-						v.lerpedFrame.characterYaw = forwardAng.yaw
-					end
-
-					v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng = LocalToWorld(v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng, plyPos, plyAng)
-					v.lerpedFrame.lefthandPos, v.lerpedFrame.lefthandAng = LocalToWorld(v.lerpedFrame.lefthandPos, v.lerpedFrame.lefthandAng, plyPos, plyAng)
-					v.lerpedFrame.righthandPos, v.lerpedFrame.righthandAng = LocalToWorld(v.lerpedFrame.righthandPos, v.lerpedFrame.righthandAng, plyPos, plyAng)
-					if v.lerpedFrame.waistPos then
-						v.lerpedFrame.waistPos, v.lerpedFrame.waistAng = LocalToWorld(v.lerpedFrame.waistPos, v.lerpedFrame.waistAng, plyPos, plyAng)
-						v.lerpedFrame.leftfootPos, v.lerpedFrame.leftfootAng = LocalToWorld(v.lerpedFrame.leftfootPos, v.lerpedFrame.leftfootAng, plyPos, plyAng)
-						v.lerpedFrame.rightfootPos, v.lerpedFrame.rightfootAng = LocalToWorld(v.lerpedFrame.rightfootPos, v.lerpedFrame.rightfootAng, plyPos, plyAng)
-					end
-
-					--
 					break
+				end
+			end
+
+			if previousFrame and nextFrame then
+				v.lerpedFrame = v.lerpedFrame or {}
+				local lerped = v.lerpedFrame
+				for k2, v2 in pairs(previousFrame) do
+					if k2 == "characterYaw" then
+						lerped[k2] = LerpAngle(fraction, Angle(0, v2, 0), Angle(0, nextFrame[k2], 0)).yaw
+					elseif isnumber(v2) then
+						lerped[k2] = Lerp(fraction, v2, nextFrame[k2])
+					elseif isvector(v2) then
+						lerped[k2] = LerpVector(fraction, v2, nextFrame[k2])
+					elseif isangle(v2) then
+						lerped[k2] = LerpAngle(fraction, v2, nextFrame[k2])
+					end
+				end
+
+				if ply:InVehicle() then
+					local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
+					lerped.characterYaw = forwardAng.yaw
+				end
+
+				-- Batch LocalToWorld transformations
+				lerped.hmdPos, lerped.hmdAng = LocalToWorld(lerped.hmdPos, lerped.hmdAng, plyPos, plyAng)
+				lerped.lefthandPos, lerped.lefthandAng = LocalToWorld(lerped.lefthandPos, lerped.lefthandAng, plyPos, plyAng)
+				lerped.righthandPos, lerped.righthandAng = LocalToWorld(lerped.righthandPos, lerped.righthandAng, plyPos, plyAng)
+				if lerped.waistPos then
+					lerped.waistPos, lerped.waistAng = LocalToWorld(lerped.waistPos, lerped.waistAng, plyPos, plyAng)
+					lerped.leftfootPos, lerped.leftfootAng = LocalToWorld(lerped.leftfootPos, lerped.leftfootAng, plyPos, plyAng)
+					lerped.rightfootPos, lerped.rightfootAng = LocalToWorld(lerped.rightfootPos, lerped.rightfootAng, plyPos, plyAng)
 				end
 			end
 		end
