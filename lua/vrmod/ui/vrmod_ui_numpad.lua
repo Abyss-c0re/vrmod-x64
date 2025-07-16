@@ -84,7 +84,7 @@ if CLIENT then
                 local x = col * (bw + pad)
                 local y = row * (bh + pad)
                 local key = keys[i + 1]
-                local hovered = cx > x and cx < x + bw and cy > y and cy < y + bh
+                local hovered = cx > x and cx < x + bw and cy > y and cy < y + bh and g_VR.menuFocus == "numpadmenu"
                 draw.RoundedBox(8, x, y, bw, bh, Color(0, 0, 0, hovered and 200 or 100))
                 draw.SimpleText(key, "DermaLarge", x + bw / 2, y + bh / 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
                 if hovered and justClicked then
