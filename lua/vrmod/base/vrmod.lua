@@ -308,37 +308,47 @@ if CLIENT then
 	end
 
 	local function PerformRenderViews()
-		g_VR.view.origin = g_VR.view.origin + g_VR.view.angles:Forward() * -(eyez * g_VR.scale)
-		g_VR.eyePosLeft = g_VR.view.origin + g_VR.view.angles:Right() * -(ipd * 0.5 * g_VR.scale)
-		g_VR.eyePosRight = g_VR.view.origin + g_VR.view.angles:Right() * ipd * 0.5 * g_VR.scale
+		-- Cache eye offsets
+		local eyeOffset = ipd * 0.5 * g_VR.scale
+		local forwardOffset = g_VR.view.angles:Forward() * -(eyez * g_VR.scale)
+		g_VR.eyePosLeft = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * -eyeOffset
+		g_VR.eyePosRight = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * eyeOffset
 		render.PushRenderTarget(g_VR.rt)
+		if DrawErrorOverlay() then
+			render.PopRenderTarget()
+			return
+		end
+
 		render.Clear(0, 0, 0, 255, true, true)
+		-- Base view parameters
+		local view = g_VR.view
+		view.drawmonitors = true
+		view.drawviewmodel = false
 		-- Left eye
-		g_VR.view.origin = g_VR.eyePosLeft
-		g_VR.view.x = 0
-		g_VR.view.fov = hfovLeft
-		g_VR.view.aspectratio = aspectLeft
-		hook.Call("VRMod_PreRender")
-		render.RenderView(g_VR.view)
+		view.origin = g_VR.eyePosLeft
+		view.x = 0
+		view.fov = hfovLeft
+		view.aspectratio = aspectLeft
+		hook.Call("VRMod_PreRender", nil, "left")
+		render.RenderView(view)
 		-- Right eye
-		g_VR.view.origin = g_VR.eyePosRight
-		g_VR.view.x = rtWidth / 2
-		g_VR.view.fov = hfovRight
-		g_VR.view.aspectratio = aspectRight
-		hook.Call("VRMod_PreRenderRight")
-		render.RenderView(g_VR.view)
+		view.origin = g_VR.eyePosRight
+		view.x = rtWidth / 2
+		view.fov = hfovRight
+		view.aspectratio = aspectRight
+		hook.Call("VRMod_PreRender", nil, "right")
+		render.RenderView(view)
 		if not LocalPlayer():Alive() then
 			DrawDeathAnimation(rtWidth, rtHeight)
 		else
 			g_VR.deathTime = nil
 		end
 
-		render.PopRenderTarget(g_VR.rt)
-		if desktopView == nil then desktopView = 0 end
+		render.PopRenderTarget()
 		if desktopView > 1 then
+			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(g_VR.rtMaterial)
-			render.CullMode(1)
 			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
 			render.CullMode(0)
 		end
