@@ -28,7 +28,7 @@ Watch a short demo: [YouTube Link](https://www.youtube.com/shorts/CZYd3S08roo)
 - Ensure your system supports **GMod x64**.
 - On native Linux, run the following script first:  
      [GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
--Please note that only ALVR is now supported. 
+- Please note that only ALVR is now supported. 
 
 **Installation:**
 
