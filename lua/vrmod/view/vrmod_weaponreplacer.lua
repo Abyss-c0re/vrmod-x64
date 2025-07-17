@@ -7,6 +7,7 @@ if SERVER then
     -- Default list used if file doesn't exist
     local defaultWeaponPairs = {
         ["weapon_crowbar"] = "arcticvr_hl2_crowbar",
+        ["weapon_stunstick"] = "arcticvr_hl2_stunstick",
         ["weapon_pistol"] = "arcticvr_hl2_pistol",
         ["weapon_357"] = "arcticvr_hl2_357",
         ["weapon_smg1"] = "arcticvr_hl2_smg1",
@@ -57,18 +58,27 @@ if SERVER then
         ["weapon_haax"] = "weapon_haax_vr"
     }
 
-
     -- Load from file or generate default
     function VRWeps.LoadPairs()
         if not file.Exists(datafile, "DATA") then
             print("[VRWeps] No file found — generating default list.")
-            file.CreateDir("vrmod") -- ensure directory exists
             file.Write(datafile, util.TableToJSON(defaultWeaponPairs, true))
+            VRWeps.Replacer = table.Copy(defaultWeaponPairs)
+            return
         end
 
         local content = file.Read(datafile, "DATA")
         local decoded = util.JSONToTable(content) or {}
+        -- Merge: Fill in missing default pairs
+        for flat, vr in pairs(defaultWeaponPairs) do
+            if decoded[flat] == nil then
+                print("[VRWeps] Adding missing default pair:", flat, "→", vr)
+                decoded[flat] = vr
+            end
+        end
+
         VRWeps.Replacer = decoded
+        VRWeps.SavePairs() -- Save merged result back to disk
         print("[VRWeps] Loaded", table.Count(VRWeps.Replacer), "weapon replacement pairs.")
     end
 
@@ -140,31 +150,45 @@ if SERVER then
         local vrClass = VRWeps.Replacer[class]
         if not vrClass then return false end
         if not weapons.GetStored(vrClass) then
-            print("[VRWeps] Missing VR weapon:", vrClass, "for", class)
+            print("[VRWeps] MISSING VR WEAPON:", vrClass, "for", class)
             return false
+        end
+
+        if ply:HasWeapon(vrClass) then
+            print("[VRWeps] Already has VR weapon — switching to:", vrClass)
+            if IsValid(wep) then wep:Remove() end
+            ply:SelectWeapon(vrClass)
+            return true
         end
 
         local given = ply:Give(vrClass, true)
         if IsValid(given) then
-            wep:Remove()
+            print("[VRWeps] Successfully gave VR weapon:", vrClass)
+            if IsValid(wep) then wep:Remove() end
             ply:SelectWeapon(vrClass)
-            print("[VRWeps] Replaced weapon:", class, "→", vrClass)
             return true
-        else
-            -- Retry give in 0.3s if something failed
-            timer.Simple(0.3, function()
-                if not IsValid(ply) then return end
-                local retried = ply:Give(vrClass, true)
-                if IsValid(retried) then
-                    if IsValid(wep) then wep:Remove() end
-                    ply:SelectWeapon(vrClass)
-                    print("[VRWeps] Gave VR weapon on retry:", vrClass)
-                else
-                    print("[VRWeps] Failed to give VR weapon:", vrClass, "for", class)
-                end
-            end)
-            return false
         end
+
+        print("[VRWeps] Delaying VR weapon give for:", vrClass)
+        timer.Simple(0.3, function()
+            if not IsValid(ply) then return end
+            if ply:HasWeapon(vrClass) then
+                print("[VRWeps] Found VR weapon on retry — switching:", vrClass)
+                if IsValid(wep) then wep:Remove() end
+                ply:SelectWeapon(vrClass)
+                return
+            end
+
+            local retried = ply:Give(vrClass, true)
+            if IsValid(retried) then
+                print("[VRWeps] Gave VR weapon on retry:", vrClass)
+                if IsValid(wep) then wep:Remove() end
+                ply:SelectWeapon(vrClass)
+            else
+                print("[VRWeps] FINAL FAIL — could not give:", vrClass)
+            end
+        end)
+        return false
     end
 
     -- On init, load weapon pairs
