@@ -51,16 +51,18 @@ end)
 hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	if not IsValid(ply) or not ply:IsPlayer() then return end
 	if not IsValid(ent) or not ent:IsWeapon() then return end
-	if not ply.PickupWeapon then -- prevent nil method call crash
-		return
-	end
-
+	if not ply.PickupWeapon then return end
 	local wepClass = ent:GetClass()
+	local success = false
 	-- Temporarily disable pickup protection
 	hook.Call("VRMod_Drop", nil, ply, ent)
-	-- Attempt actual pickup of the entity
-	local success = ply:PickupWeapon(ent)
-	-- Optional: Select it if successful
+	-- Try to replace with VR weapon
+	if not VRWeps.ReplaceWeaponEntity(ply, ent) then
+		-- Fallback: attempt standard pickup
+		success = ply:PickupWeapon(ent)
+	end
+
+	-- Select whatever was successfully picked up
 	if success and ply:HasWeapon(wepClass) then ply:SelectWeapon(wepClass) end
 end)
 
