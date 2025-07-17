@@ -1,5 +1,5 @@
 AddCSLuaFile()
-local blacklist_path = "vrmod_blacklist.txt"
+local blacklist_path = "vrmod/vrmod_drop_blacklist.txt"
 -- Shared blacklist check
 local function InBlackList(weaponClass)
     if weaponClass == "weapon_vrmod_empty" then
