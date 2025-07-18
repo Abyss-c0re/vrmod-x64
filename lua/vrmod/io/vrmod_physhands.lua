@@ -116,12 +116,8 @@ hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepShape", function(ply, oldWep, 
     if not hands or not hands.right then return end
     local rightHand = hands.right.ent
     if not IsValid(rightHand) or not IsValid(ply) then return end
-    local class = newWep:GetClass()
-    local vmInfo = g_VR.viewModelInfo[class]
-    offsetAng = vmInfo and vmInfo.offsetAng or Angle(0, 0, 0)
-    offsetPos = vmInfo and vmInfo.offsetPos or Vector(0, 0, 0)
     local function ApplySphere(radius)
-        print("[VRHand] Applying SPHERE radius:", radius)
+        --print("[VRHand] Applying SPHERE radius:", radius)
         rightHand:PhysicsInitSphere(radius, "metal_bouncy")
         local phys = rightHand:GetPhysicsObject()
         if IsValid(phys) then
