@@ -3,6 +3,7 @@ local convars = vrmod.GetConvars()
 if CLIENT then
 	g_VR.scale = 0
 	g_VR.origin = Vector(0, 0, 0)
+	g_VR.rtWidth, g_VR.rtHeight = nil, nil
 	g_VR.originAngle = Angle(0, 0, 0)
 	g_VR.viewModel = nil
 	g_VR.viewModelMuzzle = nil
@@ -17,8 +18,6 @@ if CLIENT then
 	g_VR.changedInputs = {}
 	g_VR.errorText = ""
 	g_VR.moduleVersion = 0
-	local moduleLoaded = false
-	local rtWidth, rtHeight
 	local hfovLeft, hfovRight
 	local aspectLeft, aspectRight
 	local leftCalc, rightCalc
@@ -333,13 +332,13 @@ if CLIENT then
 		render.RenderView(view)
 		-- Right eye
 		view.origin = g_VR.eyePosRight
-		view.x = rtWidth / 2
+		view.x = g_VR.rtWidth / 2
 		view.fov = hfovRight
 		view.aspectratio = aspectRight
 		hook.Call("VRMod_PreRender", nil, "right")
 		render.RenderView(view)
 		if not LocalPlayer():Alive() then
-			DrawDeathAnimation(rtWidth, rtHeight)
+			DrawDeathAnimation(g_VR.rtWidth, g_VR.rtHeight)
 		else
 			g_VR.deathTime = nil
 		end
@@ -380,15 +379,15 @@ if CLIENT then
 	-- 3) Display parameters & render target setup
 	local function SetupRenderTargets()
 		local dp = ComputeDisplayParams()
-		rtWidth, rtHeight = dp.rtW, dp.rtH
+		g_VR.rtWidth, g_VR.rtHeight = dp.rtW, dp.rtH
 		leftCalc, rightCalc = dp.leftCalc, dp.rightCalc
 		hfovLeft, hfovRight = dp.hfovL, dp.hfovR
 		aspectLeft, aspectRight = dp.aspL, dp.aspR
 		ipd, eyez = dp.ipd, dp.eyez
-		cropVerticalMargin, cropHorizontalOffset = ComputeDesktopCrop(rtWidth, rtHeight)
+		cropVerticalMargin, cropHorizontalOffset = ComputeDesktopCrop(g_VR.rtWidth, g_VR.rtHeight)
 		VRMOD_ShareTextureBegin()
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
-		g_VR.rt = GetRenderTarget(rtName, rtWidth, rtHeight)
+		g_VR.rt = GetRenderTarget(rtName, g_VR.rtWidth, g_VR.rtHeight)
 		local matName = "vrmod_rt_mat_" .. tostring(SysTime())
 		g_VR.rtMaterial = CreateMaterial(matName, "UnlitGeneric", {
 			["$basetexture"] = g_VR.rt:GetName()
@@ -428,8 +427,8 @@ if CLIENT then
 		g_VR.view = {
 			x = 0,
 			y = 0,
-			w = rtWidth / 2,
-			h = rtHeight,
+			w = g_VR.rtWidth / 2,
+			h = g_VR.rtHeight,
 			drawmonitors = true,
 			drawviewmodel = false,
 			znear = convars.vrmod_znear:GetFloat(),
