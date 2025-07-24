@@ -339,26 +339,27 @@ if CLIENT then
 		end
 
 		--calculate target matrices
-		for i = 1, #characterInfo[steamid].boneorder do
-			local bone = characterInfo[steamid].boneorder[i]
-			local parent = characterInfo[steamid].boneinfo[bone].parent
+		for i = 1, #charinfo.boneorder do
+			local bone = charinfo.boneorder[i]
+			local boneData = boneinfo[bone]
+			local parent = boneData.parent
 			local wpos, wang
-			if characterInfo[steamid].boneinfo[bone].name == "ValveBiped.Bip01_L_Clavicle" then
-				wpos = L_ClaviclePos
-			elseif characterInfo[steamid].boneinfo[bone].name == "ValveBiped.Bip01_R_Clavicle" then
-				wpos = R_ClaviclePos
+			if boneData.name == "ValveBiped.Bip01_L_Clavicle" then
+				wpos = charinfo.L_ClaviclePos
+			elseif boneData.name == "ValveBiped.Bip01_R_Clavicle" then
+				wpos = charinfo.R_ClaviclePos
 			else
-				local parentPos, parentAng = characterInfo[steamid].boneinfo[parent].pos, characterInfo[steamid].boneinfo[parent].ang
-				wpos, wang = LocalToWorld(characterInfo[steamid].boneinfo[bone].relativePos, characterInfo[steamid].boneinfo[bone].relativeAng + characterInfo[steamid].boneinfo[bone].offsetAng, parentPos, parentAng)
+				local parentPos, parentAng = boneinfo[parent].pos, boneinfo[parent].ang
+				wpos, wang = LocalToWorld(boneData.relativePos, boneData.relativeAng + boneData.offsetAng, parentPos, parentAng)
 			end
 
-			if characterInfo[steamid].boneinfo[bone].overrideAng ~= nil then wang = characterInfo[steamid].boneinfo[bone].overrideAng end
-			local mat = Matrix()
-			mat:Translate(wpos)
-			mat:Rotate(wang)
-			characterInfo[steamid].boneinfo[bone].targetMatrix = mat
-			characterInfo[steamid].boneinfo[bone].pos = wpos
-			characterInfo[steamid].boneinfo[bone].ang = wang
+			if boneData.overrideAng ~= nil then wang = boneData.overrideAng end
+			local mat = boneData.targetMatrix
+			mat:SetTranslation(wpos)
+			mat:SetAngles(wang)
+			-- Update cached position and angle for this bone
+			boneData.pos = wpos
+			boneData.ang = wang
 		end
 	end
 
@@ -406,6 +407,15 @@ if CLIENT then
 		cm:SetupBones()
 		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_L_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
 		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_R_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
+		for bone, data in pairs(characterInfo[steamid].boneinfo) do
+			data.targetMatrix = Matrix() -- reusable matrix
+			data.pos = Vector() -- ensure initialized
+			data.ang = Angle() -- ensure initialized
+			data.lastPos = nil -- optional: for diff check
+			data.lastAng = nil -- optional: for diff check
+			data.overrideAng = nil -- ensure clean slate
+		end
+
 		local boneNames = {
 			b_leftClavicle = "ValveBiped.Bip01_L_Clavicle",
 			b_leftUpperarm = "ValveBiped.Bip01_L_UpperArm",
