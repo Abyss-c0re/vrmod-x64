@@ -2,6 +2,7 @@ if CLIENT then
 	g_VR = g_VR or {}
 	g_VR.characterYaw = 0
 	local convars = vrmod.GetConvars()
+	local lastModel = nil
 	-- Constants
 	local DEFAULT_EYE_HEIGHT = 66.8
 	local DEFAULT_HEAD_TO_HMD_DIST = 6.3
@@ -631,6 +632,7 @@ if CLIENT then
 	-------------------------------------------------------------
 	function g_VR.StartCharacterSystem(ply)
 		local steamid = ply:SteamID()
+		lastModel = ply:GetModel()
 		if not g_VR.net[steamid] or CharacterInit(ply) == false then return end
 		characterInfo[steamid].boneCallback = ply:AddCallback("BuildBonePositions", BoneCallbackFunc)
 		if ply == LocalPlayer() then hook.Add("VRMod_PreRender", "vrutil_hook_calcplyrenderpos", PreRenderFunc) end
@@ -638,36 +640,49 @@ if CLIENT then
 		hook.Add("PostPlayerDraw", "vrutil_hook_postplayerdraw", PostPlayerDrawFunc)
 		hook.Add("CalcMainActivity", "vrutil_hook_calcmainactivity", CalcMainActivityFunc)
 		hook.Add("DoAnimationEvent", "vrutil_hook_doanimationevent", DoAnimationEventFunc)
+		hook.Add("Think", "DetectLocalPlayerModelChange", function()
+			local ply = LocalPlayer()
+			if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+			local mdl = ply:GetModel()
+			if mdl ~= lastModel then
+				lastModel = mdl
+				g_VR.StopCharacterSystem(steamid)
+				g_VR.StartCharacterSystem(ply)
+			end
+		end)
+
 		activePlayers[steamid] = true
 	end
 
 	function g_VR.StopCharacterSystem(steamid)
 		if not activePlayers[steamid] then return end
 		local ply = player.GetBySteamID(steamid)
-		if characterInfo[steamid] then
-			if IsValid(ply) then
-				for k, v in pairs(characterInfo[steamid].bones) do
-					if not isnumber(v) then continue end
-					ply:ManipulateBoneAngles(v, Angle(0, 0, 0))
-				end
-
-				ply:RemoveCallback("BuildBonePositions", characterInfo[steamid].boneCallback)
-				if ply == LocalPlayer() then
-					hook.Remove("VRMod_PreRender", "vrutil_hook_calcplyrenderpos")
-					ply:ManipulateBoneScale(characterInfo[steamid].bones.b_head, Vector(1, 1, 1))
-				end
+		if characterInfo[steamid] and IsValid(ply) then
+			for k, v in pairs(characterInfo[steamid].bones) do
+				if not isnumber(v) then continue end
+				ply:ManipulateBoneAngles(v, Angle(0, 0, 0))
 			end
 
-			activePlayers[steamid] = nil
+			ply:RemoveCallback("BuildBonePositions", characterInfo[steamid].boneCallback)
+			if ply == LocalPlayer() then
+				hook.Remove("VRMod_PreRender", "vrutil_hook_calcplyrenderpos")
+				ply:ManipulateBoneScale(characterInfo[steamid].bones.b_head, Vector(1, 1, 1))
+			end
 		end
 
+		activePlayers[steamid] = nil
+		characterInfo[steamid] = nil
+		g_VR.cache[steamid] = nil
 		if table.Count(activePlayers) == 0 then
 			hook.Remove("PrePlayerDraw", "vrutil_hook_preplayerdraw")
 			hook.Remove("PostPlayerDraw", "vrutil_hook_postplayerdraw")
 			hook.Remove("UpdateAnimation", "vrutil_hook_updateanimation")
 			hook.Remove("CalcMainActivity", "vrutil_hook_calcmainactivity")
 			hook.Remove("DoAnimationEvent", "vrutil_hook_doanimationevent")
+			hook.Remove("Think", "DetectLocalPlayerModelChange")
 		end
+
+		print("VRMod: Stopped character system for " .. steamid)
 	end
 
 	hook.Add("VRMod_Start", "vrmod_characterstart", function(ply) g_VR.StartCharacterSystem(ply) end)
