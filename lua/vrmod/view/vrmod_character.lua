@@ -141,14 +141,6 @@ if CLIENT then
 		end
 	end
 
-	-- NOw let's do the rest of planned optimization 
-	-- ✅ 2. Skip Unchanged Bones
-	-- Track when bones haven't changed significantly:
-	-- ✅ 3. Minimize WorldToLocal and LocalToWorld
-	-- These calls dominate performance cost. Any repeated WorldToLocal(...):Angle() should be replaced with cached calculations where possible. 
-	-- Also extract and precompute repeated angles:
-	-- ✅ 4. Use a Flat for Loop in UpdateIK Instead of Nested Functions
-	-- The recursive traversal in RecursiveBoneTable2 is already precomputed—UpdateIK doesn't need recursion. So ensure no hidden recursive calls are made during runtime bone transforms.
 	local function UpdateIK(ply)
 		local steamid = ply:SteamID()
 		local net = g_VR.net[steamid]
@@ -159,26 +151,35 @@ if CLIENT then
 		local inVehicle = ply:InVehicle()
 		local plyAng = inVehicle and ply:GetVehicle():GetAngles() or Angle(0, frame.characterYaw, 0)
 		if inVehicle then _, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng) end
+		-- Ensure cache is initialized
+		g_VR.cache = g_VR.cache or {}
+		g_VR.cache[steamid] = g_VR.cache[steamid] or {}
+		local cache = g_VR.cache[steamid]
+		-- Cache character yaw angle for non-vehicle case
+		local characterYawAng = Angle(0, frame.characterYaw, 0)
 		--alt head
 		if net.characterAltHead then
-			local tmp1, tmp2 = WorldToLocal(zeroVec, frame.hmdAng, zeroVec, Angle(0, frame.characterYaw, 0))
+			cache.headWTL = cache.headWTL or {}
+			local pos, ang = WorldToLocal(zeroVec, frame.hmdAng, zeroVec, characterYawAng)
+			cache.headWTL.pos, cache.headWTL.ang = pos, ang
+			local _, tmp2 = cache.headWTL.pos, cache.headWTL.ang
 			ply:ManipulateBoneAngles(bones.b_head, Angle(-tmp2.roll, -tmp2.pitch, tmp2.yaw))
+		else
+			cache.headWTL = nil
 		end
 
 		--****************** CROUCHING ******************
 		if not inVehicle then
 			local headHeight = frame.hmdPos.z + (frame.hmdAng:Forward() * -3).z
 			local cutAmount = math.Clamp(charinfo.preRenderPos.z + charinfo.characterEyeHeight - headHeight, 0, 40)
-			--spine
 			local spineTargetLen = charinfo.spineLen - cutAmount * 0.5
 			local a1 = math.acos(spineTargetLen / charinfo.spineLen)
 			charinfo.horizontalCrouchOffset = math.sin(a1) * charinfo.spineLen
 			ply:ManipulateBoneAngles(bones.b_spine, Angle(0, math.deg(a1), 0))
-			--legs
 			charinfo.verticalCrouchOffset = cutAmount * 0.5
-			local legTargetLen = charinfo.upperLegLen + charinfo.lowerLegLen - charinfo.verticalCrouchOffset * 0.8 --actually cut slightly less or it looks like the legs float with the player anim
+			local legTargetLen = charinfo.upperLegLen + charinfo.lowerLegLen - charinfo.verticalCrouchOffset * 0.8
 			local a1 = math.deg(math.acos((charinfo.upperLegLen * charinfo.upperLegLen + legTargetLen * legTargetLen - charinfo.lowerLegLen * charinfo.lowerLegLen) / (2 * charinfo.upperLegLen * legTargetLen)))
-			local a23 = 180 - a1 - math.deg(math.acos((charinfo.lowerLegLen * charinfo.lowerLegLen + legTargetLen * legTargetLen - charinfo.upperLegLen * charinfo.upperLegLen) / (2 * charinfo.lowerLegLen * legTargetLen)))
+			local a23 = 180 - a1 - math.deg(math.acos((charinfo.lowerLegLen * charinfo.lowerLegLen + legTargetLen * legTargetLen - charinfo.upperArmLen * charinfo.upperArmLen) / (2 * charinfo.lowerLegLen * legTargetLen)))
 			if a1 ~= a1 or a23 ~= a23 then
 				a1 = 0
 				a23 = 180
@@ -206,18 +207,20 @@ if CLIENT then
 		local mtx = ply:GetBoneMatrix(bones.b_leftClavicle)
 		local L_ClaviclePos = mtx and mtx:GetTranslation() or ZERO_VEC
 		charinfo.L_ClaviclePos = L_ClaviclePos
-		--Calculate LEFT clavicle target angle
-		local tmp1 = L_ClaviclePos + plyAng:Right() * -charinfo.clavicleLen --neutral shoulder position
-		local tmp2 = tmp1 + (L_TargetPos - tmp1) * 0.15 --desired shoulder position
+		local tmp1 = L_ClaviclePos + plyAng:Right() * -charinfo.clavicleLen
+		local tmp2 = tmp1 + (L_TargetPos - tmp1) * 0.15
 		local L_ClavicleTargetAng
 		if not inVehicle then
 			L_ClavicleTargetAng = (tmp2 - L_ClaviclePos):Angle()
 		else
-			_, L_ClavicleTargetAng = LocalToWorld(zeroVec, WorldToLocal(tmp2 - L_ClaviclePos, zeroAng, zeroVec, plyAng):Angle(), zeroVec, plyAng)
+			cache.L_ClavicleWTL = cache.L_ClavicleWTL or {}
+			local pos, ang = WorldToLocal(tmp2 - L_ClaviclePos, zeroAng, zeroVec, plyAng)
+			cache.L_ClavicleWTL.pos, cache.L_ClavicleWTL.ang = pos, ang
+			local _, ang = cache.L_ClavicleWTL.pos, cache.L_ClavicleWTL.ang
+			_, L_ClavicleTargetAng = LocalToWorld(zeroVec, ang, zeroVec, plyAng)
 		end
 
 		L_ClavicleTargetAng:RotateAroundAxis(L_ClavicleTargetAng:Forward(), 90)
-		--
 		local L_UpperarmPos = L_ClaviclePos + L_ClavicleTargetAng:Forward() * charinfo.clavicleLen
 		local L_TargetVec = L_TargetPos - L_UpperarmPos
 		local L_TargetVecLen = L_TargetVec:Length()
@@ -225,20 +228,26 @@ if CLIENT then
 		if not inVehicle then
 			L_TargetVecAng = L_TargetVec:Angle()
 		else
-			L_TargetVecAngLocal = WorldToLocal(L_TargetVec, zeroAng, zeroVec, plyAng):Angle()
-			_, L_TargetVecAng = LocalToWorld(ZERO_VEC, L_TargetVecAngLocal, zeroVec, plyAng)
+			cache.L_TargetVecWTL = cache.L_TargetVecWTL or {}
+			local pos, ang = WorldToLocal(L_TargetVec, zeroAng, zeroVec, plyAng)
+			cache.L_TargetVecWTL.pos, cache.L_TargetVecWTL.ang = pos, ang
+			L_TargetVecAngLocal = cache.L_TargetVecWTL.ang
+			_, L_TargetVecAng = LocalToWorld(zeroVec, L_TargetVecAngLocal, zeroVec, plyAng)
 		end
 
-		--Calculate LEFT upperarm target angle
-		local L_UpperarmTargetAng = Angle(L_TargetVecAng.pitch, L_TargetVecAng.yaw, L_TargetVecAng.roll) --copy to avoid weirdness
+		local L_UpperarmTargetAng = Angle(L_TargetVecAng.pitch, L_TargetVecAng.yaw, L_TargetVecAng.roll)
 		local tmp
 		if not inVehicle then
 			tmp = Angle(L_TargetVecAng.pitch, frame.characterYaw, -90)
 		else
-			_, tmp = LocalToWorld(ZERO_VEC, Angle(L_TargetVecAngLocal.pitch, 0, -90), zeroVec, plyAng)
+			cache.L_UpperarmAng = cache.L_UpperarmAng or Angle(L_TargetVecAngLocal.pitch, 0, -90)
+			_, tmp = LocalToWorld(zeroVec, cache.L_UpperarmAng, zeroVec, plyAng)
 		end
 
-		local tpos, tang = WorldToLocal(zeroVec, tmp, zeroVec, L_TargetVecAng)
+		cache.L_UpperarmWTL = cache.L_UpperarmWTL or {}
+		local pos, tang = WorldToLocal(zeroVec, tmp, zeroVec, L_TargetVecAng)
+		cache.L_UpperarmWTL.pos, cache.L_UpperarmWTL.ang = pos, tang
+		local _, tang = cache.L_UpperarmWTL.pos, cache.L_UpperarmWTL.ang
 		L_UpperarmTargetAng:RotateAroundAxis(L_UpperarmTargetAng:Forward(), tang.roll)
 		local a1 = math.deg(math.acos((charinfo.upperArmLen * charinfo.upperArmLen + L_TargetVecLen * L_TargetVecLen - charinfo.lowerArmLen * charinfo.lowerArmLen) / (2 * charinfo.upperArmLen * L_TargetVecLen)))
 		if a1 == a1 then L_UpperarmTargetAng:RotateAroundAxis(L_UpperarmTargetAng:Up(), a1) end
@@ -251,13 +260,14 @@ if CLIENT then
 
 		if test < 0 then test = 0 end
 		L_UpperarmTargetAng:RotateAroundAxis(L_TargetVec:GetNormalized(), 30 + test)
-		--Calculate LEFT forearm target angle
 		local L_ForearmTargetAng = Angle(L_UpperarmTargetAng.pitch, L_UpperarmTargetAng.yaw, L_UpperarmTargetAng.roll)
 		local a23 = 180 - a1 - math.deg(math.acos((charinfo.lowerArmLen * charinfo.lowerArmLen + L_TargetVecLen * L_TargetVecLen - charinfo.upperArmLen * charinfo.upperArmLen) / (2 * charinfo.lowerArmLen * L_TargetVecLen)))
 		if a23 == a23 then L_ForearmTargetAng:RotateAroundAxis(L_ForearmTargetAng:Up(), 180 + a23) end
-		--Calculate LEFT wrist and ulna angle
 		local tmp = Angle(L_TargetAng.pitch, L_TargetAng.yaw, L_TargetAng.roll - 90)
-		local tpos, tang = WorldToLocal(zeroVec, tmp, zeroVec, L_ForearmTargetAng)
+		cache.L_WristWTL = cache.L_WristWTL or {}
+		local pos, tang = WorldToLocal(zeroVec, tmp, zeroVec, L_ForearmTargetAng)
+		cache.L_WristWTL.pos, cache.L_WristWTL.ang = pos, tang
+		local _, tang = cache.L_WristWTL.pos, cache.L_WristWTL.ang
 		local L_WristTargetAng = Angle(L_ForearmTargetAng.pitch, L_ForearmTargetAng.yaw, L_ForearmTargetAng.roll)
 		L_WristTargetAng:RotateAroundAxis(L_WristTargetAng:Forward(), tang.roll)
 		local L_UlnaTargetAng = LerpAngle(0.5, L_ForearmTargetAng, L_WristTargetAng)
@@ -267,18 +277,20 @@ if CLIENT then
 		local mtx = ply:GetBoneMatrix(bones.b_rightClavicle)
 		local R_ClaviclePos = mtx and mtx:GetTranslation() or ZERO_VEC
 		charinfo.R_ClaviclePos = R_ClaviclePos
-		--Calculate RIGHT clavicle target angle
 		local tmp1 = R_ClaviclePos + plyAng:Right() * charinfo.clavicleLen
 		local tmp2 = tmp1 + (R_TargetPos - tmp1) * 0.15
 		local R_ClavicleTargetAng
 		if not inVehicle then
 			R_ClavicleTargetAng = (tmp2 - R_ClaviclePos):Angle()
 		else
-			_, R_ClavicleTargetAng = LocalToWorld(ZERO_VEC, WorldToLocal(tmp2 - R_ClaviclePos, zeroAng, zeroVec, plyAng):Angle(), zeroVec, plyAng)
+			cache.R_ClavicleWTL = cache.R_ClavicleWTL or {}
+			local pos, ang = WorldToLocal(tmp2 - R_ClaviclePos, zeroAng, zeroVec, plyAng)
+			cache.R_ClavicleWTL.pos, cache.R_ClavicleWTL.ang = pos, ang
+			local _, ang = cache.R_ClavicleWTL.pos, cache.R_ClavicleWTL.ang
+			_, R_ClavicleTargetAng = LocalToWorld(zeroVec, ang, zeroVec, plyAng)
 		end
 
 		R_ClavicleTargetAng:RotateAroundAxis(R_ClavicleTargetAng:Forward(), 90)
-		--
 		local R_UpperarmPos = R_ClaviclePos + R_ClavicleTargetAng:Forward() * charinfo.clavicleLen
 		local R_TargetVec = R_TargetPos - R_UpperarmPos
 		local R_TargetVecLen = R_TargetVec:Length()
@@ -286,21 +298,27 @@ if CLIENT then
 		if not inVehicle then
 			R_TargetVecAng = R_TargetVec:Angle()
 		else
-			R_TargetVecAngLocal = WorldToLocal(R_TargetVec, zeroAng, zeroVec, plyAng):Angle()
-			_, R_TargetVecAng = LocalToWorld(ZERO_VEC, R_TargetVecAngLocal, zeroVec, plyAng)
+			cache.R_TargetVecWTL = cache.R_TargetVecWTL or {}
+			local pos, ang = WorldToLocal(R_TargetVec, zeroAng, zeroVec, plyAng)
+			cache.R_TargetVecWTL.pos, cache.R_TargetVecWTL.ang = pos, ang
+			R_TargetVecAngLocal = cache.R_TargetVecWTL.ang
+			_, R_TargetVecAng = LocalToWorld(zeroVec, R_TargetVecAngLocal, zeroVec, plyAng)
 		end
 
-		--Calculate RIGHT upperarm target angle
 		local R_UpperarmTargetAng = Angle(R_TargetVecAng.pitch, R_TargetVecAng.yaw, R_TargetVecAng.roll)
 		R_UpperarmTargetAng:RotateAroundAxis(R_TargetVec, 180)
 		local tmp
 		if not inVehicle then
 			tmp = Angle(R_TargetVecAng.pitch, frame.characterYaw, 90)
 		else
-			_, tmp = LocalToWorld(ZERO_VEC, Angle(R_TargetVecAngLocal.pitch, 0, 90), zeroVec, plyAng)
+			cache.R_UpperarmAng = cache.R_UpperarmAng or Angle(R_TargetVecAngLocal.pitch, 0, 90)
+			_, tmp = LocalToWorld(zeroVec, cache.R_UpperarmAng, zeroVec, plyAng)
 		end
 
-		local tpos, tang = WorldToLocal(zeroVec, tmp, zeroVec, R_TargetVecAng)
+		cache.R_UpperarmWTL = cache.R_UpperarmWTL or {}
+		local pos, tang = WorldToLocal(zeroVec, tmp, zeroVec, R_TargetVecAng)
+		cache.R_UpperarmWTL.pos, cache.R_UpperarmWTL.ang = pos, tang
+		local _, tang = cache.R_UpperarmWTL.pos, cache.R_UpperarmWTL.ang
 		R_UpperarmTargetAng:RotateAroundAxis(R_UpperarmTargetAng:Forward(), tang.roll)
 		local a1 = math.deg(math.acos((charinfo.upperArmLen * charinfo.upperArmLen + R_TargetVecLen * R_TargetVecLen - charinfo.lowerArmLen * charinfo.lowerArmLen) / (2 * charinfo.upperArmLen * R_TargetVecLen)))
 		if a1 == a1 then R_UpperarmTargetAng:RotateAroundAxis(R_UpperarmTargetAng:Up(), a1) end
@@ -313,13 +331,14 @@ if CLIENT then
 
 		if test < 0 then test = 0 end
 		R_UpperarmTargetAng:RotateAroundAxis(R_TargetVec:GetNormalized(), -(30 + test))
-		--Calculate RIGHT forearm target angle
 		local R_ForearmTargetAng = Angle(R_UpperarmTargetAng.pitch, R_UpperarmTargetAng.yaw, R_UpperarmTargetAng.roll)
 		local a23 = 180 - a1 - math.deg(math.acos((charinfo.lowerArmLen * charinfo.lowerArmLen + R_TargetVecLen * R_TargetVecLen - charinfo.upperArmLen * charinfo.upperArmLen) / (2 * charinfo.lowerArmLen * R_TargetVecLen)))
 		if a23 == a23 then R_ForearmTargetAng:RotateAroundAxis(R_ForearmTargetAng:Up(), 180 + a23) end
-		--Calculate RIGHT wrist and ulna angle
 		local tmp = Angle(R_TargetAng.pitch, R_TargetAng.yaw, R_TargetAng.roll - 90)
-		local tpos, tang = WorldToLocal(zeroVec, tmp, zeroVec, R_ForearmTargetAng)
+		cache.R_WristWTL = cache.R_WristWTL or {}
+		local pos, tang = WorldToLocal(zeroVec, tmp, zeroVec, R_ForearmTargetAng)
+		cache.R_WristWTL.pos, cache.R_WristWTL.ang = pos, tang
+		local _, tang = cache.R_WristWTL.pos, cache.R_WristWTL.ang
 		local R_WristTargetAng = Angle(R_ForearmTargetAng.pitch, R_ForearmTargetAng.yaw, R_ForearmTargetAng.roll)
 		R_WristTargetAng:RotateAroundAxis(R_WristTargetAng:Forward(), tang.roll)
 		local R_UlnaTargetAng = LerpAngle(0.5, R_ForearmTargetAng, R_WristTargetAng)
@@ -376,6 +395,9 @@ if CLIENT then
 
 	local function CharacterInit(ply)
 		local steamid = ply:SteamID()
+		-- Initialize cache for this player
+		g_VR.cache = g_VR.cache or {}
+		g_VR.cache[steamid] = g_VR.cache[steamid] or {}
 		local pmname = ply.vrmod_pm or ply:GetModel()
 		if characterInfo[steamid] and characterInfo[steamid].modelName == pmname then return end
 		if ply == LocalPlayer() then
@@ -419,12 +441,12 @@ if CLIENT then
 		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_L_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
 		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_R_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
 		for bone, data in pairs(characterInfo[steamid].boneinfo) do
-			data.targetMatrix = Matrix() -- reusable matrix
-			data.pos = Vector() -- ensure initialized
-			data.ang = Angle() -- ensure initialized
-			data.lastPos = nil -- optional: for diff check
-			data.lastAng = nil -- optional: for diff check
-			data.overrideAng = nil -- ensure clean slate
+			data.targetMatrix = Matrix()
+			data.pos = Vector()
+			data.ang = Angle()
+			data.lastPos = nil
+			data.lastAng = nil
+			data.overrideAng = nil
 		end
 
 		local boneNames = {
@@ -482,18 +504,6 @@ if CLIENT then
 		characterInfo[steamid].lowerArmLen = lowerPos:Distance(handPos)
 		characterInfo[steamid].upperLegLen = thighPos:Distance(calfPos)
 		characterInfo[steamid].lowerLegLen = calfPos:Distance(footPos)
-		--spineLen is set after eye height
-		--
-		local eyes = cm:GetAttachment(cm:LookupAttachment("eyes"))
-		if eyes then eyes.Pos = eyes.Pos - cm:GetPos() end
-		--if eyes and eyes.Pos.z > 10 then --assume eye pos is valid if its above ground
-		--	characterInfo[steamid].characterEyeHeight = eyes.Pos.z
-		--	characterInfo[steamid].characterHeadToHmdDist = eyes.Pos.x * 2
-		--else --otherwise set some ballparks
-		--	headPos = headPos - cm:GetPos()
-		--	characterInfo[steamid].characterEyeHeight = headPos.z
-		--	characterInfo[steamid].characterHeadToHmdDist = 7
-		--end
 		characterInfo[steamid].characterEyeHeight = DEFAULT_EYE_HEIGHT
 		characterInfo[steamid].characterHeadToHmdDist = DEFAULT_HEAD_TO_HMD_DIST
 		characterInfo[steamid].spineLen = (cm:GetPos().z + characterInfo[steamid].characterEyeHeight) - spinePos.z
