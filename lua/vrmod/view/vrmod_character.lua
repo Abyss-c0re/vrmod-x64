@@ -9,6 +9,8 @@ if CLIENT then
 	local ZERO_VEC = Vector()
 	local ZERO_ANG = Angle()
 	local RIGHT_HAND_OFFSET = Angle(0, 0, 180)
+	local ANGLE_THRESHOLD = 0.01
+	local POS_THRESHOLD = 0.01
 	-- Generate hand angles
 	g_VR.zeroHandAngles = {}
 	for i = 1, NUM_FINGER_BONES do
@@ -139,6 +141,14 @@ if CLIENT then
 		end
 	end
 
+	-- NOw let's do the rest of planned optimization 
+	-- ✅ 2. Skip Unchanged Bones
+	-- Track when bones haven't changed significantly:
+	-- ✅ 3. Minimize WorldToLocal and LocalToWorld
+	-- These calls dominate performance cost. Any repeated WorldToLocal(...):Angle() should be replaced with cached calculations where possible. 
+	-- Also extract and precompute repeated angles:
+	-- ✅ 4. Use a Flat for Loop in UpdateIK Instead of Nested Functions
+	-- The recursive traversal in RecursiveBoneTable2 is already precomputed—UpdateIK doesn't need recursion. So ensure no hidden recursive calls are made during runtime bone transforms.
 	local function UpdateIK(ply)
 		local steamid = ply:SteamID()
 		local net = g_VR.net[steamid]
@@ -355,11 +365,12 @@ if CLIENT then
 
 			if boneData.overrideAng ~= nil then wang = boneData.overrideAng end
 			local mat = boneData.targetMatrix
-			mat:SetTranslation(wpos)
-			mat:SetAngles(wang)
-			-- Update cached position and angle for this bone
-			boneData.pos = wpos
-			boneData.ang = wang
+			if not boneData.pos or not boneData.ang or wpos:Distance(boneData.pos) > POS_THRESHOLD or math.abs(wang.pitch - boneData.ang.pitch) > ANGLE_THRESHOLD or math.abs(wang.yaw - boneData.ang.yaw) > ANGLE_THRESHOLD or math.abs(wang.roll - boneData.ang.roll) > ANGLE_THRESHOLD then
+				mat:SetTranslation(wpos)
+				mat:SetAngles(wang)
+				boneData.pos = wpos
+				boneData.ang = wang
+			end
 		end
 	end
 
