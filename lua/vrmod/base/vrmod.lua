@@ -28,6 +28,8 @@ if CLIENT then
 	local lastViewEnt = nil
 	local lastViewModelPos = nil
 	local lastViewModelAng = nil
+	local eyeOffset = nil
+	local forwardOffset = nil
 	local viewEntOffsetPos = Vector(0, 0, 0)
 	local viewEntOffsetAng = Angle(0, 0, 0)
 	local flipAng180 = Angle(0, 0, 180)
@@ -344,9 +346,10 @@ if CLIENT then
 	end
 
 	local function PerformRenderViews()
-		-- Cache eye offsets
-		local eyeOffset = ipd * 0.5 * g_VR.scale
-		local forwardOffset = g_VR.view.angles:Forward() * -(eyez * g_VR.scale)
+		if not eyeOffset or not forwardOffset then
+			eyeOffset = ipd * 0.5 * g_VR.scale
+			forwardOffset = g_VR.view.angles:Forward() * -(eyez * g_VR.scale)
+		end
 		g_VR.eyePosLeft = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * -eyeOffset
 		g_VR.eyePosRight = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * eyeOffset
 		render.PushRenderTarget(g_VR.rt)
@@ -354,7 +357,6 @@ if CLIENT then
 			render.PopRenderTarget()
 			return
 		end
-
 		render.Clear(0, 0, 0, 255, true, true)
 		-- Base view parameters
 		local view = g_VR.view
@@ -471,6 +473,7 @@ if CLIENT then
 			znear = convars.vrmod_znear:GetFloat(),
 			dopostprocess = convars.vrmod_postprocess:GetBool()
 		}
+
 	end
 
 	-- 8) Initial tracking state
