@@ -26,6 +26,9 @@ if CLIENT then
 	local desktopView
 	local lastPosePos = {}
 	local currentViewEnt, pos1, ang1
+	local lastViewModelPos = nil
+	local lastViewModelAng = nil
+	local flipAng180 = Angle(0, 0, 180)
 	local convarOverrides = {}
 	local moduleFile
 	if system.IsLinux() then
@@ -129,12 +132,12 @@ if CLIENT then
 			return vMin - adj, vMax - adj
 		end
 
-		-- U bounds (unchanged)
+		-- U bounds
 		local uMinLeft = 0.0 + leftCalc.HorizontalOffset * hFactor
 		local uMaxLeft = 0.5 + leftCalc.HorizontalOffset * hFactor
 		local uMinRight = 0.5 + rightCalc.HorizontalOffset * hFactor
 		local uMaxRight = 1.0 + rightCalc.HorizontalOffset * hFactor
-		-- V bounds (now unified)
+		-- V bounds
 		local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset)
 		local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset)
 		return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
@@ -203,6 +206,14 @@ if CLIENT then
 		return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
 	end
 
+	local function VecChanged(a, b)
+		return not a or not b or a:DistToSqr(b) > 0.01
+	end
+
+	local function AngChanged(a, b)
+		return not a or not b or math.abs(a.pitch - b.pitch) > 0.1 or math.abs(a.yaw - b.yaw) > 0.1 or math.abs(a.roll - b.roll) > 0.1
+	end
+
 	local function UpdateTracking()
 		local maxVelSqr = 50 * 50
 		local maxPosDeltaSqr = 10 * 10
@@ -250,27 +261,41 @@ if CLIENT then
 	end
 
 	local function UpdateViewModel(netFrame)
-		if g_VR.currentvmi then
-			local pos, ang = LocalToWorld(g_VR.currentvmi.offsetPos, g_VR.currentvmi.offsetAng, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+		local currentvmi = g_VR.currentvmi
+		local rh_pose = g_VR.tracking.pose_righthand
+		local vm = g_VR.viewModel
+		if currentvmi and rh_pose then
+			local pos, ang = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, rh_pose.pos, rh_pose.ang)
 			g_VR.viewModelPos = pos
 			g_VR.viewModelAng = ang
 		end
 
-		if IsValid(g_VR.viewModel) and not g_VR.usingWorldModels then
-			g_VR.viewModel:SetPos(g_VR.viewModelPos)
-			g_VR.viewModel:SetAngles(g_VR.viewModelAng)
-			g_VR.viewModel:SetupBones()
-			if netFrame then
-				local b = g_VR.viewModel:LookupBone("ValveBiped.Bip01_R_Hand")
-				if b then
-					local mtx = g_VR.viewModel:GetBoneMatrix(b)
-					netFrame.righthandPos = mtx:GetTranslation()
-					netFrame.righthandAng = mtx:GetAngles() - Angle(0, 0, 180)
+		if IsValid(vm) then
+			if not g_VR.usingWorldModels then
+				if VecChanged(g_VR.viewModelPos, lastViewModelPos) then
+					vm:SetPos(g_VR.viewModelPos)
+					lastViewModelPos = g_VR.viewModelPos
+				end
+
+				if AngChanged(g_VR.viewModelAng, lastViewModelAng) then
+					vm:SetAngles(g_VR.viewModelAng)
+					lastViewModelAng = g_VR.viewModelAng
+				end
+
+				vm:SetupBones()
+				if netFrame and g_VR.viewModelRightHandBone then
+					local mtx = vm:GetBoneMatrix(g_VR.viewModelRightHandBone)
+					if mtx then
+						netFrame.righthandPos = mtx:GetTranslation()
+						local ang = mtx:GetAngles()
+						ang:Sub(flipAng180)
+						netFrame.righthandAng = ang
+					end
 				end
 			end
-		end
 
-		if IsValid(g_VR.viewModel) then g_VR.viewModelMuzzle = g_VR.viewModel:GetAttachment(1) end
+			g_VR.viewModelMuzzle = vm:GetAttachment(1)
+		end
 	end
 
 	local function DrawDeathAnimation(rtWidth, rtHeight)
