@@ -25,9 +25,11 @@ if CLIENT then
 	local cropVerticalMargin, cropHorizontalOffset
 	local desktopView
 	local lastPosePos = {}
-	local currentViewEnt, pos1, ang1
+	local lastViewEnt = nil
 	local lastViewModelPos = nil
 	local lastViewModelAng = nil
+	local viewEntOffsetPos = Vector(0, 0, 0)
+	local viewEntOffsetAng = Angle(0, 0, 0)
 	local flipAng180 = Angle(0, 0, 180)
 	local convarOverrides = {}
 	local moduleFile
@@ -315,20 +317,30 @@ if CLIENT then
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
 		local viewEnt = ply:GetViewEntity()
+		if not IsValid(viewEnt) then return end
 		if viewEnt ~= ply then
-			local rawPos, rawAng = WorldToLocal(g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang, g_VR.origin, g_VR.originAngle)
-			if viewEnt ~= currentViewEnt then
-				local pos, ang = LocalToWorld(rawPos, rawAng, viewEnt:GetPos(), viewEnt:GetAngles())
-				pos1, ang1 = WorldToLocal(viewEnt:GetPos(), viewEnt:GetAngles(), pos, ang)
+			local hmd = g_VR.tracking.hmd
+			if not hmd then return end
+			-- Transform HMD to VR origin local space
+			local rawPos, rawAng = WorldToLocal(hmd.pos, hmd.ang, g_VR.origin, g_VR.originAngle)
+			-- Update offset only when view entity changes
+			if viewEnt ~= lastViewEnt then
+				local vePos = viewEnt:GetPos()
+				local veAng = viewEnt:GetAngles()
+				local worldPos, worldAng = LocalToWorld(rawPos, rawAng, vePos, veAng)
+				viewEntOffsetPos, viewEntOffsetAng = WorldToLocal(vePos, veAng, worldPos, worldAng)
+				lastViewEnt = viewEnt
 			end
 
-			rawPos, rawAng = LocalToWorld(rawPos, rawAng, pos1, ang1)
-			g_VR.view.origin, g_VR.view.angles = LocalToWorld(rawPos, rawAng, viewEnt:GetPos(), viewEnt:GetAngles())
+			-- Apply offset
+			local intermediatePos, intermediateAng = LocalToWorld(rawPos, rawAng, viewEntOffsetPos, viewEntOffsetAng)
+			local vePos = viewEnt:GetPos()
+			local veAng = viewEnt:GetAngles()
+			g_VR.view.origin, g_VR.view.angles = LocalToWorld(intermediatePos, intermediateAng, vePos, veAng)
 		else
-			g_VR.view.origin, g_VR.view.angles = g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang
+			g_VR.view.origin = g_VR.tracking.hmd.pos
+			g_VR.view.angles = g_VR.tracking.hmd.ang
 		end
-
-		currentViewEnt = viewEnt
 	end
 
 	local function PerformRenderViews()
