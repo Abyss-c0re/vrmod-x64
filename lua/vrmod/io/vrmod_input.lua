@@ -25,7 +25,7 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		return
 	end
 
-	if action == "boolean_forword" then
+	if action == "boolean_forward" then
 		LocalPlayer():ConCommand(pressed and "+forward" or "-forward")
 		return
 	end

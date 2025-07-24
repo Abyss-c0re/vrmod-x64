@@ -152,7 +152,7 @@ g_VR.action_manifest = [[
 		},
 		
 		{
-			"name": "/actions/main/in/boolean_forword",
+			"name": "/actions/main/in/boolean_forward",
 			"type": "boolean"
 		},
 		
@@ -275,7 +275,7 @@ g_VR.action_manifest = [[
 			"/actions/main/in/boolean_right_pickup" : "Right Pickup",
 			"/actions/main/in/boolean_undo" : "Undo",
 			"/actions/main/in/boolean_sprint" : "Sprint",
-			"/actions/main/in/boolean_forword" : "Forword",
+			"/actions/main/in/boolean_forward" : "Forward",
 			"/actions/main/in/boolean_back" : "Back",
 			"/actions/main/in/boolean_left" : "Left",
 			"/actions/main/in/boolean_right" : "Right",
@@ -1812,8 +1812,8 @@ local function WriteBindingFiles()
 end
 
 local cv_bindingVersion = CreateClientConVar("vrmod_bindingversion", "0", true, false)
-if cv_bindingVersion:GetInt() < 19 then
-   cv_bindingVersion:SetInt(19)
+if cv_bindingVersion:GetInt() < 20 then
+   cv_bindingVersion:SetInt(20)
    WriteBindingFiles()
 end
 
