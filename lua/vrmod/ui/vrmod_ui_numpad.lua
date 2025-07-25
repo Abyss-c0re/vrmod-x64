@@ -3,6 +3,7 @@ if CLIENT then
     local wasClicking = false
     local justClicked = false
     local holdKey = nil
+    local binder = nil
     local holdStart = 0
     local holdDelay = 0.5
     local holdRate = 0.1
@@ -34,6 +35,34 @@ if CLIENT then
         net.SendToServer()
     end
 
+    local function FindCtrlNumPadUnderCursor()
+        local hovered = vgui.GetHoveredPanel()
+        if not IsValid(hovered) then return end
+        local function IsChildOf(panel, parent)
+            while IsValid(panel) do
+                if panel == parent then return true end
+                panel = panel:GetParent()
+            end
+            return false
+        end
+
+        local function FindNamedPanelAncestor(panel, targetName)
+            while IsValid(panel) do
+                if panel:GetName() == targetName then return panel end
+                panel = panel:GetParent()
+            end
+            return nil
+        end
+
+        local ctrlPanel = FindNamedPanelAncestor(hovered, "CtrlNumPad")
+        if not IsValid(ctrlPanel) then return end
+        if IsValid(ctrlPanel.NumPad1) and IsChildOf(hovered, ctrlPanel.NumPad1) then
+            binder = ctrlPanel.NumPad1
+        elseif IsValid(ctrlPanel.NumPad2) and IsChildOf(hovered, ctrlPanel.NumPad2) then
+            binder = ctrlPanel.NumPad2
+        end
+    end
+
     function VRUtilNumpadMenuOpen()
         if open then return end
         open = true
@@ -41,7 +70,6 @@ if CLIENT then
             hook.Remove("PreRender", "vrutil_hook_rendernumpad")
             hook.Remove("VRMod_Input", "vrmod_numpad_clickdetect")
             hook.Remove("Think", "vrmod_numpad_holdrepeat")
-            -- Release any held key on close
             if holdKey then
                 emitKey(holdKey, false)
                 holdKey = nil
@@ -57,6 +85,7 @@ if CLIENT then
             if action == "boolean_primaryfire" or clickInCar then
                 justClicked = pressed and not wasClicking
                 wasClicking = pressed
+                FindCtrlNumPadUnderCursor()
                 if not pressed and holdKey then
                     emitKey(holdKey, false)
                     holdKey = nil
@@ -88,6 +117,12 @@ if CLIENT then
                 draw.RoundedBox(8, x, y, bw, bh, Color(0, 0, 0, hovered and 200 or 100))
                 draw.SimpleText(key, "DermaLarge", x + bw / 2, y + bh / 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
                 if hovered and justClicked then
+                    if IsValid(binder) then
+                        binder:SetSelectedNumber(keyMap[key])
+                        binder:GetValue()
+                        binder = nil
+                    end
+
                     emitKey(key, true)
                     holdKey = key
                     holdStart = SysTime()
@@ -133,9 +168,9 @@ if SERVER then
         local key = net.ReadUInt(8)
         local down = net.ReadBool()
         if down then
-            numpad.Activate(ply, key, true)
+            numpad.Activate(ply, key)
         else
-            numpad.Deactivate(ply, key, true)
+            numpad.Deactivate(ply, key)
         end
     end)
 end
