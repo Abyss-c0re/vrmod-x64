@@ -94,7 +94,8 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	end
 
 	local slot = bLeftHand and 1 or 2
-	if heldItems and heldItems[slot] then
+	local isHandHeld = heldItems and heldItems[slot] and IsValid(heldItems[slot].ent) or false
+	if isHandHeld then
 		local ent = heldItems[slot].ent
 		if not IsValid(ent) then
 			heldItems[slot] = nil
@@ -109,7 +110,7 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	local candidates = {}
 	for _, ent in ipairs(ents.FindInSphere(grabPoint, radius)) do
 		if ent == ply then continue end
-		if not IsValidPickupTarget(ent, ply, bLeftHand) then continue end
+		if not IsValidPickupTarget(ent, ply, isHandHeld) then continue end
 		if not CanPickupEntity(ent, ply, cv) then continue end
 		local boostFactor = IsImportantPickup(ent) and 3.5 or 1.0
 		local lp = WorldToLocal(grabPoint, Angle(), ent:GetPos(), ent:GetAngles())
