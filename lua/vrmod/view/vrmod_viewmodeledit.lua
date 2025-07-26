@@ -10,12 +10,12 @@ if CLIENT then
 			offsetAng = Angle(0, 0, 0),
 		},
 		weapon_physgun = {
-			offsetPos = Vector(-34.5, 13.4, 14.5),
+			offsetPos = Vector(-31.5, 13.4, 14.5),
 			offsetAng = Angle(0, 0, 0),
 			noLaser = true
 		},
 		weapon_physcannon = {
-			offsetPos = Vector(-34.5, 13.4, 10.5),
+			offsetPos = Vector(-31.5, 13.4, 10.5),
 			offsetAng = Angle(0, 0, 0),
 			noLaser = true
 		},
