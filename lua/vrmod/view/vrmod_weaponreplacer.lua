@@ -1,10 +1,9 @@
 if SERVER then
     util.AddNetworkString("VRWeps_Notify")
-    VRWeps = {}
-    VRWeps.Replacer = {}
+    local replacer = {}
+    local originalWeapons = {}
     local datafile = "vrmod/vrmod_weapon_replacement.txt"
     local convar_enabled = CreateConVar("vrmod_weapon_swap", "1", FCVAR_ARCHIVE, "Enable or disable VR weapon replacement logic")
-    -- Default list used if file doesn't exist
     local defaultWeaponPairs = {
         ["weapon_crowbar"] = "arcticvr_hl2_crowbar",
         ["weapon_stunstick"] = "arcticvr_hl2_stunstick",
@@ -58,43 +57,77 @@ if SERVER then
         ["weapon_haax"] = "weapon_haax_vr"
     }
 
-    -- Load from file or generate default
-    function VRWeps.LoadPairs()
+    local function SavePairs()
+        file.Write(datafile, util.TableToJSON(replacer, true))
+    end
+
+    local function LoadPairs()
         if not file.Exists(datafile, "DATA") then
-            print("[VRWeps] No file found — generating default list.")
+            print("[VRWeps] No file found — writing default table.")
             file.Write(datafile, util.TableToJSON(defaultWeaponPairs, true))
-            VRWeps.Replacer = table.Copy(defaultWeaponPairs)
+            replacer = table.Copy(defaultWeaponPairs)
             return
         end
 
-        local content = file.Read(datafile, "DATA")
-        local decoded = util.JSONToTable(content) or {}
-        -- Merge: Fill in missing default pairs
+        local raw = file.Read(datafile, "DATA")
+        local tbl = util.JSONToTable(raw) or {}
         for flat, vr in pairs(defaultWeaponPairs) do
-            if decoded[flat] == nil then
+            if not tbl[flat] then
                 print("[VRWeps] Adding missing default pair:", flat, "→", vr)
-                decoded[flat] = vr
+                tbl[flat] = vr
             end
         end
 
-        VRWeps.Replacer = decoded
-        VRWeps.SavePairs() -- Save merged result back to disk
-        print("[VRWeps] Loaded", table.Count(VRWeps.Replacer), "weapon replacement pairs.")
+        replacer = tbl
+        SavePairs()
+        print("[VRWeps] Loaded", table.Count(replacer), "weapon pairs.")
     end
 
-    -- Save current table
-    function VRWeps.SavePairs()
-        file.Write(datafile, util.TableToJSON(VRWeps.Replacer, true))
+    local function AddPair(flat, vr)
+        replacer[flat] = vr
+        SavePairs()
+        print("[VRWeps] Added pair:", flat, "→", vr)
     end
 
-    -- Add new pair via code or concommand
-    function VRWeps.AddPair(flat, vr)
-        VRWeps.Replacer[flat] = vr
-        VRWeps.SavePairs()
-        print("[VRWeps] Added:", flat, "→", vr)
+    local function ReplaceAllWeapons(ply)
+        if not IsValid(ply) or not convar_enabled:GetBool() then return end
+        if not vrmod.IsPlayerInVR(ply) then return end
+        originalWeapons[ply:SteamID()] = {} -- track original weapons
+        for _, wep in ipairs(ply:GetWeapons()) do
+            local class = wep:GetClass()
+            local vrClass = replacer[class]
+            if vrClass and weapons.GetStored(vrClass) then
+                table.insert(originalWeapons[ply:SteamID()], {
+                    from = vrClass,
+                    to = class
+                })
+
+                ply:Give(vrClass, true)
+                if engine.ActiveGamemode() ~= "lambda" then ply:StripWeapon(class) end
+            elseif vrClass then
+                print("[VRWeps] Missing VR weapon:", vrClass, "for", class)
+            end
+        end
     end
 
-    -- ConCommand to add a replacement pair
+    local function RestoreFlatWeapons(ply)
+        if not IsValid(ply) or not convar_enabled:GetBool() then return end
+        local sid = ply:SteamID()
+        local stored = originalWeapons[sid]
+        if not stored then return end
+        for _, info in ipairs(stored) do
+            if ply:HasWeapon(info.from) then
+                ply:Give(info.to, true)
+                ply:StripWeapon(info.from)
+                print("[VRWeps] Restored:", info.to, "←", info.from)
+            else
+                print("[VRWeps] Player doesn't have VR weapon:", info.from)
+            end
+        end
+
+        originalWeapons[sid] = nil
+    end
+
     concommand.Add("vrweps_addreplace", function(ply, cmd, args)
         if IsValid(ply) and not ply:IsAdmin() then
             ply:ChatPrint("You must be admin to use this.")
@@ -106,92 +139,15 @@ if SERVER then
             return
         end
 
-        VRWeps.AddPair(args[1], args[2])
+        AddPair(args[1], args[2])
     end)
 
-    -- Replace all weapons on VR start
-    hook.Add("VRMod_Start", "VRWeps_ReplaceOnVRStart", function(ply)
-        if not IsValid(ply) or not convar_enabled:GetBool() then return end
-        timer.Simple(0.1, function()
-            if not IsValid(ply) then return end
-            for _, wep in pairs(ply:GetWeapons()) do
-                local class = wep:GetClass()
-                local vrClass = VRWeps.Replacer[class]
-                if vrClass and weapons.GetStored(vrClass) then
-                    ply:Give(vrClass, true)
-                    if engine.ActiveGamemode() ~= "lambda" then ply:StripWeapon(class) end
-                elseif vrClass then
-                    print("[VRWeps] Missing VR weapon:", vrClass, "for", class)
-                end
-            end
-        end)
-    end)
-
-    -- Restore flatscreen weapons on VR exit
-    hook.Add("VRMod_Exit", "VRWeps_RestoreOnVRExit", function(ply)
-        if not IsValid(ply) or not convar_enabled:GetBool() then return end
-        for _, wep in pairs(ply:GetWeapons()) do
-            local class = wep:GetClass()
-            local flatClass = table.KeyFromValue(VRWeps.Replacer, class)
-            if flatClass and weapons.GetStored(flatClass) then
-                ply:Give(flatClass, true)
-                ply:StripWeapon(class)
-            elseif flatClass then
-                print("[VRWeps] Missing flat weapon:", flatClass, "to restore from", class)
-            end
-        end
-    end)
-
-    function VRWeps.ReplaceWeaponEntity(ply, wep)
-        if not IsValid(ply) or not IsValid(wep) then return false end
-        if not convar_enabled:GetBool() then return false end
-        if not vrmod.IsPlayerInVR(ply) then return false end
-        local class = wep:GetClass()
-        local vrClass = VRWeps.Replacer[class]
-        if not vrClass then return false end
-        if not weapons.GetStored(vrClass) then
-            print("[VRWeps] MISSING VR WEAPON:", vrClass, "for", class)
-            return false
-        end
-
-        if ply:HasWeapon(vrClass) then
-            print("[VRWeps] Already has VR weapon — switching to:", vrClass)
-            if IsValid(wep) then wep:Remove() end
-            ply:SelectWeapon(vrClass)
-            return true
-        end
-
-        local given = ply:Give(vrClass, true)
-        if IsValid(given) then
-            print("[VRWeps] Successfully gave VR weapon:", vrClass)
-            if IsValid(wep) then wep:Remove() end
-            ply:SelectWeapon(vrClass)
-            return true
-        end
-
-        print("[VRWeps] Delaying VR weapon give for:", vrClass)
-        timer.Simple(0.3, function()
-            if not IsValid(ply) then return end
-            if ply:HasWeapon(vrClass) then
-                print("[VRWeps] Found VR weapon on retry — switching:", vrClass)
-                if IsValid(wep) then wep:Remove() end
-                ply:SelectWeapon(vrClass)
-                return
-            end
-
-            local retried = ply:Give(vrClass, true)
-            if IsValid(retried) then
-                print("[VRWeps] Gave VR weapon on retry:", vrClass)
-                if IsValid(wep) then wep:Remove() end
-                ply:SelectWeapon(vrClass)
-            else
-                print("[VRWeps] FINAL FAIL — could not give:", vrClass)
-            end
-        end)
-        return false
-    end
-
-    -- On init, load weapon pairs
-    hook.Add("Initialize", "VRWeps_LoadPairsOnStartup", function() VRWeps.LoadPairs() end)
+    -- Replace on VR start
+    hook.Add("VRMod_Start", "VRWeps_ReplaceOnStart", function(ply) timer.Simple(0.1, function() ReplaceAllWeapons(ply) end) end)
+    -- Restore on VR exit
+    hook.Add("VRMod_Exit", "VRWeps_RestoreOnExit", function(ply) timer.Simple(0.1, function() RestoreFlatWeapons(ply) end) end)
+    -- Replace on respawn
+    hook.Add("PlayerSpawn", "VRWeps_ReplaceOnRespawn", function(ply) timer.Simple(0.1, function() ReplaceAllWeapons(ply) end) end)
+    -- Load replacements at startup
+    hook.Add("Initialize", "VRWeps_LoadPairs", function() LoadPairs() end)
 end
--- if SERVER
