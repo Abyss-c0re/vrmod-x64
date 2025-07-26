@@ -94,7 +94,15 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	end
 
 	local slot = bLeftHand and 1 or 2
-	if heldItems and heldItems[slot] then return end
+	if heldItems and heldItems[slot] then
+		local ent = heldItems[slot].ent
+		if not IsValid(ent) then
+			heldItems[slot] = nil
+		else
+			return
+		end
+	end
+
 	local cv = convarValues or vrmod.GetConvars()
 	local grabPoint = LocalToWorld(Vector(3, bLeftHand and -1.5 or 1.5, 0), Angle(), handPos, handAng)
 	local radius = pickupRange * 100
@@ -184,7 +192,13 @@ if CLIENT then
 			g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] = nil
 		else
 			local targetEnt = bLeftHand and pickupTargetEntLeft or pickupTargetEntRight
-			if IsValid(targetEnt) and not (g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[bLeftHand and 1 or 2]) then
+			local handSlot = bLeftHand and 1 or 2
+			if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[handSlot] then
+				local ent = g_VR[sid].heldItems[handSlot].ent
+				if not IsValid(ent) then g_VR[sid].heldItems[handSlot] = nil end
+			end
+
+			if IsValid(targetEnt) and not (g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[handSlot]) then
 				net.Start("vrmod_pickup")
 				net.WriteBool(bLeftHand)
 				net.WriteBool(false)
@@ -418,7 +432,7 @@ if SERVER then
 					net.Broadcast()
 				end
 
-				g_VR[steamid].heldItems[bLeft and 1 or 2] = nil
+				if g_VR[steamid] and g_VR[steamid].heldItems then g_VR[steamid].heldItems[bLeft and 1 or 2] = nil end
 				table.remove(pickupList, i)
 				pickupCount = pickupCount - 1
 				if pickupCount == 0 and IsValid(pickupController) then
