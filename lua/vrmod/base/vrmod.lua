@@ -26,8 +26,7 @@ if CLIENT then
 	local desktopView
 	local lastPosePos = {}
 	local lastViewEnt = nil
-	local lastViewModelPos = nil
-	local lastViewModelAng = nil
+	local smoothingFactor = 0.95
 	local eyeOffset = nil
 	local forwardOffset = nil
 	local viewEntOffsetPos = Vector(0, 0, 0)
@@ -210,12 +209,16 @@ if CLIENT then
 		return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
 	end
 
-	local function VecChanged(a, b)
-		return not a or not b or a:DistToSqr(b) > 0.01
+	local function SmoothVector(current, target, smoothingFactor)
+		return current + (target - current) * smoothingFactor
 	end
 
-	local function AngChanged(a, b)
-		return not a or not b or math.abs(a.pitch - b.pitch) > 0.1 or math.abs(a.yaw - b.yaw) > 0.1 or math.abs(a.roll - b.roll) > 0.1
+	local function SmoothAngle(current, target, smoothingFactor)
+		local diff = target - current
+		diff.p = math.NormalizeAngle(diff.p)
+		diff.y = math.NormalizeAngle(diff.y)
+		diff.r = math.NormalizeAngle(diff.r)
+		return current + diff * smoothingFactor
 	end
 
 	local function UpdateTracking()
@@ -232,7 +235,16 @@ if CLIENT then
 			lastPosePos[k] = v.pos
 			g_VR.tracking[k] = g_VR.tracking[k] or {}
 			local worldPose = g_VR.tracking[k]
-			worldPose.pos, worldPose.ang = LocalToWorld(v.pos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
+			local pos, ang = LocalToWorld(v.pos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
+			-- Apply smoothing for hand poses
+			if k == "pose_righthand" or k == "pose_lefthand" then
+				worldPose.pos = worldPose.pos and SmoothVector(worldPose.pos, pos, smoothingFactor) or pos
+				worldPose.ang = worldPose.ang and SmoothAngle(worldPose.ang, ang, smoothingFactor) or ang
+			else
+				worldPose.pos = pos
+				worldPose.ang = ang
+			end
+
 			worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle) * g_VR.scale
 			worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle)
 			if k == "pose_righthand" then
@@ -270,22 +282,16 @@ if CLIENT then
 		local vm = g_VR.viewModel
 		if currentvmi and rh_pose then
 			local pos, ang = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, rh_pose.pos, rh_pose.ang)
-			g_VR.viewModelPos = pos
-			g_VR.viewModelAng = ang
+			g_VR.viewModelPos = g_VR.viewModelPos and SmoothVector(g_VR.viewModelPos, pos, smoothingFactor) or pos
+			g_VR.viewModelAng = g_VR.viewModelAng and SmoothAngle(g_VR.viewModelAng, ang, smoothingFactor) or ang
 		end
 
 		if IsValid(vm) then
 			if not g_VR.usingWorldModels then
-				if VecChanged(g_VR.viewModelPos, lastViewModelPos) then
-					vm:SetPos(g_VR.viewModelPos)
-					lastViewModelPos = g_VR.viewModelPos
-				end
-
-				if AngChanged(g_VR.viewModelAng, lastViewModelAng) then
-					vm:SetAngles(g_VR.viewModelAng)
-					lastViewModelAng = g_VR.viewModelAng
-				end
-
+				vm:SetPos(g_VR.viewModelPos)
+				vm:SetAngles(g_VR.viewModelAng)
+				lastViewModelPos = g_VR.viewModelPos
+				lastViewModelAng = g_VR.viewModelAng
 				vm:SetupBones()
 				if netFrame and g_VR.viewModelRightHandBone then
 					local mtx = vm:GetBoneMatrix(g_VR.viewModelRightHandBone)
