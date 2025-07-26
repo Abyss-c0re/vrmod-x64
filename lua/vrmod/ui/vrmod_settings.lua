@@ -467,6 +467,7 @@ function VRUtilOpenMenu()
 		AddCB("Replace weapons with ArcVR on pickup", "vrmod_weapon_swap")
 		AddCB("Weight limit", "vrmod_pickup_limit")
 		AddCB("Pickup NPCs", "vrmod_pickup_npcs")
+		AddCB("Pickup halos", "vrmod_pickup_halos")
 		local function AddSl(lbl, cv, mn, mx, dec)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -505,7 +506,8 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_pickup_weight", "150")
 			RunConsoleCommand("vrmod_pickup_range", "1.1")
 			RunConsoleCommand("vrmod_pickup_limit", "1")
-			RunConsoleCommand("vrmod_pickup_npcs", "0")
+			RunConsoleCommand("vrmod_pickup_npcs", "1")
+			RunConsoleCommand("vrmod_pickup_halos", "1")
 		end
 
 		y = y + 45
