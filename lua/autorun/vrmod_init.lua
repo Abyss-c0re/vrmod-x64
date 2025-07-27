@@ -6,6 +6,7 @@ local files = {
     "vrmod/base/vrmod_startup.lua",
     "vrmod/base/vrmod.lua",
     "vrmod/base/vrmod_network.lua",
+    "vrmod/utils/vrmod_utils.lua",
     "vrmod/io/vrmod_locomotion.lua",
     "vrmod/io/vrmod_buttons.lua",
     "vrmod/io/vrmod_climbing.lua",

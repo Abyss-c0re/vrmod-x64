@@ -76,7 +76,7 @@ local function IsValidPickupTarget(ent, ply, bLeftHand)
 	if ent:GetNoDraw() then return false end
 	if ent:IsDormant() then return false end
 	if blacklistedClasses[ent:GetClass()] then return false end
-	if ent:GetNWBool("vrmod_is_npc_ragdoll", false) then return false end
+	if ent:GetNWBool("is_npc_ragdoll", false) then return false end
 	-- Prevent trying to regrab with the same hand, but allow the other
 	if bLeftHand and ent == g_VR.heldEntityLeft then return false end
 	if not bLeftHand and ent == g_VR.heldEntityRight then return false end
@@ -135,7 +135,7 @@ if CLIENT then
 		local heldLeft = g_VR.heldEntityLeft
 		local heldRight = g_VR.heldEntityRight
 		local rightHand = g_VR.tracking and g_VR.tracking.pose_righthand
-		if rightHand and not heldRight then
+		if rightHand and not heldRight and not HasHeldWeaponRight(ply) then
 			pickupTargetEntRight = FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, pickupRange)
 		else
 			pickupTargetEntRight = nil
@@ -154,15 +154,18 @@ if CLIENT then
 		table.Empty(haloTargetsLeft)
 		table.Empty(haloTargetsRight)
 		local ply = LocalPlayer()
-		local heldLeft = g_VR.heldEntityLeft
-		local heldRight = g_VR.heldEntityRight
+		local heldLeft, heldRight = g_VR.heldEntityLeft, g_VR.heldEntityRight
 		local function IsRagdoll(ent)
-			return ent:GetNWBool("vrmod_is_npc_ragdoll", false)
+			return IsValid(ent) and ent:GetNWBool("is_npc_ragdoll", false)
 		end
 
-		local isHeld = function(ent) return ent == heldLeft or ent == heldRight end
-		if not isHeld(pickupTargetEntLeft) and IsValidPickupTarget(pickupTargetEntLeft, ply, false) and not IsRagdoll(pickupTargetEntLeft) then table.insert(haloTargetsLeft, pickupTargetEntLeft) end
-		if not isHeld(pickupTargetEntRight) and IsValidPickupTarget(pickupTargetEntRight, ply, false) and not IsRagdoll(pickupTargetEntRight) then table.insert(haloTargetsRight, pickupTargetEntRight) end
+		local holdingRagdoll = IsRagdoll(heldLeft) or IsRagdoll(heldRight)
+		local function ShouldAddHalo(ent, heldEnt)
+			return IsValid(ent) and ent ~= heldLeft and ent ~= heldRight and IsValidPickupTarget(ent, ply, false) and not holdingRagdoll
+		end
+
+		if ShouldAddHalo(pickupTargetEntLeft) then haloTargetsLeft[#haloTargetsLeft + 1] = pickupTargetEntLeft end
+		if ShouldAddHalo(pickupTargetEntRight) then haloTargetsRight[#haloTargetsRight + 1] = pickupTargetEntRight end
 	end)
 
 	hook.Add("PreDrawHalos", "vrmod_render_pickup_halo", function()
@@ -254,130 +257,6 @@ end
 if SERVER then
 	util.AddNetworkString("vrmod_pickup")
 	local pickupController, pickupList, pickupCount = nil, {}, 0
-	local function ForwardRagdollDamage(ent, dmginfo)
-		if not (ent:IsRagdoll() and IsValid(ent.vr_original_npc)) then return end
-		local npc = ent.vr_original_npc
-		local dmg = dmginfo:GetDamage()
-		npc:SetHealth(math.max(0, npc:Health() - dmg))
-		local force = dmginfo:GetDamageForce() or Vector(0, 0, 0)
-		if not force:IsZero() then
-			local physCount = ent:GetPhysicsObjectCount()
-			for i = 0, physCount - 1 do
-				local phys = ent:GetPhysicsObjectNum(i)
-				if IsValid(phys) then phys:ApplyForceCenter(force) end
-			end
-		end
-	end
-
-	local function SpawnPickupRagdoll(npc)
-		if not IsValid(npc) then return end
-		-- 1) Create the ragdoll immediately
-		local rag = ents.Create("prop_ragdoll")
-		if not IsValid(rag) then return end
-		rag:SetModel(npc:GetModel())
-		rag:SetNWBool("vrmod_is_npc_ragdoll", true)
-		rag:SetPos(npc:GetPos())
-		rag:SetAngles(npc:GetAngles())
-		rag:Spawn()
-		rag:Activate()
-		-- 2) Copy bones in a next-tick timer
-		timer.Simple(0, function()
-			if not (IsValid(npc) and IsValid(rag)) then return end
-			if npc.SetupBones then npc:SetupBones() end
-			for i = 0, (npc.GetBoneCount and npc:GetBoneCount() or 0) - 1 do
-				local pos, ang = npc:GetBonePosition(i)
-				if pos and ang and rag.SetBonePosition then rag:SetBonePosition(i, pos, ang) end
-			end
-
-			for i = 0, (rag.GetPhysicsObjectCount and rag:GetPhysicsObjectCount() or 0) - 1 do
-				local phys = rag:GetPhysicsObjectNum(i)
-				if IsValid(phys) then
-					phys:EnableMotion(true)
-					phys:Wake()
-				end
-			end
-		end)
-
-		-- 3) Fully disable & hide the original NPC
-		rag.vr_original_npc = npc
-		rag.vr_dropped_manually = false
-		hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", ForwardRagdollDamage)
-		npc:SetNoDraw(true)
-		npc:SetNotSolid(true)
-		npc:SetMoveType(MOVETYPE_NONE)
-		npc:SetCollisionGroup(COLLISION_GROUP_VEHICLE)
-		npc:ClearSchedule()
-		if npc.StopMoving then npc:StopMoving() end
-		-- **Silence AI & thinking completely**
-		npc:AddEFlags(EFL_NO_THINK_FUNCTION) -- stops Think() calls
-		if npc.SetNPCState then npc:SetNPCState(NPC_STATE_NONE) end
-		npc:SetSaveValue("m_bInSchedule", false) -- stop any running schedule
-		if npc.GetActiveWeapon and IsValid(npc:GetActiveWeapon()) then npc:GetActiveWeapon():Remove() end
-		-- 4) On rag removal, restore or remove the NPC
-		rag:CallOnRemove("vrmod_cleanup_npc_" .. rag:EntIndex(), function()
-			if not IsValid(npc) then return end
-			-- re-enable thinking
-			npc:RemoveEFlags(EFL_NO_THINK_FUNCTION)
-			if rag.vr_dropped_manually then
-				-- Restore NPC at rag’s last pose
-				local p, a = rag:GetPos(), rag:GetAngles()
-				npc:SetPos(p)
-				npc:SetAngles(a)
-				npc:SetNoDraw(false)
-				npc:SetNotSolid(false)
-				npc:SetMoveType(MOVETYPE_STEP)
-				npc:SetCollisionGroup(COLLISION_GROUP_NONE)
-				npc:ClearSchedule()
-				npc:SetSaveValue("m_bInSchedule", false)
-				if npc.SetNPCState then npc:SetNPCState(NPC_STATE_ALERT) end
-				npc:DropToFloor()
-				-- Restart thinking/AI
-				if npc.BehaveStart then pcall(npc.BehaveStart, npc) end
-				npc:SetSchedule(SCHED_IDLE_STAND)
-				npc:NextThink(CurTime())
-			else
-				-- Rag was gibbed: kill the NPC too
-				npc:Remove()
-			end
-
-			hook.Remove("EntityTakeDamage", "VRMod_ForwardRagdollDamage")
-		end)
-		return rag
-	end
-
-	local function IsRagdollGibbed(ent)
-		-- 0) Missing or invalid entity → treat as gibbed
-		if not IsValid(ent) then return true end
-		-- 0) Zero HP is gibbed too
-		local npc = ent.vr_original_npc
-		if IsValid(npc) and npc:Health() <= 0 then return true end
-		-- 2) Look for Zippy’s health table, only if it exists
-		local hpTable = ent.ZippyGoreMod3_PhysBoneHPs
-		if type(hpTable) == "table" then
-			for boneIndex, hp in pairs(hpTable) do
-				if hp == -1 then return true end
-			end
-		end
-
-		-- 3) Look for Zippy’s gib‑flag table, only if it exists
-		local gibTable = ent.ZippyGoreMod3_GibbedPhysBones
-		if type(gibTable) == "table" then
-			for boneIndex, wasGibbed in pairs(gibTable) do
-				if wasGibbed then return true end
-			end
-		end
-
-		-- 4) If neither table is there, Zippy is disabled or not applied—assume “not gibbed”
-		if hpTable == nil and gibTable == nil then return false end
-		-- 5) Physics‐object count heuristic (only if we have a hpTable)
-		if type(hpTable) == "table" then
-			local expectedBones = table.Count(hpTable)
-			if ent:GetPhysicsObjectCount() < expectedBones then return true end
-		end
-		-- No evidence of gibbing
-		return false
-	end
-
 	-- Drop function
 	local function drop(steamid, bLeft)
 		for i = 1, pickupCount do
@@ -385,10 +264,10 @@ if SERVER then
 			if t.steamid == steamid and t.left == bLeft then
 				local ent = t.ent
 				if IsValid(pickupController) and IsValid(t.phys) then pickupController:RemoveFromMotionController(t.phys) end
-				if IsValid(ent) and ent.vr_original_npc then
-					local npc = ent.vr_original_npc
-					if IsValid(npc) and not IsRagdollGibbed(ent) then
-						ent.vr_dropped_manually = true
+				if IsValid(ent) and ent.original_npc then
+					local npc = ent.original_npc
+					if IsValid(npc) and not vrmod.utils.IsRagdollGibbed(ent) then
+						ent.dropped_manually = true
 						local entCopy = ent
 						timer.Simple(2.0, function() if IsValid(entCopy) then entCopy:Remove() end end)
 						net.Start("vrmod_pickup")
@@ -397,8 +276,8 @@ if SERVER then
 						net.WriteBool(true)
 						net.Broadcast()
 					else
-						ent.vr_dropped_manually = false
-						if IsValid(ent) then ent:SetNWBool("vrmod_is_npc_ragdoll", false) end
+						ent.dropped_manually = false
+						if IsValid(ent) then ent:SetNWBool("is_npc_ragdoll", false) end
 						net.Start("vrmod_pickup")
 						net.WriteEntity(t.ply)
 						net.WriteEntity(IsValid(ent) and ent or NULL)
@@ -449,7 +328,7 @@ if SERVER then
 		local sid = ply:SteamID()
 		if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[bLeftHand and 1 or 2] then return end
 		if not IsValid(ent) or not CanPickupEntity(ent, ply, convarValues) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then return end
-		if ent:IsNPC() then ent = SpawnPickupRagdoll(ent) end
+		if ent:IsNPC() then ent = vrmod.utils.SpawnPickupRagdoll(ent) end
 		local handPos, handAng
 		if bLeftHand then
 			handPos = vrmod.GetLeftHandPos(ply)
