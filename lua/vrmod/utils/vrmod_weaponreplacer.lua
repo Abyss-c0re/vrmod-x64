@@ -1,3 +1,5 @@
+vrmod = vrmod or {}
+vrmod.utils = vrmod.utils or {}
 if SERVER then
     util.AddNetworkString("VRWeps_Notify")
     local replacer = {}
@@ -89,24 +91,43 @@ if SERVER then
         print("[VRWeps] Added pair:", flat, "→", vr)
     end
 
-    local function ReplaceAllWeapons(ply)
-        if not IsValid(ply) or not convar_enabled:GetBool() then return end
-        if not vrmod.IsPlayerInVR(ply) then return end
-        originalWeapons[ply:SteamID()] = {} -- track original weapons
-        for _, wep in ipairs(ply:GetWeapons()) do
-            local class = wep:GetClass()
-            local vrClass = replacer[class]
-            if vrClass and weapons.GetStored(vrClass) then
-                table.insert(originalWeapons[ply:SteamID()], {
-                    from = vrClass,
-                    to = class
-                })
+    function vrmod.utils.ReplaceWeapon(ply, thing)
+        if not IsValid(ply) or not IsValid(thing) then return false end
+        if not convar_enabled:GetBool() then return false end
+        if not vrmod.IsPlayerInVR(ply) then return false end
+        local isWorldWeapon = thing:GetOwner() == NULL
+        local class = thing:GetClass()
+        local vrClass = replacer[class]
+        if not vrClass then return false end
+        if not weapons.GetStored(vrClass) then
+            print("[VRWeps] Missing VR weapon:", vrClass, "for", class)
+            return false
+        end
 
-                ply:Give(vrClass, true)
-                if engine.ActiveGamemode() ~= "lambda" then ply:StripWeapon(class) end
-            elseif vrClass then
-                print("[VRWeps] Missing VR weapon:", vrClass, "for", class)
-            end
+        local sid = ply:SteamID()
+        originalWeapons[sid] = originalWeapons[sid] or {}
+        table.insert(originalWeapons[sid], {
+            from = vrClass,
+            to = class
+        })
+
+        -- Replace
+        ply:Give(vrClass, true)
+        if isWorldWeapon then
+            -- Picked up from the ground
+            if IsValid(thing) then thing:Remove() end
+        else
+            -- Already in inventory
+            if ply:HasWeapon(class) then if engine.ActiveGamemode() ~= "lambda" then ply:StripWeapon(class) end end
+        end
+        return vrClass
+    end
+
+    local function ReplaceAllWeapons(ply)
+        if not IsValid(ply) then return end
+        originalWeapons[ply:SteamID()] = {} -- clear and re-track
+        for _, wep in ipairs(ply:GetWeapons()) do
+            vrmod.utils.ReplaceWeapon(ply, wep)
         end
     end
 

@@ -53,17 +53,22 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	if not IsValid(ent) or not ent:IsWeapon() then return end
 	if not ply.PickupWeapon then return end
 	local wepClass = ent:GetClass()
-	local success = false
 	-- Temporarily disable pickup protection
 	hook.Call("VRMod_Drop", nil, ply, ent)
 	-- Try to replace with VR weapon
-	if not VRWeps.ReplaceWeaponEntity(ply, ent) then
-		-- Fallback: attempt standard pickup
-		success = ply:PickupWeapon(ent)
+	local replacement = vrmod.utils.ReplaceWeapon(ply, ent)
+	if replacement then wepClass = replacement end
+	if ply:HasWeapon(wepClass) then
+		-- Give ammo based on dropped weapon's clip
+		local ammoType = ent:GetPrimaryAmmoType()
+		local clip = ent:Clip1()
+		if ammoType >= 0 and clip > 0 then ply:GiveAmmo(clip, ammoType, true) end
+		ent:Remove()
+		ply:SelectWeapon(wepClass)
+	else
+		ply:Give(wepClass, true)
+		timer.Simple(0, function() if IsValid(ply) then ply:SelectWeapon(wepClass) end end)
 	end
-
-	-- Select whatever was successfully picked up
-	if success and ply:HasWeapon(wepClass) then ply:SelectWeapon(wepClass) end
 end)
 
 -- Disable touch-based item pickup
