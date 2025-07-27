@@ -45,7 +45,7 @@ local function UpdateWeaponCollisionShape(ply, wep)
     end
 
     if wep:GetClass() == "weapon_vrmod_empty" then
-        timer.Simple(0, function() ApplySphere(hand, right, 2.5) end)
+        timer.Simple(0, function() ApplySphere(hand, right, 2.8) end)
         return
     end
 
@@ -59,7 +59,7 @@ local function UpdateWeaponCollisionShape(ply, wep)
         if mins and maxs and angles then
             ApplyBox(hand, right, mins, maxs, angles)
         else
-            ApplySphere(hand, right, 2.5)
+            ApplySphere(hand, right, 2.8)
         end
     end)
 end
@@ -89,7 +89,7 @@ local function SpawnVRHands(ply)
                 }
             end
 
-            hand:PhysicsInitSphere(2.5, "metal_bouncy")
+            hand:PhysicsInitSphere(2.8, "metal_bouncy")
             hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
             hand:Activate()
             local phys = hand:GetPhysicsObject()
