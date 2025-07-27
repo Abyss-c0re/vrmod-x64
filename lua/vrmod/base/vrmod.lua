@@ -248,9 +248,20 @@ if CLIENT then
 			worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle) * g_VR.scale
 			worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle)
 			if k == "pose_righthand" then
-				worldPose.pos, worldPose.ang = LocalToWorld(g_VR.rightControllerOffsetPos * 0.01 * g_VR.scale, g_VR.rightControllerOffsetAng, worldPose.pos, worldPose.ang)
+				-- Use local-space offset
+				local offsetPos = g_VR.rightControllerOffsetPos * 0.01 * g_VR.scale
+				local offsetAng = g_VR.rightControllerOffsetAng
+				-- Apply offset in local space, relative to controller's orientation
+				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, Vector(0, 0, 0), worldPose.ang)
+				worldPose.pos = worldPose.pos + offsetWorldPos
+				worldPose.ang = offsetWorldAng
 			elseif k == "pose_lefthand" then
-				worldPose.pos, worldPose.ang = LocalToWorld(g_VR.leftControllerOffsetPos * 0.01 * g_VR.scale, g_VR.leftControllerOffsetAng, worldPose.pos, worldPose.ang)
+				-- Mirror carefully (do not just flip yaw/roll blindly)
+				local offsetPos = g_VR.leftControllerOffsetPos * 0.01 * g_VR.scale
+				local offsetAng = g_VR.leftControllerOffsetAng
+				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, Vector(0, 0, 0), worldPose.ang)
+				worldPose.pos = worldPose.pos + offsetWorldPos
+				worldPose.ang = offsetWorldAng
 			end
 		end
 
