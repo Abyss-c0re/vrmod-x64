@@ -132,10 +132,21 @@ if CLIENT then
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) then return end
 		local pickupRange = GetConVar("vrmod_pickup_range"):GetFloat()
+		local heldLeft = g_VR.heldEntityLeft
+		local heldRight = g_VR.heldEntityRight
 		local rightHand = g_VR.tracking and g_VR.tracking.pose_righthand
-		pickupTargetEntRight = rightHand and FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, pickupRange) or nil
+		if rightHand and not heldRight then
+			pickupTargetEntRight = FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, pickupRange)
+		else
+			pickupTargetEntRight = nil
+		end
+
 		local leftHand = g_VR.tracking and g_VR.tracking.pose_lefthand
-		pickupTargetEntLeft = leftHand and FindPickupTarget(ply, true, leftHand.pos, leftHand.ang, pickupRange) or nil
+		if leftHand and not heldLeft then
+			pickupTargetEntLeft = FindPickupTarget(ply, true, leftHand.pos, leftHand.ang, pickupRange)
+		else
+			pickupTargetEntLeft = nil
+		end
 	end)
 
 	hook.Add("PostDrawOpaqueRenderables", "vrmod_draw_pickup_halo", function()
