@@ -71,116 +71,101 @@ local function CanPickupEntity(v, ply, cv)
 	return true
 end
 
-local function IsValidPickupTarget(ent, ply, handHeld)
+local function IsValidPickupTarget(ent, ply, bLeftHand)
 	if not IsValid(ent) then return false end
 	if ent:GetNoDraw() then return false end
 	if ent:IsDormant() then return false end
 	if blacklistedClasses[ent:GetClass()] then return false end
 	if ent:GetNWBool("vrmod_is_npc_ragdoll", false) then return false end
-	if ent == g_VR.heldEntityLeft or ent == g_VR.heldEntityRight then return false end
-	if handHeld then return false end
+	-- Prevent trying to regrab with the same hand, but allow the other
+	if bLeftHand and ent == g_VR.heldEntityLeft then return false end
+	if not bLeftHand and ent == g_VR.heldEntityRight then return false end
 	if ent:IsWeapon() and ent:GetOwner() == ply then return false end
 	return true
 end
 
 local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
+	-- Ensure a sane default
 	if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
-	local heldItems
-	if SERVER then
-		local sid = ply:SteamID()
-		if g_VR[sid] and g_VR[sid].heldItems then heldItems = g_VR[sid].heldItems end
-	else
-		if ply == LocalPlayer() and g_VR and g_VR.heldItems then heldItems = g_VR.heldItems end
-	end
-
-	local slot = bLeftHand and 1 or 2
-	local isHandHeld = heldItems and heldItems[slot] and IsValid(heldItems[slot].ent) or false
-	if isHandHeld then
-		local ent = heldItems[slot].ent
-		if not IsValid(ent) then
-			heldItems[slot] = nil
-		else
-			return
-		end
-	end
-
-	local cv = convarValues or vrmod.GetConvars()
-	local grabPoint = LocalToWorld(Vector(3, bLeftHand and -1.5 or 1.5, 0), Angle(), handPos, handAng)
+	-- Compute grab origin in worldspace
+	local grabOffset = Vector(3, bLeftHand and -1.5 or 1.5, 0)
+	local grabPoint = LocalToWorld(grabOffset, Angle(), handPos, handAng)
 	local radius = pickupRange * 100
+	-- Gather candidates
 	local candidates = {}
 	for _, ent in ipairs(ents.FindInSphere(grabPoint, radius)) do
+		-- Basic filters
 		if ent == ply then continue end
-		if not IsValidPickupTarget(ent, ply, isHandHeld) then continue end
-		if not CanPickupEntity(ent, ply, cv) then continue end
-		local boostFactor = IsImportantPickup(ent) and 3.5 or 1.0
-		local lp = WorldToLocal(grabPoint, Angle(), ent:GetPos(), ent:GetAngles())
-		if not lp:WithinAABox(ent:OBBMins() * pickupRange * boostFactor, ent:OBBMaxs() * pickupRange * boostFactor) then continue end
+		if not IsValidPickupTarget(ent, ply, bLeftHand) then continue end
+		if not CanPickupEntity(ent, ply, convarValues or vrmod.GetConvars()) then continue end
+		-- AABB “point-in-box” check around the entity
+		local boost = IsImportantPickup(ent) and 3.5 or 1.0
+		local localPos = WorldToLocal(grabPoint, Angle(), ent:GetPos(), ent:GetAngles())
+		local mins, maxs = ent:OBBMins() * pickupRange * boost, ent:OBBMaxs() * pickupRange * boost
+		if not localPos:WithinAABox(mins, maxs) then continue end
+		-- Weapon‑specific rules
 		if IsWeaponEntity(ent) then
 			local aw = ply:GetActiveWeapon()
 			if IsValid(aw) and aw:GetClass() == ent:GetClass() then continue end
+			-- Prevent right‑hand from grabbing a second weapon if it already holds one
 			if not bLeftHand and HasHeldWeaponRight(ply) then continue end
 		end
 
 		table.insert(candidates, ent)
 	end
 
+	-- Prioritize weapons
 	for _, ent in ipairs(candidates) do
 		if IsWeaponEntity(ent) then return ent end
 	end
+	-- Fallback: first valid candidate
 	return candidates[1]
 end
 
 if CLIENT then
 	local haloEnabled = true
 	local pickupTargetEntRight = nil
-	local haloTargets = {}
+	local haloTargetsLeft = {}
+	local haloTargetsRight = {}
 	vrmod.AddCallbackedConvar("vrmod_pickup_halos", nil, "1", FCVAR_REPLICATED + FCVAR_ARCHIVE + FCVAR_NOTIFY, "Toggle pickup halos", nil, nil, tobool, function(val) haloEnabled = val end)
 	hook.Add("Tick", "vrmod_find_pickup_target", function()
 		local ply = LocalPlayer()
+		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) then return end
 		local pickupRange = GetConVar("vrmod_pickup_range"):GetFloat()
-		if not IsValid(ply) or not g_VR then return end
-		if not vrmod.IsPlayerInVR(ply) then return end
 		local rightHand = g_VR.tracking and g_VR.tracking.pose_righthand
-		if rightHand then
-			local handPos, handAng = rightHand.pos, rightHand.ang
-			pickupTargetEntRight = FindPickupTarget(ply, false, handPos, handAng, pickupRange) -- pass the updated pickupRange here
-		else
-			pickupTargetEntRight = nil
-		end
-
+		pickupTargetEntRight = rightHand and FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, pickupRange) or nil
 		local leftHand = g_VR.tracking and g_VR.tracking.pose_lefthand
-		if leftHand then
-			local handPos, handAng = leftHand.pos, leftHand.ang
-			pickupTargetEntLeft = FindPickupTarget(ply, true, handPos, handAng, pickupRange) -- pass the updated pickupRange here
-		else
-			pickupTargetEntLeft = nil
-		end
+		pickupTargetEntLeft = leftHand and FindPickupTarget(ply, true, leftHand.pos, leftHand.ang, pickupRange) or nil
 	end)
 
 	hook.Add("PostDrawOpaqueRenderables", "vrmod_draw_pickup_halo", function()
 		if not haloEnabled then return end
-		table.Empty(haloTargets)
+		table.Empty(haloTargetsLeft)
+		table.Empty(haloTargetsRight)
+		local ply = LocalPlayer()
 		local heldLeft = g_VR.heldEntityLeft
 		local heldRight = g_VR.heldEntityRight
 		local function IsRagdoll(ent)
 			return ent:GetNWBool("vrmod_is_npc_ragdoll", false)
 		end
 
-		if not heldLeft and IsValidPickupTarget(pickupTargetEntLeft, LocalPlayer(), false) and not IsRagdoll(pickupTargetEntLeft) then table.insert(haloTargets, pickupTargetEntLeft) end
-		if not heldRight and IsValidPickupTarget(pickupTargetEntRight, LocalPlayer(), false) and not IsRagdoll(pickupTargetEntRight) then table.insert(haloTargets, pickupTargetEntRight) end
+		local isHeld = function(ent) return ent == heldLeft or ent == heldRight end
+		if not isHeld(pickupTargetEntLeft) and IsValidPickupTarget(pickupTargetEntLeft, ply, false) and not IsRagdoll(pickupTargetEntLeft) then table.insert(haloTargetsLeft, pickupTargetEntLeft) end
+		if not isHeld(pickupTargetEntRight) and IsValidPickupTarget(pickupTargetEntRight, ply, false) and not IsRagdoll(pickupTargetEntRight) then table.insert(haloTargetsRight, pickupTargetEntRight) end
 	end)
 
 	hook.Add("PreDrawHalos", "vrmod_render_pickup_halo", function()
 		if not haloEnabled then return end
-		if haloTargets and #haloTargets > 0 then
-			-- for i, ent in ipairs(haloTargets) do
+		if #haloTargetsLeft > 0 then halo.Add(haloTargetsLeft, Color(255, 100, 0), 2, 2, 1, true, true) end
+		if #haloTargetsRight > 0 then
+			halo.Add(haloTargetsRight, Color(0, 255, 255), 2, 2, 1, true, true)
+			-- for i, ent in ipairs(haloTargetsRight) do
 			-- 	if IsValid(ent) then
 			-- 		print(string.format("Halo Target %d: Class=%s Model=%s Owner=%s", i, ent:GetClass() or "nil", ent:GetModel() or "nil", IsValid(ent:GetOwner()) and ent:GetOwner():Nick() or "none"))
 			-- 	else
 			-- 		print("Halo Target " .. i .. ": invalid entity")
 			-- 	end
 			-- end
-			halo.Add(haloTargets, Color(0, 255, 255), 2, 2, 1, true, true)
 		end
 	end)
 
