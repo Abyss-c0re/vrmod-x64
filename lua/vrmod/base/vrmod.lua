@@ -283,8 +283,11 @@ if CLIENT then
 			local text = not system.HasFocus() and "Please focus the game window" or g_VR.errorText
 			draw.DrawText(text, "DermaLarge", ScrW() / 2, ScrH() / 2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER)
 			cam.End2D()
+			g_VR.active = false
 			return true
 		end
+
+		g_VR.active = true
 	end
 
 	local function UpdateViewModel(netFrame)
@@ -553,11 +556,11 @@ if CLIENT then
 
 	local function BindRenderSceneHook()
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
+			if DrawErrorOverlay() then return true end
 			VRMOD_SubmitSharedTexture()
 			VRMOD_UpdatePosesAndActions()
 			UpdateTracking()
 			HandleInput()
-			if DrawErrorOverlay() then return true end
 			local netFrame = VRUtilNetUpdateLocalPly()
 			UpdateViewModel(netFrame)
 			UpdateViewFromEntity()
