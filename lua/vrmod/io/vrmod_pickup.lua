@@ -75,12 +75,18 @@ local function IsValidPickupTarget(ent, ply, bLeftHand)
 	if not IsValid(ent) then return false end
 	if ent:GetNoDraw() then return false end
 	if ent:IsDormant() then return false end
-	if blacklistedClasses[ent:GetClass()] then return false end
+	local class = ent:GetClass()
+	if blacklistedClasses[class] then return false end
 	if ent:GetNWBool("is_npc_ragdoll", false) then return false end
-	-- Prevent trying to regrab with the same hand, but allow the other
 	if bLeftHand and ent == g_VR.heldEntityLeft then return false end
 	if not bLeftHand and ent == g_VR.heldEntityRight then return false end
 	if ent:IsWeapon() and ent:GetOwner() == ply then return false end
+	local phys = ent:GetPhysicsObject()
+	if not IsValid(phys) then return false end
+	if not phys:IsMoveable() then return false end
+	if phys:GetMass() <= 0 then
+		return false
+	end
 	return true
 end
 
