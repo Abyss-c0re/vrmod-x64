@@ -42,44 +42,61 @@ surface.CreateFont("vrmod_font_small", {
 	antialias = true
 })
 
+local iconMaterials = {} -- final UnlitGenerics
+local rtCache = {} -- render targets per class
+local wireMat = CreateMaterial("vrmod_wireframe_yellow", "Wireframe", {
+	["$basetexture"] = "models/debug/debugwhite",
+	["$color"] = "[3 3 0]"
+})
+
+-- Single reusable ent
+local tempEnt = ClientsideModel(DEFAULT_MODEL, RENDER_GROUP_OPAQUE_ENTITY)
+tempEnt:SetNoDraw(true)
+-- Helper to get (or create) an RT
+local function GetIconRT(className)
+	if not rtCache[className] then rtCache[className] = GetRenderTarget("vrmod_rt_" .. className, ICON_SIZE, ICON_SIZE) end
+	return rtCache[className]
+end
+
 function RenderWeaponToMaterial(className)
+	-- 1) Return cached final material
 	if iconMaterials[className] then return iconMaterials[className] end
+	-- 2) Pick a valid world model
 	local wepDef = weapons.GetStored(className)
-	local worldMdl = wepDef and wepDef.WorldModel
-	-- only accept it if it’s non‑nil *and* non‑empty
-	local model = worldMdl and worldMdl ~= "" and worldMdl or MODEL_OVERRIDES[className] or DEFAULT_MODEL
+	local worldMdl = wepDef and wepDef.WorldModel or ""
+	if worldMdl:find("^models/weapons/c_") then
+		worldMdl = "" -- reject any c_ viewmodel
+	end
+
+	local model = worldMdl ~= "" and worldMdl or MODEL_OVERRIDES[className] or DEFAULT_MODEL
+	-- 3) Ensure model is loaded
 	util.PrecacheModel(model)
-	local rtName = "vrmod_rt_" .. className
-	local rt = GetRenderTarget(rtName, ICON_SIZE, ICON_SIZE)
+	-- 4) Grab (or create) our RT
+	local rt = GetIconRT(className)
 	if not rt then return DEFAULT_ICON end
-	local ent = ClientsideModel(model, RENDER_GROUP_OPAQUE_ENTITY)
-	if not IsValid(ent) then return DEFAULT_ICON end
-	ent:SetNoDraw(true)
-	local mins, maxs = ent:GetRenderBounds()
+	-- 5) Reuse our temporary entity
+	tempEnt:SetModel(model)
+	local mins, maxs = tempEnt:GetRenderBounds()
 	local center = (mins + maxs) * 0.5
 	local size = maxs - mins
 	local radius = size:Length() * 0.5
 	local camPos = center + Vector(radius, radius, radius)
 	local camAng = (center - camPos):Angle()
+	-- 6) Render into the RT
 	render.PushRenderTarget(rt)
 	render.Clear(0, 0, 0, 0, true, true)
 	cam.Start3D(camPos, camAng, 35, 0, 0, ICON_SIZE, ICON_SIZE)
 	render.SuppressEngineLighting(true)
 	render.SetColorModulation(3, 3, 0)
 	render.SetBlend(1)
-	local wireMat = CreateMaterial("vrmod_wireframe_yellow", "Wireframe", {
-		["$basetexture"] = "models/debug/debugwhite",
-		["$color"] = "[3 3 0]"
-	})
-
 	render.MaterialOverride(wireMat)
-	ent:DrawModel()
+	tempEnt:DrawModel()
 	render.MaterialOverride(nil)
 	render.SetColorModulation(1, 1, 1)
 	render.SuppressEngineLighting(false)
 	cam.End3D()
 	render.PopRenderTarget()
-	ent:Remove()
+	-- 7) Create and cache the final UnlitGeneric
 	local mat = CreateMaterial("vrmod_icon_mat_" .. className, "UnlitGeneric", {
 		["$basetexture"] = rt:GetName(),
 		["$color"] = "[10 10 0]",
