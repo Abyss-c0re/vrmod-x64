@@ -12,7 +12,7 @@ SWEP.Secondary.Ammo = "none"
 SWEP.Secondary.ClipSize = -1
 SWEP.Secondary.DefaultClip = -1
 function SWEP:Initialize()
-	self:SetHoldType("pistol")
+	self:SetHoldType("fist")
 end
 
 function SWEP:PrimaryAttack()
