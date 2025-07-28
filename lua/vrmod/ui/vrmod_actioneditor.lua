@@ -8,7 +8,7 @@ function VRUtilLoadCustomActions()
 end
 
 concommand.Add("vrmod_actioneditor", function(ply, cmd, args)
-	if open or g_VR.active then return end
+	if open then return end
 	open = true
 	local window = vgui.Create("DFrame")
 	window:SetPos(ScrW() / 2 - 350, ScrH() / 2 - 256)
