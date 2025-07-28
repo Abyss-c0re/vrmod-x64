@@ -63,11 +63,11 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 		local ammoType = ent:GetPrimaryAmmoType()
 		local clip = ent:Clip1()
 		if ammoType >= 0 and clip > 0 then ply:GiveAmmo(clip, ammoType, true) end
-		ent:Remove()
 		ply:SelectWeapon(wepClass)
 	else
 		ply:Give(wepClass, true)
 		timer.Simple(0, function() if IsValid(ply) then ply:SelectWeapon(wepClass) end end)
+	ent:Remove()
 	end
 end)
 
