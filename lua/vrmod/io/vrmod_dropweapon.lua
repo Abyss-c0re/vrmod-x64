@@ -34,7 +34,7 @@ if SERVER then
         local rhandvel = net.ReadVector()
         local rhandangvel = net.ReadVector()
         local wep = ply:GetActiveWeapon()
-        if not IsValid(wep) or ply:InVehicle() or InBlackList(wep:GetClass()) then return end
+        if not IsValid(wep) or wep.undroppable or ply:InVehicle() or InBlackList(wep:GetClass()) then return end
         local modelname = wep:GetModel()
         local guninhandpos = vrmod.GetRightHandPos(ply)
         local guninhandang = vrmod.GetRightHandAng(ply)
