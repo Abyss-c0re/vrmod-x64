@@ -301,8 +301,6 @@ if CLIENT then
 			if not g_VR.usingWorldModels then
 				vm:SetPos(g_VR.viewModelPos)
 				vm:SetAngles(g_VR.viewModelAng)
-				lastViewModelPos = g_VR.viewModelPos
-				lastViewModelAng = g_VR.viewModelAng
 				vm:SetupBones()
 				if netFrame and g_VR.viewModelRightHandBone then
 					local mtx = vm:GetBoneMatrix(g_VR.viewModelRightHandBone)
