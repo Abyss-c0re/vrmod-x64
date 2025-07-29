@@ -81,12 +81,6 @@ local function IsValidPickupTarget(ent, ply, bLeftHand)
 	if bLeftHand and ent == g_VR.heldEntityLeft then return false end
 	if not bLeftHand and ent == g_VR.heldEntityRight then return false end
 	if ent:IsWeapon() and ent:GetOwner() == ply then return false end
-	local phys = ent:GetPhysicsObject()
-	if not IsValid(phys) then return false end
-	if not phys:IsMoveable() then return false end
-	if phys:GetMass() <= 0 then
-		return false
-	end
 	return true
 end
 
@@ -290,8 +284,6 @@ if SERVER then
 						net.WriteBool(true)
 						net.Broadcast()
 					end
-
-					hook.Remove("EntityTakeDamage", "VRMod_ForwardRagdollDamage")
 				elseif IsValid(ent) then
 					ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 					if IsValid(t.phys) then
