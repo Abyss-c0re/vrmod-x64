@@ -258,7 +258,7 @@ if SERVER then
 	util.AddNetworkString("vrmod_pickup")
 	local pickupController, pickupList, pickupCount = nil, {}, 0
 	-- Drop function
-	local function drop(steamid, bLeft)
+	function vrmod.Drop(steamid, bLeft)
 		for i = 1, pickupCount do
 			local t = pickupList[i]
 			if t.steamid == steamid and t.left == bLeft then
@@ -322,7 +322,7 @@ if SERVER then
 	end
 
 	-- Pickup function
-	local function pickup(ply, bLeftHand, ent)
+	function vrmod.Pickup(ply, bLeftHand, ent)
 		local sid = ply:SteamID()
 		if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[bLeftHand and 1 or 2] then return end
 		if not IsValid(ent) or not CanPickupEntity(ent, ply, convarValues) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then return end
@@ -468,10 +468,10 @@ if SERVER then
 		local bLeft = net.ReadBool()
 		local bDrop = net.ReadBool()
 		if bDrop then
-			drop(ply:SteamID(), bLeft)
+			vrmod.Drop(ply:SteamID(), bLeft)
 		else
 			local ent = net.ReadEntity()
-			pickup(ply, bLeft, ent)
+			vrmod.Pickup(ply, bLeft, ent)
 		end
 	end)
 
@@ -479,8 +479,8 @@ if SERVER then
 		if not IsValid(ply) then return end
 		local sid = ply:SteamID()
 		-- Force drop for both hands
-		drop(sid, true)
-		drop(sid, false)
+		vrmod.Drop(sid, true)
+		vrmod.Drop(sid, false)
 	end)
 
 	hook.Add("AllowPlayerPickup", "vrmod", function(ply) return not g_VR[ply:SteamID()] end)
