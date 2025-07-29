@@ -268,8 +268,25 @@ if SERVER then
 					local npc = ent.original_npc
 					if IsValid(npc) and not vrmod.utils.IsRagdollGibbed(ent) then
 						ent.dropped_manually = true
-						local entCopy = ent
-						timer.Simple(2.0, function() if IsValid(entCopy) then entCopy:Remove() end end)
+						timer.Simple(0.5, function()
+							for i = 0, ent:GetPhysicsObjectCount() - 1 do
+								local phys = ent:GetPhysicsObjectNum(i)
+								if not IsValid(phys) then continue end
+								phys:EnableMotion(true)
+								--phys:SetMass(50)
+								-- Dynamically set damping based on current speed
+								local vel = phys:GetVelocity():Length()
+								-- Map [0, 500] m/s → damping [1, 15], clamped
+								local linDamp = math.Clamp(1 + vel / 500, 1, 15)
+								local angVel = phys:GetAngleVelocity():Length()
+								local angDamp = math.Clamp(1 + angVel / 500, 1, 15)
+								phys:SetDamping(linDamp, angDamp)
+								phys:Wake()
+							end
+						end)
+
+						timer.Simple(0.5, function() if IsValid(ent) then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end end)
+						timer.Simple(2.0, function() if IsValid(ent) then ent:Remove() end end)
 						net.Start("vrmod_pickup")
 						net.WriteEntity(t.ply)
 						net.WriteEntity(npc)
@@ -363,8 +380,8 @@ if SERVER then
 				maxangulardamp = 5000,
 				maxspeed = 1e6,
 				maxspeeddamp = 1e4,
-				dampfactor = 0.5,
-				teleportdistance = 0,
+				dampfactor = 0.05,
+				teleportdistance = 3,
 				deltatime = 0
 			}
 
@@ -422,13 +439,28 @@ if SERVER then
 		end
 
 		if index > pickupCount then
-			timer.Simple(0, function() end)
-			pickupCount = pickupCount + 1
-			local phys = ent:GetPhysicsObject()
-			if IsValid(phys) then
-				pickupController:AddToMotionController(phys)
-				phys:Wake()
-			end
+			timer.Simple(0, function()
+				pickupCount = pickupCount + 1
+				local phys = ent:GetPhysicsObject()
+				if IsValid(phys) then
+					--pickupController:AddToMotionController(phys)
+					if ent:GetClass() == "prop_ragdoll" then
+						timer.Simple(0, function()
+							for i = 0, ent:GetPhysicsObjectCount() - 1 do
+								local p = ent:GetPhysicsObjectNum(i)
+								if IsValid(p) then
+									p:SetMass(10) -- lighter for grabbing
+									p:SetDamping(5, 5) -- high damping to stop swing
+									p:Wake()
+								end
+							end
+						end)
+					end
+
+					pickupController:AddToMotionController(phys)
+					phys:Wake()
+				end
+			end)
 		end
 
 		-- For non-ragdoll, store localPos/localAng relative to hand pose for entity root

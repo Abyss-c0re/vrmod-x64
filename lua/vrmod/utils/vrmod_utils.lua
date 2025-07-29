@@ -203,7 +203,7 @@ end
 
 if SERVER then
     -- NPC2RAG
-    local trackedRagdolls = {}
+    local trackedRagdolls = trackedRagdolls or {}
     function vrmod.utils.ForwardRagdollDamage(ent, dmginfo)
         if not (ent:IsRagdoll() and trackedRagdolls[ent]) then return end
         local npc = trackedRagdolls[ent]
@@ -214,47 +214,67 @@ if SERVER then
 
         local dmg = dmginfo:GetDamage()
         npc:SetHealth(math.max(0, npc:Health() - dmg))
-        local force = dmginfo:GetDamageForce() or Vector(0, 0, 0)
+        local force = dmginfo:GetDamageForce() or Vector()
         if not force:IsZero() then
-            local physCount = ent:GetPhysicsObjectCount()
-            for i = 0, physCount - 1 do
+            for i = 0, ent:GetPhysicsObjectCount() - 1 do
                 local phys = ent:GetPhysicsObjectNum(i)
                 if IsValid(phys) then phys:ApplyForceCenter(force) end
             end
         end
     end
 
+    -- Add hook once
     if not hook.GetTable()["EntityTakeDamage"]["VRMod_ForwardRagdollDamage"] then hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", function(ent, dmginfo) vrmod.utils.ForwardRagdollDamage(ent, dmginfo) end) end
     function vrmod.utils.SpawnPickupRagdoll(npc)
         if not IsValid(npc) then return end
         local rag = ents.Create("prop_ragdoll")
         if not IsValid(rag) then return end
         rag:SetModel(npc:GetModel())
-        rag:SetNWBool("is_npc_ragdoll", true)
         rag:SetPos(npc:GetPos())
         rag:SetAngles(npc:GetAngles())
+        rag:SetNWBool("is_npc_ragdoll", true)
         rag:Spawn()
         rag:Activate()
+        -- Pose and weight configuration
         timer.Simple(0, function()
             if not (IsValid(npc) and IsValid(rag)) then return end
             if npc.SetupBones then npc:SetupBones() end
-            for i = 0, (npc.GetBoneCount and npc:GetBoneCount() or 0) - 1 do
-                local pos, ang = npc:GetBonePosition(i)
-                if pos and ang and rag.SetBonePosition then rag:SetBonePosition(i, pos, ang) end
+            for i = 0, rag:GetPhysicsObjectCount() - 1 do
+                local phys = rag:GetPhysicsObjectNum(i)
+                if not IsValid(phys) then continue end
+                local bone = rag:TranslatePhysBoneToBone(i)
+                if bone and bone >= 0 then
+                    local pos, ang = npc:GetBonePosition(bone)
+                    if pos and ang then
+                        phys:SetPos(pos)
+                        phys:SetAngles(ang)
+                    end
+                end
+
+                phys:SetVelocityInstantaneous(Vector(0, 0, 0))
+                phys:SetMass(1)
+                phys:SetDamping(5, 5)
+                phys:EnableMotion(false)
+                phys:Wake()
             end
 
-            for i = 0, (rag.GetPhysicsObjectCount and rag:GetPhysicsObjectCount() or 0) - 1 do
-                local phys = rag:GetPhysicsObjectNum(i)
-                if IsValid(phys) then
-                    phys:EnableMotion(true)
-                    phys:Wake()
+            --Unlock motion shortly after to allow ragdoll to fall
+            timer.Simple(0.1, function()
+                if not IsValid(rag) then return end
+                for i = 0, rag:GetPhysicsObjectCount() - 1 do
+                    local phys = rag:GetPhysicsObjectNum(i)
+                    if IsValid(phys) then
+                        phys:EnableMotion(true)
+                        phys:Wake()
+                    end
                 end
-            end
+            end)
         end)
 
+        -- Register tracking + AI disable
+        trackedRagdolls[rag] = npc
         rag.original_npc = npc
         rag.dropped_manually = false
-        trackedRagdolls[rag] = npc
         npc:SetNoDraw(true)
         npc:SetNotSolid(true)
         npc:SetMoveType(MOVETYPE_NONE)
@@ -265,14 +285,14 @@ if SERVER then
         if npc.SetNPCState then npc:SetNPCState(NPC_STATE_NONE) end
         npc:SetSaveValue("m_bInSchedule", false)
         if npc.GetActiveWeapon and IsValid(npc:GetActiveWeapon()) then npc:GetActiveWeapon():Remove() end
+        -- Handle cleanup & respawn logic
         rag:CallOnRemove("vrmod_cleanup_npc_" .. rag:EntIndex(), function()
             trackedRagdolls[rag] = nil
             if not IsValid(npc) then return end
             npc:RemoveEFlags(EFL_NO_THINK_FUNCTION)
             if rag.dropped_manually then
-                local p, a = rag:GetPos(), rag:GetAngles()
-                npc:SetPos(p)
-                npc:SetAngles(a)
+                npc:SetPos(rag:GetPos())
+                npc:SetAngles(rag:GetAngles())
                 npc:SetNoDraw(false)
                 npc:SetNotSolid(false)
                 npc:SetMoveType(MOVETYPE_STEP)
