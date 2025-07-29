@@ -77,7 +77,6 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
     end
 
     local originalModelPath = modelPath
-    local usedFallback = false
     -- Fallback for known bad viewmodels (c_models)
     if modelPath:lower():match("^models/weapons/c_") then
         local baseName = modelPath:match("models/weapons/c_(.-)%.mdl")
@@ -86,7 +85,6 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
             if file.Exists(fallback, "GAME") then
                 DebugPrint("Replacing %s with valid worldmodel %s", modelPath, fallback)
                 modelPath = fallback
-                usedFallback = true
             else
                 DebugPrint("No valid fallback for %s (attempted %s), using defaults", modelPath, fallback)
                 modelCache[originalModelPath] = {
@@ -210,9 +208,10 @@ function vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
         local class, vm = vrmod.utils.WepInfo(wep)
         if not class or not vm then return vrmod.utils.GetModelRadius(model, ply, offsetAng) end
         model = vm
-        --local class = wep:GetClass()
-        local vmInfo = g_VR.viewModelInfo[class]
-        offsetAng = vmInfo and vmInfo.offsetAng or DEFAULT_ANGLES
+        if CLIENT then
+            local vmInfo = g_VR.viewModelInfo[class]
+            offsetAng = vmInfo and vmInfo.offsetAng or DEFAULT_ANGLES
+        end
         return vrmod.utils.GetModelRadius(model, ply, offsetAng)
     else
         return vrmod.utils.GetModelRadius(model, ply, offsetAng)
