@@ -75,9 +75,39 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
         return
     end
 
-    if modelCache[modelPath] and modelCache[modelPath].computed then return end
-    if pending[modelPath] and pending[modelPath].attempts >= 3 then
-        modelCache[modelPath] = {
+    local originalModelPath = modelPath
+    local usedFallback = false
+    -- Fallback for known bad viewmodels (c_models)
+    if modelPath:lower():match("^models/weapons/c_") then
+        local baseName = modelPath:match("models/weapons/c_(.-)%.mdl")
+        if baseName then
+            local fallback = "models/weapons/w_" .. baseName .. ".mdl"
+            if file.Exists(fallback, "GAME") then
+                DebugPrint("Replacing %s with valid worldmodel %s", modelPath, fallback)
+                modelPath = fallback
+                usedFallback = true
+            else
+                DebugPrint("No valid fallback for %s (attempted %s), using defaults", modelPath, fallback)
+                modelCache[originalModelPath] = {
+                    radius = DEFAULT_RADIUS,
+                    reach = DEFAULT_REACH,
+                    mins = DEFAULT_MINS,
+                    maxs = DEFAULT_MAXS,
+                    angles = DEFAULT_ANGLES,
+                    isVertical = false,
+                    computed = true
+                }
+                return
+            end
+        end
+    end
+
+    -- Already computed?
+    if modelCache[originalModelPath] and modelCache[originalModelPath].computed then return end
+    -- Retry protection
+    if pending[originalModelPath] and pending[originalModelPath].attempts >= 3 then
+        DebugPrint("Max retries reached for %s, caching defaults", originalModelPath)
+        modelCache[originalModelPath] = {
             radius = DEFAULT_RADIUS,
             reach = DEFAULT_REACH,
             mins = DEFAULT_MINS,
@@ -87,22 +117,20 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
             computed = true
         }
 
-        DebugPrint("Max retries reached for %s, caching defaults radius=%.2f, reach=%.2f, mins=%s, maxs=%s", modelPath, DEFAULT_RADIUS, DEFAULT_REACH, tostring(DEFAULT_MINS), tostring(DEFAULT_MAXS))
-        pending[modelPath] = nil
+        pending[originalModelPath] = nil
         return
     end
 
-    pending[modelPath] = pending[modelPath] or {
+    pending[originalModelPath] = pending[originalModelPath] or {
         attempts = 0
     }
 
-    pending[modelPath].attempts = pending[modelPath].attempts + 1
-    local isClient = CLIENT
+    pending[originalModelPath].attempts = pending[originalModelPath].attempts + 1
     util.PrecacheModel(modelPath)
-    local ent = isClient and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
+    local ent = CLIENT and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
     if not IsValid(ent) then
-        DebugPrint("Spawn failed for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
-        pending[modelPath].lastAttempt = CurTime()
+        DebugPrint("Failed to spawn %s (attempt %d)", modelPath, pending[originalModelPath].attempts)
+        pending[originalModelPath].lastAttempt = CurTime()
         return
     end
 
@@ -117,9 +145,9 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
         if amin:Length() > 0 and amax:Length() > 0 then
             local radius = (amax - amin):Length() * 0.5
             local reach = math.Clamp(radius, 6.6, 50)
-            local isVertical = false -- Default to false, will be updated at runtime
+            local isVertical = false
             local mins, maxs = ApplyBoxFromRadius(radius, isVertical)
-            modelCache[modelPath] = {
+            modelCache[originalModelPath] = {
                 radius = radius,
                 reach = reach,
                 mins = mins or DEFAULT_MINS,
@@ -129,16 +157,16 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
                 computed = true
             }
 
-            DebugPrint("AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s, IsVertical: %s for %s", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), tostring(isVertical), modelPath)
+            DebugPrint("Computed radius for %s (actual: %s) → %.2f units", originalModelPath, modelPath, radius)
         else
-            DebugPrint("Zero AABB for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
+            DebugPrint("Invalid AABB for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
         end
     else
-        DebugPrint("No physobj for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
+        DebugPrint("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
     end
 
     timer.Simple(0, function() if IsValid(ent) then ent:Remove() end end)
-    pending[modelPath].lastAttempt = CurTime()
+    pending[originalModelPath].lastAttempt = CurTime()
 end
 
 function vrmod.utils.GetModelRadius(modelPath, ply, offsetAng)
