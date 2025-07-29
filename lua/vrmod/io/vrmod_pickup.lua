@@ -273,14 +273,8 @@ if SERVER then
 								local phys = ent:GetPhysicsObjectNum(i)
 								if not IsValid(phys) then continue end
 								phys:EnableMotion(true)
-								--phys:SetMass(50)
-								-- Dynamically set damping based on current speed
-								local vel = phys:GetVelocity():Length()
-								-- Map [0, 500] m/s → damping [1, 15], clamped
-								local linDamp = math.Clamp(1 + vel / 500, 1, 15)
-								local angVel = phys:GetAngleVelocity():Length()
-								local angDamp = math.Clamp(1 + angVel / 500, 1, 15)
-								phys:SetDamping(linDamp, angDamp)
+								phys:SetMass(50)
+								phys:SetDamping(0, 0)
 								phys:Wake()
 							end
 						end)
@@ -344,16 +338,18 @@ if SERVER then
 		if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[bLeftHand and 1 or 2] then return end
 		if not IsValid(ent) or not CanPickupEntity(ent, ply, convarValues) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then return end
 		if ent:IsNPC() then ent = vrmod.utils.SpawnPickupRagdoll(ent) end
-		local handPos, handAng
+		local handPos, handAng, tr
 		if bLeftHand then
 			handPos = vrmod.GetLeftHandPos(ply)
 			handAng = vrmod.GetLeftHandAng(ply)
+			tr = vrmod.utils.TraceHand(ply, "left")
 		else
 			handPos = vrmod.GetRightHandPos(ply)
 			handAng = vrmod.GetRightHandAng(ply)
+			tr = vrmod.utils.TraceHand(ply, "right")
 		end
 
-		if not handPos or not handAng then return end
+
 		-- For ragdolls, store local offsets per physics bone relative to hand pose
 		if ent:GetClass() == "prop_ragdoll" then
 			local physOffsets = {}
@@ -381,7 +377,7 @@ if SERVER then
 				maxspeed = 1e6,
 				maxspeeddamp = 1e4,
 				dampfactor = 0.05,
-				teleportdistance = 3,
+				teleportdistance = 1,
 				deltatime = 0
 			}
 
