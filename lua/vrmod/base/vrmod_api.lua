@@ -603,6 +603,100 @@ elseif SERVER then
 		UpdateWorldPoses(ply, playerTable)
 		return playerTable.latestFrameWorld.righthandPos, playerTable.latestFrameWorld.righthandAng
 	end
+
+	vrmod.HandVelocityCache = vrmod.HandVelocityCache or {}
+	function vrmod.GetLeftHandVelocity(ply)
+		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		return cache and cache.leftVel or Vector()
+	end
+
+	function vrmod.GetRightHandVelocity(ply)
+		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		return cache and cache.rightVel or Vector()
+	end
+
+	function vrmod.GetHMDVelocity(ply)
+		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		return cache and cache.hmdVel or Vector()
+	end
+
+	function vrmod.GetLeftHandVelocityRelative(ply)
+		local handVel = vrmod.GetLeftHandVelocity(ply)
+		local hmdVel = vrmod.GetHMDVelocity(ply)
+		return handVel - hmdVel
+	end
+
+	function vrmod.GetRightHandVelocityRelative(ply)
+		local handVel = vrmod.GetRightHandVelocity(ply)
+		local hmdVel = vrmod.GetHMDVelocity(ply)
+		return handVel - hmdVel
+	end
+
+	function vrmod.GetPullGestureStrength(ply, hand, targetPos)
+		local handPos = hand == "left" and vrmod.GetLeftHandPos(ply) or vrmod.GetRightHandPos(ply)
+		local relVel = hand == "left" and vrmod.GetLeftHandVelocityRelative(ply) or vrmod.GetRightHandVelocityRelative(ply)
+		local pullDir = (targetPos - handPos):GetNormalized()
+		return relVel:Dot(pullDir) -- Positive = pull gesture
+	end
+
+	hook.Add("Tick", "vrmod_UpdateHandAndHMDVelocities", function()
+		for _, ply in ipairs(player.GetAll()) do
+			local sid = ply:SteamID()
+			local playerTable = g_VR[sid]
+			if not playerTable or not playerTable.latestFrame then continue end
+			-- Update world poses if new engine tick
+			UpdateWorldPoses(ply, playerTable)
+			local curTick = engine.TickCount()
+			local cache = vrmod.HandVelocityCache[sid]
+			if not cache then
+				cache = {
+					leftLastPos = Vector(),
+					rightLastPos = Vector(),
+					hmdLastPos = Vector(),
+					leftVel = Vector(),
+					rightVel = Vector(),
+					hmdVel = Vector(),
+					lastTick = 0
+				}
+
+				vrmod.HandVelocityCache[sid] = cache
+			end
+
+			-- Only update velocity once per new engine tick
+			if cache.lastTick == curTick then
+				-- Already updated velocity this engine tick
+				continue
+			end
+
+			local lfw = playerTable.latestFrameWorld
+			local leftPos, rightPos, hmdPos = lfw.lefthandPos, lfw.righthandPos, lfw.hmdPos
+			if cache.lastTick == 0 then
+				-- First run: just set last positions to avoid huge velocities
+				cache.leftLastPos = leftPos
+				cache.rightLastPos = rightPos
+				cache.hmdLastPos = hmdPos
+				cache.lastTick = curTick
+				continue
+			end
+
+			local dt = (curTick - cache.lastTick) * engine.TickInterval() -- Convert ticks to seconds
+			if dt <= 0 then
+				-- Defensive check
+				continue
+			end
+
+			-- Calculate velocities based on last positions and current positions
+			cache.leftVel = (leftPos - cache.leftLastPos) / dt
+			cache.rightVel = (rightPos - cache.rightLastPos) / dt
+			cache.hmdVel = (hmdPos - cache.hmdLastPos) / dt
+			-- Update last positions and tick
+			cache.leftLastPos = leftPos
+			cache.rightLastPos = rightPos
+			cache.hmdLastPos = hmdPos
+			cache.lastTick = curTick
+		end
+		--print(string.format("Velocities for %s: Left %s, Right %s, HMD %s", sid, tostring(cache.leftVel), tostring(cache.rightVel), tostring(cache.hmdVel)))
+	end)
 end
 
 local hookTranslations = {
