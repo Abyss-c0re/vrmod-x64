@@ -57,7 +57,7 @@ if SERVER then
         ["css_usp"] = "arcticvr_aniv_usptactical",
         ["css_xm1014"] = "arcticvr_m1014",
         ["weapon_haax"] = "weapon_haax_vr",
-        ["spiderman_swep"] = "vr_spiderman_swep"
+        ["spooderman_swep"] = "vr_spooderman"
     }
 
     local function SavePairs()
