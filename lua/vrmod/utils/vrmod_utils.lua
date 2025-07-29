@@ -1,4 +1,5 @@
 g_VR = g_VR or {}
+g_VR.viewModelInfo = g_VR.viewModelInfo or {}
 g_VR.enhanced = true
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
