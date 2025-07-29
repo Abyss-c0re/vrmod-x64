@@ -3,8 +3,7 @@ print("[VRHand] Running VR physical hands system.")
 local vrHands = {}
 -- Utility to get cached physics data from weapon
 local function GetCachedWeaponParams(wep, ply, side)
-    if not IsValid(wep) or not wep.GetClass then return end
-    local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(wep, ply, side)
+    local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
     if radius == 5 and reach == 6.6 then return nil end
     return radius, reach, mins, maxs, angles
 end
@@ -34,32 +33,27 @@ end
 
 -- Apply appropriate collision shape based on weapon
 local function UpdateWeaponCollisionShape(ply, wep)
-    if not IsValid(ply) or not IsValid(wep) then return end
-    if not vrmod.IsPlayerInVR(ply) then return end
-    local hands = vrHands[ply]
-    if not hands or not hands.right or not IsValid(hands.right.ent) then return end
-    local right = hands.right
-    local hand = right.ent
-    local function Retry()
-        timer.Simple(0, function() UpdateWeaponCollisionShape(ply, wep) end)
-    end
+    timer.Simple(0.1, function()
+        if not IsValid(ply) then return end
+        if not vrmod.utils.IsValidWep(wep) then
+            timer.Simple(0, function() ApplySphere(hand, right, 2.8) end)
+            return
+        end
 
-    if wep:GetClass() == "weapon_vrmod_empty" then
-        timer.Simple(0, function() ApplySphere(hand, right, 2.8) end)
-        return
-    end
+        local function Retry()
+            timer.Simple(0, function() UpdateWeaponCollisionShape(ply, wep) end)
+        end
 
-    local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
-    if not radius or not mins or not maxs or not angles then
-        Retry()
-        return
-    end
-
-    timer.Simple(0, function()
-        if mins and maxs and angles then
-            ApplyBox(hand, right, mins, maxs, angles)
+        local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
+        if not radius or not mins or not maxs or not angles then
+            Retry()
+            return
         else
-            ApplySphere(hand, right, 2.8)
+            local hands = vrHands[ply]
+            if not hands or not hands.right or not IsValid(hands.right.ent) then return end
+            local right = hands.right
+            local hand = right.ent
+            timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles) end)
         end
     end)
 end
@@ -103,7 +97,7 @@ local function SpawnVRHands(ply)
     timer.Simple(0.1, function()
         if IsValid(ply) and hands.right and IsValid(hands.right.ent) then
             local wep = ply:GetActiveWeapon()
-            if IsValid(wep) then UpdateWeaponCollisionShape(ply, wep) end
+            if vrmod.utils.IsValidWep(wep) then UpdateWeaponCollisionShape(ply, wep) end
         end
     end)
 end

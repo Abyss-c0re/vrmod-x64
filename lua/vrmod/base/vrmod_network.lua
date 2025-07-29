@@ -364,7 +364,7 @@ if CLIENT then
 		local vm = net.ReadString()
 		local isMag = string.StartWith(class, "avrmag_") -- Check if the entity is a magazine
 		-- Handle case where no valid weapon or magazine is selected
-		if class == "" or vm == "" or vm == "models/weapons/c_arms.mdl" then
+		if class == "" or vm == "" then
 			g_VR.viewModel = nil
 			g_VR.openHandAngles = g_VR.defaultOpenHandAngles
 			g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
@@ -374,9 +374,7 @@ if CLIENT then
 			local weapon = LocalPlayer():GetActiveWeapon()
 			if IsValid(weapon) then weapon:SetNoDraw(true) end
 			local viewModel = LocalPlayer():GetViewModel()
-			if IsValid(viewModel) then
-				viewModel:SetNoDraw(false) -- Ensure view model is visible
-			end
+			if IsValid(viewModel) then viewModel:SetNoDraw(false) end
 			return
 		end
 
@@ -397,19 +395,18 @@ if CLIENT then
 			end)
 		else
 			-- Explicitly disable world model rendering for both weapons and magazines
-			local weapon = LocalPlayer():GetActiveWeapon()
-			if IsValid(weapon) then
-				weapon:SetNoDraw(true) -- Prevent world model from rendering
+			local wep = LocalPlayer():GetActiveWeapon()
+			if IsValid(wep) then
+				wep:SetNoDraw(true) -- Prevent world model from rendering
 			end
 
 			-- Ensure view model is used and visible
-			g_VR.viewModel = LocalPlayer():GetViewModel()
 			local viewModel = LocalPlayer():GetViewModel()
 			if IsValid(viewModel) then
-				viewModel:SetNoDraw(false) -- Ensure view model is visible
+				viewModel:SetNoDraw(false)
+				g_VR.viewModel = viewModel
 			end
 
-			local wep = LocalPlayer():GetActiveWeapon()
 			if wep.ViewModelFOV then
 				if not swepOriginalFovs[class] then swepOriginalFovs[class] = wep.ViewModelFOV end
 				wep.ViewModelFOV = GetConVar("fov_desired"):GetFloat()
@@ -585,9 +582,11 @@ if SERVER then
 	hook.Add("PlayerSwitchWeapon", "vrutil_hook_playerswitchweapon", function(ply, old, new)
 		if g_VR[ply:SteamID()] ~= nil then
 			net.Start("vrutil_net_switchweapon")
-			if IsValid(new) then
-				net.WriteString(new:GetClass())
-				net.WriteString(new:GetWeaponViewModel())
+			local class, vm = vrmod.utils.WepInfo(new)
+			if class and vm then
+				timer.Simple(0, function() vrmod.utils.ComputePhysicsRadius(vm) end)
+				net.WriteString(class)
+				net.WriteString(vm)
 			else
 				net.WriteString("")
 				net.WriteString("")
