@@ -8,8 +8,7 @@ local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "100", FCVAR_REPLICATE
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cv_meleeDebug = CreateConVar("vrmod_melee_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
+local cv_meleeDebug = GetConVar("vrmod_melee_debug"):GetBool()
 local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 -- Updated impactSounds with verified sound paths
 local impactSounds = {
@@ -24,46 +23,11 @@ local impactSounds = {
 }
 
 -- SHARED CACHE
-local modelCache = {} -- Stores {radius, reach, mins, maxs, angles, computed, isVertical} for weapons, {radius, reach, computed} for fists
+-- Stores {radius, reach, mins, maxs, angles, computed, isVertical} for weapons, {radius, reach, computed} for fists
 local collisionSpheres = {}
 local collisionBoxes = {} -- For box visualization
-local pending = {}
-local magCache = {}
 -- Constants for defaults
 local DEFAULT_RADIUS = 5
-local DEFAULT_REACH = 6.6
-local DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
-local DEFAULT_MAXS = Vector(0.75, 0.75, 11)
-local DEFAULT_ANGLES = Angle(0, 0, 0)
--- Utility for debug printing
-local function DebugPrint(fmt, ...)
-    if cv_meleeDebug:GetBool() then print(string.format("[VRMod_Melee][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
-end
-
-local function IsHoldingValidWeapon(ply)
-    local wep = ply:GetActiveWeapon()
-    return IsValid(wep) and wep:GetClass() ~= "weapon_vrmod_empty" and wep or false
-end
-
-local function IsMagazine(ent)
-    local class = ent:GetClass()
-    if magCache[class] ~= nil then return magCache[class] end
-    local isMag = string.StartWith(class, "avrmag_")
-    magCache[class] = isMag
-    return isMag
-end
-
-local function MeleeFilter(ent, ply, hand)
-    if not IsValid(ent) then return true end
-    if ent:GetNWBool("isVRHand", false) then return false end
-    if IsMagazine(ent) then return false end
-    if IsValid(ply) and (hand == "left" or hand == "right") then
-        local held = vrmod.GetHeldEntity(ply, hand)
-        if IsValid(held) and held == ent then return false end
-    end
-    return true
-end
-
 local function TraceBoxOrSphere(data)
     local best = {
         Hit = false,
@@ -103,155 +67,6 @@ local function TraceBoxOrSphere(data)
         end
     end
     return best
-end
-
-local function ApplyBoxFromRadius(radius, isVertical)
-    local forward = radius
-    local side = radius * 0.15
-    local mins, maxs
-    if isVertical then
-        mins = Vector(-side, -side, -forward * 0.25)
-        maxs = Vector(side, side, forward * 2.3)
-        DebugPrint("ApplyBoxFromRadius: radius %.2f | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
-    else
-        mins = Vector(-forward * 0.35, -side, -side)
-        maxs = Vector(forward * 2.3, side, side)
-        DebugPrint("ApplyBoxFromRadius: radius %.2f | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
-    end
-    return mins, maxs, isVertical
-end
-
-local function ComputePhysicsRadius(modelPath, ply)
-    if not modelPath or modelPath == "" then
-        DebugPrint("Invalid or empty model path, caching defaults")
-        modelCache[modelPath] = {
-            radius = DEFAULT_RADIUS,
-            reach = DEFAULT_REACH,
-            mins = DEFAULT_MINS,
-            maxs = DEFAULT_MAXS,
-            angles = DEFAULT_ANGLES,
-            isVertical = false,
-            computed = true
-        }
-        return
-    end
-
-    if modelCache[modelPath] and modelCache[modelPath].computed then return end
-    if pending[modelPath] and pending[modelPath].attempts >= 3 then
-        modelCache[modelPath] = {
-            radius = DEFAULT_RADIUS,
-            reach = DEFAULT_REACH,
-            mins = DEFAULT_MINS,
-            maxs = DEFAULT_MAXS,
-            angles = DEFAULT_ANGLES,
-            isVertical = false,
-            computed = true
-        }
-
-        DebugPrint("Max retries reached for %s, caching defaults radius=%.2f, reach=%.2f, mins=%s, maxs=%s", modelPath, DEFAULT_RADIUS, DEFAULT_REACH, tostring(DEFAULT_MINS), tostring(DEFAULT_MAXS))
-        pending[modelPath] = nil
-        return
-    end
-
-    pending[modelPath] = pending[modelPath] or {
-        attempts = 0
-    }
-
-    pending[modelPath].attempts = pending[modelPath].attempts + 1
-    local isClient = CLIENT
-    util.PrecacheModel(modelPath)
-    local ent = isClient and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
-    if not IsValid(ent) then
-        DebugPrint("Spawn failed for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
-        pending[modelPath].lastAttempt = CurTime()
-        return
-    end
-
-    ent:SetModel(modelPath)
-    ent:SetNoDraw(true)
-    ent:PhysicsInit(SOLID_VPHYSICS)
-    ent:SetMoveType(MOVETYPE_NONE)
-    ent:Spawn()
-    local phys = ent:GetPhysicsObject()
-    if IsValid(phys) then
-        local amin, amax = phys:GetAABB()
-        if amin:Length() > 0 and amax:Length() > 0 then
-            local radius = (amax - amin):Length() * 0.5
-            local reach = math.Clamp(radius, 6.6, 50)
-            local isVertical = false -- Default to false, will be updated at runtime
-            local mins, maxs = ApplyBoxFromRadius(radius, isVertical)
-            modelCache[modelPath] = {
-                radius = radius,
-                reach = reach,
-                mins = mins or DEFAULT_MINS,
-                maxs = maxs or DEFAULT_MAXS,
-                angles = DEFAULT_ANGLES,
-                isVertical = isVertical,
-                computed = true
-            }
-
-            DebugPrint("AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s, IsVertical: %s for %s", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), tostring(isVertical), modelPath)
-        else
-            DebugPrint("Zero AABB for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
-        end
-    else
-        DebugPrint("No physobj for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
-    end
-
-    timer.Simple(0, function() if IsValid(ent) then ent:Remove() end end)
-    pending[modelPath].lastAttempt = CurTime()
-end
-
-local function GetModelRadius(modelPath, ply, offsetAng)
-    local ang = vrmod.GetRightHandAng(ply)
-    -- Check for significant offset in any direction (pitch, yaw, or roll)
-    local isVertical = offsetAng and (math.abs(math.NormalizeAngle(offsetAng.x)) > 45 or math.abs(
-        -- Pitch
-        math.NormalizeAngle(offsetAng.y)) > 45 or math.abs(
-        -- Yaw
-        math.NormalizeAngle(offsetAng.z)) > 45) or false
-
-    -- Roll
-    DebugPrint("GetModelRadius: offsetAng=%s, isVertical=%s (pitch=%.2f, yaw=%.2f, roll=%.2f)", tostring(offsetAng), tostring(isVertical), offsetAng and math.abs(math.NormalizeAngle(offsetAng.x)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.y)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.z)) or 0)
-    if modelCache[modelPath] and modelCache[modelPath].computed then
-        local cache = modelCache[modelPath]
-        DebugPrint("GetModelRadius: Cache found for %s, cached isVertical=%s", modelPath, tostring(cache.isVertical))
-        if isVertical ~= cache.isVertical then
-            DebugPrint("GetModelRadius: Alignment mismatch (isVertical=%s, cache.isVertical=%s), recalculating mins/maxs", tostring(isVertical), tostring(cache.isVertical))
-            local mins, maxs = ApplyBoxFromRadius(cache.radius, isVertical)
-            return cache.radius, cache.reach, mins, maxs, ang
-        end
-        return cache.radius, cache.reach, cache.mins, cache.maxs, ang
-    end
-
-    DebugPrint("GetModelRadius: No cache for %s, scheduling computation", modelPath)
-    if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
-        pending[modelPath] = {
-            attempts = 0
-        }
-
-        timer.Simple(0, function() ComputePhysicsRadius(modelPath, ply) end)
-    end
-    return DEFAULT_RADIUS, DEFAULT_REACH, DEFAULT_MINS, DEFAULT_MAXS, ang
-end
-
-function GetWeaponMeleeParams(wep, ply, hand)
-    local model = cl_effectmodel:GetString()
-    local radius, reach, mins, maxs, angles
-    local offsetAng = DEFAULT_ANGLES
-    if hand == "right" and IsHoldingValidWeapon(ply) then
-        wep = ply:GetActiveWeapon()
-        model = wep:GetModel() or wep:GetWeaponWorldModel() or model
-        local class = wep:GetClass()
-        local vmInfo = g_VR.viewModelInfo[class]
-        offsetAng = vmInfo and vmInfo.offsetAng or DEFAULT_ANGLES
-        radius, reach, mins, maxs, angles = GetModelRadius(model, ply, offsetAng)
-    else
-        radius, reach = GetModelRadius(model, ply, offsetAng)
-    end
-
-    DebugPrint("Melee params: weapon=%s, hand=%s, radius=%.2f, reach=%.2f, mins=%s, maxs=%s, angles=%s, model=%s", IsValid(wep) and wep:GetClass() or "unarmed", hand or "none", radius, reach, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or DEFAULT_ANGLES), model or "nil")
-    return radius, reach, mins, maxs, angles
 end
 
 -- CLIENTSIDE --------------------------
@@ -294,9 +109,9 @@ if CLIENT then
         local ply = LocalPlayer()
         if not vrmod or not vrmod.GetHMDVelocity then return end
         if not IsValid(ply) or not ply:Alive() then return end
-        if not MeleeFilter(ply, ply, hand) then return end
-        local wep = IsHoldingValidWeapon(ply)
-        if useWeapon and not wep then useWeapon = false end
+        if not vrmod.utils.MeleeFilter(ply, ply, hand) then return end
+        local wep = ply:GetActiveWeapon()
+        if useWeapon and not vrmod.utils.IsValidWep(wep) then useWeapon = false end
         local relativeSpeed = relativeVel:Length()
         if relativeSpeed / 40 < cv_meleeVelThreshold:GetFloat() then return end
         if NextMeleeTime > CurTime() then return end
@@ -325,14 +140,14 @@ if CLIENT then
 
         local src = tr0.HitPos + tr0.HitNormal * -2
         local dir = relativeVel:GetNormalized()
-        local radius, reach, mins, maxs, angles = GetWeaponMeleeParams(wep, ply, hand)
+        local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
         local traceData = {
             start = src,
             endpos = src + dir * reach,
             radius = radius,
             mins = mins,
             maxs = maxs,
-            filter = function(ent) return MeleeFilter(ent, ply, hand) end,
+            filter = function(ent) return vrmod.utils.MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
         }
 
@@ -405,7 +220,7 @@ if SERVER then
             max = maxs,
             filter = function(ent)
                 if ent == ply then return false end
-                return MeleeFilter(ent, ply, hand)
+                return vrmod.utils.MeleeFilter(ent, ply, hand)
             end,
             mask = MASK_SHOT
         }
@@ -552,7 +367,7 @@ if SERVER then
         if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
         local attackerName = ply:Nick() or "Unknown"
         local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
-        if cv_meleeDebug:GetBool() then
+        if cv_meleeDebug then
             local targetVelDot = targetVel:Dot(dir)
             print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
         else
@@ -560,20 +375,20 @@ if SERVER then
         end
     end)
 
-    hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep, newWep)
-        if not vrmod.IsPlayerInVR(ply) then return end
-        if not IsValid(newWep) then return end
-        timer.Simple(0, function()
-            if not IsValid(ply) or not IsValid(newWep) then return end
-            local class = newWep:GetClass()
-            if class == "weapon_vrmod_empty" then return end
-            local model = newWep:GetModel() or newWep:GetWeaponWorldModel()
-            if model and model ~= "" then
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] Weapon changed to", class, "model:", model) end
-                ComputePhysicsRadius(model, ply)
-            else
-                if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] No valid model for weapon:", class) end
-            end
-        end)
-    end)
+    -- hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep, newWep)
+    --     if not vrmod.IsPlayerInVR(ply) then return end
+    --     if not IsValid(newWep) then return end
+    --     timer.Simple(0, function()
+    --         if not IsValid(ply) or not IsValid(newWep) then return end
+    --         local class = newWep:GetClass()
+    --         if class == "weapon_vrmod_empty" then return end
+    --         local model = newWep:GetModel() or newWep:GetWeaponWorldModel()
+    --         if model and model ~= "" then
+    --             if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] Weapon changed to", class, "model:", model) end
+    --             ComputePhysicsRadius(model, ply)
+    --         else
+    --             if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] No valid model for weapon:", class) end
+    --         end
+    --     end)
+    -- end)
 end

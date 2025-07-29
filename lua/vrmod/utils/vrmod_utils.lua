@@ -2,10 +2,216 @@ g_VR = g_VR or {}
 g_VR.enhanced = true
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
+local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+local cv_meleeDebug = CreateConVar("vrmod_melee_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
+local magCache = {}
+local modelCache = {}
+local pending = {}
+local DEFAULT_RADIUS = 5
+local DEFAULT_REACH = 6.6
+local DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
+local DEFAULT_MAXS = Vector(0.75, 0.75, 11)
+local DEFAULT_ANGLES = Angle(0, 0, 0)
+-- HELPERS
+local function DebugPrint(fmt, ...)
+    if cv_meleeDebug:GetBool() then print(string.format("[VRMod:][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
+end
+
+local function IsMagazine(ent)
+    local class = ent:GetClass()
+    if magCache[class] ~= nil then return magCache[class] end
+    local isMag = string.StartWith(class, "avrmag_")
+    magCache[class] = isMag
+    return isMag
+end
+
+local function ApplyBoxFromRadius(radius, isVertical)
+    local forward = radius
+    local side = radius * 0.15
+    local mins, maxs
+    if isVertical then
+        mins = Vector(-side, -side, -forward * 0.25)
+        maxs = Vector(side, side, forward * 2.3)
+        DebugPrint("ApplyBoxFromRadius: radius %.2f | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
+    else
+        mins = Vector(-forward * 0.35, -side, -side)
+        maxs = Vector(forward * 2.3, side, side)
+        DebugPrint("ApplyBoxFromRadius: radius %.2f | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
+    end
+    return mins, maxs, isVertical
+end
+
+-- WEP UTILS
+function vrmod.utils.IsValidWep(wep, get)
+    if not IsValid(wep) then return false end
+    local class = wep:GetClass()
+    local vm = wep:GetWeaponViewModel()
+    if class == "weapon_vrmod_empty" or vm == "" or vm == "models/weapons/c_arms.mdl" then return false end
+    if get then
+        return class, vm
+    else
+        return true
+    end
+end
+
+function vrmod.utils.WepInfo(wep)
+    local class, vm = vrmod.utils.IsValidWep(wep, true)
+    if class and vm then return class, vm end
+end
+
+-- MELEE UTILS
+function vrmod.utils.ComputePhysicsRadius(modelPath)
+    if not modelPath or modelPath == "" then
+        DebugPrint("Invalid or empty model path, caching defaults")
+        modelCache[modelPath] = {
+            radius = DEFAULT_RADIUS,
+            reach = DEFAULT_REACH,
+            mins = DEFAULT_MINS,
+            maxs = DEFAULT_MAXS,
+            angles = DEFAULT_ANGLES,
+            isVertical = false,
+            computed = true
+        }
+        return
+    end
+
+    if modelCache[modelPath] and modelCache[modelPath].computed then return end
+    if pending[modelPath] and pending[modelPath].attempts >= 3 then
+        modelCache[modelPath] = {
+            radius = DEFAULT_RADIUS,
+            reach = DEFAULT_REACH,
+            mins = DEFAULT_MINS,
+            maxs = DEFAULT_MAXS,
+            angles = DEFAULT_ANGLES,
+            isVertical = false,
+            computed = true
+        }
+
+        DebugPrint("Max retries reached for %s, caching defaults radius=%.2f, reach=%.2f, mins=%s, maxs=%s", modelPath, DEFAULT_RADIUS, DEFAULT_REACH, tostring(DEFAULT_MINS), tostring(DEFAULT_MAXS))
+        pending[modelPath] = nil
+        return
+    end
+
+    pending[modelPath] = pending[modelPath] or {
+        attempts = 0
+    }
+
+    pending[modelPath].attempts = pending[modelPath].attempts + 1
+    local isClient = CLIENT
+    util.PrecacheModel(modelPath)
+    local ent = isClient and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
+    if not IsValid(ent) then
+        DebugPrint("Spawn failed for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
+        pending[modelPath].lastAttempt = CurTime()
+        return
+    end
+
+    ent:SetModel(modelPath)
+    ent:SetNoDraw(true)
+    ent:PhysicsInit(SOLID_VPHYSICS)
+    ent:SetMoveType(MOVETYPE_NONE)
+    ent:Spawn()
+    local phys = ent:GetPhysicsObject()
+    if IsValid(phys) then
+        local amin, amax = phys:GetAABB()
+        if amin:Length() > 0 and amax:Length() > 0 then
+            local radius = (amax - amin):Length() * 0.5
+            local reach = math.Clamp(radius, 6.6, 50)
+            local isVertical = false -- Default to false, will be updated at runtime
+            local mins, maxs = ApplyBoxFromRadius(radius, isVertical)
+            modelCache[modelPath] = {
+                radius = radius,
+                reach = reach,
+                mins = mins or DEFAULT_MINS,
+                maxs = maxs or DEFAULT_MAXS,
+                angles = DEFAULT_ANGLES,
+                isVertical = isVertical,
+                computed = true
+            }
+
+            DebugPrint("AABB → %s Radius: %.2f, Reach: %.2f, Mins: %s, Maxs: %s, IsVertical: %s for %s", tostring(amin) .. " / " .. tostring(amax), radius, reach, tostring(mins), tostring(maxs), tostring(isVertical), modelPath)
+        else
+            DebugPrint("Zero AABB for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
+        end
+    else
+        DebugPrint("No physobj for %s, attempt %d of 3", modelPath, pending[modelPath].attempts)
+    end
+
+    timer.Simple(0, function() if IsValid(ent) then ent:Remove() end end)
+    pending[modelPath].lastAttempt = CurTime()
+end
+
+function vrmod.utils.GetModelRadius(modelPath, ply, offsetAng)
+    local ang = vrmod.GetRightHandAng(ply)
+    -- Check for significant offset in any direction (pitch, yaw, or roll)
+    local isVertical = offsetAng and (math.abs(math.NormalizeAngle(offsetAng.x)) > 45 or math.abs(
+        -- Pitch
+        math.NormalizeAngle(offsetAng.y)) > 45 or math.abs(
+        -- Yaw
+        math.NormalizeAngle(offsetAng.z)) > 45) or false
+
+    -- Roll
+    DebugPrint("GetModelRadius: offsetAng=%s, isVertical=%s (pitch=%.2f, yaw=%.2f, roll=%.2f)", tostring(offsetAng), tostring(isVertical), offsetAng and math.abs(math.NormalizeAngle(offsetAng.x)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.y)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.z)) or 0)
+    if modelCache[modelPath] and modelCache[modelPath].computed then
+        local cache = modelCache[modelPath]
+        DebugPrint("GetModelRadius: Cache found for %s, cached isVertical=%s", modelPath, tostring(cache.isVertical))
+        if isVertical ~= cache.isVertical then
+            DebugPrint("GetModelRadius: Alignment mismatch (isVertical=%s, cache.isVertical=%s), recalculating mins/maxs", tostring(isVertical), tostring(cache.isVertical))
+            local mins, maxs = ApplyBoxFromRadius(cache.radius, isVertical)
+            return cache.radius, cache.reach, mins, maxs, ang
+        end
+        return cache.radius, cache.reach, cache.mins, cache.maxs, ang
+    end
+
+    DebugPrint("GetModelRadius: No cache for %s, scheduling computation", modelPath)
+    if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
+        pending[modelPath] = {
+            attempts = 0
+        }
+
+        timer.Simple(0, function() vrmod.utils.ComputePhysicsRadius(modelPath) end)
+    end
+    return DEFAULT_RADIUS, DEFAULT_REACH, DEFAULT_MINS, DEFAULT_MAXS, ang
+end
+
+function vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
+    local model = cl_effectmodel:GetString()
+    local offsetAng = DEFAULT_ANGLES
+    if hand == "right" then
+        local class, vm = vrmod.utils.WepInfo(wep)
+        if not class or not vm then return vrmod.utils.GetModelRadius(model, ply, offsetAng) end
+        model = vm
+        --local class = wep:GetClass()
+        local vmInfo = g_VR.viewModelInfo[class]
+        offsetAng = vmInfo and vmInfo.offsetAng or DEFAULT_ANGLES
+        return vrmod.utils.GetModelRadius(model, ply, offsetAng)
+    else
+        return vrmod.utils.GetModelRadius(model, ply, offsetAng)
+    end
+end
+
+function vrmod.utils.MeleeFilter(ent, ply, hand)
+    if not IsValid(ent) then return true end
+    if ent:GetNWBool("isVRHand", false) then return false end
+    if IsMagazine(ent) then return false end
+    if IsValid(ply) and (hand == "left" or hand == "right") then
+        local held = vrmod.GetHeldEntity(ply, hand)
+        if IsValid(held) and held == ent then return false end
+    end
+    return true
+end
+
 if SERVER then
+    -- NPC2RAG
+    local trackedRagdolls = {}
     function vrmod.utils.ForwardRagdollDamage(ent, dmginfo)
-        if not (ent:IsRagdoll() and IsValid(ent.original_npc)) then return end
-        local npc = ent.original_npc
+        if not (ent:IsRagdoll() and trackedRagdolls[ent]) then return end
+        local npc = trackedRagdolls[ent]
+        if not IsValid(npc) then
+            trackedRagdolls[ent] = nil
+            return
+        end
+
         local dmg = dmginfo:GetDamage()
         npc:SetHealth(math.max(0, npc:Health() - dmg))
         local force = dmginfo:GetDamageForce() or Vector(0, 0, 0)
@@ -18,9 +224,9 @@ if SERVER then
         end
     end
 
+    if not hook.GetTable()["EntityTakeDamage"]["VRMod_ForwardRagdollDamage"] then hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", function(ent, dmginfo) vrmod.utils.ForwardRagdollDamage(ent, dmginfo) end) end
     function vrmod.utils.SpawnPickupRagdoll(npc)
         if not IsValid(npc) then return end
-        -- 1) Create the ragdoll immediately
         local rag = ents.Create("prop_ragdoll")
         if not IsValid(rag) then return end
         rag:SetModel(npc:GetModel())
@@ -29,7 +235,6 @@ if SERVER then
         rag:SetAngles(npc:GetAngles())
         rag:Spawn()
         rag:Activate()
-        -- 2) Copy bones in a next-tick timer
         timer.Simple(0, function()
             if not (IsValid(npc) and IsValid(rag)) then return end
             if npc.SetupBones then npc:SetupBones() end
@@ -47,28 +252,24 @@ if SERVER then
             end
         end)
 
-        -- 3) Fully disable & hide the original NPC
         rag.original_npc = npc
         rag.dropped_manually = false
-        hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", vrmod.utils.ForwardRagdollDamage)
+        trackedRagdolls[rag] = npc
         npc:SetNoDraw(true)
         npc:SetNotSolid(true)
         npc:SetMoveType(MOVETYPE_NONE)
         npc:SetCollisionGroup(COLLISION_GROUP_VEHICLE)
         npc:ClearSchedule()
         if npc.StopMoving then npc:StopMoving() end
-        -- **Silence AI & thinking completely**
-        npc:AddEFlags(EFL_NO_THINK_FUNCTION) -- stops Think() calls
+        npc:AddEFlags(EFL_NO_THINK_FUNCTION)
         if npc.SetNPCState then npc:SetNPCState(NPC_STATE_NONE) end
-        npc:SetSaveValue("m_bInSchedule", false) -- stop any running schedule
+        npc:SetSaveValue("m_bInSchedule", false)
         if npc.GetActiveWeapon and IsValid(npc:GetActiveWeapon()) then npc:GetActiveWeapon():Remove() end
-        -- 4) On rag removal, restore or remove the NPC
         rag:CallOnRemove("vrmod_cleanup_npc_" .. rag:EntIndex(), function()
+            trackedRagdolls[rag] = nil
             if not IsValid(npc) then return end
-            -- re-enable thinking
             npc:RemoveEFlags(EFL_NO_THINK_FUNCTION)
             if rag.dropped_manually then
-                -- Restore NPC at rag’s last pose
                 local p, a = rag:GetPos(), rag:GetAngles()
                 npc:SetPos(p)
                 npc:SetAngles(a)
@@ -80,16 +281,12 @@ if SERVER then
                 npc:SetSaveValue("m_bInSchedule", false)
                 if npc.SetNPCState then npc:SetNPCState(NPC_STATE_ALERT) end
                 npc:DropToFloor()
-                -- Restart thinking/AI
                 if npc.BehaveStart then pcall(npc.BehaveStart, npc) end
                 npc:SetSchedule(SCHED_IDLE_STAND)
                 npc:NextThink(CurTime())
             else
-                -- Rag was gibbed: kill the NPC too
                 npc:Remove()
             end
-
-            hook.Remove("EntityTakeDamage", "VRMod_ForwardRagdollDamage")
         end)
         return rag
     end
@@ -126,4 +323,10 @@ if SERVER then
         -- No evidence of gibbing
         return false
     end
+
+    timer.Create("VRMod_Cleanup_DeadRagdolls", 60, 0, function()
+        for rag, npc in pairs(trackedRagdolls) do
+            if not IsValid(rag) or not IsValid(npc) then trackedRagdolls[rag] = nil end
+        end
+    end)
 end
