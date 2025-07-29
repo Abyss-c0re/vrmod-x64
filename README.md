@@ -1,4 +1,4 @@
-## **VRMod x64 Build – All-In-One Package with Linux Support**
+## **GarrysMod VRMod x64 – Extended**
 
 ![VRmodX64-JayPegged](https://github.com/user-attachments/assets/d08e80cd-b8e6-4348-b56d-70e2e79fa8a6)
 
