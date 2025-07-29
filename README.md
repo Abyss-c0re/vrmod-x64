@@ -10,9 +10,29 @@ This build focuses on **optimization** by merging essential features from semi-o
 
 ### ✅ Key Features
 
-- Integrated collision physics, melee system, manual pickup, and interactive buttons
-- Fixed rendering and shader issues on Linux (native x64 build)
-- Fully compatible with Windows (x64)
+- Refactored codebase for improved stability and cross-platform compatibility  
+- Fixed rendering issues on Linux (native x64 builds)  
+- Fully supported on Windows (both x64 and Legacy branches)  
+- Improved UI with new rendering settings  
+- Cursor stability fixed in spawn menu and popups  
+- Better performance and reduced latency across systems  
+- Integrated hand collision physics (no more unintended prop sounds)  
+- Rewritten pickup system:  
+    - Manual item pickup  
+    - Multiplayer-friendly design  
+    - Adds halos for visual clarity
+    - Serverside weight limit   
+    - Clientside precalculation to reduce server load  
+    - Supports picking up NPCs  
+- Interactive world buttons with motion-based input  
+- Support for dropping and picking up non-VR weapons  
+- Melee system overhauled: trace-based with velocity-scaled damage + bonus for weapon impact  
+- Functional numpad input in VR  
+- Motion-controlled physgun: rotation and movement based on hand motion  
+- Gravity gun now supports prop rotation, just like HL2 VR  
+- UI now works correctly while in vehicles  
+  - (Bind left/right pickup actions in SteamVR to simulate mouse clicks inside vehicles)  
+- Likely more small fixes and improvements under the hood
 
 
 ### 📦 Installation
@@ -21,6 +41,7 @@ This build focuses on **optimization** by merging essential features from semi-o
 
 - Ensure your system supports **GMod x64**.
 - On native Linux, run the following script first:[GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
+- For trully native experience, use [Steam-Play-None](https://github.com/Scrumplex/Steam-Play-None)
 - Please note that only ALVR is now supported.
 
 **Installation:**
