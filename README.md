@@ -1,5 +1,8 @@
 ## **VRMod x64 Build – All-In-One Package with Linux Support**
 
+![VRmodX64-JayPegged](https://github.com/user-attachments/assets/d08e80cd-b8e6-4348-b56d-70e2e79fa8a6)
+
+
 ### ⚠️ Optimization Issues
 
 VRMod and its components—such as hand physics, melee attacks, and item interaction—are maintained by different authors. This often results in compatibility issues, broken features, or abandoned modules.
