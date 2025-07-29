@@ -49,7 +49,7 @@ This build focuses on **optimization** by merging essential features from semi-o
 
 **Installation:**
 
-1. Download the latest precompiled modules:[Releases Page](https://github.com/Abyss-c0re/vrmod-module-master/releases)
+1. Download the latest precompiled modules: [Releases Page](https://github.com/Abyss-c0re/vrmod-module-master/releases)
 2. Subscribe to the Workshop addon:
    [Steam Workshop – VRMod](https://steamcommunity.com/sharedfiles/filedetails/?id=3442302711)
 
