@@ -190,15 +190,52 @@ function vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
     end
 end
 
-function vrmod.utils.MeleeFilter(ent, ply, hand)
-    if not IsValid(ent) then return true end
+function vrmod.utils.HitFilter(ent, ply, hand)
+    if not IsValid(ent) then return false end
+    if ent == ply then return false end
     if ent:GetNWBool("isVRHand", false) then return false end
-    if IsMagazine(ent) then return false end
     if IsValid(ply) and (hand == "left" or hand == "right") then
         local held = vrmod.GetHeldEntity(ply, hand)
         if IsValid(held) and held == ent then return false end
     end
     return true
+end
+
+function vrmod.utils.MeleeFilter(ent, ply, hand)
+    if vrmod.utils.HitFilter(ent, ply, hand) and not IsMagazine(ent) then return true end
+end
+
+function vrmod.utils.TraceHand(ply, hand)
+    local startPos, ang, dir
+    if hand == "left" then
+        startPos = vrmod.GetLeftHandPos(ply)
+        ang = vrmod.GetLeftHandAng(ply)
+        local ang2 = Angle(ang.p, ang.y, ang.r + 180)
+        dir = ang2:Forward()
+    else
+        startPos = vrmod.GetRightHandPos(ply)
+        ang = vrmod.GetRightHandAng(ply)
+        dir = ang:Forward()
+    end
+
+    local ignore = {}
+    local maxDepth = 10
+    for i = 1, maxDepth do
+        local tr = util.TraceLine({
+            start = startPos,
+            endpos = startPos + dir * 32768,
+            filter = ignore
+        })
+
+        if not tr.Entity or not IsValid(tr.Entity) then return tr end
+        if vrmod.utils.HitFilter(tr.Entity, ply, hand) then
+            return tr
+        else
+            table.insert(ignore, tr.Entity)
+            startPos = tr.HitPos + dir * 1 -- Avoid infinite loops on same surface
+        end
+    end
+    return nil -- Nothing valid hit after maxDepth
 end
 
 if SERVER then
