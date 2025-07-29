@@ -1,7 +1,7 @@
--- vr_viewmodel_config.lua
+g_VR = g_VR or {}
+g_VR.viewModelInfo = g_VR.viewModelInfo or {}
 if CLIENT then
 	local CONFIG_PATH = "vrmod/vrmod_weapons_config.json"
-	g_VR.viewModelInfo = g_VR.viewModelInfo or {}
 	-- Default hardcoded offsets and overrides
 	local DEFAULT_VIEWMODEL_INFO = {
 		autoOffsetAddPos = Vector(1, 0.2, 0),
