@@ -35,8 +35,10 @@ local function netReadFrame()
 end
 
 local function buildClientFrame(relative)
+	local lp = LocalPlayer()
+	local inVehicle = lp:InVehicle()
 	local frame = {
-		characterYaw = LocalPlayer():InVehicle() and LocalPlayer():GetAngles().yaw or g_VR.characterYaw,
+		characterYaw = inVehicle and lp:GetAngles().yaw or g_VR.characterYaw,
 		hmdPos = g_VR.tracking.hmd.pos,
 		hmdAng = g_VR.tracking.hmd.ang,
 		lefthandPos = g_VR.tracking.pose_lefthand.pos,
@@ -65,7 +67,8 @@ local function buildClientFrame(relative)
 	end
 
 	if relative then
-		local plyPos, plyAng = LocalPlayer():GetPos(), LocalPlayer():InVehicle() and LocalPlayer():GetVehicle():GetAngles() or Angle()
+		local plyPos = lp:GetPos()
+		local plyAng = inVehicle and lp:GetVehicle():GetAngles() or Angle()
 		frame.hmdPos, frame.hmdAng = WorldToLocal(frame.hmdPos, frame.hmdAng, plyPos, plyAng)
 		frame.lefthandPos, frame.lefthandAng = WorldToLocal(frame.lefthandPos, frame.lefthandAng, plyPos, plyAng)
 		frame.righthandPos, frame.righthandAng = WorldToLocal(frame.righthandPos, frame.righthandAng, plyPos, plyAng)
