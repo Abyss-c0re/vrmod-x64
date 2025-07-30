@@ -1,42 +1,19 @@
 g_VR = g_VR or {}
 vrmod = vrmod or {}
+local debugPrintedClasses = {}
 scripted_ents.Register({
 	Type = "anim",
 	Base = "vrmod_pickup"
 }, "vrmod_pickup")
 
 local blacklistedClasses = {
-	-- Physgun / Gravity Gun Beams
-	["physgun_beam"] = true,
-	["physcannon_beam"] = true,
-	["physcannon_laser"] = true,
-	-- Effects / Invisible entities
-	["env_sprite"] = true,
-	["env_projectedtexture"] = true,
-	["env_beam"] = true,
-	["env_smoketrail"] = true,
-	["env_spritetrail"] = true,
-	["env_fire"] = true,
-	["env_firesource"] = true,
-	["env_explosion"] = true,
-	["point_spotlight"] = true,
-	["light_dynamic"] = true,
-	["shadow_control"] = true,
-	-- Toolgun Effects
-	["gmod_tool"] = true,
-	["gmod_hoverball"] = true,
-	["gmod_camera"] = true,
-	-- Scripted Weapon Auxiliary Entities (common examples)
-	["sent_turret"] = true,
 	["npc_turret_floor"] = true,
-	-- Misc Helpers
-	["class C_BaseFlex"] = true, -- base for some clientside models; exclude if needed
-	-- Particle effects and decals (if ever created as entities)
 	["info_particle_system"] = true,
-	-- Viewmodels (usually clientside)
+	["class C_BaseFlex"] = true,
 	["class C_BaseViewModel"] = true,
 }
 
+local blacklistedPatterns = {"beam", "laser", "sprite", "env_", "fire", "trail", "spotlight", "projectedtexture", "shadow",}
 local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber)
@@ -71,12 +48,37 @@ local function CanPickupEntity(v, ply, cv)
 	return true
 end
 
-local function IsValidPickupTarget(ent, ply, bLeftHand)
-	if not IsValid(ent) then return false end
-	if ent:GetNoDraw() then return false end
-	if ent:IsDormant() then return false end
+local function IsNonPickupable(ent)
+	if not IsValid(ent) then return true end
 	local class = ent:GetClass()
-	if blacklistedClasses[class] then return false end
+	local model = ent:GetModel() or ""
+	-- Static blacklist
+	if blacklistedClasses[class] then return true end
+	-- Pattern-based class filter
+	for _, pattern in ipairs(blacklistedPatterns) do
+		if class:find(pattern, 1, true) then return true end
+	end
+	if IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then return false end
+	local npcPickupAllowed = (convarValues and convarValues.vrmod_pickup_npcs or 0) >= 1
+	if npcPickupAllowed and (ent:IsNPC() or ent:IsNextBot()) then return false end
+	-- Final fallback: block non-physics objects
+	if ent:GetMoveType() ~= MOVETYPE_VPHYSICS then
+		if CLIENT and GetConVar("vrmod_pickup_debug"):GetBool() and not debugPrintedClasses[class] then
+			debugPrintedClasses[class] = true
+			print("[VRMod] DEBUG fallback: non-blacklisted non-physics entity")
+			print("  Class: " .. class)
+			print("  Model: " .. model)
+			print("  MoveType: " .. tostring(ent:GetMoveType()))
+			print("  Owner: " .. tostring(ent:GetOwner()))
+		end
+		return true
+	end
+	return false
+end
+
+local function IsValidPickupTarget(ent, ply, bLeftHand)
+	if not IsValid(ent) or ent:GetNoDraw() or ent:IsDormant() then return false end
+	if IsNonPickupable(ent) then return false end
 	if ent:GetNWBool("is_npc_ragdoll", false) then return false end
 	if bLeftHand and ent == g_VR.heldEntityLeft then return false end
 	if not bLeftHand and ent == g_VR.heldEntityRight then return false end
@@ -128,6 +130,7 @@ if CLIENT then
 	local haloTargetsLeft = {}
 	local haloTargetsRight = {}
 	vrmod.AddCallbackedConvar("vrmod_pickup_halos", nil, "1", FCVAR_REPLICATED + FCVAR_ARCHIVE + FCVAR_NOTIFY, "Toggle pickup halos", nil, nil, tobool, function(val) haloEnabled = val end)
+	vrmod.AddCallbackedConvar("vrmod_pickup_debug", nil, "0", FCVAR_ARCHIVE, "Enable debug prints for unfiltered pickup targets", 0, 1, tobool)
 	hook.Add("Tick", "vrmod_find_pickup_target", function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) then return end
@@ -168,19 +171,22 @@ if CLIENT then
 		if ShouldAddHalo(pickupTargetEntRight) then haloTargetsRight[#haloTargetsRight + 1] = pickupTargetEntRight end
 	end)
 
-	hook.Add("PreDrawHalos", "vrmod_render_pickup_halo", function()
+	hook.Add("PostDrawOpaqueRenderables", "vrmod_draw_pickup_halo", function()
 		if not haloEnabled then return end
-		if #haloTargetsLeft > 0 then halo.Add(haloTargetsLeft, Color(255, 100, 0), 2, 2, 1, true, true) end
-		if #haloTargetsRight > 0 then
-			halo.Add(haloTargetsRight, Color(0, 255, 255), 2, 2, 1, true, true)
-			-- for i, ent in ipairs(haloTargetsRight) do
-			-- 	if IsValid(ent) then
-			-- 		print(string.format("Halo Target %d: Class=%s Model=%s Owner=%s", i, ent:GetClass() or "nil", ent:GetModel() or "nil", IsValid(ent:GetOwner()) and ent:GetOwner():Nick() or "none"))
-			-- 	else
-			-- 		print("Halo Target " .. i .. ": invalid entity")
-			-- 	end
-			-- end
+		table.Empty(haloTargetsLeft)
+		table.Empty(haloTargetsRight)
+		local ply = LocalPlayer()
+		local heldLeft, heldRight = g_VR.heldEntityLeft, g_VR.heldEntityRight
+		local holdingRagdoll = IsValid(heldLeft) and heldLeft:GetNWBool("is_npc_ragdoll", false) or IsValid(heldRight) and heldRight:GetNWBool("is_npc_ragdoll", false)
+		local function ShouldAddHalo(ent)
+			return IsValid(ent) and ent ~= heldLeft and ent ~= heldRight and not holdingRagdoll and IsValidPickupTarget(ent, ply, false)
 		end
+
+		if ShouldAddHalo(pickupTargetEntLeft) then haloTargetsLeft[#haloTargetsLeft + 1] = pickupTargetEntLeft end
+		if ShouldAddHalo(pickupTargetEntRight) then haloTargetsRight[#haloTargetsRight + 1] = pickupTargetEntRight end
+		-- This was missing
+		if #haloTargetsLeft > 0 then halo.Add(haloTargetsLeft, Color(250, 100, 0), 1, 1, 1, true, true) end
+		if #haloTargetsRight > 0 then halo.Add(haloTargetsRight, Color(0, 255, 255), 1, 1, 1, true, true) end
 	end)
 
 	function vrmod.Pickup(bLeftHand, bDrop)
@@ -348,7 +354,6 @@ if SERVER then
 			handAng = vrmod.GetRightHandAng(ply)
 			tr = vrmod.utils.TraceHand(ply, "right")
 		end
-
 
 		-- For ragdolls, store local offsets per physics bone relative to hand pose
 		if ent:GetClass() == "prop_ragdoll" then
