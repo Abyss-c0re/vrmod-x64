@@ -58,6 +58,7 @@ local function IsNonPickupable(ent)
 	for _, pattern in ipairs(blacklistedPatterns) do
 		if class:find(pattern, 1, true) then return true end
 	end
+
 	if IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then return false end
 	local npcPickupAllowed = (convarValues and convarValues.vrmod_pickup_npcs or 0) >= 1
 	if npcPickupAllowed and (ent:IsNPC() or ent:IsNextBot()) then return false end
@@ -265,6 +266,14 @@ if SERVER then
 	local pickupController, pickupList, pickupCount = nil, {}, 0
 	-- Drop function
 	function vrmod.Drop(steamid, bLeft)
+		local function SendPickupNetMsg(ply, ent)
+			net.Start("vrmod_pickup")
+			net.WriteEntity(ply)
+			net.WriteEntity(IsValid(ent) and ent or NULL)
+			net.WriteBool(true)
+			net.Broadcast()
+		end
+
 		for i = 1, pickupCount do
 			local t = pickupList[i]
 			if t.steamid == steamid and t.left == bLeft then
@@ -272,34 +281,19 @@ if SERVER then
 				if IsValid(pickupController) and IsValid(t.phys) then pickupController:RemoveFromMotionController(t.phys) end
 				if IsValid(ent) and ent.original_npc then
 					local npc = ent.original_npc
-					if IsValid(npc) and not vrmod.utils.IsRagdollGibbed(ent) then
+					if IsValid(npc) and not vrmod.utils.IsRagdollDead(ent) then
 						ent.dropped_manually = true
-						timer.Simple(0.5, function()
-							for i = 0, ent:GetPhysicsObjectCount() - 1 do
-								local phys = ent:GetPhysicsObjectNum(i)
-								if not IsValid(phys) then continue end
-								phys:EnableMotion(true)
-								phys:SetMass(50)
-								phys:SetDamping(0, 0)
-								phys:Wake()
-							end
-						end)
-
-						timer.Simple(0.5, function() if IsValid(ent) then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end end)
-						timer.Simple(2.0, function() if IsValid(ent) then ent:Remove() end end)
-						net.Start("vrmod_pickup")
-						net.WriteEntity(t.ply)
-						net.WriteEntity(npc)
-						net.WriteBool(true)
-						net.Broadcast()
+						local cache = vrmod.HandVelocityCache[steamid]
+						local handVel = bLeft and cache.leftVel or cache.rightVel or Vector(0, 0, 0)
+						ent.noDamage = true --preventing damage by the mass increase
+						vrmod.utils.SetBoneMass(ent, 300, 0, handVel, 5)
+						timer.Simple(0.1, function() if IsValid(ent) then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end end)
+						SendPickupNetMsg(t.ply, npc)
+						timer.Simple(3.0, function() if not vrmod.utils.IsRagdollDead(ent) then ent:Remove() end end)
 					else
 						ent.dropped_manually = false
 						if IsValid(ent) then ent:SetNWBool("is_npc_ragdoll", false) end
-						net.Start("vrmod_pickup")
-						net.WriteEntity(t.ply)
-						net.WriteEntity(IsValid(ent) and ent or NULL)
-						net.WriteBool(true)
-						net.Broadcast()
+						SendPickupNetMsg(t.ply, ent)
 					end
 				elseif IsValid(ent) then
 					ent:SetCollisionGroup(COLLISION_GROUP_NONE)
@@ -310,22 +304,15 @@ if SERVER then
 						t.phys:Wake()
 					end
 
-					net.Start("vrmod_pickup")
-					net.WriteEntity(t.ply)
-					net.WriteEntity(ent)
-					net.WriteBool(true)
-					net.Broadcast()
+					SendPickupNetMsg(t.ply, ent)
 				else
-					net.Start("vrmod_pickup")
-					net.WriteEntity(t.ply)
-					net.WriteEntity(NULL)
-					net.WriteBool(true)
-					net.Broadcast()
+					SendPickupNetMsg(t.ply, nil)
 				end
 
 				if g_VR[steamid] and g_VR[steamid].heldItems then g_VR[steamid].heldItems[bLeft and 1 or 2] = nil end
 				table.remove(pickupList, i)
 				pickupCount = pickupCount - 1
+				if IsValid(ent) then ent.picked = false end
 				if pickupCount == 0 and IsValid(pickupController) then
 					pickupController:StopMotionController()
 					pickupController:Remove()
@@ -344,15 +331,16 @@ if SERVER then
 		if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[bLeftHand and 1 or 2] then return end
 		if not IsValid(ent) or not CanPickupEntity(ent, ply, convarValues) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then return end
 		if ent:IsNPC() then ent = vrmod.utils.SpawnPickupRagdoll(ent) end
-		local handPos, handAng, tr
+		ent.picked = true
+		local handPos, handAng
 		if bLeftHand then
 			handPos = vrmod.GetLeftHandPos(ply)
 			handAng = vrmod.GetLeftHandAng(ply)
-			tr = vrmod.utils.TraceHand(ply, "left")
+			--tr = vrmod.utils.TraceHand(ply, "left")
 		else
 			handPos = vrmod.GetRightHandPos(ply)
 			handAng = vrmod.GetRightHandAng(ply)
-			tr = vrmod.utils.TraceHand(ply, "right")
+			--tr = vrmod.utils.TraceHand(ply, "right")
 		end
 
 		-- For ragdolls, store local offsets per physics bone relative to hand pose
@@ -377,12 +365,12 @@ if SERVER then
 			pickupController = ents.Create("vrmod_pickup")
 			pickupController.ShadowParams = {
 				secondstoarrive = engine.TickInterval(),
-				maxangular = 5000,
-				maxangulardamp = 5000,
-				maxspeed = 1e6,
-				maxspeeddamp = 1e4,
-				dampfactor = 0.05,
-				teleportdistance = 1,
+				maxangular = 3000,
+				maxangulardamp = 3000,
+				maxspeed = 3000,
+				maxspeeddamp = 300,
+				dampfactor = 0.5,
+				teleportdistance = 100,
 				deltatime = 0
 			}
 
@@ -440,28 +428,13 @@ if SERVER then
 		end
 
 		if index > pickupCount then
-			timer.Simple(0, function()
-				pickupCount = pickupCount + 1
-				local phys = ent:GetPhysicsObject()
-				if IsValid(phys) then
-					--pickupController:AddToMotionController(phys)
-					if ent:GetClass() == "prop_ragdoll" then
-						timer.Simple(0, function()
-							for i = 0, ent:GetPhysicsObjectCount() - 1 do
-								local p = ent:GetPhysicsObjectNum(i)
-								if IsValid(p) then
-									p:SetMass(10) -- lighter for grabbing
-									p:SetDamping(5, 5) -- high damping to stop swing
-									p:Wake()
-								end
-							end
-						end)
-					end
-
-					pickupController:AddToMotionController(phys)
-					phys:Wake()
-				end
-			end)
+			pickupCount = pickupCount + 1
+			if ent:GetClass() == "prop_ragdoll" then vrmod.utils.SetBoneMass(ent, 15, 0.5) end
+			local phys = ent:GetPhysicsObject()
+			if IsValid(phys) then
+				pickupController:AddToMotionController(phys)
+				phys:Wake()
+			end
 		end
 
 		-- For non-ragdoll, store localPos/localAng relative to hand pose for entity root

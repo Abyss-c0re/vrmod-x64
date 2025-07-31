@@ -269,8 +269,37 @@ end
 if SERVER then
     -- NPC2RAG
     local trackedRagdolls = trackedRagdolls or {}
+    local lastDamageTime = {}
+    function vrmod.utils.SetBoneMass(ent, mass, damp, vel, angvel, resetmotion, delay)
+        if not IsValid(ent) or not IsValid(ent:GetPhysicsObject()) then return end
+        if not delay then delay = 0 end
+        timer.Simple(delay, function()
+            for i = 0, ent:GetPhysicsObjectCount() - 1 do
+                local phys = ent:GetPhysicsObjectNum(i)
+                if not IsValid(phys) then continue end
+                if resetmotion then
+                    phys:EnableMotion(false)
+                else
+                    phys:EnableMotion(true)
+                end
+
+                phys:SetMass(mass)
+                phys:SetDamping(damp, damp)
+                if vel then phys:SetVelocity(vel) end
+                if angvel then phys:AddAngleVelocity(VectorRand() * angvel) end
+                phys:EnableGravity(true)
+                phys:Wake()
+            end
+        end)
+    end
+
     function vrmod.utils.ForwardRagdollDamage(ent, dmginfo)
         if not (ent:IsRagdoll() and trackedRagdolls[ent]) then return end
+        if ent.noDamage then return end
+        local now = CurTime()
+        local last = lastDamageTime[ent] or 0
+        if now - last < 1 then return end
+        lastDamageTime[ent] = now
         local npc = trackedRagdolls[ent]
         if not IsValid(npc) then
             trackedRagdolls[ent] = nil
@@ -279,6 +308,7 @@ if SERVER then
 
         local dmg = dmginfo:GetDamage()
         npc:SetHealth(math.max(0, npc:Health() - dmg))
+        --Apply force to ragdoll
         local force = dmginfo:GetDamageForce() or Vector()
         if not force:IsZero() then
             for i = 0, ent:GetPhysicsObjectCount() - 1 do
@@ -300,42 +330,6 @@ if SERVER then
         rag:SetNWBool("is_npc_ragdoll", true)
         rag:Spawn()
         rag:Activate()
-        -- Pose and weight configuration
-        timer.Simple(0, function()
-            if not (IsValid(npc) and IsValid(rag)) then return end
-            if npc.SetupBones then npc:SetupBones() end
-            for i = 0, rag:GetPhysicsObjectCount() - 1 do
-                local phys = rag:GetPhysicsObjectNum(i)
-                if not IsValid(phys) then continue end
-                local bone = rag:TranslatePhysBoneToBone(i)
-                if bone and bone >= 0 then
-                    local pos, ang = npc:GetBonePosition(bone)
-                    if pos and ang then
-                        phys:SetPos(pos)
-                        phys:SetAngles(ang)
-                    end
-                end
-
-                phys:SetVelocityInstantaneous(Vector(0, 0, 0))
-                phys:SetMass(1)
-                phys:SetDamping(5, 5)
-                phys:EnableMotion(false)
-                phys:Wake()
-            end
-
-            --Unlock motion shortly after to allow ragdoll to fall
-            timer.Simple(0.1, function()
-                if not IsValid(rag) then return end
-                for i = 0, rag:GetPhysicsObjectCount() - 1 do
-                    local phys = rag:GetPhysicsObjectNum(i)
-                    if IsValid(phys) then
-                        phys:EnableMotion(true)
-                        phys:Wake()
-                    end
-                end
-            end)
-        end)
-
         -- Register tracking + AI disable
         trackedRagdolls[rag] = npc
         rag.original_npc = npc
@@ -350,6 +344,26 @@ if SERVER then
         if npc.SetNPCState then npc:SetNPCState(NPC_STATE_NONE) end
         npc:SetSaveValue("m_bInSchedule", false)
         if npc.GetActiveWeapon and IsValid(npc:GetActiveWeapon()) then npc:GetActiveWeapon():Remove() end
+        rag:AddCallback("PhysicsCollide", function(self, data)
+            if rag.picked then return end
+            local impactVel = data.OurOldVelocity.z
+            local speed = math.abs(impactVel)
+            local threshold = 250
+            if speed > threshold then
+                local damage = speed - threshold
+                local dmginfo = DamageInfo()
+                dmginfo:SetDamage(math.abs(damage))
+                dmginfo:SetDamageType(DMG_FALL)
+                dmginfo:SetAttacker(game.GetWorld())
+                dmginfo:SetInflictor(game.GetWorld())
+                dmginfo:SetDamageForce(Vector(0, 0, -speed * 100))
+                vrmod.utils.SetBoneMass(rag, 50, 25, nil, nil, true)
+                vrmod.utils.SetBoneMass(rag, 50, 0.5, nil, nil, false, 0.01)
+                rag.noDamage = false
+                vrmod.utils.ForwardRagdollDamage(rag, dmginfo)
+            end
+        end)
+
         -- Handle cleanup & respawn logic
         rag:CallOnRemove("vrmod_cleanup_npc_" .. rag:EntIndex(), function()
             trackedRagdolls[rag] = nil
@@ -373,15 +387,26 @@ if SERVER then
                 npc:Remove()
             end
         end)
+
+        -- Monitor for gibbing in a Think hook
+        hook.Add("Think", "VRMod_MonitorRagdollGibbing_" .. rag:EntIndex(), function()
+            if not IsValid(rag) then
+                hook.Remove("Think", "VRMod_MonitorRagdollGibbing_" .. rag:EntIndex())
+                return
+            end
+
+            if vrmod.utils.IsRagdollGibbed(rag) then
+                print("Ragdoll gibbed during runtime, removing")
+                rag:Remove()
+                hook.Remove("Think", "VRMod_MonitorRagdollGibbing_" .. rag:EntIndex())
+            end
+        end)
         return rag
     end
 
     function vrmod.utils.IsRagdollGibbed(ent)
-        -- 0) Missing or invalid entity → treat as gibbed
+        -- 1) Missing or invalid entity → treat as gibbed
         if not IsValid(ent) then return true end
-        -- 0) Zero HP is gibbed too
-        local npc = ent.original_npc
-        if IsValid(npc) and npc:Health() <= 0 then return true end
         -- 2) Look for Zippy’s health table, only if it exists
         local hpTable = ent.ZippyGoreMod3_PhysBoneHPs
         if type(hpTable) == "table" then
@@ -407,6 +432,13 @@ if SERVER then
         end
         -- No evidence of gibbing
         return false
+    end
+
+    function vrmod.utils.IsRagdollDead(ent)
+        if not IsValid(ent) then return true end
+        local npc = ent.original_npc
+        if IsValid(npc) and npc:Health() <= 0 then return true end
+        return vrmod.utils.IsRagdollGibbed(ent)
     end
 
     timer.Create("VRMod_Cleanup_DeadRagdolls", 60, 0, function()
