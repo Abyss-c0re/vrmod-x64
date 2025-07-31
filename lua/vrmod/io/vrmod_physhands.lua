@@ -105,6 +105,7 @@ local function RemoveVRHands(ply)
 end
 
 hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
+    if not g_VR.active then return end
     local hands = vrHands[ply]
     if not hands or not hands.right or not hands.left then
         RemoveVRHands(ply)
