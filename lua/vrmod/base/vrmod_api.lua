@@ -138,9 +138,13 @@ if CLIENT then
 		return g_VR.threePoints and g_VR.tracking.pose_lefthand.angvel or Vector()
 	end
 
+	function vrmod.GetLeftHandVelocityRelative()
+		return g_VR.tracking.pose_lefthand.vel - g_VR.tracking.hmd.vel
+	end
+
 	function vrmod.GetLeftHandVelocities()
-		if g_VR.threePoints then return g_VR.tracking.pose_lefthand.vel, g_VR.tracking.pose_lefthand.angvel end
-		return Vector(), Vector()
+		if g_VR.threePoints then return g_VR.tracking.pose_lefthand.vel, g_VR.tracking.pose_lefthand.angvel, GetLeftHandVelocityRelative() end
+		return Vector(), Vector(), Vector()
 	end
 
 	function vrmod.GetRightHandPos(ply)
@@ -167,9 +171,13 @@ if CLIENT then
 		return g_VR.threePoints and g_VR.tracking.pose_righthand.angvel or Vector()
 	end
 
+	function vrmod.GetRightHandVelocityRelative()
+		return g_VR.tracking.pose_righthand.vel - g_VR.tracking.hmd.vel
+	end
+
 	function vrmod.GetRightHandVelocities()
-		if g_VR.threePoints then return g_VR.tracking.pose_righthand.vel, g_VR.tracking.pose_righthand.angvel end
-		return Vector(), Vector()
+		if g_VR.threePoints then return g_VR.tracking.pose_righthand.vel, g_VR.tracking.pose_righthand.angvel, vrmod.GetRightHandVelocityRelative() end
+		return Vector(), Vector(), Vector()
 	end
 
 	function vrmod.SetLeftHandPose(pos, ang)
@@ -489,6 +497,7 @@ if CLIENT then
 		return g_VR.active and VRMOD_GetTrackedDeviceNames and VRMOD_GetTrackedDeviceNames() or {}
 	end
 elseif SERVER then
+	vrmod.HandVelocityCache = vrmod.HandVelocityCache or {}
 	function vrmod.NetReceiveLimited(msgName, maxCountPerSec, maxLen, callback)
 		local msgCounts = {}
 		net.Receive(msgName, function(len, ply)
@@ -505,10 +514,12 @@ elseif SERVER then
 	end
 
 	function vrmod.IsPlayerInVR(ply)
+		if not IsValid(ply) then return end
 		return g_VR[ply:SteamID()] ~= nil
 	end
 
 	function vrmod.UsingEmptyHands(ply)
+		if not IsValid(ply) then return end
 		local wep = ply:GetActiveWeapon()
 		return IsValid(wep) and wep:GetClass() == "weapon_vrmod_empty" or false
 	end
@@ -524,8 +535,8 @@ elseif SERVER then
 		return nil
 	end
 
-	vrmod.HandVelocityCache = vrmod.HandVelocityCache or {}
 	local function UpdateWorldPoses(ply, playerTable)
+		if not IsValid(ply) then return end
 		if not playerTable.latestFrameWorld or playerTable.latestFrameWorld.tick ~= engine.TickCount() then
 			playerTable.latestFrameWorld = playerTable.latestFrameWorld or {}
 			local lf = playerTable.latestFrame
@@ -569,6 +580,7 @@ elseif SERVER then
 	end
 
 	function vrmod.GetHMDPos(ply)
+		if not IsValid(ply) then return end
 		local playerTable = g_VR[ply:SteamID()]
 		if not (playerTable and playerTable.latestFrame) then return Vector() end
 		UpdateWorldPoses(ply, playerTable)
@@ -576,6 +588,7 @@ elseif SERVER then
 	end
 
 	function vrmod.GetHMDAng(ply)
+		if not IsValid(ply) then return end
 		local playerTable = g_VR[ply:SteamID()]
 		if not (playerTable and playerTable.latestFrame) then return Angle() end
 		UpdateWorldPoses(ply, playerTable)
@@ -583,73 +596,15 @@ elseif SERVER then
 	end
 
 	function vrmod.GetHMDPose(ply)
+		if not IsValid(ply) then return end
 		local playerTable = g_VR[ply:SteamID()]
 		if not (playerTable and playerTable.latestFrame) then return Vector(), Angle() end
 		UpdateWorldPoses(ply, playerTable)
 		return playerTable.latestFrameWorld.hmdPos, playerTable.latestFrameWorld.hmdAng
 	end
 
-	function vrmod.GetLeftHandPos(ply)
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.lefthandPos
-	end
-
-	function vrmod.GetLeftHandAng(ply)
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.lefthandAng
-	end
-
-	function vrmod.GetLeftHandPose(ply)
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector(), Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.lefthandPos, playerTable.latestFrameWorld.lefthandAng
-	end
-
-	function vrmod.GetRightHandPos(ply)
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.righthandPos
-	end
-
-	function vrmod.GetRightHandAng(ply)
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.righthandAng
-	end
-
-	function vrmod.GetRightHandPose(ply)
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector(), Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.righthandPos, playerTable.latestFrameWorld.righthandAng
-	end
-
-	function vrmod.GetLeftHandVelocity(ply)
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
-		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
-		end
-		return cache and cache.leftVel or Vector()
-	end
-
-	function vrmod.GetRightHandVelocity(ply)
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
-		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
-		end
-		return cache and cache.rightVel or Vector()
-	end
-
 	function vrmod.GetHMDVelocity(ply)
+		if not IsValid(ply) then return end
 		local cache = vrmod.HandVelocityCache[ply:SteamID()]
 		if not cache then
 			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
@@ -658,19 +613,90 @@ elseif SERVER then
 		return cache and cache.hmdVel or Vector()
 	end
 
+	function vrmod.GetLeftHandPos(ply)
+		if not IsValid(ply) then return end
+		local playerTable = g_VR[ply:SteamID()]
+		if not (playerTable and playerTable.latestFrame) then return Vector() end
+		UpdateWorldPoses(ply, playerTable)
+		return playerTable.latestFrameWorld.lefthandPos
+	end
+
+	function vrmod.GetLeftHandAng(ply)
+		if not IsValid(ply) then return end
+		local playerTable = g_VR[ply:SteamID()]
+		if not (playerTable and playerTable.latestFrame) then return Angle() end
+		UpdateWorldPoses(ply, playerTable)
+		return playerTable.latestFrameWorld.lefthandAng
+	end
+
+	function vrmod.GetLeftHandPose(ply)
+		if not IsValid(ply) then return end
+		local playerTable = g_VR[ply:SteamID()]
+		if not (playerTable and playerTable.latestFrame) then return Vector(), Angle() end
+		UpdateWorldPoses(ply, playerTable)
+		return playerTable.latestFrameWorld.lefthandPos, playerTable.latestFrameWorld.lefthandAng
+	end
+
+	function vrmod.GetLeftHandVelocity(ply)
+		if not IsValid(ply) then return end
+		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not cache then
+			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
+			cache = vrmod.HandVelocityCache[ply:SteamID()]
+		end
+		return cache and cache.leftVel or Vector()
+	end
+
 	function vrmod.GetLeftHandVelocityRelative(ply)
+		if not IsValid(ply) then return end
 		local handVel = vrmod.GetLeftHandVelocity(ply)
 		local hmdVel = vrmod.GetHMDVelocity(ply)
 		return handVel - hmdVel
 	end
 
+	function vrmod.GetRightHandPos(ply)
+		if not IsValid(ply) then return end
+		local playerTable = g_VR[ply:SteamID()]
+		if not (playerTable and playerTable.latestFrame) then return Vector() end
+		UpdateWorldPoses(ply, playerTable)
+		return playerTable.latestFrameWorld.righthandPos
+	end
+
+	function vrmod.GetRightHandAng(ply)
+		if not IsValid(ply) then return end
+		local playerTable = g_VR[ply:SteamID()]
+		if not (playerTable and playerTable.latestFrame) then return Angle() end
+		UpdateWorldPoses(ply, playerTable)
+		return playerTable.latestFrameWorld.righthandAng
+	end
+
+	function vrmod.GetRightHandPose(ply)
+		if not IsValid(ply) then return end
+		local playerTable = g_VR[ply:SteamID()]
+		if not (playerTable and playerTable.latestFrame) then return Vector(), Angle() end
+		UpdateWorldPoses(ply, playerTable)
+		return playerTable.latestFrameWorld.righthandPos, playerTable.latestFrameWorld.righthandAng
+	end
+
+	function vrmod.GetRightHandVelocity(ply)
+		if not IsValid(ply) then return end
+		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not cache then
+			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
+			cache = vrmod.HandVelocityCache[ply:SteamID()]
+		end
+		return cache and cache.rightVel or Vector()
+	end
+
 	function vrmod.GetRightHandVelocityRelative(ply)
+		if not IsValid(ply) then return end
 		local handVel = vrmod.GetRightHandVelocity(ply)
 		local hmdVel = vrmod.GetHMDVelocity(ply)
 		return handVel - hmdVel
 	end
 
 	function vrmod.GetPullGestureStrength(ply, hand, targetPos)
+		if not IsValid(ply) then return end
 		local handPos = hand == "left" and vrmod.GetLeftHandPos(ply) or vrmod.GetRightHandPos(ply)
 		local relVel = hand == "left" and vrmod.GetLeftHandVelocityRelative(ply) or vrmod.GetRightHandVelocityRelative(ply)
 		local pullDir = (targetPos - handPos):GetNormalized()

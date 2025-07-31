@@ -4,7 +4,8 @@ g_VR.enhanced = true
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cv_meleeDebug = CreateConVar("vrmod_melee_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
+local cv_debug = CreateConVar("vrmod_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
+local cl_debug_collisions = CreateClientConVar("vrmod_debug_collisions", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local magCache = {}
 local modelCache = {}
 local pending = {}
@@ -13,11 +14,12 @@ local DEFAULT_REACH = 6.6
 local DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
 local DEFAULT_MAXS = Vector(0.75, 0.75, 11)
 local DEFAULT_ANGLES = Angle(0, 0, 0)
--- HELPERS
-local function DebugPrint(fmt, ...)
-    if cv_meleeDebug:GetBool() then print(string.format("[VRMod:][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
+--DEBUG
+function vrmod.utils.DebugPrint(fmt, ...)
+    if cv_debug:GetBool() then print(string.format("[VRMod:][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
 end
 
+-- HELPERS
 local function IsMagazine(ent)
     local class = ent:GetClass()
     if magCache[class] ~= nil then return magCache[class] end
@@ -33,11 +35,11 @@ local function ApplyBoxFromRadius(radius, isVertical)
     if isVertical then
         mins = Vector(-side, -side, -forward * 0.25)
         maxs = Vector(side, side, forward * 2.3)
-        DebugPrint("ApplyBoxFromRadius: radius %.2f | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
+        vrmod.utils.DebugPrint("ApplyBoxFromRadius: radius %.2f | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
     else
         mins = Vector(-forward * 0.35, -side, -side)
         maxs = Vector(forward * 2.3, side, side)
-        DebugPrint("ApplyBoxFromRadius: radius %.2f | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
+        vrmod.utils.DebugPrint("ApplyBoxFromRadius: radius %.2f | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
     end
     return mins, maxs, isVertical
 end
@@ -61,9 +63,9 @@ function vrmod.utils.WepInfo(wep)
 end
 
 -- MELEE UTILS
-function vrmod.utils.ComputePhysicsRadius(modelPath)
+function vrmod.utils.ComputePhysicsParams(modelPath)
     if not modelPath or modelPath == "" then
-        DebugPrint("Invalid or empty model path, caching defaults")
+        vrmod.utils.DebugPrint("Invalid or empty model path, caching defaults")
         modelCache[modelPath] = {
             radius = DEFAULT_RADIUS,
             reach = DEFAULT_REACH,
@@ -83,10 +85,10 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
         if baseName then
             local fallback = "models/weapons/w_" .. baseName .. ".mdl"
             if file.Exists(fallback, "GAME") then
-                DebugPrint("Replacing %s with valid worldmodel %s", modelPath, fallback)
+                vrmod.utils.DebugPrint("Replacing %s with valid worldmodel %s", modelPath, fallback)
                 modelPath = fallback
             else
-                DebugPrint("No valid fallback for %s (attempted %s), using defaults", modelPath, fallback)
+                vrmod.utils.DebugPrint("No valid fallback for %s (attempted %s), using defaults", modelPath, fallback)
                 modelCache[originalModelPath] = {
                     radius = DEFAULT_RADIUS,
                     reach = DEFAULT_REACH,
@@ -105,7 +107,7 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
     if modelCache[originalModelPath] and modelCache[originalModelPath].computed then return end
     -- Retry protection
     if pending[originalModelPath] and pending[originalModelPath].attempts >= 3 then
-        DebugPrint("Max retries reached for %s, caching defaults", originalModelPath)
+        vrmod.utils.DebugPrint("Max retries reached for %s, caching defaults", originalModelPath)
         modelCache[originalModelPath] = {
             radius = DEFAULT_RADIUS,
             reach = DEFAULT_REACH,
@@ -128,7 +130,7 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
     util.PrecacheModel(modelPath)
     local ent = CLIENT and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
     if not IsValid(ent) then
-        DebugPrint("Failed to spawn %s (attempt %d)", modelPath, pending[originalModelPath].attempts)
+        vrmod.utils.DebugPrint("Failed to spawn %s (attempt %d)", modelPath, pending[originalModelPath].attempts)
         pending[originalModelPath].lastAttempt = CurTime()
         return
     end
@@ -156,19 +158,19 @@ function vrmod.utils.ComputePhysicsRadius(modelPath)
                 computed = true
             }
 
-            DebugPrint("Computed radius for %s (actual: %s) → %.2f units", originalModelPath, modelPath, radius)
+            vrmod.utils.DebugPrint("Computed radius for %s (actual: %s) → %.2f units", originalModelPath, modelPath, radius)
         else
-            DebugPrint("Invalid AABB for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
+            vrmod.utils.DebugPrint("Invalid AABB for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
         end
     else
-        DebugPrint("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
+        vrmod.utils.DebugPrint("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
     end
 
     timer.Simple(0, function() if IsValid(ent) then ent:Remove() end end)
     pending[originalModelPath].lastAttempt = CurTime()
 end
 
-function vrmod.utils.GetModelRadius(modelPath, ply, offsetAng)
+function vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
     local ang = vrmod.GetRightHandAng(ply)
     -- Check for significant offset in any direction (pitch, yaw, or roll)
     local isVertical = offsetAng and (math.abs(math.NormalizeAngle(offsetAng.x)) > 45 or math.abs(
@@ -178,25 +180,27 @@ function vrmod.utils.GetModelRadius(modelPath, ply, offsetAng)
         math.NormalizeAngle(offsetAng.z)) > 45) or false
 
     -- Roll
-    DebugPrint("GetModelRadius: offsetAng=%s, isVertical=%s (pitch=%.2f, yaw=%.2f, roll=%.2f)", tostring(offsetAng), tostring(isVertical), offsetAng and math.abs(math.NormalizeAngle(offsetAng.x)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.y)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.z)) or 0)
+    vrmod.utils.DebugPrint("GetModelRadius: offsetAng=%s, isVertical=%s (pitch=%.2f, yaw=%.2f, roll=%.2f)", tostring(offsetAng), tostring(isVertical), offsetAng and math.abs(math.NormalizeAngle(offsetAng.x)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.y)) or 0, offsetAng and math.abs(math.NormalizeAngle(offsetAng.z)) or 0)
     if modelCache[modelPath] and modelCache[modelPath].computed then
         local cache = modelCache[modelPath]
-        DebugPrint("GetModelRadius: Cache found for %s, cached isVertical=%s", modelPath, tostring(cache.isVertical))
+        vrmod.utils.DebugPrint("GetModelRadius: Cache found for %s, cached isVertical=%s", modelPath, tostring(cache.isVertical))
         if isVertical ~= cache.isVertical then
-            DebugPrint("GetModelRadius: Alignment mismatch (isVertical=%s, cache.isVertical=%s), recalculating mins/maxs", tostring(isVertical), tostring(cache.isVertical))
+            vrmod.utils.DebugPrint("GetModelRadius: Alignment mismatch (isVertical=%s, cache.isVertical=%s), recalculating mins/maxs", tostring(isVertical), tostring(cache.isVertical))
             local mins, maxs = ApplyBoxFromRadius(cache.radius, isVertical)
+            --vrmod.utils.AddDebugShape(cache.radius, cache.reach, mins, maxs, ang)
             return cache.radius, cache.reach, mins, maxs, ang
         end
+        --vrmod.utils.AddDebugShape(cache.radius, cache.reach, cache.mins, cache.maxs, ang)
         return cache.radius, cache.reach, cache.mins, cache.maxs, ang
     end
 
-    DebugPrint("GetModelRadius: No cache for %s, scheduling computation", modelPath)
+    vrmod.utils.DebugPrint("GetModelRadius: No cache for %s, scheduling computation", modelPath)
     if not pending[modelPath] or pending[modelPath] and CurTime() - (pending[modelPath].lastAttempt or 0) > 1 then
         pending[modelPath] = {
             attempts = 0
         }
 
-        timer.Simple(0, function() vrmod.utils.ComputePhysicsRadius(modelPath) end)
+        timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(modelPath) end)
     end
     return DEFAULT_RADIUS, DEFAULT_REACH, DEFAULT_MINS, DEFAULT_MAXS, ang
 end
@@ -206,20 +210,38 @@ function vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
     local offsetAng = DEFAULT_ANGLES
     if hand == "right" then
         local class, vm = vrmod.utils.WepInfo(wep)
-        if not class or not vm then return vrmod.utils.GetModelRadius(model, ply, offsetAng) end
+        if not class or not vm then return vrmod.utils.GetModelParams(model, ply, offsetAng) end
         model = vm
         if CLIENT then
             local vmInfo = g_VR.viewModelInfo[class]
             offsetAng = vmInfo and vmInfo.offsetAng or DEFAULT_ANGLES
         end
-        return vrmod.utils.GetModelRadius(model, ply, offsetAng)
+        return vrmod.utils.GetModelParams(model, ply, offsetAng)
     else
-        return vrmod.utils.GetModelRadius(model, ply, offsetAng)
+        return vrmod.utils.GetModelParams(model, ply, offsetAng)
     end
+end
+
+function vrmod.utils.GetCachedWeaponParams(wep, ply, side)
+    local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
+    local function Retry()
+        timer.Simple(0, function() vrmod.utils.GetCachedWeaponParams(wep, ply, side) end)
+    end
+
+    if vrmod.utils.IsValidWep(wep) then
+        if radius == DEFAULT_RADIUS and reach == DEFAULT_RADIUS and mins == DEFAULT_MINS then
+            Retry()
+            return
+        end
+    else
+        return DEFAULT_RADIUS, DEFAULT_REACH
+    end
+    return radius, reach, mins, maxs, angles
 end
 
 function vrmod.utils.HitFilter(ent, ply, hand)
     if not IsValid(ent) then return false end
+    if ent == ply then return end
     if ent:GetNWBool("isVRHand", false) then return false end
     if IsValid(ply) and (hand == "left" or hand == "right") then
         local held = vrmod.GetHeldEntity(ply, hand)
@@ -263,6 +285,47 @@ function vrmod.utils.TraceHand(ply, hand)
         end
     end
     return nil -- Nothing valid hit after maxDepth
+end
+
+function vrmod.utils.TraceBoxOrSphere(data)
+    local best = {
+        Hit = false,
+        Fraction = 1
+    }
+
+    if data.mins and data.maxs then
+        -- Box trace
+        local tr = util.TraceHull({
+            start = data.start,
+            endpos = data.endpos,
+            mins = data.mins,
+            maxs = data.maxs,
+            filter = data.filter,
+            mask = data.mask
+        })
+
+        if tr.Hit then
+            best = tr
+            best.Hit = true
+        end
+    else
+        -- Sphere approximation with single hull trace
+        local radius = data.radius or DEFAULT_RADIUS
+        local tr = util.TraceHull({
+            start = data.start,
+            endpos = data.endpos,
+            mins = Vector(-radius, -radius, -radius),
+            maxs = Vector(radius, radius, radius),
+            filter = data.filter,
+            mask = data.mask
+        })
+
+        if tr.Hit then
+            best = tr
+            best.Hit = true
+        end
+    end
+    return best
 end
 
 if SERVER then
@@ -443,6 +506,89 @@ if SERVER then
     timer.Create("VRMod_Cleanup_DeadRagdolls", 60, 0, function()
         for rag, npc in pairs(trackedRagdolls) do
             if not IsValid(rag) or not IsValid(npc) then trackedRagdolls[rag] = nil end
+        end
+    end)
+end
+
+if CLIENT then
+    local collisionSpheres = {}
+    local collisionBoxes = {}
+    function vrmod.utils.UpdateHandCollisionShapes(ply, wep)
+        if not IsValid(ply) or not g_VR.active and not cl_debug_collisions:GetBool() then
+            collisionSpheres = {}
+            collisionBoxes = {}
+            return
+        end
+
+        collisionSpheres = {}
+        collisionBoxes = {}
+        -- Determine shapes based on g_VR.currentvmi
+        if not vrmod.utils.IsValidWep(wep) then
+            -- Case 1: g_VR.currentvmi is empty
+            -- Spheres for both hands
+            local hands = {"left", "right"}
+            for _, hand in ipairs(hands) do
+                local pos = hand == "left" and vrmod.GetLeftHandPos(ply) or vrmod.GetRightHandPos(ply)
+                local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
+                table.insert(collisionSpheres, {
+                    pos = pos,
+                    radius = radius or DEFAULT_RADIUS
+                })
+            end
+
+            -- Box for right hand
+            local pos = vrmod.GetRightHandPos(ply)
+            local ang = vrmod.GetRightHandAng(ply)
+            local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
+            table.insert(collisionBoxes, {
+                pos = pos,
+                mins = mins or DEFAULT_MINS,
+                maxs = maxs or DEFAULT_MAXS,
+                angles = ang or DEFAULT_ANGLES
+            })
+        else
+            -- Case 2: g_VR.currentvmi is not empty
+            -- Box for left hand
+            local pos = vrmod.GetLeftHandPos(ply)
+            local ang = vrmod.GetLeftHandAng(ply)
+            local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "left")
+            table.insert(collisionBoxes, {
+                pos = pos,
+                mins = mins or DEFAULT_MINS,
+                maxs = maxs or DEFAULT_MAXS,
+                angles = ang or DEFAULT_ANGLES
+            })
+
+            -- Sphere for right hand
+            local pos = vrmod.GetRightHandPos(ply)
+            local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
+            table.insert(collisionSpheres, {
+                pos = pos,
+                radius = radius or DEFAULT_RADIUS
+            })
+        end
+    end
+
+    -- Update shapes every frame
+    hook.Add("Think", "VRMod_UpdateHandCollisionShapes", function()
+        local ply = LocalPlayer()
+        local wep = ply:GetActiveWeapon()
+        vrmod.utils.UpdateHandCollisionShapes(ply, wep)
+    end)
+
+    -- Render shapes
+    hook.Add("PostDrawOpaqueRenderables", "VRMod_HandDebugShapes", function()
+        if not cl_debug_collisions:GetBool() or not g_VR.active then return end
+        -- Render spheres
+        for _, s in ipairs(collisionSpheres) do
+            render.SetColorMaterial()
+            render.DrawWireframeSphere(s.pos, s.radius, 16, 16, Color(255, 0, 0, 150))
+        end
+
+        -- Render boxes
+        for _, b in ipairs(collisionBoxes) do
+            render.SetColorMaterial()
+            render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(0, 255, 0, 150))
         end
     end)
 end
