@@ -374,21 +374,4 @@ if SERVER then
             print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
         end
     end)
-
-    -- hook.Add("PlayerSwitchWeapon", "VRHand_UpdateSweepRadius", function(ply, oldWep, newWep)
-    --     if not vrmod.IsPlayerInVR(ply) then return end
-    --     if not IsValid(newWep) then return end
-    --     timer.Simple(0, function()
-    --         if not IsValid(ply) or not IsValid(newWep) then return end
-    --         local class = newWep:GetClass()
-    --         if class == "weapon_vrmod_empty" then return end
-    --         local model = newWep:GetModel() or newWep:GetWeaponWorldModel()
-    --         if model and model ~= "" then
-    --             if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] Weapon changed to", class, "model:", model) end
-    --             ComputePhysicsRadius(model, ply)
-    --         else
-    --             if cv_meleeDebug:GetBool() then print("[VRMod_Melee][Server][Delayed] No valid model for weapon:", class) end
-    --         end
-    --     end)
-    -- end)
 end

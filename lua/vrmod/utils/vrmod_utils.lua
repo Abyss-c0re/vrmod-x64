@@ -220,7 +220,6 @@ end
 
 function vrmod.utils.HitFilter(ent, ply, hand)
     if not IsValid(ent) then return false end
-    if ent == ply then return false end
     if ent:GetNWBool("isVRHand", false) then return false end
     if IsValid(ply) and (hand == "left" or hand == "right") then
         local held = vrmod.GetHeldEntity(ply, hand)
@@ -230,7 +229,7 @@ function vrmod.utils.HitFilter(ent, ply, hand)
 end
 
 function vrmod.utils.MeleeFilter(ent, ply, hand)
-    if vrmod.utils.HitFilter(ent, ply, hand) and not IsMagazine(ent) then return true end
+    return vrmod.utils.HitFilter(ent, ply, hand) and not IsMagazine(ent)
 end
 
 function vrmod.utils.TraceHand(ply, hand)
