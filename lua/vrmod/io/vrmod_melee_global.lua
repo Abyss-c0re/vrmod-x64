@@ -8,8 +8,7 @@ local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "100", FCVAR_REPLICATE
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
 local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cv_meleeDebug = GetConVar("vrmod_melee_debug"):GetBool()
-local cl_fistvisible = CreateClientConVar("vrmod_melee_fist_visible", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+local cv_debug = GetConVar("vrmod_debug"):GetBool()
 -- Updated impactSounds with verified sound paths
 local impactSounds = {
     fist = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_soft1.wav"},
@@ -22,98 +21,29 @@ local impactSounds = {
     explosive = {"weapons/explode3.wav", "weapons/explode4.wav", "ambient/explosions/explode_1.wav", "ambient/explosions/explode_2.wav"}
 }
 
--- SHARED CACHE
--- Stores {radius, reach, mins, maxs, angles, computed, isVertical} for weapons, {radius, reach, computed} for fists
-local collisionSpheres = {}
-local collisionBoxes = {} -- For box visualization
--- Constants for defaults
-local DEFAULT_RADIUS = 5
-local function TraceBoxOrSphere(data)
-    local best = {
-        Hit = false,
-        Fraction = 1
-    }
-
-    if data.mins and data.maxs then
-        -- Box trace
-        local tr = util.TraceHull({
-            start = data.start,
-            endpos = data.endpos,
-            mins = data.mins,
-            maxs = data.maxs,
-            filter = data.filter,
-            mask = data.mask
-        })
-
-        if tr.Hit then
-            best = tr
-            best.Hit = true
-        end
-    else
-        -- Sphere approximation with single hull trace
-        local radius = data.radius or DEFAULT_RADIUS
-        local tr = util.TraceHull({
-            start = data.start,
-            endpos = data.endpos,
-            mins = Vector(-radius, -radius, -radius),
-            maxs = Vector(radius, radius, radius),
-            filter = data.filter,
-            mask = data.mask
-        })
-
-        if tr.Hit then
-            best = tr
-            best.Hit = true
-        end
-    end
-    return best
-end
-
 -- CLIENTSIDE --------------------------
 if CLIENT then
     local NextMeleeTime = 0
-    local function SendMeleeAttack(src, dir, speed, radius, reach, mins, maxs, angles, impactType, hand)
+    local function SendMeleeAttack(src, dir, radius, reach, mins, maxs, angles, impactType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
         net.WriteVector(dir)
-        net.WriteFloat(speed)
         net.WriteFloat(radius)
         net.WriteFloat(reach)
         net.WriteVector(mins or Vector(0, 0, 0))
         net.WriteVector(maxs or Vector(0, 0, 0))
         net.WriteAngle(angles or Angle(0, 0, 0))
         net.WriteString(impactType)
-        net.WriteString(hand or "")
+        net.WriteString(hand)
         net.SendToServer()
     end
 
-    local function AddDebugShape(pos, radius, mins, maxs, angles)
-        if mins and maxs and angles then
-            table.insert(collisionBoxes, {
-                pos = pos,
-                mins = mins,
-                maxs = maxs,
-                angles = angles,
-                die = CurTime() + 0.15
-            })
-        else
-            table.insert(collisionSpheres, {
-                pos = pos,
-                radius = radius,
-                die = CurTime() + 0.15
-            })
-        end
-    end
-
-    local function TryMelee(pos, relativeVel, useWeapon, hand)
+    local function TryMelee(pos, useWeapon, hand)
         local ply = LocalPlayer()
         if not vrmod or not vrmod.GetHMDVelocity then return end
         if not IsValid(ply) or not ply:Alive() then return end
-        if not vrmod.utils.MeleeFilter(ply, ply, hand) then return end
         local wep = ply:GetActiveWeapon()
         if useWeapon and not vrmod.utils.IsValidWep(wep) then useWeapon = false end
-        local relativeSpeed = relativeVel:Length()
-        if relativeSpeed / 40 < cv_meleeVelThreshold:GetFloat() then return end
         if NextMeleeTime > CurTime() then return end
         local swingSound
         if useWeapon and IsValid(wep) then
@@ -124,8 +54,6 @@ if CLIENT then
                 Weapon = wep,
                 Hand = hand,
                 Position = pos,
-                RelativeVelocity = relativeVel,
-                RelativeSpeed = relativeSpeed
             }
 
             hook.Run("VRMod_MeleeSwing", swingData, function(soundPath) swingSound = soundPath end)
@@ -139,7 +67,7 @@ if CLIENT then
         })
 
         local src = tr0.HitPos + tr0.HitNormal * -2
-        local dir = relativeVel:GetNormalized()
+        local dir = pos:GetNormalized()
         local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
         local traceData = {
             start = src,
@@ -151,48 +79,25 @@ if CLIENT then
             mask = MASK_SHOT
         }
 
-        local tr = TraceBoxOrSphere(traceData)
-        if cl_fistvisible:GetBool() then AddDebugShape(src, radius, mins, maxs, angles) end
+        local tr = vrmod.utils.TraceBoxOrSphere(traceData)
         if tr.Hit then
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
             local impactType = useWeapon and "blunt" or "fist"
-            SendMeleeAttack(tr.HitPos, dir, relativeSpeed, radius, reach, mins, maxs, angles, impactType, hand)
+            SendMeleeAttack(tr.HitPos, dir, radius, reach, mins, maxs, angles, impactType, hand)
         end
     end
-
-    hook.Add("PostDrawOpaqueRenderables", "VRMeleeDebugShapes", function()
-        local now = CurTime()
-        for i = #collisionSpheres, 1, -1 do
-            local s = collisionSpheres[i]
-            if now > s.die then
-                table.remove(collisionSpheres, i)
-            else
-                render.SetColorMaterial()
-                render.DrawWireframeSphere(s.pos, s.radius, 16, 16, Color(255, 0, 0, 150))
-            end
-        end
-
-        for i = #collisionBoxes, 1, -1 do
-            local b = collisionBoxes[i]
-            if now > b.die then
-                table.remove(collisionBoxes, i)
-            else
-                render.SetColorMaterial()
-                render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(0, 255, 0, 150))
-            end
-        end
-    end)
 
     hook.Add("VRMod_Tracking", "VRMeleeTrace", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
-        local hmdVel = vrmod.GetHMDVelocity()
-        local leftRelVel = vrmod.GetLeftHandVelocity() - hmdVel
-        local rightRelVel = vrmod.GetRightHandVelocity() - hmdVel
-        if cl_usefist:GetBool() then
-            TryMelee(vrmod.GetLeftHandPos(ply), leftRelVel, false, "left")
-            TryMelee(vrmod.GetRightHandPos(ply), rightRelVel, cv_allowgunmelee:GetBool(), "right")
-        end
+        local leftRelVel = vrmod.GetLeftHandVelocityRelative() or Vector(0, 0, 0)
+        local rightRelVel = vrmod.GetRightHandVelocityRelative() or Vector(0, 0, 0)
+        local threshold = cv_meleeVelThreshold:GetFloat() * 50
+        --  print(rightRelVel:Length() )
+        if not cl_usefist:GetBool() then return end
+        if leftRelVel:Length() < threshold and rightRelVel:Length() < threshold then return end
+        TryMelee(vrmod.GetLeftHandPos(ply), false, "left")
+        TryMelee(vrmod.GetRightHandPos(ply), cv_allowgunmelee:GetBool(), "right")
     end)
 end
 
@@ -203,7 +108,6 @@ if SERVER then
         if not IsValid(ply) or not ply:Alive() then return end
         local src = net.ReadVector()
         local dir = net.ReadVector()
-        local swingSpeed = net.ReadFloat()
         local radius = net.ReadFloat()
         local reach = net.ReadFloat()
         local mins = net.ReadVector()
@@ -211,21 +115,25 @@ if SERVER then
         local angles = net.ReadAngle()
         local impactType = net.ReadString()
         local hand = net.ReadString()
-        if hand == "" then hand = nil end
+        local swingSpeed
+        if hand == "left" then
+            swingSpeed = vrmod.GetLeftHandVelocityRelative(ply)
+        else
+            swingSpeed = vrmod.GetRightHandVelocityRelative(ply)
+        end
+
+        if swingSpeed then swingSpeed = swingSpeed:Length() end
         local traceData = {
             start = src,
             endpos = src + dir * reach,
             radius = radius,
             mins = mins,
             max = maxs,
-            filter = function(ent)
-                if ent == ply then return false end
-                return vrmod.utils.MeleeFilter(ent, ply, hand)
-            end,
+            filter = function(ent) return vrmod.utils.MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
         }
 
-        local tr = TraceBoxOrSphere(traceData)
+        local tr = vrmod.utils.TraceBoxOrSphere(traceData)
         if not tr.Hit then return end
         local decalName = "Impact.Concrete"
         local matType = tr.MatType
@@ -367,7 +275,7 @@ if SERVER then
         if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
         local attackerName = ply:Nick() or "Unknown"
         local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
-        if cv_meleeDebug then
+        if cv_debug then
             local targetVelDot = targetVel:Dot(dir)
             print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
         else
