@@ -34,6 +34,26 @@ if CLIENT then
 	g_VR.viewModelInfo = g_VR.viewModelInfo or {}
 	g_VR.locomotionOptions = g_VR.locomotionOptions or {}
 	g_VR.menuItems = g_VR.menuItems or {}
+	-- Cache for per-frame results
+	local frameCache = {}
+	local lastFrame = -1
+	local fingerAngleCache = {}
+	local fingerAngleCachePM = ""
+	-- Helper to get player VR data
+	local function getPlayerVRData(ply)
+		local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
+		return g_VR.net[sid]
+	end
+
+	-- Helper to update frame cache
+	local function updateFrameCache()
+		local frame = FrameNumber()
+		if frame ~= lastFrame then
+			frameCache = {}
+			lastFrame = frame
+		end
+	end
+
 	function vrmod.GetStartupError()
 		local error = nil
 		local moduleFile = nil
@@ -66,7 +86,7 @@ if CLIENT then
 	end
 
 	function vrmod.IsPlayerInVR(ply)
-		return g_VR.net[ply and ply:SteamID() or LocalPlayer():SteamID()] ~= nil
+		return getPlayerVRData(ply) ~= nil
 	end
 
 	function vrmod.UsingEmptyHands(ply)
@@ -86,19 +106,35 @@ if CLIENT then
 	end
 
 	function vrmod.GetHMDPos(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		return t and t.lerpedFrame and t.lerpedFrame.hmdPos or Vector()
+		updateFrameCache()
+		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_hmdPos"
+		if frameCache[cacheKey] then return frameCache[cacheKey] end
+		local t = getPlayerVRData(ply)
+		local pos = t and t.lerpedFrame and t.lerpedFrame.hmdPos or Vector()
+		frameCache[cacheKey] = pos
+		return pos
 	end
 
 	function vrmod.GetHMDAng(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		return t and t.lerpedFrame and t.lerpedFrame.hmdAng or Angle()
+		updateFrameCache()
+		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_hmdAng"
+		if frameCache[cacheKey] then return frameCache[cacheKey] end
+		local t = getPlayerVRData(ply)
+		local ang = t and t.lerpedFrame and t.lerpedFrame.hmdAng or Angle()
+		frameCache[cacheKey] = ang
+		return ang
 	end
 
 	function vrmod.GetHMDPose(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		if t and t.lerpedFrame then return t.lerpedFrame.hmdPos, t.lerpedFrame.hmdAng end
-		return Vector(), Angle()
+		updateFrameCache()
+		local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
+		local posKey = sid .. "_hmdPos"
+		local angKey = sid .. "_hmdAng"
+		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
+		local t = getPlayerVRData(ply)
+		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.hmdPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.hmdAng or Angle()
+		frameCache[posKey], frameCache[angKey] = pos, ang
+		return pos, ang
 	end
 
 	function vrmod.GetHMDVelocity()
@@ -106,28 +142,44 @@ if CLIENT then
 	end
 
 	function vrmod.GetHMDAngularVelocity()
-		return g_VR.threePoints and g_VR.tracking.hmd.angvel or Vector()
+		return g_VR.threePoints and g_VR.tracking.hmd.angvel or Angle() -- Changed to return Angle() for consistency
 	end
 
 	function vrmod.GetHMDVelocities()
 		if g_VR.threePoints then return g_VR.tracking.hmd.vel, g_VR.tracking.hmd.angvel end
-		return Vector(), Vector()
+		return Vector(), Angle() -- Changed to return Angle() for angvel
 	end
 
 	function vrmod.GetLeftHandPos(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		return t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector()
+		updateFrameCache()
+		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_leftPos"
+		if frameCache[cacheKey] then return frameCache[cacheKey] end
+		local t = getPlayerVRData(ply)
+		local pos = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector()
+		frameCache[cacheKey] = pos
+		return pos
 	end
 
 	function vrmod.GetLeftHandAng(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		return t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
+		updateFrameCache()
+		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_leftAng"
+		if frameCache[cacheKey] then return frameCache[cacheKey] end
+		local t = getPlayerVRData(ply)
+		local ang = t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
+		frameCache[cacheKey] = ang
+		return ang
 	end
 
 	function vrmod.GetLeftHandPose(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		if t and t.lerpedFrame then return t.lerpedFrame.lefthandPos, t.lerpedFrame.lefthandAng end
-		return Vector(), Angle()
+		updateFrameCache()
+		local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
+		local posKey = sid .. "_leftPos"
+		local angKey = sid .. "_leftAng"
+		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
+		local t = getPlayerVRData(ply)
+		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
+		frameCache[posKey], frameCache[angKey] = pos, ang
+		return pos, ang
 	end
 
 	function vrmod.GetLeftHandVelocity()
@@ -135,32 +187,49 @@ if CLIENT then
 	end
 
 	function vrmod.GetLeftHandAngularVelocity()
-		return g_VR.threePoints and g_VR.tracking.pose_lefthand.angvel or Vector()
+		return g_VR.threePoints and g_VR.tracking.pose_lefthand.angvel or Angle() -- Changed to return Angle()
 	end
 
 	function vrmod.GetLeftHandVelocityRelative()
+		if not g_VR.threePoints then return Vector() end
 		return g_VR.tracking.pose_lefthand.vel - g_VR.tracking.hmd.vel
 	end
 
 	function vrmod.GetLeftHandVelocities()
-		if g_VR.threePoints then return g_VR.tracking.pose_lefthand.vel, g_VR.tracking.pose_lefthand.angvel, GetLeftHandVelocityRelative() end
-		return Vector(), Vector(), Vector()
+		if g_VR.threePoints then return g_VR.tracking.pose_lefthand.vel, g_VR.tracking.pose_lefthand.angvel, vrmod.GetLeftHandVelocityRelative() end
+		return Vector(), Angle(), Vector() -- Changed to return Angle() for angvel
 	end
 
 	function vrmod.GetRightHandPos(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		return t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector()
+		updateFrameCache()
+		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_rightPos"
+		if frameCache[cacheKey] then return frameCache[cacheKey] end
+		local t = getPlayerVRData(ply)
+		local pos = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector()
+		frameCache[cacheKey] = pos
+		return pos
 	end
 
 	function vrmod.GetRightHandAng(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		return t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
+		updateFrameCache()
+		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_rightAng"
+		if frameCache[cacheKey] then return frameCache[cacheKey] end
+		local t = getPlayerVRData(ply)
+		local ang = t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
+		frameCache[cacheKey] = ang
+		return ang
 	end
 
 	function vrmod.GetRightHandPose(ply)
-		local t = ply and g_VR.net[ply:SteamID()] or g_VR.net[LocalPlayer():SteamID()]
-		if t and t.lerpedFrame then return t.lerpedFrame.righthandPos, t.lerpedFrame.righthandAng end
-		return Vector(), Angle()
+		updateFrameCache()
+		local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
+		local posKey = sid .. "_rightPos"
+		local angKey = sid .. "_rightAng"
+		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
+		local t = getPlayerVRData(ply)
+		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
+		frameCache[posKey], frameCache[angKey] = pos, ang
+		return pos, ang
 	end
 
 	function vrmod.GetRightHandVelocity()
@@ -168,130 +237,127 @@ if CLIENT then
 	end
 
 	function vrmod.GetRightHandAngularVelocity()
-		return g_VR.threePoints and g_VR.tracking.pose_righthand.angvel or Vector()
+		return g_VR.threePoints and g_VR.tracking.pose_righthand.angvel or Angle() -- Changed to return Angle()
 	end
 
 	function vrmod.GetRightHandVelocityRelative()
+		if not g_VR.threePoints then return Vector() end
 		return g_VR.tracking.pose_righthand.vel - g_VR.tracking.hmd.vel
 	end
 
 	function vrmod.GetRightHandVelocities()
 		if g_VR.threePoints then return g_VR.tracking.pose_righthand.vel, g_VR.tracking.pose_righthand.angvel, vrmod.GetRightHandVelocityRelative() end
-		return Vector(), Vector(), Vector()
+		return Vector(), Angle(), Vector() -- Changed to return Angle() for angvel
 	end
 
 	function vrmod.SetLeftHandPose(pos, ang)
 		local t = g_VR.net[LocalPlayer():SteamID()]
-		if t and t.lerpedFrame then t.lerpedFrame.lefthandPos, t.lerpedFrame.lefthandAng = pos, ang end
+		if t and t.lerpedFrame then
+			t.lerpedFrame.lefthandPos, t.lerpedFrame.lefthandAng = pos, ang
+			-- Invalidate cache
+			frameCache[LocalPlayer():SteamID() .. "_leftPos"] = nil
+			frameCache[LocalPlayer():SteamID() .. "_leftAng"] = nil
+		end
 	end
 
 	function vrmod.SetRightHandPose(pos, ang)
 		local t = g_VR.net[LocalPlayer():SteamID()]
-		if t and t.lerpedFrame then t.lerpedFrame.righthandPos, t.lerpedFrame.righthandAng = pos, ang end
+		if t and t.lerpedFrame then
+			t.lerpedFrame.righthandPos, t.lerpedFrame.righthandAng = pos, ang
+			-- Invalidate cache
+			frameCache[LocalPlayer():SteamID() .. "_rightPos"] = nil
+			frameCache[LocalPlayer():SteamID() .. "_rightAng"] = nil
+		end
 	end
 
-	function vrmod.GetLeftHandOpenFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.openHandAngles[i]
+	local function HandleFingerAngles(mode, hand, state, tbl)
+		local isGetter = mode == "get"
+		local isDefault = mode == "get_default"
+		local sourceTable = isDefault and (state == "open" and g_VR.defaultOpenHandAngles or g_VR.defaultClosedHandAngles) or state == "open" and g_VR.openHandAngles or g_VR.closedHandAngles
+		local offset = hand == "right" and 15 or 0
+		local cacheKey = isGetter and hand .. "_" .. state or nil
+		if isGetter or isDefault then
+			-- Check cache for getters
+			if isGetter and fingerAngleCache[cacheKey] then return fingerAngleCache[cacheKey] end
+			local r = {}
+			for i = 1, 15 do
+				r[i] = sourceTable[i + offset]
+			end
+
+			if isGetter then fingerAngleCache[cacheKey] = r end
+			return r
+		else -- Setter
+			local t = table.Copy(sourceTable)
+			for i = 1, 15 do
+				t[i + offset] = tbl[i]
+			end
+
+			if state == "open" then
+				g_VR.openHandAngles = t
+			else
+				g_VR.closedHandAngles = t
+			end
+
+			-- Invalidate getter cache
+			fingerAngleCache[hand .. "_" .. state] = nil
 		end
-		return r
+	end
+
+	-- Getter functions
+	function vrmod.GetLeftHandOpenFingerAngles()
+		updateFrameCache()
+		return HandleFingerAngles("get", "left", "open")
 	end
 
 	function vrmod.GetLeftHandClosedFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.closedHandAngles[i]
-		end
-		return r
+		updateFrameCache()
+		return HandleFingerAngles("get", "left", "closed")
 	end
 
 	function vrmod.GetRightHandOpenFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.openHandAngles[15 + i]
-		end
-		return r
+		updateFrameCache()
+		return HandleFingerAngles("get", "right", "open")
 	end
 
 	function vrmod.GetRightHandClosedFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.closedHandAngles[15 + i]
-		end
-		return r
+		updateFrameCache()
+		return HandleFingerAngles("get", "right", "closed")
 	end
 
+	-- Setter functions
 	function vrmod.SetLeftHandOpenFingerAngles(tbl)
-		local t = table.Copy(g_VR.openHandAngles)
-		for i = 1, 15 do
-			t[i] = tbl[i]
-		end
-
-		g_VR.openHandAngles = t
+		HandleFingerAngles("set", "left", "open", tbl)
 	end
 
 	function vrmod.SetLeftHandClosedFingerAngles(tbl)
-		local t = table.Copy(g_VR.closedHandAngles)
-		for i = 1, 15 do
-			t[i] = tbl[i]
-		end
-
-		g_VR.closedHandAngles = t
+		HandleFingerAngles("set", "left", "closed", tbl)
 	end
 
 	function vrmod.SetRightHandOpenFingerAngles(tbl)
-		local t = table.Copy(g_VR.openHandAngles)
-		for i = 1, 15 do
-			t[15 + i] = tbl[i]
-		end
-
-		g_VR.openHandAngles = t
+		HandleFingerAngles("set", "right", "open", tbl)
 	end
 
 	function vrmod.SetRightHandClosedFingerAngles(tbl)
-		local t = table.Copy(g_VR.closedHandAngles)
-		for i = 1, 15 do
-			t[15 + i] = tbl[i]
-		end
-
-		g_VR.closedHandAngles = t
+		HandleFingerAngles("set", "right", "closed", tbl)
 	end
 
+	-- Default getter functions
 	function vrmod.GetDefaultLeftHandOpenFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.defaultOpenHandAngles[i]
-		end
-		return r
+		return HandleFingerAngles("get_default", "left", "open")
 	end
 
 	function vrmod.GetDefaultLeftHandClosedFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.defaultClosedHandAngles[i]
-		end
-		return r
+		return HandleFingerAngles("get_default", "left", "closed")
 	end
 
 	function vrmod.GetDefaultRightHandOpenFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.defaultOpenHandAngles[15 + i]
-		end
-		return r
+		return HandleFingerAngles("get_default", "right", "open")
 	end
 
 	function vrmod.GetDefaultRightHandClosedFingerAngles()
-		local r = {}
-		for i = 1, 15 do
-			r[i] = g_VR.defaultClosedHandAngles[15 + i]
-		end
-		return r
+		return HandleFingerAngles("get_default", "right", "closed")
 	end
 
-	local fingerAngleCache = {}
-	local fingerAngleCachePM = ""
 	local function GetFingerAnglesFromModel(modelName, sequenceNumber)
 		sequenceNumber = sequenceNumber or 0
 		local pm = convars.vrmod_floatinghands:GetBool() and "models/weapons/c_arms.mdl" or LocalPlayer():GetModel()
@@ -300,9 +366,8 @@ if CLIENT then
 			fingerAngleCache = {}
 		end
 
-		local cache = fingerAngleCache[modelName .. sequenceNumber]
-		if cache then return cache end
-		--
+		local cacheKey = modelName .. sequenceNumber
+		if fingerAngleCache[cacheKey] then return fingerAngleCache[cacheKey] end
 		local pmdl = ClientsideModel(pm)
 		pmdl:SetupBones()
 		local tmdl = ClientsideModel(modelName)
@@ -326,7 +391,7 @@ if CLIENT then
 
 		pmdl:Remove()
 		tmdl:Remove()
-		fingerAngleCache[modelName .. sequenceNumber] = r
+		fingerAngleCache[cacheKey] = r
 		return r
 	end
 
@@ -348,13 +413,18 @@ if CLIENT then
 		return r
 	end
 
+	local bonePoseCache = {}
 	local function GetRelativeBonePoseFromModel(modelName, sequenceNumber, boneName, refBoneName)
+		sequenceNumber = sequenceNumber or 0
+		local cacheKey = modelName .. sequenceNumber .. boneName .. (refBoneName or "")
+		if bonePoseCache[cacheKey] then return bonePoseCache[cacheKey][1], bonePoseCache[cacheKey][2] end
 		local ent = ClientsideModel(modelName)
-		ent:ResetSequence(sequenceNumber or 0)
+		ent:ResetSequence(sequenceNumber)
 		ent:SetupBones()
 		local mtx, mtxRef = ent:GetBoneMatrix(ent:LookupBone(boneName)), ent:GetBoneMatrix(refBoneName and ent:LookupBone(refBoneName) or 0)
 		local relativePos, relativeAng = WorldToLocal(mtx:GetTranslation(), mtx:GetAngles(), mtxRef:GetTranslation(), mtxRef:GetAngles())
 		ent:Remove()
+		bonePoseCache[cacheKey] = {relativePos, relativeAng}
 		return relativePos, relativeAng
 	end
 
