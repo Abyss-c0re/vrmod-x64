@@ -34,11 +34,11 @@ local function ApplyBoxFromRadius(radius, isVertical)
     local mins, maxs
     if isVertical then
         mins = Vector(-side, -side, -forward * 0.25)
-        maxs = Vector(side, side, forward * 2.3)
+        maxs = Vector(side, side, forward * 2)
         vrmod.utils.DebugPrint("ApplyBoxFromRadius: radius %.2f | Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
     else
         mins = Vector(-forward * 0.35, -side, -side)
-        maxs = Vector(forward * 2.3, side, side)
+        maxs = Vector(forward * 2, side, side)
         vrmod.utils.DebugPrint("ApplyBoxFromRadius: radius %.2f | Forward-aligned (x-axis) | Mins: %s, Maxs: %s", radius, tostring(mins), tostring(maxs))
     end
     return mins, maxs, isVertical
@@ -535,8 +535,8 @@ if CLIENT then
                     radius = radius or DEFAULT_RADIUS
                 })
             end
-
-            -- Box for right hand
+        else
+            -- Case 2: g_VR.currentvmi is not empty
             local pos = vrmod.GetRightHandPos(ply)
             local ang = vrmod.GetRightHandAng(ply)
             local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
@@ -546,22 +546,9 @@ if CLIENT then
                 maxs = maxs or DEFAULT_MAXS,
                 angles = ang or DEFAULT_ANGLES
             })
-        else
-            -- Case 2: g_VR.currentvmi is not empty
-            -- Box for left hand
-            local pos = vrmod.GetLeftHandPos(ply)
-            local ang = vrmod.GetLeftHandAng(ply)
-            local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "left")
-            table.insert(collisionBoxes, {
-                pos = pos,
-                mins = mins or DEFAULT_MINS,
-                maxs = maxs or DEFAULT_MAXS,
-                angles = ang or DEFAULT_ANGLES
-            })
 
-            -- Sphere for right hand
-            local pos = vrmod.GetRightHandPos(ply)
-            local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
+            local pos = vrmod.GetLeftHandPos(ply)
+            local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, "left")
             table.insert(collisionSpheres, {
                 pos = pos,
                 radius = radius or DEFAULT_RADIUS
