@@ -14,14 +14,13 @@ vrmod.MODEL_OVERRIDES = {
     weapon_physgun = "models/weapons/w_physics.mdl",
     weapon_physcannon = "models/weapons/w_physics.mdl",
 }
+
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cv_debug = CreateConVar("vrmod_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
 local cl_debug_collisions = CreateClientConVar("vrmod_debug_collisions", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local magCache = {}
 local modelCache = {}
 local pending = {}
-
-
 --DEBUG
 function vrmod.utils.DebugPrint(fmt, ...)
     if cv_debug:GetBool() then print(string.format("[VRMod:][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
@@ -36,7 +35,6 @@ local function IsMagazine(ent)
     return isMag
 end
 
--- Replace ApplyBoxFromRadius with a function that uses AABB directly
 local function GetWeaponCollisionBox(phys, isVertical)
     local mins, maxs = phys:GetAABB()
     if not mins or not maxs then
@@ -406,7 +404,7 @@ if SERVER then
 
     -- Add hook once
     if not hook.GetTable()["EntityTakeDamage"]["VRMod_ForwardRagdollDamage"] then hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", function(ent, dmginfo) vrmod.utils.ForwardRagdollDamage(ent, dmginfo) end) end
-    function vrmod.utils.SpawnPickupRagdoll(npc)
+    function vrmod.utils.SpawnPickupRagdoll(ply, npc)
         if not IsValid(npc) then return end
         local rag = ents.Create("prop_ragdoll")
         if not IsValid(rag) then return end
@@ -416,6 +414,15 @@ if SERVER then
         rag:SetNWBool("is_npc_ragdoll", true)
         rag:Spawn()
         rag:Activate()
+        if IsValid(ply) then
+            rag:SetOwner(ply)
+            cleanup.Add(ply, "props", rag)
+            undo.Create("VRMod NPC Ragdoll")
+            undo.AddEntity(rag)
+            undo.SetPlayer(ply)
+            undo.Finish()
+        end
+
         -- Register tracking + AI disable
         trackedRagdolls[rag] = npc
         rag.original_npc = npc
@@ -553,7 +560,6 @@ if CLIENT then
         local rightAng = vrmod.GetRightHandAng(ply)
         local leftPos = vrmod.GetLeftHandPos(ply) + leftAng:Forward() * vrmod.DEFAULT_OFFSET
         local rightPos = vrmod.GetRightHandPos(ply) + rightAng:Forward() * vrmod.DEFAULT_OFFSET
-        
         -- Only update if pose has changed
         if leftPos == lastLeftPos and rightPos == lastRightPos and rightAng == lastAng then return end
         lastLeftPos = leftPos
