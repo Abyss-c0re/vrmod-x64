@@ -4,7 +4,7 @@ local vrHands = {}
 -- Utility to get cached physics data from weapon
 local function GetCachedWeaponParams(wep, ply, side)
     local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
-    if radius == 5 and reach == 6.6 then return nil end
+    if radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH then return nil end
     return radius, reach, mins, maxs, angles
 end
 
@@ -23,7 +23,7 @@ end
 local function ApplyBox(hand, handData, mins, maxs, angles)
     if not IsValid(hand) then return end
     hand:PhysicsInitBox(mins, maxs)
-    hand:SetAngles(angles)
+    --hand:SetAngles(angles)
     local phys = hand:GetPhysicsObject()
     if IsValid(phys) then
         phys:SetMass(20)
@@ -36,7 +36,7 @@ local function UpdateWeaponCollisionShape(ply, wep)
     timer.Simple(0.1, function()
         if not IsValid(ply) then return end
         if not vrmod.utils.IsValidWep(wep) then
-            timer.Simple(0, function() ApplySphere(hand, right, 2.8) end)
+            timer.Simple(0, function() ApplySphere(hand, right, vrmod.DEFAULT_RADIUS) end)
             return
         end
 
@@ -83,7 +83,7 @@ local function SpawnVRHands(ply)
                 }
             end
 
-            hand:PhysicsInitSphere(2.8, "metal_bouncy")
+            hand:PhysicsInitSphere(vrmod.DEFAULT_RADIUS, "metal_bouncy")
             hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
             hand:Activate()
             local phys = hand:GetPhysicsObject()
@@ -131,13 +131,24 @@ hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
     local function UpdateHand(side, getPos, getAng)
         local hand = hands[side]
         if not hand or not IsValid(hand.ent) or not IsValid(hand.phys) then return end
-        local pos, ang = LocalToWorld(Vector(2, 0, 0), Angle(), getPos(ply), getAng(ply))
-        local center = hand.ent:LocalToWorld(hand.phys:GetMassCenter())
-        local velocity = (pos - center) * 60 + ply:GetVelocity()
-        hand.phys:SetVelocity(velocity)
-        local _, angVel = WorldToLocal(Vector(), ang, Vector(), hand.phys:GetAngles())
-        local targetAngVel = Vector(angVel.roll, angVel.pitch, angVel.yaw) * 30
-        hand.phys:AddAngleVelocity(targetAngVel - hand.phys:GetAngleVelocity())
+        local pos = getPos(ply)
+        local ang = getAng(ply)
+        -- Apply forward offset
+        local offsetPos = pos + ang:Forward() * vrmod.DEFAULT_OFFSET
+        local phys = hand.phys
+        phys:Wake()
+        phys:ComputeShadowControl({
+            secondstoarrive = engine.TickInterval(),
+            pos = offsetPos,
+            angle = ang,
+            maxangular = 3000,
+            maxangulardamp = 3000,
+            maxspeed = 3000,
+            maxspeeddamp = 300,
+            dampfactor = 0.3,
+            teleportdistance = 100,
+            deltatime = FrameTime()
+        })
     end
 
     UpdateHand("right", vrmod.GetRightHandPos, vrmod.GetRightHandAng)
