@@ -274,6 +274,8 @@ if SERVER then
 			net.Broadcast()
 		end
 
+		local cache = vrmod.HandVelocityCache[steamid]
+		local handVel = bLeft and cache.leftVel or cache.rightVel or Vector(0, 0, 0)
 		for i = 1, pickupCount do
 			local t = pickupList[i]
 			if t.steamid == steamid and t.left == bLeft then
@@ -283,13 +285,11 @@ if SERVER then
 					local npc = ent.original_npc
 					if IsValid(npc) and not vrmod.utils.IsRagdollDead(ent) then
 						ent.dropped_manually = true
-						local cache = vrmod.HandVelocityCache[steamid]
-						local handVel = bLeft and cache.leftVel or cache.rightVel or Vector(0, 0, 0)
 						ent.noDamage = true --preventing damage by the mass increase
 						vrmod.utils.SetBoneMass(ent, 300, 0, handVel, 5)
 						timer.Simple(0.1, function() if IsValid(ent) then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end end)
 						SendPickupNetMsg(t.ply, npc)
-						timer.Simple(3.0, function() if not vrmod.utils.IsRagdollDead(ent) then ent:Remove() end end)
+						if not vrmod.utils.IsRagdollDead(ent) then timer.Simple(3.0, function() ent:Remove() end) end
 					else
 						ent.dropped_manually = false
 						if IsValid(ent) then ent:SetNWBool("is_npc_ragdoll", false) end
@@ -300,7 +300,7 @@ if SERVER then
 					if IsValid(t.phys) then
 						t.phys:SetPos(ent:GetPos())
 						t.phys:SetAngles(ent:GetAngles())
-						t.phys:SetVelocity(t.ply:GetVelocity())
+						t.phys:SetVelocity(handVel)
 						t.phys:Wake()
 					end
 
@@ -330,7 +330,7 @@ if SERVER then
 		local sid = ply:SteamID()
 		if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[bLeftHand and 1 or 2] then return end
 		if not IsValid(ent) or not CanPickupEntity(ent, ply, convarValues) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then return end
-		if ent:IsNPC() then ent = vrmod.utils.SpawnPickupRagdoll(ent) end
+		if ent:IsNPC() then ent = vrmod.utils.SpawnPickupRagdoll(ply, ent) end
 		ent.picked = true
 		local handPos, handAng
 		if bLeftHand then
