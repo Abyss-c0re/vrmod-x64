@@ -587,7 +587,7 @@ if SERVER then
 			net.Start("vrutil_net_switchweapon")
 			local class, vm = vrmod.utils.WepInfo(new)
 			if class and vm then
-				timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(vm) end)
+				timer.Simple(0, function() vrmod.utils.GetWeaponMeleeParams(wep, ply, "right") end)
 				net.WriteString(class)
 				net.WriteString(vm)
 			else

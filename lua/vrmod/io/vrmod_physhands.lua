@@ -1,6 +1,13 @@
 if CLIENT then return end
 print("[VRHand] Running VR physical hands system.")
 local vrHands = {}
+-- Utility to get cached physics data from weapon
+local function GetCachedWeaponParams(wep, ply, side)
+    local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
+    if radius == 5 and reach == 6.6 then return nil end
+    return radius, reach, mins, maxs, angles
+end
+
 -- Applies sphere collision
 local function ApplySphere(hand, handData, radius)
     if not IsValid(hand) then return end
@@ -33,12 +40,21 @@ local function UpdateWeaponCollisionShape(ply, wep)
             return
         end
 
-        local radius, reach, mins, maxs, angles = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
-        local hands = vrHands[ply]
-        if not hands or not hands.right or not IsValid(hands.right.ent) then return end
-        local right = hands.right
-        local hand = right.ent
-        timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles) end)
+        local function Retry()
+            timer.Simple(0, function() UpdateWeaponCollisionShape(ply, wep) end)
+        end
+
+        local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
+        if not radius or not mins or not maxs or not angles then
+            Retry()
+            return
+        else
+            local hands = vrHands[ply]
+            if not hands or not hands.right or not IsValid(hands.right.ent) then return end
+            local right = hands.right
+            local hand = right.ent
+            timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles) end)
+        end
     end)
 end
 
@@ -105,7 +121,6 @@ local function RemoveVRHands(ply)
 end
 
 hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
-    if not g_VR.active then return end
     local hands = vrHands[ply]
     if not hands or not hands.right or not hands.left then
         RemoveVRHands(ply)
