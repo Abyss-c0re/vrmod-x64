@@ -96,8 +96,12 @@ if CLIENT then
         --  print(rightRelVel:Length() )
         if not cl_usefist:GetBool() then return end
         if leftRelVel:Length() < threshold and rightRelVel:Length() < threshold then return end
-        TryMelee(vrmod.GetLeftHandPos(ply), false, "left")
-        TryMelee(vrmod.GetRightHandPos(ply), cv_allowgunmelee:GetBool(), "right")
+        local leftAng = vrmod.GetLeftHandAng(ply)
+        local rightAng = vrmod.GetRightHandAng(ply)
+        local leftPos = vrmod.GetLeftHandPos(ply) + leftAng:Forward() * 5
+        local rightPos = vrmod.GetRightHandPos(ply) + rightAng:Forward() * 5
+        TryMelee(leftPos, false, "left")
+        TryMelee(rightPos, cv_allowgunmelee:GetBool(), "right")
     end)
 end
 

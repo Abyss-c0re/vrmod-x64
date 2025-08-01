@@ -3,21 +3,24 @@ g_VR = g_VR or {}
 g_VR.enhanced = true
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
+--GLOBALS
+vrmod.DEFAULT_RADIUS = 3.5
+vrmod.DEFAULT_REACH = 5.5
+vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
+vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
+vrmod.DEFAULT_ANGLES = Angle(0, 0, 0)
+vrmod.DEFAULT_OFFSET = 5
+vrmod.MODEL_OVERRIDES = {
+    weapon_physgun = "models/weapons/w_physics.mdl",
+    weapon_physcannon = "models/weapons/w_physics.mdl",
+}
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cv_debug = CreateConVar("vrmod_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
 local cl_debug_collisions = CreateClientConVar("vrmod_debug_collisions", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local magCache = {}
 local modelCache = {}
 local pending = {}
-local DEFAULT_RADIUS = 6
-local DEFAULT_REACH = 6.6
-local DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
-local DEFAULT_MAXS = Vector(0.75, 0.75, 11)
-local DEFAULT_ANGLES = Angle(0, 0, 0)
-local MODEL_OVERRIDES = {
-    weapon_physgun = "models/weapons/w_physics.mdl",
-    weapon_physcannon = "models/weapons/w_physics.mdl",
-}
+
 
 --DEBUG
 function vrmod.utils.DebugPrint(fmt, ...)
@@ -38,7 +41,7 @@ local function GetWeaponCollisionBox(phys, isVertical)
     local mins, maxs = phys:GetAABB()
     if not mins or not maxs then
         vrmod.utils.DebugPrint("GetWeaponCollisionBox: Invalid AABB, returning defaults")
-        return DEFAULT_MINS, DEFAULT_MAXS, isVertical, DEFAULT_MINS, DEFAULT_MAXS
+        return vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, isVertical, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS
     end
 
     local amin, amax = mins, maxs -- Store raw AABB for return
@@ -46,7 +49,7 @@ local function GetWeaponCollisionBox(phys, isVertical)
     local center = (mins + maxs) * 0.5
     local extents = (maxs - mins) * 0.5
     -- Scale the extents to make the collision box larger (1.2x for better coverage)
-    local scaleFactor = 1.2
+    local scaleFactor = 1.0
     extents = extents * scaleFactor
     -- Adjust box based on orientation
     if isVertical then
@@ -62,7 +65,7 @@ local function GetWeaponCollisionBox(phys, isVertical)
     end
 
     -- Ensure the box isn't too small by enforcing minimum dimensions
-    local minSize = DEFAULT_RADIUS * 0.5
+    local minSize = vrmod.DEFAULT_RADIUS * 0.5
     mins.x = math.min(mins.x, -minSize)
     mins.y = math.min(mins.y, -minSize)
     mins.z = math.min(mins.z, -minSize)
@@ -77,7 +80,7 @@ function vrmod.utils.IsValidWep(wep, get)
     if not IsValid(wep) then return false end
     local class = wep:GetClass()
     local vm
-    vm = MODEL_OVERRIDES[class] or wep:GetWeaponViewModel()
+    vm = vrmod.MODEL_OVERRIDES[class] or wep:GetWeaponViewModel()
     if class == "weapon_vrmod_empty" or vm == "" or vm == "models/weapons/c_arms.mdl" then return false end
     if get then
         return class, vm
@@ -96,13 +99,13 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
     if not modelPath or modelPath == "" then
         vrmod.utils.DebugPrint("Invalid or empty model path, caching defaults")
         modelCache[modelPath] = {
-            radius = DEFAULT_RADIUS,
-            reach = DEFAULT_REACH,
-            mins_horizontal = DEFAULT_MINS,
-            maxs_horizontal = DEFAULT_MAXS,
-            mins_vertical = DEFAULT_MINS,
-            maxs_vertical = DEFAULT_MAXS,
-            angles = DEFAULT_ANGLES,
+            radius = vrmod.DEFAULT_RADIUS,
+            reach = vrmod.DEFAULT_REACH,
+            mins_horizontal = vrmod.DEFAULT_MINS,
+            maxs_horizontal = vrmod.DEFAULT_MAXS,
+            mins_vertical = vrmod.DEFAULT_MINS,
+            maxs_vertical = vrmod.DEFAULT_MAXS,
+            angles = vrmod.DEFAULT_ANGLES,
             computed = true
         }
         return
@@ -120,13 +123,13 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
             else
                 vrmod.utils.DebugPrint("No valid fallback for %s (attempted %s), using defaults", modelPath, fallback)
                 modelCache[originalModelPath] = {
-                    radius = DEFAULT_RADIUS,
-                    reach = DEFAULT_REACH,
-                    mins_horizontal = DEFAULT_MINS,
-                    maxs_horizontal = DEFAULT_MAXS,
-                    mins_vertical = DEFAULT_MINS,
-                    maxs_vertical = DEFAULT_MAXS,
-                    angles = DEFAULT_ANGLES,
+                    radius = vrmod.DEFAULT_RADIUS,
+                    reach = vrmod.DEFAULT_REACH,
+                    mins_horizontal = vrmod.DEFAULT_MINS,
+                    maxs_horizontal = vrmod.DEFAULT_MAXS,
+                    mins_vertical = vrmod.DEFAULT_MINS,
+                    maxs_vertical = vrmod.DEFAULT_MAXS,
+                    angles = vrmod.DEFAULT_ANGLES,
                     computed = true
                 }
                 return
@@ -140,13 +143,13 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
     if pending[originalModelPath] and pending[originalModelPath].attempts >= 3 then
         vrmod.utils.DebugPrint("Max retries reached for %s, caching defaults", originalModelPath)
         modelCache[originalModelPath] = {
-            radius = DEFAULT_RADIUS,
-            reach = DEFAULT_REACH,
-            mins_horizontal = DEFAULT_MINS,
-            maxs_horizontal = DEFAULT_MAXS,
-            mins_vertical = DEFAULT_MINS,
-            maxs_vertical = DEFAULT_MAXS,
-            angles = DEFAULT_ANGLES,
+            radius = vrmod.DEFAULT_RADIUS,
+            reach = vrmod.DEFAULT_REACH,
+            mins_horizontal = vrmod.DEFAULT_MINS,
+            maxs_horizontal = vrmod.DEFAULT_MAXS,
+            mins_vertical = vrmod.DEFAULT_MINS,
+            maxs_vertical = vrmod.DEFAULT_MAXS,
+            angles = vrmod.DEFAULT_ANGLES,
             computed = true
         }
 
@@ -183,11 +186,11 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
             modelCache[originalModelPath] = {
                 radius = reach, -- Keep radius for compatibility
                 reach = reach,
-                mins_horizontal = mins_horizontal or DEFAULT_MINS,
-                maxs_horizontal = maxs_horizontal or DEFAULT_MAXS,
-                mins_vertical = mins_vertical or DEFAULT_MINS,
-                maxs_vertical = maxs_vertical or DEFAULT_MAXS,
-                angles = DEFAULT_ANGLES,
+                mins_horizontal = mins_horizontal or vrmod.DEFAULT_MINS,
+                maxs_horizontal = maxs_horizontal or vrmod.DEFAULT_MAXS,
+                mins_vertical = mins_vertical or vrmod.DEFAULT_MINS,
+                maxs_vertical = maxs_vertical or vrmod.DEFAULT_MAXS,
+                angles = vrmod.DEFAULT_ANGLES,
                 computed = true
             }
 
@@ -224,21 +227,21 @@ function vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
 
         timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(modelPath) end)
     end
-    return DEFAULT_RADIUS, DEFAULT_REACH, DEFAULT_MINS, DEFAULT_MAXS, ang
+    return vrmod.DEFAULT_RADIUS, vrmod.DEFAULT_REACH, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, ang
 end
 
 function vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
     local model = cl_effectmodel:GetString()
-    local offsetAng = DEFAULT_ANGLES
+    local offsetAng = vrmod.DEFAULT_ANGLES
     if hand == "right" then
         local class, vm = vrmod.utils.WepInfo(wep)
-        if not class then return DEFAULT_RADIUS, DEFAULT_REACH end
+        if not class then return vrmod.DEFAULT_RADIUS, vrmod.DEFAULT_REACH end
         if CLIENT then
             local vmInfo = g_VR.viewModelInfo[class]
-            offsetAng = vmInfo and vmInfo.offsetAng or DEFAULT_ANGLES
+            offsetAng = vmInfo and vmInfo.offsetAng or vrmod.DEFAULT_ANGLES
             model = vm
         else
-            model = MODEL_OVERRIDES[class] or wep:GetModel()
+            model = vrmod.MODEL_OVERRIDES[class] or wep:GetModel()
         end
         return vrmod.utils.GetModelParams(model, ply, offsetAng)
     else
@@ -253,7 +256,7 @@ function vrmod.utils.GetCachedWeaponParams(wep, ply, side)
         timer.Simple(0, function() vrmod.utils.GetCachedWeaponParams(wep, ply, side) end)
     end
 
-    if radius == DEFAULT_RADIUS and reach == DEFAULT_RADIUS and mins == DEFAULT_MINS then
+    if radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_RADIUS and mins == vrmod.DEFAULT_MINS then
         Retry()
         return
     end
@@ -331,7 +334,7 @@ function vrmod.utils.TraceBoxOrSphere(data)
         end
     else
         -- Sphere approximation with single hull trace
-        local radius = data.radius or DEFAULT_RADIUS
+        local radius = data.radius or vrmod.DEFAULT_RADIUS
         local tr = util.TraceHull({
             start = data.start,
             endpos = data.endpos,
@@ -546,9 +549,11 @@ if CLIENT then
             return
         end
 
-        local leftPos = vrmod.GetLeftHandPos(ply)
-        local rightPos = vrmod.GetRightHandPos(ply)
+        local leftAng = vrmod.GetLeftHandAng(ply)
         local rightAng = vrmod.GetRightHandAng(ply)
+        local leftPos = vrmod.GetLeftHandPos(ply) + leftAng:Forward() * vrmod.DEFAULT_OFFSET
+        local rightPos = vrmod.GetRightHandPos(ply) + rightAng:Forward() * vrmod.DEFAULT_OFFSET
+        
         -- Only update if pose has changed
         if leftPos == lastLeftPos and rightPos == lastRightPos and rightAng == lastAng then return end
         lastLeftPos = leftPos
@@ -564,7 +569,7 @@ if CLIENT then
                 local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
                 table.insert(collisionSpheres, {
                     pos = pos,
-                    radius = radius or DEFAULT_RADIUS
+                    radius = radius or vrmod.DEFAULT_RADIUS
                 })
             end
         else
@@ -572,15 +577,15 @@ if CLIENT then
             local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
             table.insert(collisionBoxes, {
                 pos = rightPos,
-                mins = mins or DEFAULT_MINS,
-                maxs = maxs or DEFAULT_MAXS,
-                angles = rightAng or DEFAULT_ANGLES
+                mins = mins or vrmod.DEFAULT_MINS,
+                maxs = maxs or vrmod.DEFAULT_MAXS,
+                angles = rightAng or vrmod.DEFAULT_ANGLES
             })
 
             local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, "left")
             table.insert(collisionSpheres, {
                 pos = leftPos,
-                radius = radius or DEFAULT_RADIUS
+                radius = radius or vrmod.DEFAULT_RADIUS
             })
         end
     end

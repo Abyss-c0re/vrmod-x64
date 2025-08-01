@@ -5,11 +5,6 @@ local ICON_SIZE = 44
 local iconMaterials = {}
 local DEFAULT_ICON = Material("icon32/hand_point_090.png")
 local DEFAULT_MODEL = "models/dav0r/hoverball.mdl"
-local MODEL_OVERRIDES = {
-	weapon_physgun = "models/weapons/w_physics.mdl",
-	weapon_physcannon = "models/weapons/w_physics.mdl",
-}
-
 -- Slot names mapping
 local slotNames = {
 	[0] = "Melee",
@@ -68,7 +63,7 @@ function RenderWeaponToMaterial(className)
 		worldMdl = "" -- reject any c_ viewmodel
 	end
 
-	local model = worldMdl ~= "" and worldMdl or MODEL_OVERRIDES[className] or DEFAULT_MODEL
+	local model = worldMdl ~= "" and worldMdl or vrmod.MODEL_OVERRIDES[className] or DEFAULT_MODEL
 	-- 3) Ensure model is loaded
 	util.PrecacheModel(model)
 	-- 4) Grab (or create) our RT
