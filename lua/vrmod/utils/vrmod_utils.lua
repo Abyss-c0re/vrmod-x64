@@ -549,6 +549,33 @@ if CLIENT then
     vrmod.collisionBoxes = collisionBoxes
     -- Internal cache to skip redundant updates
     local lastLeftPos, lastRightPos, lastAng
+    local function SphereCollidesWithWorld(pos, radius)
+        local tr = util.TraceHull({
+            start = pos,
+            endpos = pos,
+            mins = Vector(-radius, -radius, -radius),
+            maxs = Vector(radius, radius, radius),
+            mask = MASK_SOLID_BRUSHONLY, -- World geometry only
+            filter = LocalPlayer()
+        })
+        return tr.Hit and tr.HitWorld
+    end
+
+    local function BoxCollidesWithWorld(pos, ang, mins, maxs)
+        local tr = util.TraceHull({
+            start = pos,
+            endpos = pos,
+            mins = mins,
+            maxs = maxs,
+            mask = MASK_SOLID_BRUSHONLY,
+            filter = LocalPlayer()
+        })
+
+        tr.mins = mins
+        tr.maxs = maxs
+        return tr.Hit and tr.HitWorld
+    end
+
     function vrmod.utils.UpdateHandCollisionShapes(ply, wep)
         if not IsValid(ply) or not g_VR.active and not cl_debug_collisions:GetBool() then
             table.Empty(collisionSpheres)
@@ -594,11 +621,19 @@ if CLIENT then
                 radius = radius or vrmod.DEFAULT_RADIUS
             })
         end
+
+        for _, s in ipairs(collisionSpheres) do
+            s.hitWorld = SphereCollidesWithWorld(s.pos, s.radius)
+        end
+
+        for _, b in ipairs(collisionBoxes) do
+            b.hitWorld = BoxCollidesWithWorld(b.pos, b.angles, b.mins, b.maxs)
+        end
     end
 
     -- Update on every VR tracking tick
     hook.Add("VRMod_Tracking", "VRMod_CollisionTrackingUpdate", function()
-        if not cl_debug_collisions:GetBool() or not g_VR.active then return end
+        if not g_VR.active then return end
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
         local wep = ply:GetActiveWeapon()
@@ -612,11 +647,19 @@ if CLIENT then
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
         render.SetColorMaterial()
         for _, s in ipairs(collisionSpheres) do
-            render.DrawWireframeSphere(s.pos, s.radius, 16, 16, Color(255, 0, 0, 150))
+            if s.hitWorld then
+                render.DrawSphere(s.pos, s.radius, 16, 16, Color(255, 255, 0, 100))
+            else
+                render.DrawWireframeSphere(s.pos, s.radius, 16, 16, Color(255, 0, 0, 150))
+            end
         end
 
         for _, b in ipairs(collisionBoxes) do
-            render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(0, 255, 0, 150))
+            if b.hitWorld then
+                render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(255, 255, 0, 100))
+            else
+                render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(0, 255, 0, 150))
+            end
         end
     end)
 end
