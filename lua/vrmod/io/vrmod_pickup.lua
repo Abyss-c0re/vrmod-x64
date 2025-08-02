@@ -126,12 +126,11 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 end
 
 if CLIENT then
-	local haloEnabled = true
+	CreateClientConVar("vrmod_pickup_halos", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+	CreateClientConVar("vrmod_pickup_debug", "1", false, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 	local pickupTargetEntRight = nil
 	local haloTargetsLeft = {}
 	local haloTargetsRight = {}
-	vrmod.AddCallbackedConvar("vrmod_pickup_halos", nil, "1", FCVAR_REPLICATED + FCVAR_ARCHIVE + FCVAR_NOTIFY, "Toggle pickup halos", nil, nil, tobool, function(val) haloEnabled = val end)
-	vrmod.AddCallbackedConvar("vrmod_pickup_debug", nil, "0", FCVAR_ARCHIVE, "Enable debug prints for unfiltered pickup targets", 0, 1, tobool)
 	hook.Add("Tick", "vrmod_find_pickup_target", function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) then return end
@@ -154,26 +153,7 @@ if CLIENT then
 	end)
 
 	hook.Add("PostDrawOpaqueRenderables", "vrmod_draw_pickup_halo", function()
-		if not haloEnabled then return end
-		table.Empty(haloTargetsLeft)
-		table.Empty(haloTargetsRight)
-		local ply = LocalPlayer()
-		local heldLeft, heldRight = g_VR.heldEntityLeft, g_VR.heldEntityRight
-		local function IsRagdoll(ent)
-			return IsValid(ent) and ent:GetNWBool("is_npc_ragdoll", false)
-		end
-
-		local holdingRagdoll = IsRagdoll(heldLeft) or IsRagdoll(heldRight)
-		local function ShouldAddHalo(ent, heldEnt)
-			return IsValid(ent) and ent ~= heldLeft and ent ~= heldRight and IsValidPickupTarget(ent, ply, false) and not holdingRagdoll
-		end
-
-		if ShouldAddHalo(pickupTargetEntLeft) then haloTargetsLeft[#haloTargetsLeft + 1] = pickupTargetEntLeft end
-		if ShouldAddHalo(pickupTargetEntRight) then haloTargetsRight[#haloTargetsRight + 1] = pickupTargetEntRight end
-	end)
-
-	hook.Add("PostDrawOpaqueRenderables", "vrmod_draw_pickup_halo", function()
-		if not haloEnabled then return end
+		if not GetConVar("vrmod_pickup_halos"):GetBool() then return end
 		table.Empty(haloTargetsLeft)
 		table.Empty(haloTargetsRight)
 		local ply = LocalPlayer()
