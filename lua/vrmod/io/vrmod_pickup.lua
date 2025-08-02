@@ -127,7 +127,8 @@ end
 
 if CLIENT then
 	CreateClientConVar("vrmod_pickup_halos", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-	CreateClientConVar("vrmod_pickup_debug", "1", false, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+	CreateClientConVar("vrmod_pickup_debug", "0", false, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+	local pickupTargetEntLeft = nil
 	local pickupTargetEntRight = nil
 	local haloTargetsLeft = {}
 	local haloTargetsRight = {}
