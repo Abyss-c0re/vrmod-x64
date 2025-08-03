@@ -23,10 +23,8 @@ if CLIENT then
 	local leftCalc, rightCalc
 	local ipd, eyez
 	local cropVerticalMargin, cropHorizontalOffset
-	local desktopView
 	local lastPosePos = {}
 	local lastViewEnt = nil
-	local smoothingFactor = 0.95
 	local eyeOffset = nil
 	local forwardOffset = nil
 	local viewEntOffsetPos = Vector(0, 0, 0)
@@ -82,95 +80,16 @@ if CLIENT then
 		convarOverrides = {}
 	end
 
-	local function calculateProjectionParams(projMatrix, worldScale)
-		local xscale = projMatrix[1][1]
-		local xoffset = projMatrix[1][3]
-		local yscale = projMatrix[2][2]
-		local yoffset = projMatrix[2][3]
-		-- ** Normalize vertical sign: **
-		if not system.IsWindows() then
-			-- On Linux/OpenGL: invert the sign so + means “down” just like on Windows
-			yoffset = -yoffset
-		end
-
-		-- now the rest is identical on both platforms:
-		local tan_px = math.abs((1 - xoffset) / xscale)
-		local tan_nx = math.abs((-1 - xoffset) / xscale)
-		local tan_py = math.abs((1 - yoffset) / yscale)
-		local tan_ny = math.abs((-1 - yoffset) / yscale)
-		local w = (tan_px + tan_nx) / worldScale
-		local h = (tan_py + tan_ny) / worldScale
-		return {
-			HorizontalFOV = math.deg(2 * math.atan(w / 2)),
-			AspectRatio = w / h,
-			HorizontalOffset = xoffset + convars.vrmod_horizontaloffset:GetFloat(),
-			VerticalOffset = yoffset + convars.vrmod_verticaloffset:GetFloat(),
-			Width = w,
-			Height = h,
-		}
-	end
-
-	local function computeSubmitBounds(leftCalc, rightCalc)
-		local isWindows = system.IsWindows()
-		local hFactor, vFactor = 0, 0
-		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
-		-- average half‐eye extents in tangent space
-		if convars.vrmod_renderoffset:GetBool() then
-			local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
-			local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
-			hFactor = 0.5 / wAvg
-			vFactor = 1.0 / hAvg
-		else
-			--original calues
-			hFactor = 0.25
-			vFactor = 0.5
-		end
-
-		hFactor = hFactor * scaleFactor
-		vFactor = vFactor * scaleFactor
-		-- UV origin flip only affects V‐range endpoints, not the offset sign:
-		local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
-		local function calcVMinMax(offset)
-			local adj = offset * vFactor
-			return vMin - adj, vMax - adj
-		end
-
-		-- U bounds
-		local uMinLeft = 0.0 + leftCalc.HorizontalOffset * hFactor
-		local uMaxLeft = 0.5 + leftCalc.HorizontalOffset * hFactor
-		local uMinRight = 0.5 + rightCalc.HorizontalOffset * hFactor
-		local uMaxRight = 1.0 + rightCalc.HorizontalOffset * hFactor
-		-- V bounds
-		local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset)
-		local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset)
-		return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
-	end
-
-	local function adjustFOV(proj, fovScaleX, fovScaleY)
-		local clone = {}
-		for i = 1, 4 do
-			clone[i] = {proj[i][1], proj[i][2], proj[i][3], proj[i][4]}
-		end
-
-		-- scale the FOV (diagonal terms)
-		clone[1][1] = clone[1][1] * fovScaleX
-		clone[2][2] = clone[2][2] * fovScaleY
-		-- scale the center offset (asymmetry) terms
-		clone[1][3] = clone[1][3] * fovScaleX
-		clone[2][3] = clone[2][3] * fovScaleY
-		return clone
-	end
-
 	local function ComputeDisplayParams()
 		local viewscale = convars.vrmod_viewscale:GetFloat()
 		local fovX, fovY = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
 		local di = VRMOD_GetDisplayInfo(1, 10)
 		local rawW, rawH = di.RecommendedWidth * 2, di.RecommendedHeight
 		-- preserve your variables exactly
-		local leftProj = adjustFOV(di.ProjectionLeft, fovX, fovY)
-		local rightProj = adjustFOV(di.ProjectionRight, fovX, fovY)
-		local leftCalc = calculateProjectionParams(leftProj, viewscale)
-		local rightCalc = calculateProjectionParams(rightProj, viewscale)
+		local leftProj = vrmod.utils.adjustFOV(di.ProjectionLeft, fovX, fovY)
+		local rightProj = vrmod.utils.adjustFOV(di.ProjectionRight, fovX, fovY)
+		local leftCalc = vrmod.utils.calculateProjectionParams(leftProj, viewscale)
+		local rightCalc = vrmod.utils.calculateProjectionParams(rightProj, viewscale)
 		-- clamp on Linux exactly as before
 		if system.IsLinux() then
 			local maxW, maxH = 4096, 4096
@@ -194,78 +113,46 @@ if CLIENT then
 		}
 	end
 
-	local function ComputeDesktopCrop(w, h)
-		desktopView = convars.vrmod_desktopview:GetInt()
-		local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
-		local hoffset = desktopView == 3 and 0.5 or 0
-		return vmargin, hoffset
-	end
-
-	local function LengthSqr(v)
-		return v.x * v.x + v.y * v.y + v.z * v.z
-	end
-
-	local function SubVec(a, b)
-		return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
-	end
-
-	local function SmoothVector(current, target, smoothingFactor)
-		return current + (target - current) * smoothingFactor
-	end
-
-	local function SmoothAngle(current, target, smoothingFactor)
-		local diff = target - current
-		diff.p = math.NormalizeAngle(diff.p)
-		diff.y = math.NormalizeAngle(diff.y)
-		diff.r = math.NormalizeAngle(diff.r)
-		return current + diff * smoothingFactor
-	end
-
 	local function UpdateTracking()
-		local maxVelSqr = 50 * 50
-		local maxPosDeltaSqr = 10 * 10
+		local smoothingFactor = vrmod.SMOOTHING_FACTOR
+		local maxVelSqr = 2500
+		local maxPosDeltaSqr = 100
 		local rawPoses = VRMOD_GetPoses()
 		for k, v in pairs(rawPoses) do
-			if LengthSqr(v.vel) > maxVelSqr then continue end
+			if vrmod.utils.LengthSqr(v.vel) > maxVelSqr then continue end
 			if lastPosePos[k] then
-				local delta = SubVec(v.pos, lastPosePos[k])
-				if LengthSqr(delta) > maxPosDeltaSqr then continue end
+				local delta = vrmod.utils.SubVec(v.pos, lastPosePos[k])
+				if vrmod.utils.LengthSqr(delta) > maxPosDeltaSqr then continue end
 			end
 
 			lastPosePos[k] = v.pos
 			g_VR.tracking[k] = g_VR.tracking[k] or {}
 			local worldPose = g_VR.tracking[k]
+			--if vrmod._collisionShapeByHand then vrmod.utils.ApplyCollisionCorrection(k, v) end
 			local pos, ang = LocalToWorld(v.pos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
-			-- Apply smoothing for hand poses
 			if k == "pose_righthand" or k == "pose_lefthand" then
-				worldPose.pos = worldPose.pos and SmoothVector(worldPose.pos, pos, smoothingFactor) or pos
-				worldPose.ang = worldPose.ang and SmoothAngle(worldPose.ang, ang, smoothingFactor) or ang
+				worldPose.pos = worldPose.pos and vrmod.utils.SmoothVector(worldPose.pos, pos, smoothingFactor) or pos
+				--worldPose.pos.z = pos.z
+				worldPose.ang = worldPose.ang and vrmod.utils.SmoothAngle(worldPose.ang, ang, smoothingFactor) or ang
 			else
 				worldPose.pos = pos
 				worldPose.ang = ang
 			end
 
-			worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle) * g_VR.scale
-			worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), Vector(0, 0, 0), g_VR.originAngle)
-			if k == "pose_righthand" then
-				-- Use local-space offset
-				local offsetPos = g_VR.rightControllerOffsetPos * 0.01 * g_VR.scale
-				local offsetAng = g_VR.rightControllerOffsetAng
-				-- Apply offset in local space, relative to controller's orientation
-				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, Vector(0, 0, 0), worldPose.ang)
-				worldPose.pos = worldPose.pos + offsetWorldPos
-				worldPose.ang = offsetWorldAng
-			elseif k == "pose_lefthand" then
-				-- Mirror carefully (do not just flip yaw/roll blindly)
-				local offsetPos = g_VR.leftControllerOffsetPos * 0.01 * g_VR.scale
-				local offsetAng = g_VR.leftControllerOffsetAng
-				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, Vector(0, 0, 0), worldPose.ang)
+			worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), vector_origin, g_VR.originAngle) * g_VR.scale
+			worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), vector_origin, g_VR.originAngle)
+			local isRight = k == "pose_righthand"
+			local isLeft = k == "pose_lefthand"
+			if isRight or isLeft then
+				local offsetPos = (isRight and g_VR.rightControllerOffsetPos or g_VR.leftControllerOffsetPos) * 0.01 * g_VR.scale
+				local offsetAng = isRight and g_VR.rightControllerOffsetAng or g_VR.leftControllerOffsetAng
+				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, vector_origin, worldPose.ang)
 				worldPose.pos = worldPose.pos + offsetWorldPos
 				worldPose.ang = offsetWorldAng
 			end
 		end
 
-		g_VR.sixPoints = (g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot) ~= nil
+		g_VR.sixPoints = g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot
 		hook.Call("VRMod_Tracking")
 	end
 
@@ -291,13 +178,14 @@ if CLIENT then
 	end
 
 	local function UpdateViewModel(netFrame)
+		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local currentvmi = g_VR.currentvmi
 		local rh_pose = g_VR.tracking.pose_righthand
 		local vm = g_VR.viewModel
 		if currentvmi and rh_pose then
 			local pos, ang = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, rh_pose.pos, rh_pose.ang)
-			g_VR.viewModelPos = g_VR.viewModelPos and SmoothVector(g_VR.viewModelPos, pos, smoothingFactor) or pos
-			g_VR.viewModelAng = g_VR.viewModelAng and SmoothAngle(g_VR.viewModelAng, ang, smoothingFactor) or ang
+			g_VR.viewModelPos = g_VR.viewModelPos and vrmod.utils.SmoothVector(g_VR.viewModelPos, pos, smoothingFactor) or pos
+			g_VR.viewModelAng = g_VR.viewModelAng and vrmod.utils.SmoothAngle(g_VR.viewModelAng, ang, smoothingFactor) or ang
 		end
 
 		if IsValid(vm) then
@@ -318,19 +206,6 @@ if CLIENT then
 
 			g_VR.viewModelMuzzle = vm:GetAttachment(1)
 		end
-	end
-
-	local function DrawDeathAnimation(rtWidth, rtHeight)
-		if not g_VR.deathTime then g_VR.deathTime = CurTime() end
-		local fadeAlpha = 0
-		local fadeDuration = 3.5
-		local maxAlpha = 200
-		local progress = math.min((CurTime() - g_VR.deathTime) / fadeDuration, 1)
-		fadeAlpha = math.min(progress * maxAlpha, maxAlpha)
-		cam.Start2D()
-		surface.SetDrawColor(120, 0, 0, fadeAlpha)
-		surface.DrawRect(0, 0, rtWidth, rtHeight)
-		cam.End2D()
 	end
 
 	local function UpdateViewFromEntity()
@@ -397,13 +272,13 @@ if CLIENT then
 		hook.Call("VRMod_PreRender", nil, "right")
 		render.RenderView(view)
 		if not LocalPlayer():Alive() then
-			DrawDeathAnimation(g_VR.rtWidth, g_VR.rtHeight)
+			vrmod.utils.DrawDeathAnimation(g_VR.rtWidth, g_VR.rtHeight)
 		else
 			g_VR.deathTime = nil
 		end
 
 		render.PopRenderTarget()
-		if desktopView > 1 then
+		if g_VR.desktopView > 1 then
 			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(g_VR.rtMaterial)
@@ -437,13 +312,19 @@ if CLIENT then
 
 	-- 3) Display parameters & render target setup
 	local function SetupRenderTargets()
+		local hOffset = convars.vrmod_horizontaloffset:GetFloat()
+		local vOffset = convars.vrmod_verticaloffset:GetFloat()
+		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
+		-- average half‐eye extents in tangent space
+		local renderOffset = convars.vrmod_renderoffset:GetBool()
+		g_VR.desktopView = convars.vrmod_desktopview:GetInt()
 		local dp = ComputeDisplayParams()
 		g_VR.rtWidth, g_VR.rtHeight = dp.rtW, dp.rtH
 		leftCalc, rightCalc = dp.leftCalc, dp.rightCalc
 		hfovLeft, hfovRight = dp.hfovL, dp.hfovR
 		aspectLeft, aspectRight = dp.aspL, dp.aspR
 		ipd, eyez = dp.ipd, dp.eyez
-		cropVerticalMargin, cropHorizontalOffset = ComputeDesktopCrop(g_VR.rtWidth, g_VR.rtHeight)
+		cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
 		VRMOD_ShareTextureBegin()
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
 		g_VR.rt = GetRenderTarget(rtName, g_VR.rtWidth, g_VR.rtHeight)
@@ -453,7 +334,7 @@ if CLIENT then
 		})
 
 		VRMOD_ShareTextureFinish()
-		local bounds = {computeSubmitBounds(leftCalc, rightCalc)}
+		local bounds = {vrmod.utils.computeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
 	end
 
