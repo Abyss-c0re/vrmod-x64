@@ -95,13 +95,13 @@ if CLIENT then
 	end
 
 	function vrmod.GetHeldEntity(ply, hand)
-		if not IsValid(ply) or not (hand == "left" or hand == "right") then return nil end
-		local sid = ply:SteamID()
-		local data = g_VR[sid] and g_VR[sid].heldItems
-		if not data then return nil end
-		local slot = hand == "left" and 1 or 2
-		local info = data[slot]
-		if info and IsValid(info.ent) then return info.ent end
+		if not IsValid(ply) then return nil end
+		if hand ~= "left" and hand ~= "right" then return nil end
+		if hand == "left" then
+			return g_VR.heldEntityLeft
+		else
+			return g_VR.heldEntityRight
+		end
 		return nil
 	end
 
