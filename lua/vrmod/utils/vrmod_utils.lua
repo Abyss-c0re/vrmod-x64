@@ -4,12 +4,13 @@ g_VR.enhanced = true
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 --GLOBALS
+vrmod.SMOOTHING_FACTOR = 0.98
 vrmod.DEFAULT_RADIUS = 3.5
 vrmod.DEFAULT_REACH = 5.5
 vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
 vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
 vrmod.DEFAULT_ANGLES = Angle(0, 0, 0)
-vrmod.DEFAULT_OFFSET = 5
+vrmod.DEFAULT_OFFSET = 4
 vrmod.MODEL_OVERRIDES = {
     weapon_physgun = "models/weapons/w_physics.mdl",
     weapon_physcannon = "models/weapons/w_physics.mdl",
@@ -73,6 +74,146 @@ local function GetWeaponCollisionBox(phys, isVertical)
     return mins, maxs, isVertical, amin, amax
 end
 
+--MATH
+function vrmod.utils.LengthSqr(v)
+    return v.x * v.x + v.y * v.y + v.z * v.z
+end
+
+function vrmod.utils.SubVec(a, b)
+    return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
+end
+
+function vrmod.utils.SmoothVector(current, target, smoothingFactor)
+    return current + (target - current) * smoothingFactor
+end
+
+function vrmod.utils.SmoothAngle(current, target, smoothingFactor)
+    local diff = target - current
+    diff.p = math.NormalizeAngle(diff.p)
+    diff.y = math.NormalizeAngle(diff.y)
+    diff.r = math.NormalizeAngle(diff.r)
+    return current + diff * smoothingFactor
+end
+
+-- SYSTEM
+function vrmod.utils.calculateProjectionParams(projMatrix, worldScale)
+    local xscale = projMatrix[1][1]
+    local xoffset = projMatrix[1][3]
+    local yscale = projMatrix[2][2]
+    local yoffset = projMatrix[2][3]
+    -- ** Normalize vertical sign: **
+    if not system.IsWindows() then
+        -- On Linux/OpenGL: invert the sign so + means “down” just like on Windows
+        yoffset = -yoffset
+    end
+
+    -- now the rest is identical on both platforms:
+    local tan_px = math.abs((1 - xoffset) / xscale)
+    local tan_nx = math.abs((-1 - xoffset) / xscale)
+    local tan_py = math.abs((1 - yoffset) / yscale)
+    local tan_ny = math.abs((-1 - yoffset) / yscale)
+    local w = (tan_px + tan_nx) / worldScale
+    local h = (tan_py + tan_ny) / worldScale
+    return {
+        HorizontalFOV = math.deg(2 * math.atan(w / 2)),
+        AspectRatio = w / h,
+        HorizontalOffset = xoffset,
+        VerticalOffset = yoffset,
+        Width = w,
+        Height = h,
+    }
+end
+
+function vrmod.utils.computeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)
+    local isWindows = system.IsWindows()
+    local hFactor, vFactor = 0, 0
+    -- average half‐eye extents in tangent space
+    if renderOffse then
+        local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
+        local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
+        hFactor = 0.5 / wAvg
+        vFactor = 1.0 / hAvg
+    else
+        --original calues
+        hFactor = 0.25
+        vFactor = 0.5
+    end
+
+    hFactor = hFactor * scaleFactor
+    vFactor = vFactor * scaleFactor
+    -- UV origin flip only affects V‐range endpoints, not the offset sign:
+    local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
+    local function calcVMinMax(offset)
+        local adj = offset * vFactor
+        return vMin - adj, vMax - adj
+    end
+
+    -- U bounds
+    local uMinLeft = 0.0 + (leftCalc.HorizontalOffset + hOffset) * hFactor
+    local uMaxLeft = 0.5 + (leftCalc.HorizontalOffset + hOffset) * hFactor
+    local uMinRight = 0.5 + (rightCalc.HorizontalOffset + hOffset) * hFactor
+    local uMaxRight = 1.0 + (rightCalc.HorizontalOffset + hOffset) * hFactor
+    -- V bounds
+    local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset + vOffset)
+    local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset + vOffset)
+    return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
+end
+
+function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
+    local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
+    local hoffset = desktopView == 3 and 0.5 or 0
+    return vmargin, hoffset
+end
+
+function vrmod.utils.adjustFOV(proj, fovScaleX, fovScaleY)
+    local clone = {}
+    for i = 1, 4 do
+        clone[i] = {proj[i][1], proj[i][2], proj[i][3], proj[i][4]}
+    end
+
+    -- scale the FOV (diagonal terms)
+    clone[1][1] = clone[1][1] * fovScaleX
+    clone[2][2] = clone[2][2] * fovScaleY
+    -- scale the center offset (asymmetry) terms
+    clone[1][3] = clone[1][3] * fovScaleX
+    clone[2][3] = clone[2][3] * fovScaleY
+    return clone
+end
+
+function vrmod.utils.ApplyCollisionCorrection(k, v)
+    local hand = k == "pose_righthand" and "right" or k == "pose_lefthand" and "left" or nil
+    if not hand then return end
+    local shape = vrmod._collisionShapeByHand[hand]
+    if not (shape and shape.pushOutPos and shape.hit) then return end
+    local pushOutWorldPos = shape.pushOutPos
+    local localPushOutPos = WorldToLocal(pushOutWorldPos, Angle(0, 0, 0), g_VR.origin, g_VR.originAngle) / g_VR.scale
+    local distance = (localPushOutPos - v.pos):Length()
+    --print(distance) -- Uncomment for debugging
+    -- Add a minimum distance threshold to prevent jitter on light contact
+    if distance < 0.4 then return end
+    -- Increase damping for small distances to reduce shaking
+    local distanceFactor = math.min(distance / 0.3, 0.99) -- Scale distance for smoother transitions
+    local originalZ = v.pos.z
+    local pos = vrmod.utils.SmoothVector(v.pos, localPushOutPos, distanceFactor)
+    v.pos = LerpVector(distanceFactor, pos, localPushOutPos)
+    v.pos.z = originalZ
+    --print(distance .. " oii " .. distanceFactor)
+    vrmod._collisionShapeByHand[hand] = nil
+end
+
+function vrmod.utils.DrawDeathAnimation(rtWidth, rtHeight)
+    if not g_VR.deathTime then g_VR.deathTime = CurTime() end
+    local fadeAlpha = 0
+    local fadeDuration = 3.5
+    local maxAlpha = 200
+    local progress = math.min((CurTime() - g_VR.deathTime) / fadeDuration, 1)
+    fadeAlpha = math.min(progress * maxAlpha, maxAlpha)
+    cam.Start2D()
+    surface.SetDrawColor(120, 0, 0, fadeAlpha)
+    surface.DrawRect(0, 0, rtWidth, rtHeight)
+    cam.End2D()
+end
+
 -- WEP UTILS
 function vrmod.utils.IsValidWep(wep, get)
     if not IsValid(wep) then return false end
@@ -92,7 +233,7 @@ function vrmod.utils.WepInfo(wep)
     if class and vm then return class, vm end
 end
 
--- MELEE UTILS
+-- COLLISIONS
 function vrmod.utils.ComputePhysicsParams(modelPath)
     if not modelPath or modelPath == "" then
         vrmod.utils.DebugPrint("Invalid or empty model path, caching defaults")
@@ -261,6 +402,7 @@ function vrmod.utils.GetCachedWeaponParams(wep, ply, side)
     return radius, reach, mins, maxs, angles
 end
 
+--MEELE AND TRACE UTILS
 function vrmod.utils.HitFilter(ent, ply, hand)
     if not IsValid(ent) then return false end
     if ent == ply then return end
@@ -544,42 +686,27 @@ end
 if CLIENT then
     local collisionSpheres = {}
     local collisionBoxes = {}
-    -- Allow other files to access these
-    vrmod.collisionSpheres = collisionSpheres
-    vrmod.collisionBoxes = collisionBoxes
     -- Internal cache to skip redundant updates
     local lastLeftPos, lastRightPos, lastAng
-    local function SphereCollidesWithWorld(pos, radius)
-        local tr = util.TraceHull({
-            start = pos,
-            endpos = pos,
-            mins = Vector(-radius, -radius, -radius),
-            maxs = Vector(radius, radius, radius),
-            mask = MASK_SOLID_BRUSHONLY, -- World geometry only
-            filter = LocalPlayer()
-        })
-        return tr.Hit and tr.HitWorld
-    end
-
-    local function BoxCollidesWithWorld(pos, ang, mins, maxs)
-        local tr = util.TraceHull({
-            start = pos,
-            endpos = pos,
-            mins = mins,
-            maxs = maxs,
-            mask = MASK_SOLID_BRUSHONLY,
-            filter = LocalPlayer()
-        })
-
-        tr.mins = mins
-        tr.maxs = maxs
-        return tr.Hit and tr.HitWorld
-    end
+    -- Cache for previous pushOutPos to limit changes
+    local cachedPushOutPos = {
+        right = nil,
+        left = nil
+    }
 
     function vrmod.utils.UpdateHandCollisionShapes(ply, wep)
         if not IsValid(ply) or not g_VR.active and not cl_debug_collisions:GetBool() then
             table.Empty(collisionSpheres)
             table.Empty(collisionBoxes)
+            vrmod._collisionShapeByHand = {
+                left = nil,
+                right = nil
+            }
+
+            cachedPushOutPos = {
+                right = nil,
+                left = nil
+            }
             return
         end
 
@@ -587,51 +714,115 @@ if CLIENT then
         local rightAng = vrmod.GetRightHandAng(ply)
         local leftPos = vrmod.GetLeftHandPos(ply) + leftAng:Forward() * vrmod.DEFAULT_OFFSET
         local rightPos = vrmod.GetRightHandPos(ply) + rightAng:Forward() * vrmod.DEFAULT_OFFSET
-        -- Only update if pose has changed
         if leftPos == lastLeftPos and rightPos == lastRightPos and rightAng == lastAng then return end
         lastLeftPos = leftPos
         lastRightPos = rightPos
         lastAng = rightAng
         table.Empty(collisionSpheres)
         table.Empty(collisionBoxes)
-        if not vrmod.utils.IsValidWep(wep) then
-            -- Default to spheres for both hands
-            local hands = {"left", "right"}
-            for _, hand in ipairs(hands) do
-                local pos = hand == "left" and leftPos or rightPos
-                local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
-                table.insert(collisionSpheres, {
-                    pos = pos,
-                    radius = radius or vrmod.DEFAULT_RADIUS
-                })
+        vrmod._collisionShapeByHand = {
+            left = nil,
+            right = nil
+        }
+
+        local function traceMeleeShape(pos, radius, mins, maxs, ang, hand, reach)
+            -- Check if hand is clipped (inside a wall)
+            local clipTrace = util.TraceHull({
+                start = pos,
+                endpos = pos,
+                mins = mins or Vector(-radius, -radius, -radius),
+                maxs = maxs or Vector(radius, radius, radius),
+                filter = ply,
+                mask = MASK_SOLID
+            })
+
+            local isClipped = clipTrace.Hit and clipTrace.HitWorld
+            local tr0 = util.TraceLine({
+                start = pos,
+                endpos = pos,
+                filter = ply
+            })
+
+            local src = tr0.HitPos + tr0.HitNormal * -2
+            local dir = ang:Forward()
+            local traceData = {
+                start = src,
+                endpos = src + dir * reach,
+                filter = function(ent) return vrmod.utils.MeleeFilter(ent, ply, hand) end,
+                mask = MASK_SOLID
+            }
+
+            if mins and maxs then
+                traceData.mins = mins
+                traceData.maxs = maxs
+            else
+                traceData.mins = Vector(-radius, -radius, -radius)
+                traceData.maxs = Vector(radius, radius, radius)
             end
-        else
-            -- Use box for right hand, sphere for left
-            local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
-            table.insert(collisionBoxes, {
-                pos = rightPos,
-                mins = mins or vrmod.DEFAULT_MINS,
-                maxs = maxs or vrmod.DEFAULT_MAXS,
-                angles = rightAng or vrmod.DEFAULT_ANGLES
-            })
 
-            local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, "left")
-            table.insert(collisionSpheres, {
-                pos = leftPos,
-                radius = radius or vrmod.DEFAULT_RADIUS
-            })
+            local tr = util.TraceHull(traceData)
+            local pushOutPos = pos
+            if tr.Hit then
+                local pushDir = tr.HitNormal
+                pushDir.z = 0
+                pushDir:Normalize()
+                local depth = radius and radius * 1.5 or math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 1.3 + 1
+                pushOutPos = pos + pushDir * depth
+                -- Smooth pushOutPos if clipped or previous position exists
+                if isClipped and cachedPushOutPos[hand] then
+                    local delta = pushOutPos - cachedPushOutPos[hand]
+                    local maxDelta = 0.1 * g_VR.scale -- Limit movement to 0.1 units per frame (scaled)
+                    if delta:LengthSqr() > maxDelta * maxDelta then
+                        delta:Normalize()
+                        pushOutPos = cachedPushOutPos[hand] + delta * maxDelta
+                    end
+                end
+
+                cachedPushOutPos[hand] = pushOutPos
+            else
+                cachedPushOutPos[hand] = nil
+            end
+            return {
+                pos = pos,
+                radius = radius,
+                mins = mins,
+                maxs = maxs,
+                angles = ang,
+                hit = tr.Hit or false,
+                pushOutPos = pushOutPos,
+                isClipped = isClipped
+            }
         end
 
-        for _, s in ipairs(collisionSpheres) do
-            s.hitWorld = SphereCollidesWithWorld(s.pos, s.radius)
+        if not vrmod.utils.IsValidWep(wep) then
+            for _, hand in ipairs({"left", "right"}) do
+                local pos = hand == "left" and leftPos or rightPos
+                local ang = hand == "left" and leftAng or rightAng
+                local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, hand) or vrmod.DEFAULT_RADIUS
+                local reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand) or vrmod.DEFAULT_RADIUS * 2
+                local shape = traceMeleeShape(pos, radius, nil, nil, ang, hand, reach)
+                table.insert(collisionSpheres, shape)
+                vrmod._collisionShapeByHand[hand] = shape
+            end
+            return
         end
 
-        for _, b in ipairs(collisionBoxes) do
-            b.hitWorld = BoxCollidesWithWorld(b.pos, b.angles, b.mins, b.maxs)
-        end
+        -- Right hand (box)
+        local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
+        mins = mins or vrmod.DEFAULT_MINS
+        maxs = maxs or vrmod.DEFAULT_MAXS
+        local reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, "right") or math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2
+        local rightBox = traceMeleeShape(rightPos, nil, mins, maxs, rightAng, "right", reach)
+        table.insert(collisionBoxes, rightBox)
+        vrmod._collisionShapeByHand.right = rightBox
+        -- Left hand (sphere)
+        local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, "left") or vrmod.DEFAULT_RADIUS
+        reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, "left") or vrmod.DEFAULT_RADIUS * 2
+        local leftSphere = traceMeleeShape(leftPos, radius, nil, nil, leftAng, "left", reach)
+        table.insert(collisionSpheres, leftSphere)
+        vrmod._collisionShapeByHand.left = leftSphere
     end
 
-    -- Update on every VR tracking tick
     hook.Add("VRMod_Tracking", "VRMod_CollisionTrackingUpdate", function()
         if not g_VR.active then return end
         local ply = LocalPlayer()
@@ -640,14 +831,13 @@ if CLIENT then
         vrmod.utils.UpdateHandCollisionShapes(ply, wep)
     end)
 
-    -- Debug rendering
     hook.Add("PostDrawOpaqueRenderables", "VRMod_HandDebugShapes", function()
         if not cl_debug_collisions:GetBool() or not g_VR.active then return end
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
         render.SetColorMaterial()
         for _, s in ipairs(collisionSpheres) do
-            if s.hitWorld then
+            if s.hit then
                 render.DrawSphere(s.pos, s.radius, 16, 16, Color(255, 255, 0, 100))
             else
                 render.DrawWireframeSphere(s.pos, s.radius, 16, 16, Color(255, 0, 0, 150))
@@ -655,7 +845,7 @@ if CLIENT then
         end
 
         for _, b in ipairs(collisionBoxes) do
-            if b.hitWorld then
+            if b.hit then
                 render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(255, 255, 0, 100))
             else
                 render.DrawWireframeBox(b.pos, b.angles, b.mins, b.maxs, Color(0, 255, 0, 150))
