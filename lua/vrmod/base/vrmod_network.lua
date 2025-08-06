@@ -34,11 +34,21 @@ local function netReadFrame()
 	return frame
 end
 
+-- Per-frame cache reset
+hook.Add("Think", "VRMod_ResetClientFrameCache", function()
+	g_VR._cachedFrameRelative = nil
+	g_VR._cachedFrameAbsolute = nil
+end)
+
+-- Caches and returns the built client frame
 local function buildClientFrame(relative)
+	local cacheKey = relative and "_cachedFrameRelative" or "_cachedFrameAbsolute"
+	if g_VR[cacheKey] then return g_VR[cacheKey] end
 	local lp = LocalPlayer()
+	if not IsValid(lp) then return nil end
 	local inVehicle = lp:InVehicle()
 	local frame = {
-		characterYaw = inVehicle and lp:GetAngles().yaw or g_VR.characterYaw,
+		characterYaw = inVehicle and lp:EyeAngles().yaw or g_VR.characterYaw,
 		hmdPos = g_VR.tracking.hmd.pos,
 		hmdAng = g_VR.tracking.hmd.ang,
 		lefthandPos = g_VR.tracking.pose_lefthand.pos,
@@ -78,6 +88,8 @@ local function buildClientFrame(relative)
 			frame.rightfootPos, frame.rightfootAng = WorldToLocal(frame.rightfootPos, frame.rightfootAng, plyPos, plyAng)
 		end
 	end
+
+	g_VR[cacheKey] = frame
 	return frame
 end
 
@@ -483,6 +495,7 @@ if SERVER then
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
 		local frame = netReadFrame()
+		frame = vrmod.utils.ApplyCollisionCorrectionServer(ply, frame)
 		g_VR[ply:SteamID()].latestFrame = frame
 		if not viewHackPos:IsZero() and util.IsInWorld(viewHackPos) then
 			ply.viewOffset = viewHackPos - ply:EyePos() + ply.viewOffset
