@@ -180,10 +180,9 @@ if CLIENT then
 	local function UpdateViewModel(netFrame)
 		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local currentvmi = g_VR.currentvmi
-		local rh_pose = g_VR.tracking.pose_righthand
 		local vm = g_VR.viewModel
-		if currentvmi and rh_pose then
-			local pos, ang = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, rh_pose.pos, rh_pose.ang)
+		if currentvmi and netFrame and netFrame.righthandPos and netFrame.righthandAng then
+			local pos, ang = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, netFrame.righthandPos, netFrame.righthandAng)
 			g_VR.viewModelPos = g_VR.viewModelPos and vrmod.utils.SmoothVector(g_VR.viewModelPos, pos, smoothingFactor) or pos
 			g_VR.viewModelAng = g_VR.viewModelAng and vrmod.utils.SmoothAngle(g_VR.viewModelAng, ang, smoothingFactor) or ang
 		end
@@ -193,15 +192,6 @@ if CLIENT then
 				vm:SetPos(g_VR.viewModelPos)
 				vm:SetAngles(g_VR.viewModelAng)
 				vm:SetupBones()
-				if netFrame and g_VR.viewModelRightHandBone then
-					local mtx = vm:GetBoneMatrix(g_VR.viewModelRightHandBone)
-					if mtx then
-						netFrame.righthandPos = mtx:GetTranslation()
-						local ang = mtx:GetAngles()
-						ang:Sub(flipAng180)
-						netFrame.righthandAng = ang
-					end
-				end
 			end
 
 			g_VR.viewModelMuzzle = vm:GetAttachment(1)

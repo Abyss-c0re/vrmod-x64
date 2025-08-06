@@ -89,6 +89,7 @@ local function buildClientFrame(relative)
 		end
 	end
 
+	frame = vrmod.utils.UpdateHandCollisionShapes(frame)
 	g_VR[cacheKey] = frame
 	return frame
 end
@@ -495,7 +496,6 @@ if SERVER then
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
 		local frame = netReadFrame()
-		frame = vrmod.utils.ApplyCollisionCorrectionServer(ply, frame)
 		g_VR[ply:SteamID()].latestFrame = frame
 		if not viewHackPos:IsZero() and util.IsInWorld(viewHackPos) then
 			ply.viewOffset = viewHackPos - ply:EyePos() + ply.viewOffset

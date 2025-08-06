@@ -2,6 +2,7 @@ g_VR = g_VR or {}
 --g_VR.viewModelInfo = g_VR.viewModelInfo or {}
 g_VR.enhanced = true
 vrmod = vrmod or {}
+vrmod.data = vrmod.data or {}
 vrmod.utils = vrmod.utils or {}
 --GLOBALS
 vrmod.SMOOTHING_FACTOR = 0.98
@@ -178,27 +179,6 @@ function vrmod.utils.adjustFOV(proj, fovScaleX, fovScaleY)
     clone[1][3] = clone[1][3] * fovScaleX
     clone[2][3] = clone[2][3] * fovScaleY
     return clone
-end
-
-function vrmod.utils.ApplyCollisionCorrection(k, v)
-    local hand = k == "pose_righthand" and "right" or k == "pose_lefthand" and "left" or nil
-    if not hand then return end
-    local shape = vrmod._collisionShapeByHand[hand]
-    if not (shape and shape.pushOutPos and shape.hit) then return end
-    local pushOutWorldPos = shape.pushOutPos
-    local localPushOutPos = WorldToLocal(pushOutWorldPos, Angle(0, 0, 0), g_VR.origin, g_VR.originAngle) / g_VR.scale
-    local distance = (localPushOutPos - v.pos):Length()
-    --print(distance) -- Uncomment for debugging
-    -- Add a minimum distance threshold to prevent jitter on light contact
-    if distance < 0.4 then return end
-    -- Increase damping for small distances to reduce shaking
-    local distanceFactor = math.min(distance / 0.3, 0.99) -- Scale distance for smoother transitions
-    local originalZ = v.pos.z
-    local pos = vrmod.utils.SmoothVector(v.pos, localPushOutPos, distanceFactor)
-    v.pos = LerpVector(distanceFactor, pos, localPushOutPos)
-    v.pos.z = originalZ
-    --print(distance .. " oii " .. distanceFactor)
-    vrmod._collisionShapeByHand[hand] = nil
 end
 
 function vrmod.utils.DrawDeathAnimation(rtWidth, rtHeight)
@@ -694,8 +674,20 @@ if CLIENT then
         left = nil
     }
 
-    function vrmod.utils.UpdateHandCollisionShapes(ply, wep)
-        if not IsValid(ply) or not g_VR.active and not cl_debug_collisions:GetBool() then
+    -- Cache for last non-clipped hand positions
+    local lastNonClippedPos = {
+        left = nil,
+        right = nil
+    }
+
+    local lastLeftPos = Vector(0, 0, 0)
+    local lastRightPos = Vector(0, 0, 0)
+    local lastRightAng = Angle(0, 0, 0)
+    function vrmod.utils.UpdateHandCollisionShapes(frame)
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return frame end
+        local wep = ply:GetActiveWeapon()
+        if not cl_debug_collisions:GetBool() then
             table.Empty(collisionSpheres)
             table.Empty(collisionBoxes)
             vrmod._collisionShapeByHand = {
@@ -703,21 +695,27 @@ if CLIENT then
                 right = nil
             }
 
-            cachedPushOutPos = {
-                right = nil,
-                left = nil
-            }
-            return
+            cachedPushOutPos.left = nil
+            cachedPushOutPos.right = nil
+            lastNonClippedPos.left = nil
+            lastNonClippedPos.right = nil
+            return frame
         end
 
-        local leftAng = vrmod.GetLeftHandAng(ply)
-        local rightAng = vrmod.GetRightHandAng(ply)
-        local leftPos = vrmod.GetLeftHandPos(ply) + leftAng:Forward() * vrmod.DEFAULT_OFFSET
-        local rightPos = vrmod.GetRightHandPos(ply) + rightAng:Forward() * vrmod.DEFAULT_OFFSET
-        if leftPos == lastLeftPos and rightPos == lastRightPos and rightAng == lastAng then return end
+        local leftAng = frame.lefthandAng
+        local rightAng = frame.righthandAng
+        local leftPos = frame.lefthandPos + leftAng:Forward() * vrmod.DEFAULT_OFFSET
+        local rightPos = frame.righthandPos + rightAng:Forward() * vrmod.DEFAULT_OFFSET
+        local function vecAlmostEqual(v1, v2, threshold)
+            if not v1 or not v2 then return false end
+            threshold = threshold or 0.001
+            return v1:DistToSqr(v2) < threshold * threshold
+        end
+
+        if vecAlmostEqual(leftPos, lastLeftPos) and vecAlmostEqual(rightPos, lastRightPos) and rightAng:Forward():Dot(lastRightAng:Forward()) > 0.999 then return frame end
         lastLeftPos = leftPos
         lastRightPos = rightPos
-        lastAng = rightAng
+        lastRightAng = rightAng
         table.Empty(collisionSpheres)
         table.Empty(collisionBoxes)
         vrmod._collisionShapeByHand = {
@@ -726,62 +724,60 @@ if CLIENT then
         }
 
         local function traceMeleeShape(pos, radius, mins, maxs, ang, hand, reach)
-            -- Check if hand is clipped (inside a wall)
+            local shapeMins = mins or Vector(-radius, -radius, -radius)
+            local shapeMaxs = maxs or Vector(radius, radius, radius)
+            -- Start by checking if already clipping
             local clipTrace = util.TraceHull({
                 start = pos,
                 endpos = pos,
-                mins = mins or Vector(-radius, -radius, -radius),
-                maxs = maxs or Vector(radius, radius, radius),
+                mins = shapeMins,
+                maxs = shapeMaxs,
                 filter = ply,
                 mask = MASK_SOLID
             })
 
-            local isClipped = clipTrace.Hit and clipTrace.HitWorld
-            local tr0 = util.TraceLine({
-                start = pos,
-                endpos = pos,
-                filter = ply
-            })
-
-            local src = tr0.HitPos + tr0.HitNormal * -2
-            local dir = ang:Forward()
-            local traceData = {
-                start = src,
-                endpos = src + dir * reach,
-                filter = function(ent) return vrmod.utils.MeleeFilter(ent, ply, hand) end,
-                mask = MASK_SOLID
-            }
-
-            if mins and maxs then
-                traceData.mins = mins
-                traceData.maxs = maxs
-            else
-                traceData.mins = Vector(-radius, -radius, -radius)
-                traceData.maxs = Vector(radius, radius, radius)
-            end
-
-            local tr = util.TraceHull(traceData)
+            local isClipped = clipTrace.StartSolid or clipTrace.Hit and clipTrace.HitWorld
             local pushOutPos = pos
-            if tr.Hit then
-                local pushDir = tr.HitNormal
-                pushDir.z = 0
-                pushDir:Normalize()
-                local depth = radius and radius * 1.5 or math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 1.3 + 1
-                pushOutPos = pos + pushDir * depth
-                -- Smooth pushOutPos if clipped or previous position exists
-                if isClipped and cachedPushOutPos[hand] then
-                    local delta = pushOutPos - cachedPushOutPos[hand]
-                    local maxDelta = 0.1 * g_VR.scale -- Limit movement to 0.1 units per frame (scaled)
-                    if delta:LengthSqr() > maxDelta * maxDelta then
-                        delta:Normalize()
-                        pushOutPos = cachedPushOutPos[hand] + delta * maxDelta
+            local hitNormal = clipTrace.HitNormal or ang:Forward() * -1
+            if isClipped then
+                -- Use last non-clipped position if available
+                if lastNonClippedPos[hand] then
+                    pushOutPos = lastNonClippedPos[hand]
+                else
+                    -- Fallback: nudge out along normal
+                    local traceOut = util.TraceHull({
+                        start = pos,
+                        endpos = pos + hitNormal * 4, -- Small nudge distance
+                        mins = shapeMins,
+                        maxs = shapeMaxs,
+                        filter = ply,
+                        mask = MASK_SOLID
+                    })
+
+                    if traceOut.Hit then
+                        pushOutPos = traceOut.HitPos + traceOut.HitNormal * 0.25
+                        hitNormal = traceOut.HitNormal
+                    else
+                        pushOutPos = pos + hitNormal * 0.5
                     end
                 end
 
                 cachedPushOutPos[hand] = pushOutPos
             else
+                -- Not clipped: cache this position
+                lastNonClippedPos[hand] = pos
                 cachedPushOutPos[hand] = nil
             end
+
+            -- Forward trace to find if we’re about to collide
+            local tr = util.TraceHull({
+                start = pos,
+                endpos = pos + ang:Forward() * reach,
+                mins = shapeMins,
+                maxs = shapeMaxs,
+                filter = function(ent) return vrmod.utils.MeleeFilter(ent, ply, hand) end,
+                mask = MASK_SOLID
+            })
             return {
                 pos = pos,
                 radius = radius,
@@ -790,46 +786,50 @@ if CLIENT then
                 angles = ang,
                 hit = tr.Hit or false,
                 pushOutPos = pushOutPos,
-                isClipped = isClipped
+                isClipped = isClipped,
+                hitNormal = hitNormal
             }
         end
 
-        if not vrmod.utils.IsValidWep(wep) then
-            for _, hand in ipairs({"left", "right"}) do
-                local pos = hand == "left" and leftPos or rightPos
-                local ang = hand == "left" and leftAng or rightAng
-                local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, hand) or vrmod.DEFAULT_RADIUS
-                local reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand) or vrmod.DEFAULT_RADIUS * 2
-                local shape = traceMeleeShape(pos, radius, nil, nil, ang, hand, reach)
+        -- Apply collision correction to frame
+        for _, hand in ipairs({"left", "right"}) do
+            local pos = hand == "left" and leftPos or rightPos
+            local ang = hand == "left" and leftAng or rightAng
+            local posKey = hand .. "handPos"
+            local angKey = hand .. "handAng"
+            local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, hand) or vrmod.DEFAULT_RADIUS
+            local reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand) or vrmod.DEFAULT_RADIUS * 2
+            local shape
+            if vrmod.utils.IsValidWep(wep) and hand == "right" then
+                local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
+                mins = mins or vrmod.DEFAULT_MINS
+                maxs = maxs or vrmod.DEFAULT_MAXS
+                reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, "right") or math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2
+                shape = traceMeleeShape(rightPos, nil, mins, maxs, rightAng, "right", reach)
+                table.insert(collisionBoxes, shape)
+            else
+                shape = traceMeleeShape(pos, radius, nil, nil, ang, hand, reach)
                 table.insert(collisionSpheres, shape)
-                vrmod._collisionShapeByHand[hand] = shape
             end
-            return
+
+            vrmod._collisionShapeByHand[hand] = shape
+            -- Apply collision correction if clipped
+            if shape and shape.isClipped then
+                local handPos = frame[posKey]
+                local handAng = frame[angKey]
+                if handPos and handAng then
+                    local worldPush = shape.pushOutPos
+                    vrmod.utils.DebugPrint("[VRMod] Clipping detected for:", hand)
+                    vrmod.utils.DebugPrint("[VRMod] Original pos:", handPos)
+                    vrmod.utils.DebugPrint("[VRMod] Push-out pos:", worldPush)
+                    -- Use pushOutPos directly, preserving z
+                    local corrected = Vector(worldPush.x, worldPush.y, handPos.z)
+                    frame[posKey] = corrected
+                end
+            end
         end
-
-        -- Right hand (box)
-        local _, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
-        mins = mins or vrmod.DEFAULT_MINS
-        maxs = maxs or vrmod.DEFAULT_MAXS
-        local reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, "right") or math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2
-        local rightBox = traceMeleeShape(rightPos, nil, mins, maxs, rightAng, "right", reach)
-        table.insert(collisionBoxes, rightBox)
-        vrmod._collisionShapeByHand.right = rightBox
-        -- Left hand (sphere)
-        local radius = vrmod.utils.GetCachedWeaponParams(wep, ply, "left") or vrmod.DEFAULT_RADIUS
-        reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, "left") or vrmod.DEFAULT_RADIUS * 2
-        local leftSphere = traceMeleeShape(leftPos, radius, nil, nil, leftAng, "left", reach)
-        table.insert(collisionSpheres, leftSphere)
-        vrmod._collisionShapeByHand.left = leftSphere
+        return frame
     end
-
-    hook.Add("VRMod_Tracking", "VRMod_CollisionTrackingUpdate", function()
-        if not g_VR.active then return end
-        local ply = LocalPlayer()
-        if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
-        local wep = ply:GetActiveWeapon()
-        vrmod.utils.UpdateHandCollisionShapes(ply, wep)
-    end)
 
     hook.Add("PostDrawOpaqueRenderables", "VRMod_HandDebugShapes", function()
         if not cl_debug_collisions:GetBool() or not g_VR.active then return end
