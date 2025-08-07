@@ -479,7 +479,6 @@ if SERVER then
 
 			for _, ent in ipairs(nearbyEntities) do
 				local canPickup = CanPickupEntity(ent, ply, cv)
-				print("uff")
 				ent:SetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), canPickup)
 				-- or use ent:SetNWBool("vrmod_pickup_valid", canPickup) if single player check suffices
 			end
