@@ -702,6 +702,11 @@ if CLIENT then
         right = nil
     }
 
+    local lastNonClippedNormal = {
+        left = nil,
+        right = nil
+    }
+
     local cachedPushOutPos = {
         left = nil,
         right = nil
@@ -778,6 +783,8 @@ if CLIENT then
 
                 lastNonClippedPos.left = nil
                 lastNonClippedPos.right = nil
+                lastNonClippedNormal.left = nil
+                lastNonClippedNormal.right = nil
                 cachedPushOutPos.left = nil
                 cachedPushOutPos.right = nil
             end
@@ -787,10 +794,7 @@ if CLIENT then
         local leftPos = frame.lefthandPos + frame.lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
         local rightPos = frame.righthandPos + frame.righthandAng:Forward() * vrmod.DEFAULT_OFFSET
         local rightAng = frame.righthandAng
-        if vecAlmostEqual(leftPos, lastLeftPos) and vecAlmostEqual(rightPos, lastRightPos) and rightAng:Forward():Dot(lastRightAng:Forward()) > 0.999 then return frame end
-        lastLeftPos:Set(leftPos)
-        lastRightPos:Set(rightPos)
-        lastRightAng:Set(rightAng)
+        -- Process each hand independently
         collisionSpheres = {}
         collisionBoxes = {}
         vrmod._collisionShapeByHand = {
@@ -803,6 +807,22 @@ if CLIENT then
             local pos = hand == "left" and leftPos or rightPos
             local ang = hand == "left" and frame.lefthandAng or rightAng
             local posKey = hand .. "handPos"
+            local lastPos = hand == "left" and lastLeftPos or lastRightPos
+            local lastAng = hand == "right" and lastRightAng or nil
+            -- Only skip if this specific hand hasn't moved significantly
+            if hand == "left" and vecAlmostEqual(pos, lastPos) then
+                continue
+            elseif hand == "right" and vecAlmostEqual(pos, lastPos) and lastAng and ang:Forward():Dot(lastAng:Forward()) > 0.999 then
+                continue
+            end
+
+            if hand == "left" then
+                lastLeftPos:Set(leftPos)
+            else
+                lastRightPos:Set(rightPos)
+                lastRightAng:Set(rightAng)
+            end
+
             local radius, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
             radius = radius or vrmod.DEFAULT_RADIUS
             mins = mins or vrmod.DEFAULT_MINS
@@ -820,37 +840,52 @@ if CLIENT then
 
             vrmod._collisionShapeByHand[hand] = shape
             if shape and shape.isClipped then
-                if g_VR._cachedFrameRelative and g_VR._cachedFrameAbsolute then
-                    g_VR._cachedFrameRelative = nil
-                    g_VR._cachedFrameAbsolute = nil
-                end
-
+                g_VR._cachedFrameRelative = nil
+                g_VR._cachedFrameAbsolute = nil
                 local handPos = frame[posKey]
                 local normal = shape.hitNormal
                 local corrected = Vector(handPos.x, handPos.y, handPos.z)
                 local absX, absY, absZ = math.abs(normal.x), math.abs(normal.y), math.abs(normal.z)
-                local useLastNonClipped = lastNonClippedPos[hand] and vecAlmostEqual(normal, lastNonClippedPos[hand].normal or Vector(0, 0, 1), 0.1)
-                if absX > absY and absX > absZ and absX > 0.7 then
-                    corrected.x = useLastNonClipped and lastNonClippedPos[hand].x or shape.pushOutPos.x
-                elseif absY > absX and absY > absZ and absY > 0.7 then
-                    corrected.y = useLastNonClipped and lastNonClippedPos[hand].y or shape.pushOutPos.y
-                elseif absZ > absX and absZ > absY and absZ > 0.7 then
-                    corrected.z = useLastNonClipped and lastNonClippedPos[hand].z or shape.pushOutPos.z
+                local useLastNonClipped = lastNonClippedPos[hand] and lastNonClippedNormal[hand] and vecAlmostEqual(normal, lastNonClippedNormal[hand], 0.1)
+                -- Check distance between pushOutPos and player position
+                local plyPos = ply:GetPos()
+                if shape.pushOutPos and type(shape.pushOutPos) == "Vector" and IsValid(ply) then
+                    local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
+                    if distanceSqr > 4500 then
+                        -- Reset clipping state if too far from player
+                        lastNonClippedPos[hand] = nil
+                        lastNonClippedNormal[hand] = nil
+                        cachedPushOutPos[hand] = nil
+                        shape.isClipped = false
+                        vrmod.utils.DebugPrint("[VRMod] Reset clipping for:", hand, "DistanceSqr:", distanceSqr, "Distance:", math.sqrt(distanceSqr), "Push-out pos:", shape.pushOutPos, "Player pos:", plyPos)
+                    else
+                        -- Apply correction only if within threshold
+                        if absX > absY and absX > absZ and absX > 0.7 then
+                            corrected.x = useLastNonClipped and lastNonClippedPos[hand].x or shape.pushOutPos.x
+                        elseif absY > absX and absY > absZ and absY > 0.7 then
+                            corrected.y = useLastNonClipped and lastNonClippedPos[hand].y or shape.pushOutPos.y
+                        elseif absZ > absX and absZ > absY and absZ > 0.7 then
+                            corrected.z = useLastNonClipped and lastNonClippedPos[hand].z or shape.pushOutPos.z
+                        else
+                            corrected = useLastNonClipped and Vector(lastNonClippedPos[hand].x, lastNonClippedPos[hand].y, lastNonClippedPos[hand].z) or shape.pushOutPos
+                        end
+
+                        frame[posKey] = corrected
+                        vrmod.utils.DebugPrint("[VRMod] Clipping detected for:", hand, "Normal:", normal, "Original pos:", handPos, "Push-out pos:", corrected, "DistanceSqr:", distanceSqr, "Distance:", math.sqrt(distanceSqr))
+                    end
                 else
-                    corrected = useLastNonClipped and Vector(lastNonClippedPos[hand].x, lastNonClippedPos[hand].y, lastNonClippedPos[hand].z) or shape.pushOutPos
+                    -- Fallback if pushOutPos is invalid or player is invalid
+                    lastNonClippedPos[hand] = nil
+                    lastNonClippedNormal[hand] = nil
+                    cachedPushOutPos[hand] = nil
+                    shape.isClipped = false
+                    vrmod.utils.DebugPrint("[VRMod] Invalid pushOutPos or player for:", hand, "Push-out pos:", shape.pushOutPos, "Player:", ply)
                 end
 
                 if not shape.isClipped then
-                    lastNonClippedPos[hand] = {
-                        x = pos.x,
-                        y = pos.y,
-                        z = pos.z,
-                        normal = normal
-                    }
+                    lastNonClippedPos[hand] = Vector(pos.x, pos.y, pos.z)
+                    lastNonClippedNormal[hand] = Vector(normal.x, normal.y, normal.z)
                 end
-
-                frame[posKey] = corrected
-                vrmod.utils.DebugPrint("[VRMod] Clipping detected for:", hand, "Normal:", normal, "Original pos:", handPos, "Push-out pos:", corrected)
             end
         end
         return frame
