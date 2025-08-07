@@ -161,12 +161,18 @@ if CLIENT then
 		local heldLeft, heldRight = g_VR.heldEntityLeft, g_VR.heldEntityRight
 		local holdingRagdoll = IsValid(heldLeft) and heldLeft:GetNWBool("is_npc_ragdoll", false) or IsValid(heldRight) and heldRight:GetNWBool("is_npc_ragdoll", false)
 		local function ShouldAddHalo(ent)
-			return IsValid(ent) and ent ~= heldLeft and ent ~= heldRight and not holdingRagdoll and IsValidPickupTarget(ent, ply, false)
+			if not IsValid(ent) or ent == heldLeft or ent == heldRight or holdingRagdoll then return false end
+			-- Check server flag for pickup validity, fallback to IsValidPickupTarget if flag missing
+			local serverFlag = ent:GetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), nil)
+			if serverFlag == nil then
+				-- If no server flag, fallback to your clientside logic
+				return IsValidPickupTarget(ent, ply, false)
+			end
+			return serverFlag
 		end
 
 		if ShouldAddHalo(pickupTargetEntLeft) then haloTargetsLeft[#haloTargetsLeft + 1] = pickupTargetEntLeft end
 		if ShouldAddHalo(pickupTargetEntRight) then haloTargetsRight[#haloTargetsRight + 1] = pickupTargetEntRight end
-		-- This was missing
 		if #haloTargetsLeft > 0 then halo.Add(haloTargetsLeft, Color(250, 100, 0), 1, 1, 1, true, true) end
 		if #haloTargetsRight > 0 then halo.Add(haloTargetsRight, Color(0, 255, 255), 1, 1, 1, true, true) end
 	end)
@@ -462,6 +468,26 @@ if SERVER then
 		end
 	end)
 
+	local function UpdatePickupFlags()
+		for _, ply in ipairs(player.GetAll()) do
+			local nearbyEntities = ents.FindInSphere(ply:GetPos(), 300) -- adjust radius as needed
+			local cv = {
+				vrmod_pickup_npcs = GetConVar("vrmod_pickup_npcs"):GetInt(),
+				vrmod_pickup_limit = GetConVar("vrmod_pickup_limit"):GetInt(),
+				vrmod_pickup_weight = GetConVar("vrmod_pickup_weight"):GetFloat()
+			}
+
+			for _, ent in ipairs(nearbyEntities) do
+				local canPickup = CanPickupEntity(ent, ply, cv)
+				print("uff")
+				ent:SetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), canPickup)
+				-- or use ent:SetNWBool("vrmod_pickup_valid", canPickup) if single player check suffices
+			end
+		end
+	end
+
+	-- Run every second for performance
+	timer.Create("VRMod_UpdatePickupFlags", 1, 0, UpdatePickupFlags)
 	hook.Add("PlayerDeath", "vrmod_drop_items_on_death", function(ply)
 		if not IsValid(ply) then return end
 		local sid = ply:SteamID()

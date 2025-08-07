@@ -771,7 +771,7 @@ if CLIENT then
 
     function vrmod.utils.UpdateHandCollisionShapes(frame)
         local ply = LocalPlayer()
-        if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return frame end
+        if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then return frame end
         if not convars.vrmod_collisions:GetBool() then
             if next(collisionSpheres) or next(collisionBoxes) then
                 collisionSpheres = {}
