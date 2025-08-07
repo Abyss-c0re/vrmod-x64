@@ -19,7 +19,8 @@ This build focuses on **optimization** by merging essential features from semi-o
 - Improved UI with new rendering settings  
 - Cursor stability fixed in spawn menu and popups  
 - Better performance and reduced latency across systems  
-- Integrated hand collision physics (no more unintended prop sounds)  
+- Integrated hand collision physics for props (no more unintended prop sounds)
+- Added clientside wall collisions for hands and SWEPs   
 - Rewritten pickup system:  
     - Manual item pickup  
     - Multiplayer-friendly design  
