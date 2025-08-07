@@ -29,7 +29,6 @@ if CLIENT then
 	local forwardOffset = nil
 	local viewEntOffsetPos = Vector(0, 0, 0)
 	local viewEntOffsetAng = Angle(0, 0, 0)
-	local flipAng180 = Angle(0, 0, 180)
 	local convarOverrides = {}
 	local moduleFile
 	if system.IsLinux() then

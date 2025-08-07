@@ -89,7 +89,7 @@ local function buildClientFrame(relative)
 		end
 	end
 
-	frame = vrmod.utils.UpdateHandCollisionShapes(frame)
+	--frame = vrmod.utils.UpdateHandCollisionShapes(frame)
 	g_VR[cacheKey] = frame
 	return frame
 end
@@ -307,7 +307,11 @@ if CLIENT then
 		local tab = g_VR.net[LocalPlayer():SteamID()]
 		if g_VR.threePoints and tab then
 			tab.lerpedFrame = buildClientFrame()
-			return tab.lerpedFrame
+			if convars.vrmod_collisions:GetBool() then
+				return vrmod.utils.UpdateHandCollisionShapes(tab.lerpedFrame)
+			else
+				return tab.lerpedFrame
+			end
 		end
 	end
 

@@ -11,11 +11,17 @@ g_VR = g_VR or {}
 vrmod = vrmod or {}
 local convars, convarValues = {}, {}
 function vrmod.AddCallbackedConvar(cvarName, valueName, defaultValue, flags, helptext, min, max, conversionFunc, callbackFunc)
-	valueName, flags, conversionFunc = valueName or cvarName, flags or FCVAR_ARCHIVE, conversionFunc or function(val) return val end
-	local cv = CreateConVar(cvarName, defaultValue, flags, helptext, min, max)
-	convars[cvarName], convarValues[valueName] = cv, conversionFunc(cv:GetString())
-	cvars.AddChangeCallback(cvarName, function(cv_name, val_old, val_new)
-		convarValues[valueName] = conversionFunc(val_new)
+	valueName = valueName or cvarName
+	flags = flags or FCVAR_ARCHIVE
+	conversionFunc = conversionFunc or function(val) return val end
+	-- Prevent re-creating existing convar
+	local cv = GetConVar(cvarName)
+	if not cv then cv = CreateConVar(cvarName, defaultValue, flags, helptext, min, max) end
+	convars[cvarName] = cv
+	convarValues[valueName] = conversionFunc(cv:GetString())
+	-- Set up dynamic callback
+	cvars.AddChangeCallback(cvarName, function(_, _, new)
+		convarValues[valueName] = conversionFunc(new)
 		if callbackFunc then callbackFunc(convarValues[valueName]) end
 	end, "vrmod")
 	return convars, convarValues

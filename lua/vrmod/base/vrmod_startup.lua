@@ -16,6 +16,7 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3")
     vrmod.AddCallbackedConvar("vrmod_useworldmodels", nil, "0")
+    vrmod.AddCallbackedConvar("vrmod_collisions", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_laserpointer", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_znear", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_renderoffset", nil, "1")
@@ -143,27 +144,18 @@ if CLIENT then
             end
         end)
     end)
-
-
 elseif SERVER then
--- Mark player on spawn
-hook.Add("PlayerSpawn", "VRMarkPlayerForEmptyWeapon", function(ply)
-    if g_VR and g_VR[ply:SteamID()] then
-        ply:SetNWBool("vr_switch_empty", true)
-    end
-end)
-
--- Switch weapon in Think hook
-hook.Add("Think", "VRSwitchToEmptyWeapon", function()
-    for _, ply in ipairs(player.GetAll()) do
-        if ply:GetNWBool("vr_switch_empty") and IsValid(ply) and ply:Alive() then
-            if ply:HasWeapon("weapon_vrmod_empty") then
-                ply:SelectWeapon("weapon_vrmod_empty")
-                ply:SetNWBool("vr_switch_empty", false)
+    -- Mark player on spawn
+    hook.Add("PlayerSpawn", "VRMarkPlayerForEmptyWeapon", function(ply) if g_VR and g_VR[ply:SteamID()] then ply:SetNWBool("vr_switch_empty", true) end end)
+    -- Switch weapon in Think hook
+    hook.Add("Think", "VRSwitchToEmptyWeapon", function()
+        for _, ply in ipairs(player.GetAll()) do
+            if ply:GetNWBool("vr_switch_empty") and IsValid(ply) and ply:Alive() then
+                if ply:HasWeapon("weapon_vrmod_empty") then
+                    ply:SelectWeapon("weapon_vrmod_empty")
+                    ply:SetNWBool("vr_switch_empty", false)
+                end
             end
         end
-    end
-end)
-
+    end)
 end
-    
