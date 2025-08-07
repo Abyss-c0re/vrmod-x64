@@ -76,7 +76,34 @@ local function GetWeaponCollisionBox(phys, isVertical)
     return mins, maxs, isVertical, amin, amax
 end
 
+local function SphereCollidesWithWorld(pos, radius)
+    local tr = util.TraceHull({
+        start = pos,
+        endpos = pos,
+        mins = Vector(-radius, -radius, -radius),
+        maxs = Vector(radius, radius, radius),
+        mask = MASK_SOLID_BRUSHONLY
+    })
+    return tr.Hit and tr.HitWorld, tr.HitNormal or Vector(0, 0, 1)
+end
+
+local function BoxCollidesWithWorld(pos, ang, mins, maxs)
+    local tr = util.TraceHull({
+        start = pos,
+        endpos = pos,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_SOLID_BRUSHONLY
+    })
+    return tr.Hit and tr.HitWorld, tr.HitNormal or Vector(0, 0, 1)
+end
+
 --MATH
+local function vecAlmostEqual(v1, v2, threshold)
+    if not v1 or not v2 then return false end
+    return v1:DistToSqr(v2) < (threshold or 0.001) ^ 2
+end
+
 function vrmod.utils.LengthSqr(v)
     return v.x * v.x + v.y * v.y + v.z * v.z
 end
@@ -680,34 +707,7 @@ if CLIENT then
         right = nil
     }
 
-    local function SphereCollidesWithWorld(pos, radius)
-        local tr = util.TraceHull({
-            start = pos,
-            endpos = pos,
-            mins = Vector(-radius, -radius, -radius),
-            maxs = Vector(radius, radius, radius),
-            mask = MASK_SOLID_BRUSHONLY
-        })
-        return tr.Hit and tr.HitWorld, tr.HitNormal or Vector(0, 0, 1)
-    end
-
-    local function BoxCollidesWithWorld(pos, ang, mins, maxs)
-        local tr = util.TraceHull({
-            start = pos,
-            endpos = pos,
-            mins = mins,
-            maxs = maxs,
-            mask = MASK_SOLID_BRUSHONLY
-        })
-        return tr.Hit and tr.HitWorld, tr.HitNormal or Vector(0, 0, 1)
-    end
-
-    local function vecAlmostEqual(v1, v2, threshold)
-        if not v1 or not v2 then return false end
-        return v1:DistToSqr(v2) < (threshold or 0.001) ^ 2
-    end
-
-    local function traceMeleeShape(pos, radius, mins, maxs, ang, hand, reach)
+    local function traceShape(pos, radius, mins, maxs, ang, hand, reach)
         local shapeMins = mins or Vector(-radius, -radius, -radius)
         local shapeMaxs = maxs or Vector(radius, radius, radius)
         local isClipped, hitNormal
@@ -803,7 +803,6 @@ if CLIENT then
             local pos = hand == "left" and leftPos or rightPos
             local ang = hand == "left" and frame.lefthandAng or rightAng
             local posKey = hand .. "handPos"
-            local angKey = hand .. "handAng"
             local radius, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
             radius = radius or vrmod.DEFAULT_RADIUS
             mins = mins or vrmod.DEFAULT_MINS
@@ -812,15 +811,20 @@ if CLIENT then
             if not isnumber(reach) then reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2 end
             local shape
             if vrmod.utils.IsValidWep(wep) and hand == "right" then
-                shape = traceMeleeShape(rightPos, nil, mins, maxs, rightAng, "right", reach)
+                shape = traceShape(rightPos, nil, mins, maxs, rightAng, "right", reach)
                 collisionBoxes[1] = shape
             else
-                shape = traceMeleeShape(pos, radius, nil, nil, ang, hand, reach)
+                shape = traceShape(pos, radius, nil, nil, ang, hand, reach)
                 collisionSpheres[#collisionSpheres + 1] = shape
             end
 
             vrmod._collisionShapeByHand[hand] = shape
             if shape and shape.isClipped then
+                if g_VR._cachedFrameRelative and g_VR._cachedFrameAbsolute then
+                    g_VR._cachedFrameRelative = nil
+                    g_VR._cachedFrameAbsolute = nil
+                end
+
                 local handPos = frame[posKey]
                 local normal = shape.hitNormal
                 local corrected = Vector(handPos.x, handPos.y, handPos.z)
