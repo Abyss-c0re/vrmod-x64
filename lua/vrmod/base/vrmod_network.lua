@@ -89,7 +89,7 @@ local function buildClientFrame(relative)
 		end
 	end
 
-	if not relative and convars.vrmod_collisions:GetBool() then frame = vrmod.utils.UpdateHandCollisionShapes(frame) end
+	if not relative then frame = vrmod.utils.UpdateHandCollisionShapes(frame) end
 	g_VR[cacheKey] = frame
 	return frame
 end
@@ -324,7 +324,7 @@ if CLIENT then
 		if not tab then return end
 		tab.debugTickCount = tab.debugTickCount + 1
 		local frame = netReadFrame()
-		if convars.vrmod_collisions:GetBool() then frame = vrmod.utils.UpdateHandCollisionShapes(frame) end
+		frame = vrmod.utils.UpdateHandCollisionShapes(frame)
 		if tab.latestFrameIndex == 0 then
 			tab.playbackTime = frame.ts
 		elseif frame.ts <= tab.frames[tab.latestFrameIndex].ts then
