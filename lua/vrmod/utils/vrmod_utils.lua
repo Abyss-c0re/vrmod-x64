@@ -75,14 +75,39 @@ local function GetWeaponCollisionBox(phys, isVertical)
 end
 
 local function SphereCollidesWithWorld(pos, radius)
+    local hullSize = Vector(radius, radius, radius)
+    -- First: detect overlap
     local tr = util.TraceHull({
         start = pos,
         endpos = pos,
-        mins = Vector(-radius, -radius, -radius),
-        maxs = Vector(radius, radius, radius),
+        mins = -hullSize,
+        maxs = hullSize,
         mask = MASK_SOLID_BRUSHONLY
     })
-    return tr.Hit and tr.HitWorld, tr.HitNormal or Vector(0, 0, 1)
+
+    if not tr.Hit or not tr.HitWorld then return false, Vector(0, 0, 1) end
+    -- Second: iterative push-out (resolve penetration)
+    local maxIterations = 5
+    local pushPos = pos
+    local hitNormal = tr.HitNormal
+    for _ = 1, maxIterations do
+        local pushTrace = util.TraceHull({
+            start = pushPos,
+            endpos = pushPos + hitNormal * radius * 1.1,
+            mins = -hullSize,
+            maxs = hullSize,
+            mask = MASK_SOLID_BRUSHONLY
+        })
+
+        if not pushTrace.Hit then
+            pushPos = pushTrace.EndPos
+            break
+        else
+            pushPos = pushTrace.HitPos + pushTrace.HitNormal * 0.1
+            hitNormal = pushTrace.HitNormal
+        end
+    end
+    return true, hitNormal, pushPos
 end
 
 local function BoxCollidesWithWorld(pos, ang, mins, maxs, reach)
@@ -122,6 +147,12 @@ end
 local function vecAlmostEqual(v1, v2, threshold)
     if not v1 or not v2 then return false end
     return v1:DistToSqr(v2) < (threshold or 0.001) ^ 2
+end
+
+local function angAlmostEqual(a1, a2, threshold)
+    if not a1 or not a2 then return false end
+    threshold = threshold or 0.1 -- degrees
+    return math.abs(math.AngleDifference(a1.p, a2.p)) < threshold and math.abs(math.AngleDifference(a1.y, a2.y)) < threshold and math.abs(math.AngleDifference(a1.r, a2.r)) < threshold
 end
 
 function vrmod.utils.LengthSqr(v)
@@ -831,6 +862,7 @@ if CLIENT then
             return frame
         end
 
+        --local relFrame =  VRUtilNetUpdateLocalPly(true)
         local leftPos = frame.lefthandPos + frame.lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
         local rightPos = frame.righthandPos + frame.righthandAng:Forward() * vrmod.DEFAULT_OFFSET
         local rightAng = frame.righthandAng
@@ -847,16 +879,34 @@ if CLIENT then
             local pos = hand == "left" and leftPos or rightPos
             local ang = hand == "left" and frame.lefthandAng or rightAng
             local posKey = hand .. "handPos"
-            local lastPos = hand == "left" and lastLeftPos or lastRightPos
-            -- Only skip if this specific hand hasn't moved significantly
+            if not vrmod._lastRelFrame then vrmod._lastRelFrame = {} end
+            local relFrame = VRUtilNetUpdateLocalPly(true)
+            local relPosKey = hand .. "handPos"
+            local relAngKey = hand .. "handAng"
+            -- Previous relative frame for this hand
+            local prevRel = vrmod._lastRelFrame[hand]
+            -- Movement check: only skip if the hand has not moved or rotated
+            local moved = true
+            if prevRel then moved = not (vecAlmostEqual(relFrame[relPosKey], prevRel.pos, 0.05) and angAlmostEqual(relFrame[relAngKey], prevRel.ang, 0.5)) end
             local clippedLastFrame = cachedPushOutPos[hand] ~= nil
-            local sameNormal = lastNonClippedNormal[hand] and vecAlmostEqual(lastNonClippedNormal[hand], frame[posKey], 0.5)
-            local samePos = vecAlmostEqual(pos, lastPos)
-            if clippedLastFrame and samePos and sameNormal then
+            local sameNormal = lastNonClippedNormal[hand] and vecAlmostEqual(lastNonClippedNormal[hand], frame[posKey], 0.3)
+            if not moved and clippedLastFrame and sameNormal then
                 frame[posKey] = cachedPushOutPos[hand]
                 vrmod.utils.DebugPrint("[VRMod] Using cached push-out for:", hand, "at", cachedPushOutPos[hand])
+                -- Cache current relFrame for next tick
+                vrmod._lastRelFrame[hand] = {
+                    pos = relFrame[relPosKey],
+                    ang = relFrame[relAngKey]
+                }
+
                 continue -- skip re-tracing and shape creation
             end
+
+            -- Update cache for next movement check
+            vrmod._lastRelFrame[hand] = {
+                pos = relFrame[relPosKey],
+                ang = relFrame[relAngKey]
+            }
 
             if hand == "left" then
                 lastLeftPos:Set(leftPos)
@@ -930,6 +980,10 @@ if CLIENT then
                 end
             end
         end
+
+        -- Override actual VR poses with pushed-out positions after collision adjustments
+        g_VR.tracking.pose_lefthand.pos = frame.lefthandPos
+        g_VR.tracking.pose_righthand.pos = frame.righthandPos
         return frame
     end
 

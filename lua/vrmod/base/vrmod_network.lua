@@ -303,10 +303,10 @@ if CLIENT then
 		end
 	end
 
-	function VRUtilNetUpdateLocalPly()
+	function VRUtilNetUpdateLocalPly(relative)
 		local tab = g_VR.net[LocalPlayer():SteamID()]
 		if g_VR.threePoints and tab then
-			tab.lerpedFrame = buildClientFrame()
+			tab.lerpedFrame = buildClientFrame(relative)
 			return tab.lerpedFrame
 		end
 	end
