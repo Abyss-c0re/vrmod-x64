@@ -88,45 +88,34 @@ end
 local function BoxCollidesWithWorld(pos, ang, mins, maxs, reach)
     ang = ang or Angle()
     ang:Normalize()
-    local hit, hitNormal
-    -- Define the 8 corners of the box
-    local points = {Vector(mins.x, mins.y, mins.z), Vector(mins.x, mins.y, maxs.z), Vector(mins.x, maxs.y, mins.z), Vector(mins.x, maxs.y, maxs.z), Vector(maxs.x, mins.y, mins.z), Vector(maxs.x, mins.y, maxs.z), Vector(maxs.x, maxs.y, mins.z), Vector(maxs.x, maxs.y, maxs.z),}
-    for _, localOffset in ipairs(points) do
-        -- Transform using LocalToWorld with origin at 'pos' and rotation 'ang'
-        local worldPoint = LocalToWorld(localOffset, Angle(), pos, ang)
-        local tr = util.TraceLine({
-            start = pos,
-            endpos = worldPoint,
-            mask = MASK_SOLID_BRUSHONLY
-        })
-
-        if tr.Hit and tr.HitWorld then
-            hit = true
-            hitNormal = tr.HitNormal or Vector(0, 0, 1)
-            vrmod.utils.DebugPrint("[VRMod] Box corner hit at:", worldPoint, "Normal:", hitNormal)
-            break
-        end
-    end
-
-    -- Optional reach-based hull sweep
-    if not hit and isnumber(reach) and reach > 0 then
-        local sweepStart = pos
-        local sweepEnd = pos + ang:Forward() * reach
+    -- Create “side-reduced” extents: half the width on the local Y axis,
+    -- but keep the full X (forward/back) and Z (up/down) extents.
+    local reducedMins = Vector(mins.x, mins.y * 0.15, mins.z)
+    local reducedMaxs = Vector(maxs.x, maxs.y * 0.15, maxs.z)
+    -- If no reach: zero-length hull at pos
+    if not reach then
         local tr = util.TraceHull({
-            start = sweepStart,
-            endpos = sweepEnd,
-            mins = mins,
-            maxs = maxs,
+            start = pos,
+            endpos = pos,
+            angles = ang,
+            mins = reducedMins,
+            maxs = reducedMaxs,
             mask = MASK_SOLID_BRUSHONLY
         })
-
-        if tr.Hit and tr.HitWorld then
-            hit = true
-            hitNormal = tr.HitNormal or Vector(0, 0, 1)
-            vrmod.utils.DebugPrint("[VRMod] Box reach hull hit from:", sweepStart, "to", sweepEnd, "Normal:", hitNormal)
-        end
+        return tr.Hit and tr.HitWorld, tr.HitNormal or Vector(0, 0, 1)
     end
-    return hit, hitNormal
+
+    -- With reach: sweep the hull forward
+    local sweepEnd = pos + ang:Forward() * reach
+    local tr = util.TraceHull({
+        start = pos,
+        endpos = sweepEnd,
+        angles = ang,
+        mins = reducedMins,
+        maxs = reducedMaxs,
+        mask = MASK_SOLID_BRUSHONLY
+    })
+    return tr.Hit and tr.HitWorld, tr.HitNormal or Vector(0, 0, 1)
 end
 
 --MATH
