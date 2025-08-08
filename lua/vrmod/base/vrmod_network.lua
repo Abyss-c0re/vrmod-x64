@@ -35,7 +35,7 @@ local function netReadFrame()
 end
 
 -- Per-frame cache reset
-hook.Add("Think", "VRMod_ResetClientFrameCache", function()
+hook.Add("PreRender", "VRMod_ResetClientFrameCache", function()
 	g_VR._cachedFrameRelative = nil
 	g_VR._cachedFrameAbsolute = nil
 end)
@@ -89,7 +89,7 @@ local function buildClientFrame(relative)
 		end
 	end
 
-	--frame = vrmod.utils.UpdateHandCollisionShapes(frame)
+	if not relative and convars.vrmod_collisions:GetBool() then frame = vrmod.utils.UpdateHandCollisionShapes(frame) end
 	g_VR[cacheKey] = frame
 	return frame
 end
@@ -307,11 +307,7 @@ if CLIENT then
 		local tab = g_VR.net[LocalPlayer():SteamID()]
 		if g_VR.threePoints and tab then
 			tab.lerpedFrame = buildClientFrame()
-			if convars.vrmod_collisions:GetBool() then
-				return vrmod.utils.UpdateHandCollisionShapes(tab.lerpedFrame)
-			else
-				return tab.lerpedFrame
-			end
+			return tab.lerpedFrame
 		end
 	end
 
@@ -328,6 +324,7 @@ if CLIENT then
 		if not tab then return end
 		tab.debugTickCount = tab.debugTickCount + 1
 		local frame = netReadFrame()
+		if convars.vrmod_collisions:GetBool() then frame = vrmod.utils.UpdateHandCollisionShapes(frame) end
 		if tab.latestFrameIndex == 0 then
 			tab.playbackTime = frame.ts
 		elseif frame.ts <= tab.frames[tab.latestFrameIndex].ts then
