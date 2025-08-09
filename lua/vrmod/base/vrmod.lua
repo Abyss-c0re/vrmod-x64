@@ -114,24 +114,28 @@ if CLIENT then
 
 	local function UpdateTracking()
 		local smoothingFactor = vrmod.SMOOTHING_FACTOR
-		local maxVelSqr = 2500
 		local maxPosDeltaSqr = 100
 		local rawPoses = VRMOD_GetPoses()
 		for k, v in pairs(rawPoses) do
-			if vrmod.utils.LengthSqr(v.vel) > maxVelSqr then continue end
-			if lastPosePos[k] then
-				local delta = vrmod.utils.SubVec(v.pos, lastPosePos[k])
-				if vrmod.utils.LengthSqr(delta) > maxPosDeltaSqr then continue end
+			local lastPos = lastPosePos[k]
+			local currentPos = v.pos
+			if lastPos then
+				local delta = vrmod.utils.SubVec(currentPos, lastPos)
+				local deltaLenSqr = vrmod.utils.LengthSqr(delta)
+				if deltaLenSqr > maxPosDeltaSqr then
+					-- Clamp delta to max allowed delta
+					local deltaLen = math.sqrt(deltaLenSqr)
+					local clampedDelta = vrmod.utils.MulVec(delta, maxPosDeltaSqr / deltaLen)
+					currentPos = vrmod.utils.AddVec(lastPos, clampedDelta)
+				end
 			end
 
-			lastPosePos[k] = v.pos
+			lastPosePos[k] = currentPos
 			g_VR.tracking[k] = g_VR.tracking[k] or {}
 			local worldPose = g_VR.tracking[k]
-			--if vrmod._collisionShapeByHand then vrmod.utils.ApplyCollisionCorrection(k, v) end
-			local pos, ang = LocalToWorld(v.pos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
+			local pos, ang = LocalToWorld(currentPos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
 			if k == "pose_righthand" or k == "pose_lefthand" then
 				worldPose.pos = worldPose.pos and vrmod.utils.SmoothVector(worldPose.pos, pos, smoothingFactor) or pos
-				--worldPose.pos.z = pos.z
 				worldPose.ang = worldPose.ang and vrmod.utils.SmoothAngle(worldPose.ang, ang, smoothingFactor) or ang
 			else
 				worldPose.pos = pos

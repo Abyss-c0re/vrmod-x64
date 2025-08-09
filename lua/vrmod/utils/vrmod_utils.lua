@@ -841,8 +841,13 @@ if CLIENT then
     end
 
     function vrmod.utils.UpdateHandCollisionShapes(frame)
+        if not vrmod._collisionNearby then
+            -- Early exit, no collisions nearby
+            return frame
+        end
+
         local ply = LocalPlayer()
-        if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() or not ply:GetNWBool("vrmod_server_enforce_collision", true) then return frame end
+        --if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then return frame end
         if not ply:GetNWBool("vrmod_server_enforce_collision", true) then
             if next(collisionSpheres) or next(collisionBoxes) then
                 collisionSpheres = {}
@@ -980,12 +985,23 @@ if CLIENT then
                 end
             end
         end
-
-        -- Override actual VR poses with pushed-out positions after collision adjustments
-        g_VR.tracking.pose_lefthand.pos = frame.lefthandPos
-        g_VR.tracking.pose_righthand.pos = frame.righthandPos
         return frame
     end
+
+    hook.Add("VRMod_PreRender", "VRMod_CollisionBroadPhaseCheck", function()
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not ply:GetNWBool("vrmod_server_enforce_collision", true) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
+            vrmod._collisionNearby = false
+            return
+        end
+
+        local leftPos = vrmod.GetLeftHandPos(ply)
+        local rightPos = vrmod.GetRightHandPos(ply)
+        local bigRadius = 20 -- tune this to cover your largest weapons plus margin
+        local leftNearby = SphereCollidesWithWorld(leftPos, bigRadius)
+        local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
+        vrmod._collisionNearby = leftNearby or rightNearby
+    end)
 
     hook.Add("PostDrawOpaqueRenderables", "VRMod_HandDebugShapes", function()
         if not cl_debug_collisions:GetBool() or not g_VR.active then return end
