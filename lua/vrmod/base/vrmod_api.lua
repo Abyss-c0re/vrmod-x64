@@ -116,7 +116,6 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_hmdPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
-		if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.hmdPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
@@ -162,7 +161,6 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_leftPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
-		if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
@@ -185,7 +183,6 @@ if CLIENT then
 		local angKey = sid .. "_leftAng"
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
-		if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
 		return pos, ang
@@ -214,7 +211,6 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_rightPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
-		if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
@@ -237,7 +233,6 @@ if CLIENT then
 		local angKey = sid .. "_rightAng"
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
-		if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
 		return pos, ang
@@ -601,6 +596,19 @@ elseif SERVER then
 		return g_VR[ply:SteamID()] ~= nil
 	end
 
+	function vrmod.GetFrameDeltaTime(ply, shouldPrint)
+		if not IsValid(ply) then return end
+		local sid = ply:SteamID()
+		local playerTable = g_VR[sid]
+		if not playerTable or not playerTable.lastFrameDelta then
+			if shouldPrint ~= false then print("VRMod: No frame delta time available for player " .. sid) end
+			return
+		end
+
+		if shouldPrint ~= false then print(string.format("VRMod: Time since last frame for player %s: %.4f seconds", sid, playerTable.lastFrameDelta)) end
+		return playerTable.lastFrameDelta
+	end
+
 	function vrmod.UsingEmptyHands(ply)
 		if not IsValid(ply) then return end
 		local wep = ply:GetActiveWeapon()
@@ -633,18 +641,18 @@ elseif SERVER then
 			local rawLeftPos, rawLeftAng = LocalToWorld(lf.lefthandPos or Vector(), lf.lefthandAng or Angle(), refPos, refAng)
 			local rawRightPos, rawRightAng = LocalToWorld(lf.righthandPos or Vector(), lf.righthandAng or Angle(), refPos, refAng)
 			-- If vrmod.utils smoothing exists, apply only to hands
-			if vrmod.utils and vrmod.utils.SmoothVector and vrmod.utils.SmoothAngle then
-				local smoothingFactor = 0.3 -- tweakable
-				if lfw.lefthandPos then
-					rawLeftPos = vrmod.utils.SmoothVector(lfw.lefthandPos, rawLeftPos, smoothingFactor)
-					rawLeftAng = vrmod.utils.SmoothAngle(lfw.lefthandAng, rawLeftAng, smoothingFactor)
-				end
+			-- if vrmod.utils and vrmod.utils.SmoothVector and vrmod.utils.SmoothAngle then
+			-- 	local smoothingFactor = 0.3 -- tweakable
+			-- 	if lfw.lefthandPos then
+			-- 		rawLeftPos = vrmod.utils.SmoothVector(lfw.lefthandPos, rawLeftPos, smoothingFactor)
+			-- 		rawLeftAng = vrmod.utils.SmoothAngle(lfw.lefthandAng, rawLeftAng, smoothingFactor)
+			-- 	end
 
-				if lfw.righthandPos then
-					rawRightPos = vrmod.utils.SmoothVector(lfw.righthandPos, rawRightPos, smoothingFactor)
-					rawRightAng = vrmod.utils.SmoothAngle(lfw.righthandAng, rawRightAng, smoothingFactor)
-				end
-			end
+			-- 	if lfw.righthandPos then
+			-- 		rawRightPos = vrmod.utils.SmoothVector(lfw.righthandPos, rawRightPos, smoothingFactor)
+			-- 		rawRightAng = vrmod.utils.SmoothAngle(lfw.righthandAng, rawRightAng, smoothingFactor)
+			-- 	end
+			-- end
 
 			-- Store updated positions
 			lfw.hmdPos, lfw.hmdAng = rawHMDPos, rawHMDAng
