@@ -138,7 +138,7 @@ hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
         local phys = hand.phys
         phys:Wake()
         phys:ComputeShadowControl({
-            secondstoarrive = engine.TickInterval(),
+            secondstoarrive = vrmod.GetFrameDeltaTime(ply),
             pos = offsetPos,
             angle = ang,
             maxangular = 3000,
