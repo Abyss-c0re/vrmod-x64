@@ -294,6 +294,41 @@ function vrmod.utils.DrawDeathAnimation(rtWidth, rtHeight)
     cam.End2D()
 end
 
+function vrmod.utils.ConvertToRelativeFrame(absFrame)
+    local lp = LocalPlayer()
+    if not IsValid(lp) then return nil end
+    local inVehicle = lp:InVehicle()
+    local plyPos = lp:GetPos()
+    local plyAng = inVehicle and lp:GetVehicle():GetAngles() or Angle()
+    local relFrame = {
+        characterYaw = absFrame.characterYaw
+    }
+
+    local function convertPosAng(posKey, angKey)
+        local pos = absFrame[posKey]
+        local ang = absFrame[angKey]
+        if pos and ang then
+            local localPos, localAng = WorldToLocal(pos, ang, plyPos, plyAng)
+            relFrame[posKey] = localPos
+            relFrame[angKey] = localAng
+        end
+    end
+
+    for i = 1, 10 do
+        relFrame["finger" .. i] = absFrame["finger" .. i]
+    end
+
+    convertPosAng("hmdPos", "hmdAng")
+    convertPosAng("lefthandPos", "lefthandAng")
+    convertPosAng("righthandPos", "righthandAng")
+    if g_VR.sixPoints then
+        convertPosAng("waistPos", "waistAng")
+        convertPosAng("leftfootPos", "leftfootAng")
+        convertPosAng("rightfootPos", "rightfootAng")
+    end
+    return relFrame
+end
+
 -- WEP UTILS
 function vrmod.utils.IsValidWep(wep, get)
     if not IsValid(wep) then return false end
@@ -671,11 +706,12 @@ function vrmod.utils.checkWorldCollisions(pos, radius, mins, maxs, ang, hand, re
     return shape
 end
 
+-- Full rewrite: UpdateHandCollisionShapes
 function vrmod.utils.UpdateHandCollisionShapes(frame)
+    -- Fast early out when no collision broad-phase
     if not vrmod._collisionNearby then
         if next(collisionSpheres) or next(collisionBoxes) then
-            collisionSpheres = {}
-            collisionBoxes = {}
+            collisionSpheres, collisionBoxes = {}, {}
             vrmod._collisionShapeByHand = {
                 left = nil,
                 right = nil
@@ -692,128 +728,152 @@ function vrmod.utils.UpdateHandCollisionShapes(frame)
     end
 
     local ply = LocalPlayer()
-    --local relFrame =  VRUtilNetUpdateLocalPly(true)
+    if not IsValid(ply) then return frame end
+    -- Pre-calc offset positions used for collision queries (absolute space)
     local leftPos = frame.lefthandPos + frame.lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
     local rightPos = frame.righthandPos + frame.righthandAng:Forward() * vrmod.DEFAULT_OFFSET
     local rightAng = frame.righthandAng
-    -- Process each hand independently
-    collisionSpheres = {}
-    collisionBoxes = {}
+    -- Try to reuse the pre-render relative snapshot; fallback to converting this absolute frame
+    local relFrame = vrmod._cachedFrameRelativePreRender or vrmod.utils.ConvertToRelativeFrame(frame)
+    local relFrameDirty = false -- set true when we change absolute frame (so we must recompute relative)
+    -- Reset containers for this update
+    collisionSpheres, collisionBoxes = {}, {}
     vrmod._collisionShapeByHand = {
         left = nil,
         right = nil
     }
 
     local wep = ply:GetActiveWeapon()
+    vrmod._lastRelFrame = vrmod._lastRelFrame or {}
+    -- tolerances (tweak these if you need to tune responsiveness vs jitter)
+    local POS_TOLERANCE = 0.1
+    local ANG_TOLERANCE = 1.0
     for _, hand in ipairs({"left", "right"}) do
         local pos = hand == "left" and leftPos or rightPos
         local ang = hand == "left" and frame.lefthandAng or rightAng
-        local posKey = hand .. "handPos"
-        if not vrmod._lastRelFrame then vrmod._lastRelFrame = {} end
-        local relFrame = VRUtilNetUpdateLocalPly(true)
-        local relPosKey = hand .. "handPos"
-        local relAngKey = hand .. "handAng"
-        -- Previous relative frame for this hand
+        local posKey = hand .. "handPos" -- "lefthandPos" / "righthandPos"
+        local angKey = hand .. "handAng" -- "lefthandAng" / "righthandAng"
+        local relPosKey = posKey -- relFrame uses same keys
+        local relAngKey = angKey
         local prevRel = vrmod._lastRelFrame[hand]
-        -- Movement check: only skip if the hand has not moved or rotated
+        -- Movement check in relative space (player-local) — avoids recalculating collisions when player hasn't moved their hand
         local moved = true
-        if prevRel then moved = not (vrmod.utils.vecAlmostEqual(relFrame[relPosKey], prevRel.pos, 0.1) and vrmod.utils.angAlmostEqual(relFrame[relAngKey], prevRel.ang, 1.0)) end
+        if prevRel then
+            local posEqual = vrmod.utils.vecAlmostEqual(relFrame[relPosKey], prevRel.pos, POS_TOLERANCE)
+            local angEqual = vrmod.utils.angAlmostEqual(relFrame[relAngKey], prevRel.ang, ANG_TOLERANCE)
+            moved = not (posEqual and angEqual)
+        end
+
         local clippedLastFrame = cachedPushOutPos[hand] ~= nil
         local sameNormal = lastNonClippedNormal[hand] and vrmod.utils.vecAlmostEqual(lastNonClippedNormal[hand], frame[posKey], 0.3)
         if not moved and clippedLastFrame and sameNormal then
+            -- Use cached push-out in absolute space (no need to retrace)
             frame[posKey] = cachedPushOutPos[hand]
             vrmod.utils.DebugPrint("[VRMod] Using cached push-out for:", hand, "at", cachedPushOutPos[hand])
-            -- Cache current relFrame for next tick
+            -- mark absolute frame changed so we regenerate relative cache before updating vrmod._lastRelFrame
+            relFrameDirty = true
+            -- regenerate relative snapshot now (so lastRelFrame aligns with corrected absolute)
+            relFrame = vrmod.utils.ConvertToRelativeFrame(frame)
+            relFrameDirty = false
             vrmod._lastRelFrame[hand] = {
                 pos = relFrame[relPosKey],
                 ang = relFrame[relAngKey]
             }
-
-            continue -- skip re-tracing and shape creation
-        end
-
-        -- Update cache for next movement check
-        vrmod._lastRelFrame[hand] = {
-            pos = relFrame[relPosKey],
-            ang = relFrame[relAngKey]
-        }
-
-        if hand == "left" then
-            lastLeftPos:Set(leftPos)
+            -- skip narrow-phase for this hand
         else
-            lastRightPos:Set(rightPos)
-            lastRightAng:Set(rightAng)
-        end
+            -- Proceed to collision tests & possible push-out
+            -- update last known non-cached pos containers (kept for other uses)
+            if hand == "left" then
+                lastLeftPos:Set(leftPos)
+            else
+                lastRightPos:Set(rightPos)
+                lastRightAng:Set(rightAng)
+            end
 
-        local radius, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
-        radius = radius or vrmod.DEFAULT_RADIUS
-        mins = mins or vrmod.DEFAULT_MINS
-        maxs = maxs or vrmod.DEFAULT_MAXS
-        local reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
-        if not isnumber(reach) then reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2 end
-        local shape
-        if vrmod.utils.IsValidWep(wep) and hand == "right" then
-            shape = vrmod.utils.checkWorldCollisions(rightPos, nil, mins, maxs, rightAng, "right", reach)
-            collisionBoxes[1] = shape
-        else
-            shape = vrmod.utils.checkWorldCollisions(pos, radius, nil, nil, ang, hand, reach)
-            collisionSpheres[#collisionSpheres + 1] = shape
-        end
+            -- weapon params and reach
+            local radius, _, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
+            radius = radius or vrmod.DEFAULT_RADIUS
+            mins = mins or vrmod.DEFAULT_MINS
+            maxs = maxs or vrmod.DEFAULT_MAXS
+            local reach = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
+            if not isnumber(reach) then reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2 end
+            -- Narrow-phase collision check (world-space)
+            local shape
+            if vrmod.utils.IsValidWep(wep) and hand == "right" then
+                shape = vrmod.utils.checkWorldCollisions(rightPos, nil, mins, maxs, rightAng, "right", reach)
+                collisionBoxes[1] = shape
+            else
+                shape = vrmod.utils.checkWorldCollisions(pos, radius, nil, nil, ang, hand, reach)
+                collisionSpheres[#collisionSpheres + 1] = shape
+            end
 
-        vrmod._collisionShapeByHand[hand] = shape
-        if shape and shape.isClipped then
-            g_VR._cachedFrameRelative = nil
-            g_VR._cachedFrameAbsolute = nil
-            local handPos = frame[posKey]
-            local normal = shape.hitNormal
-            local corrected = Vector(handPos.x, handPos.y, handPos.z)
-            local absX, absY, absZ = math.abs(normal.x), math.abs(normal.y), math.abs(normal.z)
-            local useLastNonClipped = lastNonClippedPos[hand] and lastNonClippedNormal[hand] and vrmod.utils.vecAlmostEqual(normal, lastNonClippedNormal[hand], 0.1)
-            -- Check distance between pushOutPos and player position
-            local plyPos = frame.hmdPos
-            if shape.pushOutPos and type(shape.pushOutPos) == "Vector" and IsValid(ply) then
-                local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
-                if distanceSqr > 450 then
-                    -- Reset clipping state if too far from player
+            vrmod._collisionShapeByHand[hand] = shape
+            if shape and shape.isClipped then
+                -- Invalidate global cached frames so other systems recompute on next tick
+                g_VR._cachedFrameRelative = nil
+                g_VR._cachedFrameAbsolute = nil
+                local handPos = frame[posKey]
+                local normal = shape.hitNormal
+                local corrected = Vector(handPos.x, handPos.y, handPos.z)
+                local absX, absY, absZ = math.abs(normal.x), math.abs(normal.y), math.abs(normal.z)
+                local useLastNonClipped = lastNonClippedPos[hand] and lastNonClippedNormal[hand] and vrmod.utils.vecAlmostEqual(normal, lastNonClippedNormal[hand], 0.1)
+                local plyPos = frame.hmdPos
+                if shape.pushOutPos and type(shape.pushOutPos) == "Vector" and IsValid(ply) then
+                    local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
+                    if distanceSqr > 450 then
+                        -- Too far: reset clipping state
+                        lastNonClippedPos[hand] = nil
+                        lastNonClippedNormal[hand] = nil
+                        cachedPushOutPos[hand] = nil
+                        shape.isClipped = false
+                        vrmod.utils.DebugPrint("[VRMod] Reset clipping for:", hand, "DistanceSqr:", distanceSqr)
+                    else
+                        -- Compute penetration and push-out (dominant axis preference)
+                        local penetrationVec = handPos - shape.pushOutPos
+                        local penetrationDepth = penetrationVec:Dot(normal)
+                        local correctionFactor = 2
+                        if absX > absY and absX > absZ and absX > 0.5 then
+                            corrected.x = useLastNonClipped and lastNonClippedPos[hand].x or shape.pushOutPos.x + normal.x * penetrationDepth * correctionFactor
+                        elseif absY > absX and absY > absZ and absY > 0.5 then
+                            corrected.y = useLastNonClipped and lastNonClippedPos[hand].y or shape.pushOutPos.y + normal.y * penetrationDepth * correctionFactor
+                        elseif absZ > absX and absZ > absY and absZ > 0.5 then
+                            corrected.z = useLastNonClipped and lastNonClippedPos[hand].z or shape.pushOutPos.z + normal.z * penetrationDepth * correctionFactor
+                        else
+                            corrected = useLastNonClipped and Vector(lastNonClippedPos[hand].x, lastNonClippedPos[hand].y, lastNonClippedPos[hand].z) or shape.pushOutPos + normal * penetrationDepth * correctionFactor
+                        end
+
+                        -- Apply push-out in absolute space
+                        frame[posKey] = corrected
+                        cachedPushOutPos[hand] = corrected
+                        vrmod.utils.DebugPrint("[VRMod] Clipping detected for:", hand, "Push-out pos:", corrected)
+                        relFrameDirty = true
+                    end
+                else
+                    -- Invalid pushOut or player: clear clipping state
                     lastNonClippedPos[hand] = nil
                     lastNonClippedNormal[hand] = nil
                     cachedPushOutPos[hand] = nil
                     shape.isClipped = false
-                    vrmod.utils.DebugPrint("[VRMod] Reset clipping for:", hand, "DistanceSqr:", distanceSqr, "Distance:", math.sqrt(distanceSqr), "Push-out pos:", shape.pushOutPos, "Player pos:", plyPos)
-                else
-                    -- Calculate penetration depth along the normal
-                    local penetrationVec = handPos - shape.pushOutPos
-                    local penetrationDepth = penetrationVec:Dot(normal) -- Project penetration vector onto normal
-                    local correctionFactor = 2
-                    -- Apply correction based on penetration depth along the dominant axis
-                    if absX > absY and absX > absZ and absX > 0.5 then
-                        corrected.x = useLastNonClipped and lastNonClippedPos[hand].x or shape.pushOutPos.x + normal.x * penetrationDepth * correctionFactor
-                    elseif absY > absX and absY > absZ and absY > 0.5 then
-                        corrected.y = useLastNonClipped and lastNonClippedPos[hand].y or shape.pushOutPos.y + normal.y * penetrationDepth * correctionFactor
-                    elseif absZ > absX and absZ > absY and absZ > 0.5 then
-                        corrected.z = useLastNonClipped and lastNonClippedPos[hand].z or shape.pushOutPos.z + normal.z * penetrationDepth * correctionFactor
-                    else
-                        -- Fallback for non-axis-aligned normals
-                        corrected = useLastNonClipped and Vector(lastNonClippedPos[hand].x, lastNonClippedPos[hand].y, lastNonClippedPos[hand].z) or shape.pushOutPos + normal * penetrationDepth * correctionFactor
-                    end
-
-                    frame[posKey] = corrected
-                    cachedPushOutPos[hand] = corrected -- Cache the corrected position
-                    vrmod.utils.DebugPrint("[VRMod] Clipping detected for:", hand, "Normal:", normal, "Original pos:", handPos, "Push-out pos:", corrected, "Penetration depth:", penetrationDepth, "DistanceSqr:", distanceSqr)
+                    vrmod.utils.DebugPrint("[VRMod] Invalid pushOutPos or player for:", hand)
                 end
-            else
-                -- Fallback if pushOutPos is invalid or player is invalid
-                lastNonClippedPos[hand] = nil
-                lastNonClippedNormal[hand] = nil
-                cachedPushOutPos[hand] = nil
-                shape.isClipped = false
-                vrmod.utils.DebugPrint("[VRMod] Invalid pushOutPos or player for:", hand, "Push-out pos:", shape.pushOutPos, "Player:", ply)
+
+                if not shape.isClipped then
+                    lastNonClippedPos[hand] = Vector(pos.x, pos.y, pos.z)
+                    lastNonClippedNormal[hand] = Vector(normal.x, normal.y, normal.z)
+                end
             end
 
-            if not shape.isClipped then
-                lastNonClippedPos[hand] = Vector(pos.x, pos.y, pos.z)
-                lastNonClippedNormal[hand] = Vector(normal.x, normal.y, normal.z)
+            -- If we modified absolute frame, regenerate relative snapshot before updating lastRelFrame
+            if relFrameDirty then
+                relFrame = vrmod.utils.ConvertToRelativeFrame(frame)
+                relFrameDirty = false
             end
+
+            -- Update per-hand relative cache for movement checks next tick
+            vrmod._lastRelFrame[hand] = {
+                pos = relFrame[relPosKey],
+                ang = relFrame[relAngKey]
+            }
         end
     end
     return frame
@@ -1051,11 +1111,13 @@ if CLIENT then
         modelCache[modelPath] = params
     end)
 
-    hook.Add("VRMod_Tracking", "VRMod_CollisionBroadPhaseCheck", function()
+    -- Hook: broad-phase proximity + cache a relative snapshot (once per frame)
+    hook.Add("VRMod_PreRender", "VRMod_CollisionBroadPhaseCheck", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:GetNWBool("vrmod_server_enforce_collision", true) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
             vrmod._collisionNearby = false
             collisionNearbyCache = nil
+            vrmod._cachedFrameRelativePreRender = nil
             return
         end
 
@@ -1066,6 +1128,7 @@ if CLIENT then
         end
 
         lastPlayerPos:Set(plyPos)
+        -- Use your accessor functions — they return world-space vectors
         local leftPos = vrmod.GetLeftHandPos(ply)
         local rightPos = vrmod.GetRightHandPos(ply)
         local bigRadius = 20
@@ -1073,6 +1136,13 @@ if CLIENT then
         local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
         vrmod._collisionNearby = leftNearby or rightNearby
         collisionNearbyCache = vrmod._collisionNearby
+        -- Cache a relative snapshot for this pre-render if we have an authoritative absolute frame
+        if g_VR._cachedFrameAbsolute then
+            -- Convert once and reuse in UpdateHandCollisionShapes for movement checks
+            vrmod._cachedFrameRelativePreRender = vrmod.utils.ConvertToRelativeFrame(g_VR._cachedFrameAbsolute)
+        else
+            vrmod._cachedFrameRelativePreRender = nil
+        end
     end)
 
     hook.Add("PostDrawOpaqueRenderables", "VRMod_HandDebugShapes", function()
