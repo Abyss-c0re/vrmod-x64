@@ -35,7 +35,7 @@ local function netReadFrame()
 end
 
 -- Per-frame cache reset
-hook.Add("PreRender", "VRMod_ResetClientFrameCache", function()
+hook.Add("VRMod_PreRender", "VRMod_ResetClientFrameCache", function()
 	g_VR._cachedFrameRelative = nil
 	g_VR._cachedFrameAbsolute = nil
 end)
@@ -55,17 +55,13 @@ local function buildClientFrame(relative)
 		lefthandAng = g_VR.tracking.pose_lefthand.ang,
 		righthandPos = g_VR.tracking.pose_righthand.pos,
 		righthandAng = g_VR.tracking.pose_righthand.ang,
-		finger1 = g_VR.input.skeleton_lefthand.fingerCurls[1],
-		finger2 = g_VR.input.skeleton_lefthand.fingerCurls[2],
-		finger3 = g_VR.input.skeleton_lefthand.fingerCurls[3],
-		finger4 = g_VR.input.skeleton_lefthand.fingerCurls[4],
-		finger5 = g_VR.input.skeleton_lefthand.fingerCurls[5],
-		finger6 = g_VR.input.skeleton_righthand.fingerCurls[1],
-		finger7 = g_VR.input.skeleton_righthand.fingerCurls[2],
-		finger8 = g_VR.input.skeleton_righthand.fingerCurls[3],
-		finger9 = g_VR.input.skeleton_righthand.fingerCurls[4],
-		finger10 = g_VR.input.skeleton_righthand.fingerCurls[5],
 	}
+
+	-- Assign fingers using loop
+	for i = 1, 5 do
+		frame["finger" .. i] = g_VR.input.skeleton_lefthand.fingerCurls[i]
+		frame["finger" .. i + 5] = g_VR.input.skeleton_righthand.fingerCurls[i]
+	end
 
 	if g_VR.sixPoints then
 		frame.waistPos = g_VR.tracking.pose_waist.pos
@@ -77,19 +73,11 @@ local function buildClientFrame(relative)
 	end
 
 	if relative then
-		local plyPos = lp:GetPos()
-		local plyAng = inVehicle and lp:GetVehicle():GetAngles() or Angle()
-		frame.hmdPos, frame.hmdAng = WorldToLocal(frame.hmdPos, frame.hmdAng, plyPos, plyAng)
-		frame.lefthandPos, frame.lefthandAng = WorldToLocal(frame.lefthandPos, frame.lefthandAng, plyPos, plyAng)
-		frame.righthandPos, frame.righthandAng = WorldToLocal(frame.righthandPos, frame.righthandAng, plyPos, plyAng)
-		if g_VR.sixPoints then
-			frame.waistPos, frame.waistAng = WorldToLocal(frame.waistPos, frame.waistAng, plyPos, plyAng)
-			frame.leftfootPos, frame.leftfootAng = WorldToLocal(frame.leftfootPos, frame.leftfootAng, plyPos, plyAng)
-			frame.rightfootPos, frame.rightfootAng = WorldToLocal(frame.rightfootPos, frame.rightfootAng, plyPos, plyAng)
-		end
+		frame = vrmod.utils.ConvertToRelativeFrame(frame)
+	else
+		frame = vrmod.utils.UpdateHandCollisionShapes(frame)
 	end
 
-	if not relative then frame = vrmod.utils.UpdateHandCollisionShapes(frame) end
 	g_VR[cacheKey] = frame
 	return frame
 end
