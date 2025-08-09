@@ -358,7 +358,7 @@ if SERVER then
 				maxspeeddamp = 300,
 				dampfactor = 0.3,
 				teleportdistance = 100,
-				deltatime = FrameTime()
+				deltatime = 0
 			}
 
 			function pickupController:PhysicsSimulate(phys, dt)

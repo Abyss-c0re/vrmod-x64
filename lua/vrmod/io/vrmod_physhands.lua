@@ -147,7 +147,7 @@ hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
             maxspeeddamp = 300,
             dampfactor = 0.3,
             teleportdistance = 100,
-            deltatime = FrameTime()
+            deltatime = 0
         })
     end
 
