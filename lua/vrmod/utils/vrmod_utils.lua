@@ -1,8 +1,23 @@
+local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+local cv_debug = CreateConVar("vrmod_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
+local cl_debug_collisions = CreateClientConVar("vrmod_debug_collisions", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 g_VR = g_VR or {}
 g_VR.enhanced = true
 vrmod = vrmod or {}
-vrmod.data = vrmod.data or {}
 vrmod.utils = vrmod.utils or {}
+--GLOBALS
+vrmod.SMOOTHING_FACTOR = 0.98
+vrmod.DEFAULT_RADIUS = 3.5
+vrmod.DEFAULT_REACH = 5.5
+vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
+vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
+vrmod.DEFAULT_ANGLES = Angle(0, 0, 0)
+vrmod.DEFAULT_OFFSET = 4
+vrmod.MODEL_OVERRIDES = {
+    weapon_physgun = "models/weapons/w_physics.mdl",
+    weapon_physcannon = "models/weapons/w_physics.mdl",
+}
+
 local magCache = {}
 local modelCache = {}
 local pending = {}
@@ -30,22 +45,6 @@ local cachedPushOutPos = {
 
 local trackedRagdolls = trackedRagdolls or {}
 local lastDamageTime = {}
---GLOBALS
-vrmod.SMOOTHING_FACTOR = 0.98
-vrmod.DEFAULT_RADIUS = 3.5
-vrmod.DEFAULT_REACH = 5.5
-vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
-vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
-vrmod.DEFAULT_ANGLES = Angle(0, 0, 0)
-vrmod.DEFAULT_OFFSET = 4
-vrmod.MODEL_OVERRIDES = {
-    weapon_physgun = "models/weapons/w_physics.mdl",
-    weapon_physcannon = "models/weapons/w_physics.mdl",
-}
-
-local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
-local cv_debug = CreateConVar("vrmod_debug", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Enable detailed melee debug logging (0 = off, 1 = on)")
-local cl_debug_collisions = CreateClientConVar("vrmod_debug_collisions", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 -- HELPERS
 local function IsMagazine(ent)
     local class = ent:GetClass()
@@ -418,6 +417,19 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
             angles = vrmod.DEFAULT_ANGLES,
             computed = true
         }
+
+        if CLIENT and IsValid(LocalPlayer()) and LocalPlayer():IsConnected() then
+            net.Start("vrmod_sync_model_params")
+            net.WriteString(originalModelPath)
+            net.WriteFloat(reach)
+            net.WriteFloat(reach) -- radius = reach in your case
+            net.WriteVector(mins_horizontal or vrmod.DEFAULT_MINS)
+            net.WriteVector(maxs_horizontal or vrmod.DEFAULT_MAXS)
+            net.WriteVector(mins_vertical or vrmod.DEFAULT_MINS)
+            net.WriteVector(maxs_vertical or vrmod.DEFAULT_MAXS)
+            net.WriteAngle(vrmod.DEFAULT_ANGLES)
+            net.SendToServer()
+        end
         return
     end
 
@@ -566,21 +578,28 @@ end
 function vrmod.utils.GetCachedWeaponParams(wep, ply, side)
     if not vrmod.utils.IsValidWep(wep) or side == "left" then return nil end
     local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
-    -- Check if computation is pending and hasn't timed out
     local model = vrmod.utils.WepInfo(wep)
+    -- SERVER: check if synced cache already exists
+    if SERVER and modelCache[model] and modelCache[model].computed then
+        local c = modelCache[model]
+        vrmod.utils.DebugPrint("GetCachedWeaponParams: Using server-side synced params for %s", model)
+        return c.radius, c.reach, c.mins_horizontal, c.maxs_horizontal, c.angles
+    end
+
+    -- Check if computation is pending and hasn't timed out
     if pending[model] and CurTime() - (pending[model].lastAttempt or 0) < 2 then
         vrmod.utils.DebugPrint("GetCachedWeaponParams: Computation pending for %s, waiting", model)
-        return nil -- Return nil to indicate params aren't ready yet
+        return nil -- params not ready yet
     end
 
     -- Only return params if they're not defaults or if computation is complete
     if radius ~= vrmod.DEFAULT_RADIUS or reach ~= vrmod.DEFAULT_REACH or mins ~= vrmod.DEFAULT_MINS then return radius, reach, mins, maxs, angles end
-    -- Schedule computation if not already pending
+    -- Schedule computation if not already pending (client-side)
     if not pending[model] then
         vrmod.utils.DebugPrint("GetCachedWeaponParams: Scheduling computation for %s", model)
         timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(model) end)
     end
-    return nil -- Indicate params aren't ready
+    return nil -- params not ready
 end
 
 function vrmod.utils.checkWorldCollisions(pos, radius, mins, maxs, ang, hand, reach)
@@ -981,6 +1000,24 @@ end
 
 if SERVER then
     CreateConVar("vrmod_collisions", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY + FCVAR_REPLICATED, "Enable VR hand collision correction")
+    util.AddNetworkString("vrmod_sync_model_params")
+    net.Receive("vrmod_sync_model_params", function(len, ply)
+        local modelPath = net.ReadString()
+        local params = {
+            radius = net.ReadFloat(),
+            reach = net.ReadFloat(),
+            mins_horizontal = net.ReadVector(),
+            maxs_horizontal = net.ReadVector(),
+            mins_vertical = net.ReadVector(),
+            maxs_vertical = net.ReadVector(),
+            angles = net.ReadAngle(),
+            computed = true
+        }
+
+        vrmod.utils.DebugPrint("Server received collision params for %s from %s", modelPath, ply:Nick())
+        modelCache[modelPath] = params
+    end)
+
     cvars.AddChangeCallback("vrmod_collisions", function(cvar, old, new)
         for _, ply in ipairs(player.GetAll()) do
             ply:SetNWBool("vrmod_server_enforce_collision", tobool(new))
@@ -997,6 +1034,23 @@ if SERVER then
 end
 
 if CLIENT then
+    net.Receive("vrmod_sync_model_params", function()
+        local modelPath = net.ReadString()
+        local params = {
+            radius = net.ReadFloat(),
+            reach = net.ReadFloat(),
+            mins_horizontal = net.ReadVector(),
+            maxs_horizontal = net.ReadVector(),
+            mins_vertical = net.ReadVector(),
+            maxs_vertical = net.ReadVector(),
+            angles = net.ReadAngle(),
+            computed = true
+        }
+
+        vrmod.utils.DebugPrint("Received synced collision params for %s from server", modelPath)
+        modelCache[modelPath] = params
+    end)
+
     hook.Add("VRMod_Tracking", "VRMod_CollisionBroadPhaseCheck", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:GetNWBool("vrmod_server_enforce_collision", true) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
