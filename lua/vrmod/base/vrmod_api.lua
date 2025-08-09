@@ -628,10 +628,29 @@ elseif SERVER then
 			local refPos, refAng = ply:GetPos(), ply:InVehicle() and ply:GetVehicle():GetAngles() or Angle()
 			-- Ensure latestFrame has valid data
 			if not lf then return end
-			lfw.hmdPos, lfw.hmdAng = LocalToWorld(lf.hmdPos or Vector(), lf.hmdAng or Angle(), refPos, refAng)
-			lfw.lefthandPos, lfw.lefthandAng = LocalToWorld(lf.lefthandPos or Vector(), lf.lefthandAng or Angle(), refPos, refAng)
-			lfw.righthandPos, lfw.righthandAng = LocalToWorld(lf.righthandPos or Vector(), lf.righthandAng or Angle(), refPos, refAng)
-			-- Update velocities and angular velocities
+			-- Base world conversions
+			local rawHMDPos, rawHMDAng = LocalToWorld(lf.hmdPos or Vector(), lf.hmdAng or Angle(), refPos, refAng)
+			local rawLeftPos, rawLeftAng = LocalToWorld(lf.lefthandPos or Vector(), lf.lefthandAng or Angle(), refPos, refAng)
+			local rawRightPos, rawRightAng = LocalToWorld(lf.righthandPos or Vector(), lf.righthandAng or Angle(), refPos, refAng)
+			-- If vrmod.utils smoothing exists, apply only to hands
+			if vrmod.utils and vrmod.utils.SmoothVector and vrmod.utils.SmoothAngle then
+				local smoothingFactor = 0.3 -- tweakable
+				if lfw.lefthandPos then
+					rawLeftPos = vrmod.utils.SmoothVector(lfw.lefthandPos, rawLeftPos, smoothingFactor)
+					rawLeftAng = vrmod.utils.SmoothAngle(lfw.lefthandAng, rawLeftAng, smoothingFactor)
+				end
+
+				if lfw.righthandPos then
+					rawRightPos = vrmod.utils.SmoothVector(lfw.righthandPos, rawRightPos, smoothingFactor)
+					rawRightAng = vrmod.utils.SmoothAngle(lfw.righthandAng, rawRightAng, smoothingFactor)
+				end
+			end
+
+			-- Store updated positions
+			lfw.hmdPos, lfw.hmdAng = rawHMDPos, rawHMDAng
+			lfw.lefthandPos, lfw.lefthandAng = rawLeftPos, rawLeftAng
+			lfw.righthandPos, lfw.righthandAng = rawRightPos, rawRightAng
+			-- Update velocity cache
 			local sid = ply:SteamID()
 			local cache = vrmod.HandVelocityCache[sid]
 			if not cache then
@@ -639,7 +658,7 @@ elseif SERVER then
 					leftLastPos = lfw.lefthandPos,
 					rightLastPos = lfw.righthandPos,
 					hmdLastPos = lfw.hmdPos,
-					leftLastAng = lfw.lefthandAng or Angle(), -- Initialize with current angle or default
+					leftLastAng = lfw.lefthandAng or Angle(),
 					rightLastAng = lfw.righthandAng or Angle(),
 					hmdLastAng = lfw.hmdAng or Angle(),
 					leftVel = Vector(),
@@ -657,28 +676,12 @@ elseif SERVER then
 			if cache.lastTick ~= 0 then
 				local dt = (lfw.tick - cache.lastTick) * engine.TickInterval()
 				if dt > 0 then
-					-- Linear velocities
 					cache.leftVel = (lfw.lefthandPos - cache.leftLastPos) / dt
 					cache.rightVel = (lfw.righthandPos - cache.rightLastPos) / dt
 					cache.hmdVel = (lfw.hmdPos - cache.hmdLastPos) / dt
-					-- Angular velocities with nil checks
-					if lfw.lefthandAng and cache.leftLastAng then
-						cache.leftAngVel = (lfw.lefthandAng - cache.leftLastAng) / dt
-					else
-						cache.leftAngVel = Angle()
-					end
-
-					if lfw.righthandAng and cache.rightLastAng then
-						cache.rightAngVel = (lfw.righthandAng - cache.rightLastAng) / dt
-					else
-						cache.rightAngVel = Angle()
-					end
-
-					if lfw.hmdAng and cache.hmdLastAng then
-						cache.hmdAngVel = (lfw.hmdAng - cache.hmdLastAng) / dt
-					else
-						cache.hmdAngVel = Angle()
-					end
+					cache.leftAngVel = lfw.lefthandAng and cache.leftLastAng and (lfw.lefthandAng - cache.leftLastAng) / dt or Angle()
+					cache.rightAngVel = lfw.righthandAng and cache.rightLastAng and (lfw.righthandAng - cache.rightLastAng) / dt or Angle()
+					cache.hmdAngVel = lfw.hmdAng and cache.hmdLastAng and (lfw.hmdAng - cache.hmdLastAng) / dt or Angle()
 				end
 			end
 

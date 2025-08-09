@@ -352,11 +352,11 @@ if SERVER then
 			pickupController = ents.Create("vrmod_pickup")
 			pickupController.ShadowParams = {
 				secondstoarrive = engine.TickInterval(),
-				maxangular = 3000,
-				maxangulardamp = 3000,
-				maxspeed = 3000,
-				maxspeeddamp = 300,
-				dampfactor = 0.5,
+				maxangular = 5000,
+				maxangulardamp = 5000,
+				maxspeed = 5000,
+				maxspeeddamp = 5000,
+				dampfactor = 0.3,
 				teleportdistance = 100,
 				deltatime = 0
 			}
@@ -398,7 +398,13 @@ if SERVER then
 				end
 
 				-- Default fallback: use stored localPos/localAng for non-ragdolls
-				self.ShadowParams.pos, self.ShadowParams.angle = LocalToWorld(info.localPos, info.localAng, handPos, handAng)
+				-- Get target position and angle from hand pose
+				local targetPos, targetAng = LocalToWorld(info.localPos, info.localAng, handPos, handAng)
+				-- Smooth from current phys state to target
+				local currentPos, currentAng = phys:GetPos(), phys:GetAngles()
+				self.ShadowParams.pos = vrmod.utils.SmoothVector(currentPos, targetPos, 0.9)
+				self.ShadowParams.angle = vrmod.utils.SmoothAngle(currentAng, targetAng, 0.9)
+				-- Apply to shadow control
 				phys:ComputeShadowControl(self.ShadowParams)
 			end
 
