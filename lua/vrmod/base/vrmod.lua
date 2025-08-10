@@ -181,13 +181,19 @@ if CLIENT then
 	end
 
 	local function UpdateViewModel(netFrame)
-		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local currentvmi = g_VR.currentvmi
 		local vm = g_VR.viewModel
 		if currentvmi and netFrame and netFrame.righthandPos and netFrame.righthandAng then
-			local pos, ang = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, netFrame.righthandPos, netFrame.righthandAng)
-			g_VR.viewModelPos = g_VR.viewModelPos and vrmod.utils.SmoothVector(g_VR.viewModelPos, pos, smoothingFactor) or pos
-			g_VR.viewModelAng = g_VR.viewModelAng and vrmod.utils.SmoothAngle(g_VR.viewModelAng, ang, smoothingFactor) or ang
+			local pos, ang = netFrame.righthandPos, netFrame.righthandAng
+			local collisionShape = vrmod._collisionShapeByHand and vrmod._collisionShapeByHand.right
+			if collisionShape and collisionShape.isClipped and collisionShape.pushOutPos then
+				pos = collisionShape.pushOutPos
+				vrmod.utils.DebugPrint("[VRMod] Applying collision-corrected pos for viewmodel:", pos)
+			end
+
+			local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, pos, ang)
+			g_VR.viewModelPos = offsetPos
+			g_VR.viewModelAng = offsetAng
 		end
 
 		if IsValid(vm) then
