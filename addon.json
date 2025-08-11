@@ -8,6 +8,7 @@
         "README.md",
         "models/**/*.sw.vtx",
         "materials/**/*.sw.vtx",
-        "**/*.sw.vtx"
+        "**/*.sw.vtx",
+        ".vscode/settings.json"
     ]
 }
