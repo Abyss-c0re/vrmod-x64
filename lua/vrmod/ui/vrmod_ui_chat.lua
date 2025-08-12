@@ -66,8 +66,41 @@ if CLIENT then
 	end
 
 	local function addConsoleMessage(msg)
-		table.insert(consoleLog, {Color(255, 255, 0, 255), tostring(msg)})
+		-- Ensure msg is a string or a table with valid color and string elements
+		local formattedMsg
+		if type(msg) == "table" then
+			formattedMsg = {}
+			for _, v in ipairs(msg) do
+				if IsColor(v) then
+					table.insert(formattedMsg, v)
+				else
+					table.insert(formattedMsg, tostring(v))
+				end
+			end
+		else
+			formattedMsg = tostring(msg)
+		end
+
+		table.insert(consoleLog, formattedMsg)
 		if #consoleLog > 30 then table.remove(consoleLog, 1) end
+	end
+
+	-- Override Error function
+	local oldError = Error
+	function Error(...)
+		oldError(...)
+		local args = {...}
+		local msg = "[Lua Error] " .. table.concat(args, " ")
+		addConsoleMessage({Color(255, 0, 0, 255), msg})
+	end
+
+	-- Override ErrorNoHalt function
+	local oldErrorNoHalt = ErrorNoHalt
+	function ErrorNoHalt(...)
+		oldErrorNoHalt(...)
+		local args = {...}
+		local msg = "[Lua Error (No Halt)] " .. table.concat(args, " ")
+		addConsoleMessage({Color(255, 0, 0, 255), msg})
 	end
 
 	-- Override print and MsgC
@@ -76,26 +109,23 @@ if CLIENT then
 		oldPrint(...)
 		local args = {...}
 		local msg = table.concat(args, " ")
-		addConsoleMessage(msg)
+		addConsoleMessage({Color(255, 255, 255, 255), msg})
 	end
 
 	local oldMsgC = MsgC
 	function MsgC(...)
 		local args = {...}
-		-- Filter strings for concatenation
 		local stringArgs = {}
 		for _, v in ipairs(args) do
 			if type(v) == "string" then table.insert(stringArgs, v) end
 		end
 
 		local msg = table.concat(stringArgs, " ")
-		-- Check for "Unknown command" errors
 		for _, v in ipairs(args) do
-			if type(v) == "string" and v:match("Unknown command:") then addConsoleMessage("[Unknown Command Error] " .. v) end
+			if type(v) == "string" and v:match("Unknown command:") then addConsoleMessage({Color(255, 0, 0, 255), "[Unknown Command Error] " .. v}) end
 		end
 
-		-- Add regular message if not empty
-		if msg ~= "" then addConsoleMessage(msg) end
+		if msg ~= "" then addConsoleMessage({Color(255, 255, 255, 255), msg}) end
 		oldMsgC(...)
 	end
 
@@ -103,9 +133,21 @@ if CLIENT then
 	local meta = FindMetaTable("Player")
 	local oldConCommand = meta.ConCommand
 	function meta:ConCommand(cmd)
-		addConsoleMessage("[Command] " .. tostring(cmd))
-		return oldConCommand(self, cmd)
+		addConsoleMessage({Color(0, 255, 255, 255), "[Command] " .. tostring(cmd)})
+		local function errorHandler(err)
+			local errorMsg = "[Lua Error] " .. tostring(err)
+			addConsoleMessage({Color(255, 0, 0, 255), errorMsg})
+			local stackTrace = debug.traceback("", 2)
+			for _, line in ipairs(string.Split(tostring(stackTrace), "\n")) do
+				if line ~= "" then addConsoleMessage({Color(255, 0, 0, 255), "  " .. line}) end
+			end
+		end
+
+		xpcall(function() oldConCommand(self, cmd) end, errorHandler)
+		-- Explicitly return nil to match original behavior
+		return
 	end
+
 
 	local function ToggleChat()
 		if VRUtilIsMenuOpen("chat") then
