@@ -116,6 +116,7 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_hmdPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.hmdPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
@@ -126,6 +127,7 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_hmdAng"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		local ang = t and t.lerpedFrame and t.lerpedFrame.hmdAng or Angle()
 		frameCache[cacheKey] = ang
 		return ang
@@ -138,6 +140,7 @@ if CLIENT then
 		local angKey = sid .. "_hmdAng"
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.hmdPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.hmdAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
 		return pos, ang
@@ -161,6 +164,7 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_leftPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector()
 		frameCache[cacheKey] = pos
@@ -172,6 +176,7 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_leftAng"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		local ang = t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
 		frameCache[cacheKey] = ang
 		return ang
@@ -184,6 +189,7 @@ if CLIENT then
 		local angKey = sid .. "_leftAng"
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
@@ -213,6 +219,7 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_rightPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector()
 		frameCache[cacheKey] = pos
@@ -224,6 +231,7 @@ if CLIENT then
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_rightAng"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		local ang = t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
 		frameCache[cacheKey] = ang
 		return ang
@@ -236,6 +244,7 @@ if CLIENT then
 		local angKey = sid .. "_rightAng"
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
+		if not t then return end
 		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang

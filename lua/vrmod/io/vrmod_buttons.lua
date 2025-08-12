@@ -30,9 +30,7 @@ if SERVER then
         ["func_door_rotating"] = true,
         ["gmod_button"] = true,
         ["gmod_wire_button"] = true,
-        ["sent_button"] = true,
-        ["keypad"] = true,
-        ["keypad_wire"] = true,
+        ["sent_button"] = true
     }
 
     net.Receive("VRButtonPresserMessage", function(_, ply)

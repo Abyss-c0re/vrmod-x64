@@ -411,13 +411,16 @@ function vrmod.utils.TraceHand(ply, hand)
         startPos = vrmod.GetLeftHandPos(ply)
         ang = vrmod.GetLeftHandAng(ply)
         local ang2 = Angle(ang.p, ang.y, ang.r + 180)
+        if not ang then return nil end
         dir = ang2:Forward()
     else
         startPos = vrmod.GetRightHandPos(ply)
         ang = vrmod.GetRightHandAng(ply)
+        if not ang then return nil end
         dir = ang:Forward()
     end
 
+    if not pos or not ang or not dir then return nil end
     local ignore = {}
     local maxDepth = 10
     for i = 1, maxDepth do

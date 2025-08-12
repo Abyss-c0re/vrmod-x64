@@ -9,8 +9,8 @@ scripted_ents.Register({
 local blacklistedClasses = {
 	["npc_turret_floor"] = true,
 	["info_particle_system"] = true,
-	["class C_BaseFlex"] = true,
-	["class C_BaseViewModel"] = true,
+	["C_BaseFlex"] = true,
+	["C_BaseViewModel"] = true,
 	["func_button"] = true,
 	["func_rot_button"] = true,
 	["item_healthcharger"] = true,
@@ -56,13 +56,13 @@ end
 
 local function IsNonPickupable(ent)
 	if not IsValid(ent) then return true end
-	local class = ent:GetClass()
-	local model = ent:GetModel() or ""
+	local class = ent:GetClass():lower()
+	local model = (ent:GetModel() or ""):lower()
 	-- Static blacklist
 	if blacklistedClasses[class] then return true end
 	-- Pattern-based class filter
 	for _, pattern in ipairs(blacklistedPatterns) do
-		if class:find(pattern, 1, true) then return true end
+		if class:find(pattern:lower(), 1, true) then return true end
 	end
 
 	if IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then return false end
