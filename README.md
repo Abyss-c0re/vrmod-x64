@@ -28,7 +28,7 @@ This build focuses on **optimization** by merging essential features from semi-o
     - Serverside weight limit   
     - Clientside precalculation to reduce server load  
     - Supports picking up NPCs  
-- Interactive world buttons with motion-based input  
+- Interactive world buttons 
 - Support for dropping and picking up non-VR weapons  
 - Melee system overhauled: trace-based with velocity-scaled damage + bonus for weapon impact  
 - Functional numpad input in VR  

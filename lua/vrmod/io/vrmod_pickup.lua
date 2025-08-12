@@ -11,9 +11,15 @@ local blacklistedClasses = {
 	["info_particle_system"] = true,
 	["class C_BaseFlex"] = true,
 	["class C_BaseViewModel"] = true,
+	["func_button"] = true,
+	["func_rot_button"] = true,
+	["item_healthcharger"] = true,
+	["item_suitcharger"] = true,
+	["item_ammo_crate"] = true,
+	["func_door_rotating"] = true,
 }
 
-local blacklistedPatterns = {"beam", "laser", "sprite", "env_", "fire", "trail", "spotlight", "projectedtexture", "shadow",}
+local blacklistedPatterns = {"beam", "button", "laser", "sprite", "env_", "fire", "trail", "spotlight", "projectedtexture", "shadow", "keypad"}
 local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber)
