@@ -35,10 +35,10 @@ local function netReadFrame()
 end
 
 -- Per-frame cache reset
-hook.Add("VRMod_PreRender", "VRMod_ResetClientFrameCache", function()
-	g_VR._cachedFrameRelative = nil
-	g_VR._cachedFrameAbsolute = nil
-end)
+-- hook.Add("VRMod_PreRender", "VRMod_ResetClientFrameCache", function()
+-- 	g_VR._cachedFrameRelative = nil
+-- 	g_VR._cachedFrameAbsolute = nil
+-- end)
 
 -- Caches and returns the built client frame
 local function buildClientFrame(relative)
@@ -195,7 +195,7 @@ if CLIENT then
 				--write viewHackPos
 				net.WriteVector(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos or Vector(0, 0, 0))
 				--write frame
-				netWriteFrame(buildClientFrame(true))
+				netWriteFrame((true))
 				net.SendToServer()
 			end
 		end)
