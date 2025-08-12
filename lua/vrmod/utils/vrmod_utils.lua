@@ -1126,7 +1126,7 @@ if SERVER then
     end)
 
     hook.Add("VRMod_Start", "SendCollisionState", function(ply) ply:SetNWBool("vrmod_server_enforce_collision", GetConVar("vrmod_collisions"):GetBool()) end)
-    if not hook.GetTable()["EntityTakeDamage"]["VRMod_ForwardRagdollDamage"] then hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", function(ent, dmginfo) vrmod.utils.ForwardRagdollDamage(ent, dmginfo) end) end
+    if not (hook.GetTable()["EntityTakeDamage"] or {})["VRMod_ForwardRagdollDamage"] then hook.Add("EntityTakeDamage", "VRMod_ForwardRagdollDamage", function(ent, dmginfo) vrmod.utils.ForwardRagdollDamage(ent, dmginfo) end) end
     timer.Create("VRMod_Cleanup_DeadRagdolls", 60, 0, function()
         for rag, npc in pairs(trackedRagdolls) do
             if not IsValid(rag) or not IsValid(npc) then trackedRagdolls[rag] = nil end
