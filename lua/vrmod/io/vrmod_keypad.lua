@@ -2,6 +2,7 @@ if CLIENT then
     local maxDistance = 35
     local originalCalculateCursorPos = nil
     local keypadFocusedEnt = nil
+    local unpatched = true
     local cursorVisible = false
     local cursorPos = {
         x = 0,
@@ -110,7 +111,22 @@ if CLIENT then
         gui.EnableScreenClicker(true)
     end
 
-    hook.Add("Think", "VRMod_Keypad_Interaction", UpdateKeypadInteraction)
+    hook.Add("Think", "VRMod_Keypad_Interaction", function()
+        if not g_VR or not g_VR.active then
+            if not unpatched then
+                UnpatchAllKeypads()
+                keypadFocusedEnt = nil
+                cursorVisible = false
+                gui.EnableScreenClicker(false)
+                unpatched = true
+            end
+            return
+        end
+
+        UpdateKeypadInteraction()
+        unpatched = false
+    end)
+
     hook.Add("PostDrawTranslucentRenderables", "VRMod_Keypad_Beam", function()
         if not cursorVisible or not IsValid(keypadFocusedEnt) then return end
         local ply = LocalPlayer()
@@ -134,12 +150,5 @@ if CLIENT then
                 gui.InternalMouseReleased(mouseButton)
             end
         end
-    end)
-
-    hook.Add("VRMod_Exit", "VRMod_Keypad_Unpatch", function()
-        UnpatchAllKeypads()
-        keypadFocusedEnt = nil
-        cursorVisible = false
-        gui.EnableScreenClicker(false)
     end)
 end
