@@ -34,16 +34,7 @@ local function netReadFrame()
 	return frame
 end
 
--- Per-frame cache reset
-hook.Add("VRMod_PreRender", "VRMod_ResetClientFrameCache", function()
-	g_VR._cachedFrameRelative = nil
-	g_VR._cachedFrameAbsolute = nil
-end)
-
--- Caches and returns the built client frame
 local function buildClientFrame(relative)
-	local cacheKey = relative and "_cachedFrameRelative" or "_cachedFrameAbsolute"
-	if g_VR[cacheKey] then return g_VR[cacheKey] end
 	local lp = LocalPlayer()
 	if not IsValid(lp) then return nil end
 	local inVehicle = lp:InVehicle()
@@ -77,8 +68,6 @@ local function buildClientFrame(relative)
 	else
 		frame = vrmod.utils.UpdateHandCollisionShapes(frame)
 	end
-
-	g_VR[cacheKey] = frame
 	return frame
 end
 
