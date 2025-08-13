@@ -180,33 +180,6 @@ if CLIENT then
 		g_VR.active = true
 	end
 
-	local function UpdateViewModel(netFrame)
-		local currentvmi = g_VR.currentvmi
-		local vm = g_VR.viewModel
-		if currentvmi and netFrame and netFrame.righthandPos and netFrame.righthandAng then
-			local pos, ang = netFrame.righthandPos, netFrame.righthandAng
-			local collisionShape = vrmod._collisionShapeByHand and vrmod._collisionShapeByHand.right
-			if collisionShape and collisionShape.isClipped and collisionShape.pushOutPos then
-				pos = collisionShape.pushOutPos
-				vrmod.utils.DebugPrint("[VRMod] Applying collision-corrected pos for viewmodel:", pos)
-			end
-
-			local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, pos, ang)
-			g_VR.viewModelPos = offsetPos
-			g_VR.viewModelAng = offsetAng
-		end
-
-		if IsValid(vm) then
-			if not g_VR.usingWorldModels then
-				vm:SetPos(g_VR.viewModelPos)
-				vm:SetAngles(g_VR.viewModelAng)
-				vm:SetupBones()
-			end
-
-			g_VR.viewModelMuzzle = vm:GetAttachment(1)
-		end
-	end
-
 	local function UpdateViewFromEntity()
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
@@ -441,8 +414,8 @@ if CLIENT then
 			VRMOD_UpdatePosesAndActions()
 			UpdateTracking()
 			HandleInput()
-			local netFrame = VRUtilNetUpdateLocalPly()
-			UpdateViewModel(netFrame)
+			VRUtilNetUpdateLocalPly()
+			vrmod.utils.UpdateViewModel()
 			UpdateViewFromEntity()
 			PerformRenderViews()
 			hook.Call("VRMod_PostRender")

@@ -68,6 +68,8 @@ local function buildClientFrame(relative)
 	else
 		frame = vrmod.utils.UpdateHandCollisions(frame)
 	end
+
+	
 	return frame
 end
 
@@ -301,7 +303,7 @@ if CLIENT then
 		if not tab then return end
 		tab.debugTickCount = tab.debugTickCount + 1
 		local frame = netReadFrame()
-		frame = vrmod.utils.UpdateHandCollisions(frame)
+		--frame = vrmod.utils.UpdateHandCollisions(frame)
 		if tab.latestFrameIndex == 0 then
 			tab.playbackTime = frame.ts
 		elseif frame.ts <= tab.frames[tab.latestFrameIndex].ts then

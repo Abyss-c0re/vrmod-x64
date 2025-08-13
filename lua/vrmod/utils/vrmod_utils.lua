@@ -18,6 +18,7 @@ vrmod.MODEL_OVERRIDES = {
     weapon_physcannon = "models/weapons/w_physics.mdl",
 }
 
+vrmod.suppressViewModelUpdates = false
 local magCache = {}
 local modelCache = {}
 local pending = {}
@@ -387,6 +388,34 @@ end
 function vrmod.utils.WepInfo(wep)
     local class, vm = vrmod.utils.IsValidWep(wep, true)
     if class and vm then return class, vm end
+end
+
+function vrmod.utils.UpdateViewModelPos(pos, ang)
+    local currentvmi = g_VR.currentvmi
+    if currentvmi then
+        local collisionShape = vrmod._collisionShapeByHand and vrmod._collisionShapeByHand.right
+        if collisionShape and collisionShape.isClipped and collisionShape.pushOutPos then
+            pos = collisionShape.pushOutPos
+            vrmod.utils.DebugPrint("[VRMod] Applying collision-corrected pos for viewmodel:", pos)
+        end
+
+        local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, pos, ang)
+        g_VR.viewModelPos = offsetPos
+        g_VR.viewModelAng = offsetAng
+    end
+end
+
+function vrmod.utils.UpdateViewModel()
+    local vm = g_VR.viewModel
+    if IsValid(vm) then
+        if not g_VR.usingWorldModels then
+            vm:SetPos(g_VR.viewModelPos)
+            vm:SetAngles(g_VR.viewModelAng)
+            vm:SetupBones()
+        end
+
+        g_VR.viewModelMuzzle = vm:GetAttachment(1)
+    end
 end
 
 --FILTERS AND TRACE UTILS
@@ -1153,6 +1182,14 @@ if CLIENT then
 
         vrmod.utils.DebugPrint("Received synced collision params for %s from server", modelPath)
         modelCache[modelPath] = params
+    end)
+
+    hook.Add("VRMod_Tracking", "VRMod_UpdateViewModel", function()
+        if vrmod.suppressViewModelUpdates then return end
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then return end
+        local pos, ang = g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang
+        vrmod.utils.UpdateViewModelPos(pos, ang)
     end)
 
     -- Hook: broad-phase proximity + cache a relative snapshot (once per frame)

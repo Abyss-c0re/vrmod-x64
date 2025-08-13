@@ -60,12 +60,17 @@ if CLIENT then
 			-- Update hand collisions only for the specified player
 			local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
 			local data = g_VR.net[sid]
-			if data and data.lerpedFrame and vrmod.utils then data.lerpedFrame = vrmod.utils.UpdateHandCollisions(data.lerpedFrame) end
+			-- if data then
+			-- --and data.lerpedFrame and vrmod.utils then
+			-- 	-- 	--data.lerpedFrame = vrmod.utils.UpdateHandCollisions(data.lerpedFrame)
+			-- 	--vrmod.utils.UpdateViewModelPos(data.lerpedFrame.righthandPos, data.lerpedFrame.righthandAng)
+			-- 	--vrmod.utils.UpdateViewModel()
+			-- end
 		end
 	end
 
 	-- VRMod_PreRender hook to update frame data and collisions for local player
-	hook.Add("VRMod_PreRender", "VRMod_UpdateFrameData", function() updateFrameCache(LocalPlayer()) end)
+	hook.Add("VRMod_Tracking", "VRMod_UpdateFrameData", function() updateFrameCache(LocalPlayer()) end)
 	function vrmod.GetStartupError()
 		local error = nil
 		local moduleFile = nil
@@ -285,7 +290,7 @@ if CLIENT then
 		local t = g_VR.net[LocalPlayer():SteamID()]
 		if t and t.lerpedFrame then
 			t.lerpedFrame.righthandPos, t.lerpedFrame.righthandAng = pos, ang
-			if vrmod.utils then vrmod.utils.UpdateViewModel(pos, ang) end
+			if vrmod.utils then vrmod.utils.UpdateViewModelPos(pos, ang) end
 			-- Invalidate cache
 			frameCache[LocalPlayer():SteamID() .. "_rightPos"] = nil
 			frameCache[LocalPlayer():SteamID() .. "_rightAng"] = nil
