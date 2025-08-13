@@ -51,15 +51,21 @@ if CLIENT then
 		return g_VR.net[sid]
 	end
 
-	-- Helper to update frame cache
-	local function updateFrameCache()
+	-- Helper to update frame cache and apply hand collision updates for specified player
+	local function updateFrameCache(ply)
 		local frame = FrameNumber()
 		if frame ~= lastFrame then
 			frameCache = {}
 			lastFrame = frame
+			-- Update hand collisions only for the specified player
+			local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
+			local data = g_VR.net[sid]
+			if data and data.lerpedFrame and vrmod.utils then data.lerpedFrame = vrmod.utils.UpdateHandCollisions(data.lerpedFrame) end
 		end
 	end
 
+	-- VRMod_PreRender hook to update frame data and collisions for local player
+	hook.Add("VRMod_PreRender", "VRMod_UpdateFrameData", function() updateFrameCache(LocalPlayer()) end)
 	function vrmod.GetStartupError()
 		local error = nil
 		local moduleFile = nil
@@ -112,7 +118,7 @@ if CLIENT then
 	end
 
 	function vrmod.GetHMDPos(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_hmdPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
@@ -123,7 +129,7 @@ if CLIENT then
 	end
 
 	function vrmod.GetHMDAng(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_hmdAng"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
@@ -134,7 +140,7 @@ if CLIENT then
 	end
 
 	function vrmod.GetHMDPose(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
 		local posKey = sid .. "_hmdPos"
 		local angKey = sid .. "_hmdAng"
@@ -151,28 +157,27 @@ if CLIENT then
 	end
 
 	function vrmod.GetHMDAngularVelocity()
-		return g_VR.threePoints and g_VR.tracking.hmd.angvel or Angle() -- Changed to return Angle() for consistency
+		return g_VR.threePoints and g_VR.tracking.hmd.angvel or Angle()
 	end
 
 	function vrmod.GetHMDVelocities()
 		if g_VR.threePoints then return g_VR.tracking.hmd.vel, g_VR.tracking.hmd.angvel end
-		return Vector(), Angle() -- Changed to return Angle() for angvel
+		return Vector(), Angle()
 	end
 
 	function vrmod.GetLeftHandPos(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_leftPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
 	end
 
 	function vrmod.GetLeftHandAng(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_leftAng"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
@@ -183,14 +188,13 @@ if CLIENT then
 	end
 
 	function vrmod.GetLeftHandPose(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
 		local posKey = sid .. "_leftPos"
 		local angKey = sid .. "_leftAng"
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
 		return pos, ang
@@ -201,7 +205,7 @@ if CLIENT then
 	end
 
 	function vrmod.GetLeftHandAngularVelocity()
-		return g_VR.threePoints and g_VR.tracking.pose_lefthand.angvel or Angle() -- Changed to return Angle()
+		return g_VR.threePoints and g_VR.tracking.pose_lefthand.angvel or Angle()
 	end
 
 	function vrmod.GetLeftHandVelocityRelative()
@@ -211,23 +215,22 @@ if CLIENT then
 
 	function vrmod.GetLeftHandVelocities()
 		if g_VR.threePoints then return g_VR.tracking.pose_lefthand.vel, g_VR.tracking.pose_lefthand.angvel, vrmod.GetLeftHandVelocityRelative() end
-		return Vector(), Angle(), Vector() -- Changed to return Angle() for angvel
+		return Vector(), Angle(), Vector()
 	end
 
 	function vrmod.GetRightHandPos(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_rightPos"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
 	end
 
 	function vrmod.GetRightHandAng(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local cacheKey = (ply and ply:SteamID() or LocalPlayer():SteamID()) .. "_rightAng"
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
@@ -238,14 +241,13 @@ if CLIENT then
 	end
 
 	function vrmod.GetRightHandPose(ply)
-		updateFrameCache()
+		updateFrameCache(ply)
 		local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
 		local posKey = sid .. "_rightPos"
 		local angKey = sid .. "_rightAng"
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
 		return pos, ang
@@ -256,7 +258,7 @@ if CLIENT then
 	end
 
 	function vrmod.GetRightHandAngularVelocity()
-		return g_VR.threePoints and g_VR.tracking.pose_righthand.angvel or Angle() -- Changed to return Angle()
+		return g_VR.threePoints and g_VR.tracking.pose_righthand.angvel or Angle()
 	end
 
 	function vrmod.GetRightHandVelocityRelative()
@@ -266,13 +268,12 @@ if CLIENT then
 
 	function vrmod.GetRightHandVelocities()
 		if g_VR.threePoints then return g_VR.tracking.pose_righthand.vel, g_VR.tracking.pose_righthand.angvel, vrmod.GetRightHandVelocityRelative() end
-		return Vector(), Angle(), Vector() -- Changed to return Angle() for angvel
+		return Vector(), Angle(), Vector()
 	end
 
 	function vrmod.SetLeftHandPose(pos, ang)
 		local t = g_VR.net[LocalPlayer():SteamID()]
 		if t and t.lerpedFrame then
-			if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 			t.lerpedFrame.lefthandPos, t.lerpedFrame.lefthandAng = pos, ang
 			-- Invalidate cache
 			frameCache[LocalPlayer():SteamID() .. "_leftPos"] = nil
@@ -283,8 +284,8 @@ if CLIENT then
 	function vrmod.SetRightHandPose(pos, ang)
 		local t = g_VR.net[LocalPlayer():SteamID()]
 		if t and t.lerpedFrame then
-			if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 			t.lerpedFrame.righthandPos, t.lerpedFrame.righthandAng = pos, ang
+			if vrmod.utils then vrmod.utils.UpdateViewModel(pos, ang) end
 			-- Invalidate cache
 			frameCache[LocalPlayer():SteamID() .. "_rightPos"] = nil
 			frameCache[LocalPlayer():SteamID() .. "_rightAng"] = nil
@@ -326,22 +327,22 @@ if CLIENT then
 
 	-- Getter functions
 	function vrmod.GetLeftHandOpenFingerAngles()
-		updateFrameCache()
+		updateFrameCache(LocalPlayer())
 		return HandleFingerAngles("get", "left", "open")
 	end
 
 	function vrmod.GetLeftHandClosedFingerAngles()
-		updateFrameCache()
+		updateFrameCache(LocalPlayer())
 		return HandleFingerAngles("get", "left", "closed")
 	end
 
 	function vrmod.GetRightHandOpenFingerAngles()
-		updateFrameCache()
+		updateFrameCache(LocalPlayer())
 		return HandleFingerAngles("get", "right", "open")
 	end
 
 	function vrmod.GetRightHandClosedFingerAngles()
-		updateFrameCache()
+		updateFrameCache(LocalPlayer())
 		return HandleFingerAngles("get", "right", "closed")
 	end
 
