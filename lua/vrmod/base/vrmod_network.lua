@@ -42,8 +42,8 @@ end
 
 -- Caches and returns the built client frame
 local function buildClientFrame(relative)
-	local cacheKey = relative and "_cachedFrameRelative" or "_cachedFrameAbsolute"
-	if g_VR[cacheKey] then return g_VR[cacheKey] end
+	-- local cacheKey = relative and "_cachedFrameRelative" or "_cachedFrameAbsolute"
+	-- if g_VR[cacheKey] then return g_VR[cacheKey] end
 	local lp = LocalPlayer()
 	if not IsValid(lp) then return nil end
 	local inVehicle = lp:InVehicle()
@@ -78,7 +78,7 @@ local function buildClientFrame(relative)
 		frame = vrmod.utils.UpdateHandCollisionShapes(frame)
 	end
 
-	g_VR[cacheKey] = frame
+	--g_VR[cacheKey] = frame
 	return frame
 end
 
@@ -195,7 +195,7 @@ if CLIENT then
 				--write viewHackPos
 				net.WriteVector(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos or Vector(0, 0, 0))
 				--write frame
-				netWriteFrame((true))
+				netWriteFrame(buildClientFrame(true))
 				net.SendToServer()
 			end
 		end)
