@@ -751,7 +751,7 @@ function vrmod.utils.checkWorldCollisions(pos, radius, mins, maxs, ang, hand, re
     return shape
 end
 
-function vrmod.utils.UpdateHandCollisionShapes(frame)
+function vrmod.utils.UpdateHandCollisions(frame)
     -- Fast early out when no collision broad-phase
     if not vrmod._collisionNearby then
         if next(collisionSpheres) or next(collisionBoxes) then
@@ -1182,7 +1182,7 @@ if CLIENT then
         collisionNearbyCache = vrmod._collisionNearby
         -- Cache a relative snapshot for this pre-render if we have an authoritative absolute frame
         if g_VR._cachedFrameAbsolute then
-            -- Convert once and reuse in UpdateHandCollisionShapes for movement checks
+            -- Convert once and reuse in UpdateHandCollisions for movement checks
             vrmod._cachedFrameRelativePreRender = vrmod.utils.ConvertToRelativeFrame(g_VR._cachedFrameAbsolute)
         else
             vrmod._cachedFrameRelativePreRender = nil

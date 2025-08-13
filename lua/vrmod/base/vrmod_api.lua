@@ -165,7 +165,7 @@ if CLIENT then
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
+		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
@@ -190,7 +190,7 @@ if CLIENT then
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
+		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.lefthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.lefthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
 		return pos, ang
@@ -220,7 +220,7 @@ if CLIENT then
 		if frameCache[cacheKey] then return frameCache[cacheKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
+		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector()
 		frameCache[cacheKey] = pos
 		return pos
@@ -245,7 +245,7 @@ if CLIENT then
 		if frameCache[posKey] and frameCache[angKey] then return frameCache[posKey], frameCache[angKey] end
 		local t = getPlayerVRData(ply)
 		if not t then return end
-		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
+		if vrmod.utils and t.lerpedFrame then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 		local pos, ang = t and t.lerpedFrame and t.lerpedFrame.righthandPos or Vector(), t and t.lerpedFrame and t.lerpedFrame.righthandAng or Angle()
 		frameCache[posKey], frameCache[angKey] = pos, ang
 		return pos, ang
@@ -272,7 +272,7 @@ if CLIENT then
 	function vrmod.SetLeftHandPose(pos, ang)
 		local t = g_VR.net[LocalPlayer():SteamID()]
 		if t and t.lerpedFrame then
-			if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
+			if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 			t.lerpedFrame.lefthandPos, t.lerpedFrame.lefthandAng = pos, ang
 			-- Invalidate cache
 			frameCache[LocalPlayer():SteamID() .. "_leftPos"] = nil
@@ -283,7 +283,7 @@ if CLIENT then
 	function vrmod.SetRightHandPose(pos, ang)
 		local t = g_VR.net[LocalPlayer():SteamID()]
 		if t and t.lerpedFrame then
-			if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisionShapes(t.lerpedFrame) end
+			if vrmod.utils then t.lerpedFrame = vrmod.utils.UpdateHandCollisions(t.lerpedFrame) end
 			t.lerpedFrame.righthandPos, t.lerpedFrame.righthandAng = pos, ang
 			-- Invalidate cache
 			frameCache[LocalPlayer():SteamID() .. "_rightPos"] = nil
