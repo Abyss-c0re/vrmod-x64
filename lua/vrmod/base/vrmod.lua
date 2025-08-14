@@ -85,10 +85,10 @@ if CLIENT then
 		local di = VRMOD_GetDisplayInfo(1, 10)
 		local rawW, rawH = di.RecommendedWidth * 2, di.RecommendedHeight
 		-- preserve your variables exactly
-		local leftProj = vrmod.utils.adjustFOV(di.ProjectionLeft, fovX, fovY)
-		local rightProj = vrmod.utils.adjustFOV(di.ProjectionRight, fovX, fovY)
-		local leftCalc = vrmod.utils.calculateProjectionParams(leftProj, viewscale)
-		local rightCalc = vrmod.utils.calculateProjectionParams(rightProj, viewscale)
+		local leftProj = vrmod.utils.AdjustFOV(di.ProjectionLeft, fovX, fovY)
+		local rightProj = vrmod.utils.AdjustFOV(di.ProjectionRight, fovX, fovY)
+		local leftCalc = vrmod.utils.CalculateProjectionParams(leftProj, viewscale)
+		local rightCalc = vrmod.utils.CalculateProjectionParams(rightProj, viewscale)
 		-- clamp on Linux exactly as before
 		if system.IsLinux() then
 			local maxW, maxH = 4096, 4096
@@ -161,7 +161,8 @@ if CLIENT then
 
 	local function UpdateCollisionsAndWepPos()
 		if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils then
-			vrmod.utils.collisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
+			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
+			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
 			local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
 			g_VR.tracking.pose_lefthand.pos = leftPos
 			g_VR.tracking.pose_lefthand.ang = leftAng
@@ -318,7 +319,7 @@ if CLIENT then
 		})
 
 		VRMOD_ShareTextureFinish()
-		local bounds = {vrmod.utils.computeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
+		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
 	end
 

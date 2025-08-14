@@ -63,16 +63,15 @@ local function GetWeaponCollisionBox(phys, isVertical)
     local amin, amax = mins, maxs -- Store raw AABB for return
     -- Calculate the extents of the AABB
     local extents = (maxs - mins) * 0.5
-
     if isVertical then
         -- Vertical alignment: prioritize z-axis, swap x and z extents
-        mins = Vector(-extents.z * 0.35, -extents.y * 0.35, -extents.x )
-        maxs = Vector(extents.z * 0.35, extents.y * 0.35, extents.x )
+        mins = Vector(-extents.z * 0.35, -extents.y * 0.35, -extents.x)
+        maxs = Vector(extents.z * 0.35, extents.y * 0.35, extents.x)
         vrmod.utils.DebugPrint("GetWeaponCollisionBox: Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs))
     else
         -- Forward alignment: prioritize x-axis
-        mins = Vector(-extents.x , -extents.y * 0.35, -extents.z * 0.35)
-        maxs = Vector(extents.x , extents.y * 0.35, extents.z * 0.35)
+        mins = Vector(-extents.x, -extents.y * 0.35, -extents.z * 0.35)
+        maxs = Vector(extents.x, extents.y * 0.35, extents.z * 0.35)
         vrmod.utils.DebugPrint("GetWeaponCollisionBox: Forward-aligned (x-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs))
     end
 
@@ -196,32 +195,18 @@ local function BoxCollidesWithWorld(pos, ang, mins, maxs, reach)
     return true, hitNormal, pushPos
 end
 
-function vrmod.utils.collisionsPreCheck(leftPos, rightPos)
-    local ply = LocalPlayer()
-    if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
-        vrmod._collisionNearby = false
-        return
-    end
-
-    -- Use your accessor functions — they return world-space vectors
-    local bigRadius = 
-    local leftNearby = SphereCollidesWithWorld(leftPos, 30)
-    local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
-    vrmod._collisionNearby = leftNearby or rightNearby
-end
-
 --DEBUG
 function vrmod.utils.DebugPrint(fmt, ...)
     if cv_debug:GetBool() then print(string.format("[VRMod:][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
 end
 
 --MATH
-function vrmod.utils.vecAlmostEqual(v1, v2, threshold)
+function vrmod.utils.VecAlmostEqual(v1, v2, threshold)
     if not v1 or not v2 then return false end
     return v1:DistToSqr(v2) < (threshold or 0.001) ^ 2
 end
 
-function vrmod.utils.angAlmostEqual(a1, a2, threshold)
+function vrmod.utils.AngAlmostEqual(a1, a2, threshold)
     if not a1 or not a2 then return false end
     threshold = threshold or 0.1 -- degrees
     return math.abs(math.AngleDifference(a1.p, a2.p)) < threshold and math.abs(math.AngleDifference(a1.y, a2.y)) < threshold and math.abs(math.AngleDifference(a1.r, a2.r)) < threshold
@@ -248,7 +233,7 @@ function vrmod.utils.SmoothAngle(current, target, smoothingFactor)
 end
 
 -- SYSTEM
-function vrmod.utils.calculateProjectionParams(projMatrix, worldScale)
+function vrmod.utils.CalculateProjectionParams(projMatrix, worldScale)
     local xscale = projMatrix[1][1]
     local xoffset = projMatrix[1][3]
     local yscale = projMatrix[2][2]
@@ -276,7 +261,7 @@ function vrmod.utils.calculateProjectionParams(projMatrix, worldScale)
     }
 end
 
-function vrmod.utils.computeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)
+function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)
     local isWindows = system.IsWindows()
     local hFactor, vFactor = 0, 0
     -- average half‐eye extents in tangent space
@@ -317,7 +302,7 @@ function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
     return vmargin, hoffset
 end
 
-function vrmod.utils.adjustFOV(proj, fovScaleX, fovScaleY)
+function vrmod.utils.AdjustFOV(proj, fovScaleX, fovScaleY)
     local clone = {}
     for i = 1, 4 do
         clone[i] = {proj[i][1], proj[i][2], proj[i][3], proj[i][4]}
@@ -406,6 +391,7 @@ function vrmod.utils.UpdateViewModelPos(pos, ang, override)
         return
     end
 
+    pos, ang = vrmod.utils.CheckWeaponPushout(pos, ang)
     if not IsValid(ply) or not g_VR.active then return end
     if not ply:Alive() or ply:InVehicle() then return end
     local currentvmi = g_VR.currentvmi
@@ -547,13 +533,13 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
 
         if CLIENT and IsValid(LocalPlayer()) and LocalPlayer():IsConnected() then
             net.Start("vrmod_sync_model_params")
-            net.WriteString(originalModelPath)
-            net.WriteFloat(reach)
-            net.WriteFloat(reach) -- radius = reach in your case
-            net.WriteVector(mins_horizontal or vrmod.DEFAULT_MINS)
-            net.WriteVector(maxs_horizontal or vrmod.DEFAULT_MAXS)
-            net.WriteVector(mins_vertical or vrmod.DEFAULT_MINS)
-            net.WriteVector(maxs_vertical or vrmod.DEFAULT_MAXS)
+            net.WriteString(modelPath)
+            net.WriteFloat(vrmod.DEFAULT_REACH)
+            net.WriteFloat(vrmod.DEFAULT_REACH)
+            net.WriteVector(vrmod.DEFAULT_MINS)
+            net.WriteVector(vrmod.DEFAULT_MAXS)
+            net.WriteVector(vrmod.DEFAULT_MINS)
+            net.WriteVector(vrmod.DEFAULT_MAXS)
             net.WriteAngle(vrmod.DEFAULT_ANGLES)
             net.SendToServer()
         end
@@ -588,10 +574,8 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
 
     -- Already computed?
     if modelCache[originalModelPath] and modelCache[originalModelPath].computed then return end
-    -- Retry protection (reduced max attempts to 2)
-    pending[originalModelPath] = pending[originalModelPath] or {
-        attempts = 0
-    }
+    -- Retry protection
+    pending[originalModelPath] = pending[originalModelPath] or { attempts = 0 }
 
     if pending[originalModelPath].attempts >= 2 then
         vrmod.utils.DebugPrint("Max retries (2) reached for %s, caching defaults", originalModelPath)
@@ -605,7 +589,6 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
             angles = vrmod.DEFAULT_ANGLES,
             computed = true
         }
-
         pending[originalModelPath] = nil
         return
     end
@@ -626,10 +609,30 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
     ent:Spawn()
     local phys = ent:GetPhysicsObject()
     if IsValid(phys) then
-        local mins_horizontal, maxs_horizontal, _, amin, amax = GetWeaponCollisionBox(phys, false)
-        local mins_vertical, maxs_vertical = GetWeaponCollisionBox(phys, true)
-        if amin:Length() > 0 and amax:Length() > 0 then
-            local reach = math.max(math.abs(amax.x - amin.x), math.abs(amax.y - amin.y), math.abs(amax.z - amin.z)) * 0.5
+        -- Compute initial AABB to determine orientation
+        local mins, maxs = phys:GetAABB()
+        local sizeX = math.abs(maxs.x - mins.x)
+        local sizeY = math.abs(maxs.y - mins.y)
+        local sizeZ = math.abs(maxs.z - mins.z)
+
+        -- Heuristic: Melee weapons typically have a larger Z (vertical) dimension
+        local isMelee = sizeZ > sizeX * 1.5 and sizeZ > sizeY * 1.5
+        vrmod.utils.DebugPrint("Weapon %s detected as %s", modelPath, isMelee and "melee (vertical)" or "non-melee")
+
+        -- Compute collision boxes based on orientation
+        local mins_horizontal, maxs_horizontal, mins_vertical, maxs_vertical
+        if isMelee then
+            -- Only compute vertical for melee weapons
+            mins_vertical, maxs_vertical = GetWeaponCollisionBox(phys, true)
+            mins_horizontal, maxs_horizontal = vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS -- Skip horizontal
+        else
+            -- Compute both for non-melee weapons
+            mins_horizontal, maxs_horizontal, _, amin, amax = GetWeaponCollisionBox(phys, false)
+            mins_vertical, maxs_vertical = GetWeaponCollisionBox(phys, true)
+        end
+
+        if (isMelee and mins_vertical and maxs_vertical) or (not isMelee and amin:Length() > 0 and amax:Length() > 0) then
+            local reach = math.max(sizeX, sizeY, sizeZ) * 0.5
             reach = math.Clamp(reach * 1.5, 6.6, 50)
             modelCache[originalModelPath] = {
                 radius = reach,
@@ -642,7 +645,8 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
                 computed = true
             }
 
-            vrmod.utils.DebugPrint("Computed collision boxes for %s (actual: %s) → reach: %.2f units", originalModelPath, modelPath, reach)
+            vrmod.utils.DebugPrint("Computed collision boxes for %s (actual: %s) → reach: %.2f units, melee: %s", 
+                originalModelPath, modelPath, reach, tostring(isMelee))
         else
             vrmod.utils.DebugPrint("Invalid AABB for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
         end
@@ -729,6 +733,20 @@ function vrmod.utils.GetCachedWeaponParams(wep, ply, side)
     return nil -- params not ready
 end
 
+function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
+    local ply = LocalPlayer()
+    if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
+        vrmod._collisionNearby = false
+        return
+    end
+
+    -- Use your accessor functions — they return world-space vectors
+    local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
+    local leftNearby = SphereCollidesWithWorld(leftPos, 30)
+    local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
+    vrmod._collisionNearby = leftNearby or rightNearby
+end
+
 function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, reach)
     local shapeMins = mins or Vector(-radius, -radius, -radius)
     local shapeMaxs = maxs or Vector(radius, radius, radius)
@@ -799,6 +817,83 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
     return shape
 end
 
+function vrmod.utils.CheckWeaponPushout(pos, ang)
+    --local pos, ang = g_VR.viewModelPos, g_VR.viewModelAng
+    -- Early out if no collision broad-phase
+    if not vrmod._collisionNearby then
+        collisionBoxes = {}
+        return pos, ang
+    end
+
+    local ply = LocalPlayer()
+    if not IsValid(ply) then return pos, ang end
+    local wep = ply:GetActiveWeapon()
+    if not vrmod.utils.IsValidWep(wep) then return pos, ang end
+    local radius, reach, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
+    radius = radius or vrmod.DEFAULT_RADIUS
+    mins = mins or vrmod.DEFAULT_MINS
+    maxs = maxs or vrmod.DEFAULT_MAXS
+    reach = reach or vrmod.DEFAULT_REACH
+    if not isnumber(reach) then reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2 end
+    local forwardOffset = 10 -- units forward; tweak as needed
+    local adjustedPos = pos + ang:Forward() * forwardOffset
+    local shape = vrmod.utils.CheckWorldCollisions(adjustedPos, nil, mins, maxs, ang, "right", reach)
+    collisionBoxes = {} -- Reset collisionBoxes
+    if shape then
+        collisionBoxes[1] = shape -- Update collisionBoxes with the weapon shape
+    end
+
+    if shape and shape.isClipped and shape.pushOutPos and type(shape.pushOutPos) == "Vector" then
+        local normal = shape.hitNormal
+        local plyPos = g_VR.tracking.hmd.pos or Vector()
+        local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
+        if distanceSqr > 500 then
+            vrmod.utils.DebugPrint("[VRMod] Reset weapon clipping. DistanceSqr:", distanceSqr)
+            collisionBoxes = {} -- Clear collisionBoxes on reset
+            return pos, ang
+        end
+
+        -- Calculate corrected position
+        local correctedPos = Vector(pos.x, pos.y, pos.z)
+        local absX, absY, absZ = math.abs(normal.x), math.abs(normal.y), math.abs(normal.z)
+        local penetrationVec = pos - shape.pushOutPos
+        local penetrationDepth = penetrationVec:Dot(normal)
+        local correctionFactor = 1
+        if absX > absY and absX > absZ and absX > 0.45 then
+            correctedPos.x = shape.pushOutPos.x + normal.x * penetrationDepth * correctionFactor
+        elseif absY > absX and absY > absZ and absY > 0.45 then
+            correctedPos.y = shape.pushOutPos.y + normal.y * penetrationDepth * correctionFactor
+        elseif absZ > absX and absZ > absY and absZ > 0.45 then
+            correctedPos.z = shape.pushOutPos.z + normal.z * penetrationDepth * correctionFactor
+        else
+            correctedPos = shape.pushOutPos + normal * penetrationDepth * correctionFactor
+        end
+
+        -- Calculate corrected angle
+        local correctedAng = Angle(ang.pitch, ang.yaw, ang.roll)
+        local forward = ang:Forward()
+        local dot = forward:Dot(normal)
+        if math.abs(dot) > 0.1 then -- Only adjust if not already nearly perpendicular
+            -- Project forward onto plane perpendicular to normal
+            local adjustedForward = forward - normal * dot
+            adjustedForward:Normalize()
+            -- Reconstruct angle from adjusted forward vector, preserving right and up as much as possible
+            local newRight = adjustedForward:Cross(normal)
+            newRight:Normalize()
+            local newUp = newRight:Cross(adjustedForward)
+            newUp:Normalize()
+            correctedAng = adjustedForward:Angle()
+            correctedAng:RotateAroundAxis(newRight, ang:Up():Dot(newUp) < 0 and -90 or 90)
+        end
+
+        vrmod.utils.DebugPrint("[VRMod] Weapon clipping detected. Push-out pos:", correctedPos, "angle:", correctedAng)
+        return correctedPos, correctedAng
+    end
+
+    vrmod.utils.DebugPrint("[VRMod] No weapon clipping for right hand")
+    return pos, ang
+end
+
 function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos, righthandAng)
     -- Early out if no collision broad-phase
     if not vrmod._collisionNearby then
@@ -822,18 +917,18 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
 
     local ply = LocalPlayer()
     if not IsValid(ply) then return lefthandPos, lefthandAng, righthandPos, righthandAng end
+    local wep = ply:GetActiveWeapon()
+    if not vrmod.utils.IsValidWep(wep) then collisionBoxes = {} end
     -- Calculate offset positions for collision queries (absolute space)
     local leftPos = lefthandPos + lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
     local rightPos = righthandPos + righthandAng:Forward() * vrmod.DEFAULT_OFFSET
     -- Reset containers for this update
     collisionSpheres = {}
-    collisionBoxes = {}
     vrmod._collisionShapeByHand = {
         left = nil,
         right = nil
     }
 
-    local wep = ply:GetActiveWeapon()
     vrmod._lastRelFrame = vrmod._lastRelFrame or {}
     local POS_TOLERANCE = 0.05
     local ANG_TOLERANCE = 1.0
@@ -848,13 +943,13 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         local prevRel = vrmod._lastRelFrame[hand]
         local moved = true
         if prevRel then
-            local posEqual = vrmod.utils.vecAlmostEqual(relPos, prevRel.pos, POS_TOLERANCE)
-            local angEqual = vrmod.utils.angAlmostEqual(relAng, prevRel.ang, ANG_TOLERANCE)
+            local posEqual = vrmod.utils.VecAlmostEqual(relPos, prevRel.pos, POS_TOLERANCE)
+            local angEqual = vrmod.utils.AngAlmostEqual(relAng, prevRel.ang, ANG_TOLERANCE)
             moved = not (posEqual and angEqual)
         end
 
         local clippedLastFrame = cachedPushOutPos[hand] ~= nil
-        local sameNormal = lastNonClippedNormal[hand] and vrmod.utils.vecAlmostEqual(lastNonClippedNormal[hand], pos, 0.3)
+        local sameNormal = lastNonClippedNormal[hand] and vrmod.utils.VecAlmostEqual(lastNonClippedNormal[hand], pos, 0.3)
         if not moved and clippedLastFrame and sameNormal then
             -- Use cached push-out position
             if hand == "left" then
@@ -877,23 +972,11 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                 lastRightAng:Set(ang)
             end
 
-            -- Get weapon parameters
-            local radius, reach, mins, maxs = vrmod.utils.GetCachedWeaponParams(wep, ply, hand)
-            radius = radius or vrmod.DEFAULT_RADIUS
-            mins = mins or vrmod.DEFAULT_MINS
-            maxs = maxs or vrmod.DEFAULT_MAXS
-            reach = reach or vrmod.DEFAULT_REACH
-            if not isnumber(reach) then reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2 end
-            -- Perform collision check
-            local shape
-            if vrmod.utils.IsValidWep(wep) and hand == "right" then
-                shape = vrmod.utils.CheckWorldCollisions(rightPos, nil, mins, maxs, ang, "right", reach)
-                collisionBoxes[1] = shape
-            else
-                shape = vrmod.utils.CheckWorldCollisions(pos, radius, nil, nil, ang, hand, reach)
-                collisionSpheres[#collisionSpheres + 1] = shape
-            end
-
+            -- Perform collision check (always use sphere for hands)
+            local radius = vrmod.DEFAULT_RADIUS
+            local reach = vrmod.DEFAULT_REACH
+            local shape = vrmod.utils.CheckWorldCollisions(pos, radius, nil, nil, ang, hand, reach)
+            collisionSpheres[#collisionSpheres + 1] = shape
             vrmod._collisionShapeByHand[hand] = shape
             if shape and shape.isClipped then
                 g_VR._cachedFrameRelative = nil
@@ -901,7 +984,7 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                 local normal = shape.hitNormal
                 local corrected = Vector(pos.x, pos.y, pos.z)
                 local absX, absY, absZ = math.abs(normal.x), math.abs(normal.y), math.abs(normal.z)
-                local useLastNonClipped = lastNonClippedPos[hand] and lastNonClippedNormal[hand] and vrmod.utils.vecAlmostEqual(normal, lastNonClippedNormal[hand], 0.1)
+                local useLastNonClipped = lastNonClippedPos[hand] and lastNonClippedNormal[hand] and vrmod.utils.VecAlmostEqual(normal, lastNonClippedNormal[hand], 0.1)
                 local plyPos = g_VR.tracking.hmd.pos or Vector()
                 if shape.pushOutPos and type(shape.pushOutPos) == "Vector" and IsValid(ply) then
                     local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
@@ -1189,12 +1272,6 @@ if CLIENT then
         modelCache[modelPath] = params
     end)
 
-    -- hook.Add("VRMod_Tracking", "VRMod_Collisions", function()
-    --     local ply = LocalPlayer()
-    --     if not IsValid(ply) or not g_VR.active then return end
-    --     collisionsPreCheck(ply)
-    --     updateViewModel(ply)
-    -- end)
     hook.Add("PostDrawOpaqueRenderables", "VRMod_HandDebugShapes", function()
         if not cl_debug_collisions:GetBool() or not g_VR.active then return end
         local ply = LocalPlayer()
