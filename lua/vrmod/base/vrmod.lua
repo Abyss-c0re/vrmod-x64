@@ -224,13 +224,14 @@ if CLIENT then
 	end
 
 	local function PerformRenderViews()
-		if not eyeOffset or not forwardOffset then
-			eyeOffset = ipd * 0.5 * g_VR.scale
+		if not eyeOffset or not forwardOffset or not verticalOffset then
+			eyeOffset = ipd * 0.45 * g_VR.scale
 			forwardOffset = g_VR.view.angles:Forward() * -(eyez * g_VR.scale)
+			verticalOffset = g_VR.view.angles:Up() * -2.1
 		end
 
-		g_VR.eyePosLeft = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * -eyeOffset
-		g_VR.eyePosRight = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * eyeOffset
+		g_VR.eyePosLeft = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * -eyeOffset + verticalOffset
+		g_VR.eyePosRight = g_VR.view.origin + forwardOffset + g_VR.view.angles:Right() * eyeOffset + verticalOffset
 		render.PushRenderTarget(g_VR.rt)
 		if DrawErrorOverlay() then
 			render.PopRenderTarget()
