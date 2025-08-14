@@ -159,6 +159,18 @@ if CLIENT then
 		hook.Call("VRMod_Tracking")
 	end
 
+	local function UpdateCollisionsAndWepPos()
+		if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils then
+			vrmod.utils.collisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
+			local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+			g_VR.tracking.pose_lefthand.pos = leftPos
+			g_VR.tracking.pose_lefthand.ang = leftAng
+			g_VR.tracking.pose_righthand.pos = rightPos
+			g_VR.tracking.pose_righthand.ang = rightAng
+			vrmod.utils.UpdateViewModelPos(rightPos, rightAng)
+		end
+	end
+
 	local function HandleInput()
 		g_VR.input, g_VR.changedInputs = VRMOD_GetActions()
 		for k, v in pairs(g_VR.changedInputs) do
@@ -413,9 +425,10 @@ if CLIENT then
 			VRMOD_SubmitSharedTexture()
 			VRMOD_UpdatePosesAndActions()
 			UpdateTracking()
+			UpdateCollisionsAndWepPos()
 			HandleInput()
 			VRUtilNetUpdateLocalPly()
-			vrmod.utils.UpdateViewModel()
+			--vrmod.utils.UpdateViewModel()
 			UpdateViewFromEntity()
 			PerformRenderViews()
 			hook.Call("VRMod_PostRender")

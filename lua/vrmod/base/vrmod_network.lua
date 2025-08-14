@@ -63,13 +63,7 @@ local function buildClientFrame(relative)
 		frame.rightfootAng = g_VR.tracking.pose_rightfoot.ang
 	end
 
-	if relative then
-		frame = vrmod.utils.ConvertToRelativeFrame(frame)
-	else
-		frame = vrmod.utils.UpdateHandCollisions(frame)
-	end
-
-	
+	if relative then return vrmod.utils.ConvertToRelativeFrame(frame) end
 	return frame
 end
 
@@ -303,7 +297,6 @@ if CLIENT then
 		if not tab then return end
 		tab.debugTickCount = tab.debugTickCount + 1
 		local frame = netReadFrame()
-		--frame = vrmod.utils.UpdateHandCollisions(frame)
 		if tab.latestFrameIndex == 0 then
 			tab.playbackTime = frame.ts
 		elseif frame.ts <= tab.frames[tab.latestFrameIndex].ts then
