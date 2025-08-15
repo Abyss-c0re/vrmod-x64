@@ -3,9 +3,9 @@ print("[VRHand] Running VR physical hands system.")
 local vrHands = {}
 -- Utility to get cached physics data from weapon
 local function GetCachedWeaponParams(wep, ply, side)
-    local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
+    local radius, reach, mins, maxs, angles, isMelee = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
     if radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH then return nil end
-    return radius, reach, mins, maxs, angles
+    return radius, reach, mins, maxs, angles, isMelee
 end
 
 -- Applies sphere collision
@@ -20,14 +20,14 @@ local function ApplySphere(hand, handData, radius)
 end
 
 -- Applies box collision
-local function ApplyBox(hand, handData, mins, maxs, angles)
+local function ApplyBox(hand, handData, mins, maxs, angles, isMelee)
     if not IsValid(hand) then return end
     hand:PhysicsInitBox(mins, maxs)
-    --hand:SetAngles(angles)
     local phys = hand:GetPhysicsObject()
     if IsValid(phys) then
         phys:SetMass(20)
         handData.phys = phys
+        handData.isMelee = isMelee -- Store isMelee in handData
     end
 end
 
@@ -44,7 +44,7 @@ local function UpdateWeaponCollisionShape(ply, wep)
             timer.Simple(0, function() UpdateWeaponCollisionShape(ply, wep) end)
         end
 
-        local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
+        local radius, _, mins, maxs, angles, isMelee = GetCachedWeaponParams(wep, ply, "right")
         if not radius or not mins or not maxs or not angles then
             Retry()
             return
@@ -53,7 +53,7 @@ local function UpdateWeaponCollisionShape(ply, wep)
             if not hands or not hands.right or not IsValid(hands.right.ent) then return end
             local right = hands.right
             local hand = right.ent
-            timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles) end)
+            timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles, isMelee) end)
         end
     end)
 end
@@ -133,7 +133,6 @@ hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
         if not hand or not IsValid(hand.ent) or not IsValid(hand.phys) then return end
         local pos = getPos(ply)
         local ang = getAng(ply)
-        -- Apply forward offset
         local offsetPos = pos + ang:Forward() * vrmod.DEFAULT_OFFSET
         local phys = hand.phys
         phys:Wake()
@@ -149,6 +148,9 @@ hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
             teleportdistance = 100,
             deltatime = 0
         })
+
+        -- Adjust box collision for right hand if using box and isMelee is set
+        if side == "right" and hand.isMelee ~= nil then vrmod.utils.AdjustCollisionsBox(offsetPos, ang, hand.isMelee) end
     end
 
     UpdateHand("right", vrmod.GetRightHandPos, vrmod.GetRightHandAng)
