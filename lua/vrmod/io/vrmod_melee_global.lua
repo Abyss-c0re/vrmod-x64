@@ -2,11 +2,12 @@
 -- VRMod Melee System (Trace-Based)
 ----------------------------------------
 -- CONVARS -----------------------------
+local cl_vrmod_melee = CreateClientConVar("cl_vrmod_melee", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+local sv_vrmod_melee = CreateConVar("sv_vrmod_melee", "1", FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE, "Enable or disable VRMod melee system")
 local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "1.5", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "3", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
-local cl_usefist = CreateClientConVar("vrmod_melee_usefist", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 local cv_debug = GetConVar("vrmod_debug"):GetBool()
 -- Updated impactSounds with verified sound paths
 local impactSounds = {
@@ -87,6 +88,7 @@ if CLIENT then
     end
 
     hook.Add("VRMod_Tracking", "VRMeleeTrace", function()
+        if not cl_vrmod_melee:GetBool() then return end
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
         -- Precompute left hand (always fist)
@@ -128,7 +130,6 @@ if CLIENT then
         local rightVel = vrmod.GetRightHandVelocityRelative() or Vector(0, 0, 0)
         local threshold = cv_meleeVelThreshold:GetFloat() * 50
         if leftVel:Length() < threshold and rightVel:Length() < threshold then return end
-        if not cl_usefist:GetBool() then return end
         -- Try melee for both hands
         TryMelee(PrecomputedMelee.left, "left")
         TryMelee(PrecomputedMelee.right, "right")
@@ -139,6 +140,7 @@ end
 if SERVER then
     util.AddNetworkString("VRMod_MeleeAttack")
     net.Receive("VRMod_MeleeAttack", function(_, ply)
+        if not sv_vrmod_melee:GetBool() then return end
         if not IsValid(ply) or not ply:Alive() then return end
         local src = net.ReadVector()
         local dir = net.ReadVector()

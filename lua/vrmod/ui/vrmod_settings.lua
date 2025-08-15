@@ -652,7 +652,8 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
-		AddCB("Use Fist Attacks", "vrmod_melee_usefist")
+		AddCB("Enable melee (client)", "cl_vrmod_melee")
+		AddCB("Enable melee (server)", "sv_vrmod_melee")
 		AddSl("Melee Velocity Threshold", "vrmod_melee_velthreshold", 0.1, 10, 1)
 		AddSl("Melee Damage", "vrmod_melee_damage", 0, 10, 0)
 		AddSl("Melee Delay", "vrmod_melee_delay", 0.01, 1, 2)
@@ -699,11 +700,12 @@ function VRUtilOpenMenu()
 		btn:SetPos(190, y + 70)
 		btn:SetSize(160, 30)
 		function btn:DoClick()
+			RunConsoleCommand("cl_vrmod_melee", "1")
+			RunConsoleCommand("sv_vrmod_melee", "1")
 			RunConsoleCommand("vrmod_melee_velthreshold", "1.5")
 			RunConsoleCommand("vrmod_melee_damage", "3")
 			RunConsoleCommand("vrmod_melee_delay", "0.45")
 			RunConsoleCommand("vrmod_melee_speedscale", "0.030")
-			RunConsoleCommand("vrmod_melee_usefist", "1")
 			RunConsoleCommand("vrmod_melee_fist_collisionmodel", defaultModel)
 			te:SetText(defaultModel)
 		end
