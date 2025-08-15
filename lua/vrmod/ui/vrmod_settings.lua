@@ -374,6 +374,31 @@ function VRUtilOpenMenu()
 			label:SetFont("BoldSliderFont")
 			y = y + 35
 		end
+		--
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetDark(true)
+			s:SetText("Eye distance offset")
+			s:SetMin(0.0)
+			s:SetMax(1.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_eyescale")
+			y = y + 40
+		end
+
+		do
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y + 5)
+			label:SetSize(370, 30)
+			label:SetDark(true)
+			label:SetText("Changing this will visually affect your POV")
+			label:SetWrap(true)
+			label:SetAutoStretchVertical(true)
+			label:SetFont("BoldSliderFont")
+			y = y + 35
+		end
 
 		do
 			local label = vgui.Create("DLabel", t)
@@ -436,6 +461,7 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_fovscale_x", "1.0")
 			RunConsoleCommand("vrmod_fovscale_y", "1.0")
 			RunConsoleCommand("vrmod_znear", "1.0")
+			RunConsoleCommand("vrmod_eyescale", "0.5")
 			RunConsoleCommand("vrmod_scalefactor", "1.0")
 			RunConsoleCommand("vrmod_verticaloffset", "0")
 			RunConsoleCommand("vrmod_horizontaloffset", "0")

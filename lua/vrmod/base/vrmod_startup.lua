@@ -23,6 +23,7 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_fovscale_x", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_fovscale_y", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_scalefactor", nil, "1")
+    vrmod.AddCallbackedConvar("vrmod_eyescale", nil, "0.5")
     vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
