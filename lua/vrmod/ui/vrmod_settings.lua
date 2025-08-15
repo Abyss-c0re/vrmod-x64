@@ -652,7 +652,6 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
-		AddCB("Use SWEP Melee", "vrmod_melee_gunmelee")
 		AddCB("Use Fist Attacks", "vrmod_melee_usefist")
 		AddSl("Melee Velocity Threshold", "vrmod_melee_velthreshold", 0.1, 10, 1)
 		AddSl("Melee Damage", "vrmod_melee_damage", 0, 10, 0)
@@ -700,7 +699,6 @@ function VRUtilOpenMenu()
 		btn:SetPos(190, y + 70)
 		btn:SetSize(160, 30)
 		function btn:DoClick()
-			RunConsoleCommand("vrmod_melee_gunmelee", "1")
 			RunConsoleCommand("vrmod_melee_velthreshold", "1.5")
 			RunConsoleCommand("vrmod_melee_damage", "3")
 			RunConsoleCommand("vrmod_melee_delay", "0.45")
