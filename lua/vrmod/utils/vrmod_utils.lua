@@ -373,10 +373,22 @@ function vrmod.utils.ConvertToRelativeFrame(absFrame)
     if not IsValid(lp) then return nil end
     local inVehicle = lp:InVehicle()
     local plyPos = lp:GetPos()
-    local plyAng = inVehicle and lp:GetVehicle():GetAngles() or Angle()
+    -- Match original base angle logic
+    local plyAng
+    if inVehicle then
+        plyAng = lp:GetAngles()
+    else
+        plyAng = Angle(0, g_VR.characterYaw, 0)
+    end
+
     local relFrame = {
         characterYaw = absFrame.characterYaw
     }
+
+    -- Fingers
+    for i = 1, 10 do
+        relFrame["finger" .. i] = absFrame["finger" .. i]
+    end
 
     local function convertPosAng(posKey, angKey)
         local pos = absFrame[posKey]
@@ -388,10 +400,7 @@ function vrmod.utils.ConvertToRelativeFrame(absFrame)
         end
     end
 
-    for i = 1, 10 do
-        relFrame["finger" .. i] = absFrame["finger" .. i]
-    end
-
+    -- Main tracked points
     convertPosAng("hmdPos", "hmdAng")
     convertPosAng("lefthandPos", "lefthandAng")
     convertPosAng("righthandPos", "righthandAng")

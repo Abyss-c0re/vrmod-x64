@@ -292,7 +292,7 @@ if CLIENT then
 
 	net.Receive("vrutil_net_tick", function(len)
 		local ply = net.ReadEntity()
-		if not IsValid(ply) then return end
+		if not IsValid(ply) or ply == LocalPlayer() then return end
 		local tab = g_VR.net[ply:SteamID()]
 		if not tab then return end
 		tab.debugTickCount = tab.debugTickCount + 1
@@ -483,6 +483,7 @@ if SERVER then
 		net.Start("vrutil_net_tick", true)
 		net.WriteEntity(ply)
 		netWriteFrame(frame)
+		--net.Broadcast()
 		net.SendOmit(ply)
 	end)
 
