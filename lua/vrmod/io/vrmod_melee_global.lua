@@ -24,6 +24,7 @@ local impactSounds = {
 -- CLIENTSIDE --------------------------
 if CLIENT then
     local NextMeleeTime = 0
+    local PrecomputedMelee = {}
     local function SendMeleeAttack(src, dir, radius, reach, mins, maxs, angles, impactType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
@@ -38,43 +39,24 @@ if CLIENT then
         net.SendToServer()
     end
 
-    local function TryMelee(pos, useWeapon, hand)
+    local function TryMelee(params, hand)
         local ply = LocalPlayer()
-        if not vrmod or not vrmod.GetHMDVelocity then return end
-        if not IsValid(ply) or not ply:Alive() then return end
-        local wep = ply:GetActiveWeapon()
-        if useWeapon and not vrmod.utils.IsValidWep(wep) then useWeapon = false end
         if NextMeleeTime > CurTime() then return end
-        local swingSound
-        if useWeapon and IsValid(wep) then
-            local wepClass = wep:GetClass()
-            if wepClass == "weapon_crowbar" or wepClass == "arcticvr_hl2_crowbar" then swingSound = "Weapon_Crowbar.Single" end
-            local swingData = {
-                Player = ply,
-                Weapon = wep,
-                Hand = hand,
-                Position = pos,
-            }
-
-            hook.Run("VRMod_MeleeSwing", swingData, function(soundPath) swingSound = soundPath end)
-            if swingSound then sound.Play(swingSound, pos, 75, 100, 1) end
-        end
-
-        local tr0 = util.TraceLine({
-            start = pos,
-            endpos = pos,
-            filter = ply
-        })
-
-        local src = tr0.HitPos + tr0.HitNormal * -2
-        local dir = pos:GetNormalized()
-        local radius, reach, mins, maxs, angles = vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
+        -- Determine if we're using a weapon and valid
+        local useWeapon = params.useWeapon and IsValid(params.weapon) and vrmod.utils.IsValidWep(params.weapon)
+        local isMelee = params.isMelee
+        -- Compute hit source position, adjust if weapon or melee
+        local src = params.pos
+        if hand == "right" and (useWeapon or isMelee) then src = vrmod.utils.AdjustCollisionsBox(src, params.ang, isMelee) end
+        -- Compute direction
+        local dir = params.dir
+        -- Trace setup
         local traceData = {
             start = src,
-            endpos = src + dir * reach,
-            radius = radius,
-            mins = mins,
-            maxs = maxs,
+            endpos = src + dir * params.reach,
+            radius = params.radius,
+            mins = params.mins,
+            maxs = params.maxs,
             filter = function(ent) return vrmod.utils.MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
         }
@@ -82,26 +64,75 @@ if CLIENT then
         local tr = vrmod.utils.TraceBoxOrSphere(traceData)
         if tr.Hit then
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
-            local impactType = useWeapon and "blunt" or "fist"
-            SendMeleeAttack(tr.HitPos, dir, radius, reach, mins, maxs, angles, impactType, hand)
+            -- Play swing sound only for right-hand weapon
+            if hand == "right" and useWeapon then
+                local swingSound
+                local wepClass = params.weapon:GetClass()
+                if wepClass == "weapon_crowbar" or wepClass == "arcticvr_hl2_crowbar" then swingSound = "Weapon_Crowbar.Single" end
+                local swingData = {
+                    Player = ply,
+                    Weapon = params.weapon,
+                    Hand = hand,
+                    Position = params.pos
+                }
+
+                hook.Run("VRMod_MeleeSwing", swingData, function(soundPath) swingSound = soundPath end)
+                if swingSound then sound.Play(swingSound, params.pos, 75, 100, 1) end
+            end
+
+            -- Determine impact type AFTER everything else
+            local impactType = hand == "right" and useWeapon and "blunt" or "fist"
+            -- **Finally** send the melee attack
+            SendMeleeAttack(tr.HitPos, dir, params.radius, params.reach, params.mins, params.maxs, params.ang, impactType, hand)
         end
     end
 
     hook.Add("VRMod_Tracking", "VRMeleeTrace", function()
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
-        local leftRelVel = vrmod.GetLeftHandVelocityRelative() or Vector(0, 0, 0)
-        local rightRelVel = vrmod.GetRightHandVelocityRelative() or Vector(0, 0, 0)
-        local threshold = cv_meleeVelThreshold:GetFloat() * 50
-        --  print(rightRelVel:Length() )
-        if not cl_usefist:GetBool() then return end
-        if leftRelVel:Length() < threshold and rightRelVel:Length() < threshold then return end
+        -- Precompute left hand (always fist)
         local leftAng = vrmod.GetLeftHandAng(ply)
-        local rightAng = vrmod.GetRightHandAng(ply)
         local leftPos = vrmod.GetLeftHandPos(ply) + leftAng:Forward() * 5
+        local leftRadius, leftReach, leftMins, leftMaxs, leftAngParam = vrmod.utils.GetWeaponMeleeParams(nil, ply, "left")
+        PrecomputedMelee.left = {
+            radius = leftRadius,
+            reach = leftReach,
+            mins = leftMins,
+            maxs = leftMaxs,
+            ang = leftAngParam,
+            dir = leftAng:Forward(),
+            useWeapon = false,
+            pos = leftPos
+        }
+
+        -- Precompute right hand (may have weapon)
+        local rightAng = vrmod.GetRightHandAng(ply)
         local rightPos = vrmod.GetRightHandPos(ply) + rightAng:Forward() * 5
-        TryMelee(leftPos, false, "left")
-        TryMelee(rightPos, cv_allowgunmelee:GetBool(), "right")
+        local rightWep = ply:GetActiveWeapon()
+        local useWeapon = IsValid(rightWep) and vrmod.utils.IsValidWep(rightWep)
+        local rightRadius, rightReach, rightMins, rightMaxs, rightAngParam, rightIsMelee = vrmod.utils.GetWeaponMeleeParams(useWeapon and rightWep or nil, ply, "right")
+        PrecomputedMelee.right = {
+            radius = rightRadius,
+            reach = rightReach,
+            mins = rightMins,
+            maxs = rightMaxs,
+            ang = rightAngParam,
+            dir = rightAng:Forward(),
+            useWeapon = useWeapon,
+            weapon = rightWep,
+            isMelee = rightIsMelee, -- only for collision adjustment
+            pos = rightPos
+        }
+
+        -- Threshold check (velocity-based) happens **after** precomputation
+        local leftVel = vrmod.GetLeftHandVelocityRelative() or Vector(0, 0, 0)
+        local rightVel = vrmod.GetRightHandVelocityRelative() or Vector(0, 0, 0)
+        local threshold = cv_meleeVelThreshold:GetFloat() * 50
+        if leftVel:Length() < threshold and rightVel:Length() < threshold then return end
+        if not cl_usefist:GetBool() then return end
+        -- Try melee for both hands
+        TryMelee(PrecomputedMelee.left, "left")
+        TryMelee(PrecomputedMelee.right, "right")
     end)
 end
 
@@ -212,6 +243,7 @@ if SERVER then
         }
 
         hook.Run("VRMod_MeleeHit", hitData, function(soundPath, newDecal, newDamage, newDamageMultiplier, newDamageType, newReach, newRadius, newImpactType)
+            if hand == "left" then return end
             if soundPath then customSound = soundPath end
             if newDecal then customDecal = newDecal end
             if newDamage then customDamage = newDamage end
