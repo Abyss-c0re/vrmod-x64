@@ -106,8 +106,12 @@ if CLIENT then
 	-- Override print and MsgC
 	local oldPrint = print
 	function print(...)
-		oldPrint(...)
+		oldPrint(...) -- keeps normal print behavior
 		local args = {...}
+		for i = 1, #args do
+			args[i] = tostring(args[i])
+		end
+
 		local msg = table.concat(args, " ")
 		addConsoleMessage({Color(255, 255, 255, 255), msg})
 	end
@@ -147,7 +151,6 @@ if CLIENT then
 		-- Explicitly return nil to match original behavior
 		return
 	end
-
 
 	local function ToggleChat()
 		if VRUtilIsMenuOpen("chat") then
