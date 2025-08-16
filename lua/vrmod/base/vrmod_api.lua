@@ -511,19 +511,6 @@ elseif SERVER then
 		return g_VR[ply:SteamID()] ~= nil
 	end
 
-	function vrmod.GetFrameDeltaTime(ply, shouldPrint)
-		if not IsValid(ply) then return end
-		local sid = ply:SteamID()
-		local playerTable = g_VR[sid]
-		if not playerTable or not playerTable.lastFrameDelta then
-			if shouldPrint then print("VRMod: No frame delta time available for player " .. sid) end
-			return
-		end
-
-		if shouldPrint then print(string.format("VRMod: Time since last frame for player %s: %.4f seconds", sid, playerTable.lastFrameDelta)) end
-		return playerTable.lastFrameDelta
-	end
-
 	function vrmod.UsingEmptyHands(ply)
 		if not IsValid(ply) then return end
 		local wep = ply:GetActiveWeapon()

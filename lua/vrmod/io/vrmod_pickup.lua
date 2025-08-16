@@ -357,7 +357,7 @@ if SERVER then
 		if not IsValid(pickupController) then
 			pickupController = ents.Create("vrmod_pickup")
 			pickupController.ShadowParams = {
-				secondstoarrive = vrmod.GetFrameDeltaTime(ply),
+				secondstoarrive = nil,
 				maxangular = 3000,
 				maxangulardamp = 3000,
 				maxspeed = 3000,
