@@ -696,31 +696,36 @@ function vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
         -- Validate that parameters aren't just defaults
         local isDefault = mins == vrmod.DEFAULT_MINS and maxs == vrmod.DEFAULT_MAXS and cache.radius == vrmod.DEFAULT_RADIUS and cache.reach == vrmod.DEFAULT_REACH
         if not isDefault then
-            -- Send computed parameters to the other side
-            if CLIENT and GetConVar("vrmod_collisions"):GetBool() then
-                net.Start("vrmod_sync_model_params")
-                net.WriteString(modelPath)
-                net.WriteFloat(cache.radius)
-                net.WriteFloat(cache.reach)
-                net.WriteVector(mins)
-                net.WriteVector(maxs)
-                net.WriteVector(cache.mins_vertical)
-                net.WriteVector(cache.maxs_vertical)
-                net.WriteAngle(cache.angles)
-                net.SendToServer()
-                vrmod.utils.DebugPrint("GetModelParams: Sent computed params for %s to server", modelPath)
-            elseif SERVER and GetConVar("vrmod_collisions"):GetBool() then
-                net.Start("vrmod_sync_model_params")
-                net.WriteString(modelPath)
-                net.WriteFloat(cache.radius)
-                net.WriteFloat(cache.reach)
-                net.WriteVector(mins)
-                net.WriteVector(maxs)
-                net.WriteVector(cache.mins_vertical)
-                net.WriteVector(cache.maxs_vertical)
-                net.WriteAngle(cache.angles)
-                net.Broadcast()
-                vrmod.utils.DebugPrint("GetModelParams: Sent computed params for %s to clients", modelPath)
+            -- Only send once per model
+            if not cache.sent then
+                if CLIENT then
+                    net.Start("vrmod_sync_model_params")
+                    net.WriteString(modelPath)
+                    net.WriteFloat(cache.radius)
+                    net.WriteFloat(cache.reach)
+                    net.WriteVector(mins)
+                    net.WriteVector(maxs)
+                    net.WriteVector(cache.mins_vertical)
+                    net.WriteVector(cache.maxs_vertical)
+                    net.WriteAngle(cache.angles)
+                    net.SendToServer()
+                    vrmod.utils.DebugPrint("GetModelParams: Sent computed params for %s to server", modelPath)
+                elseif SERVER then
+                    net.Start("vrmod_sync_model_params")
+                    net.WriteString(modelPath)
+                    net.WriteFloat(cache.radius)
+                    net.WriteFloat(cache.reach)
+                    net.WriteVector(mins)
+                    net.WriteVector(maxs)
+                    net.WriteVector(cache.mins_vertical)
+                    net.WriteVector(cache.maxs_vertical)
+                    net.WriteAngle(cache.angles)
+                    net.Broadcast()
+                    vrmod.utils.DebugPrint("GetModelParams: Sent computed params for %s to clients", modelPath)
+                end
+
+                -- mark as sent
+                cache.sent = true
             end
         else
             vrmod.utils.DebugPrint("GetModelParams: Skipping sync for %s due to default parameters", modelPath)
