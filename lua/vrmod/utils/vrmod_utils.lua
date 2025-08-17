@@ -45,6 +45,26 @@ local cachedPushOutPos = {
 local trackedRagdolls = trackedRagdolls or {}
 local lastDamageTime = {}
 -- HELPERS
+local function tostr(v)
+    if istable(v) then
+        local parts = {}
+        for k, val in pairs(v) do
+            table.insert(parts, tostring(k) .. "=" .. tostr(val))
+        end
+        return "{" .. table.concat(parts, ", ") .. "}"
+    elseif IsEntity and IsEntity(v) and v:IsValid() then
+        return string.format("Entity[%s:%s]", v:GetClass(), v:EntIndex())
+    elseif IsEntity and IsEntity(v) then
+        return "Entity[INVALID]"
+    elseif isvector and isvector(v) then
+        return string.format("Vector(%.2f, %.2f, %.2f)", v.x, v.y, v.z)
+    elseif isangle and isangle(v) then
+        return string.format("Angle(%.2f, %.2f, %.2f)", v.p, v.y, v.r)
+    else
+        return tostring(v)
+    end
+end
+
 local function IsMagazine(ent)
     local class = ent:GetClass()
     if magCache[class] ~= nil then return magCache[class] end
@@ -235,7 +255,30 @@ end
 
 --DEBUG
 function vrmod.utils.DebugPrint(fmt, ...)
-    if cv_debug:GetBool() then print(string.format("[VRMod:][%s] " .. fmt, CLIENT and "Client" or "Server", ...)) end
+    if not cv_debug:GetBool() then return end
+    local prefix = string.format("[VRMod:][%s]", CLIENT and "Client" or "Server")
+    if select("#", ...) > 0 then
+        if type(fmt) == "string" and fmt:find("%%") then
+            -- format mode
+            local args = {...}
+            for i = 1, #args do
+                args[i] = tostr(args[i])
+            end
+
+            print(prefix, string.format(fmt, unpack(args)))
+        else
+            -- print mode
+            local args = {fmt, ...}
+            for i = 1, #args do
+                args[i] = tostr(args[i])
+            end
+
+            print(prefix, unpack(args))
+        end
+    else
+        -- single argument only
+        print(prefix, tostr(fmt))
+    end
 end
 
 --MATH
@@ -824,11 +867,11 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
         -- Clipping check: full box, no reach
         --isClipped, hitNormal = SphereCollidesWithWorld(pos, reach)
         isClipped, hitNormal = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs)
-        vrmod.utils.DebugPrint("[VRMod] Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped)
+        if isClipped then vrmod.utils.DebugPrint("[VRMod] Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped) end
     else
         if not radius then radius = vrmod.DEFAULT_RADIUS end
         isClipped, hitNormal = SphereCollidesWithWorld(pos, radius)
-        vrmod.utils.DebugPrint("[VRMod] Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped)
+        if isClipped then vrmod.utils.DebugPrint("[VRMod] Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped) end
     end
 
     local pushOutPos = pos
@@ -856,7 +899,6 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
     local reachHit
     if mins and maxs then
         reachHit, _ = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs, reach)
-        vrmod.utils.DebugPrint("[VRMod] Box reach check for:", hand, "Pos:", pos, "Reach:", reach, "Hit:", reachHit)
     else
         local tr = util.TraceLine({
             start = pos,
@@ -865,7 +907,6 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
         })
 
         reachHit = tr.Hit and tr.HitWorld or false
-        vrmod.utils.DebugPrint("[VRMod] Sphere reach check for:", hand, "Start:", pos, "End:", pos + ang:Forward() * reach, "Hit:", reachHit, "HitPos:", tr.HitPos)
     end
 
     local shape = {
@@ -915,7 +956,6 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
         local plyPos = g_VR.tracking.hmd.pos or Vector()
         local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
         if distanceSqr > 500 then
-            vrmod.utils.DebugPrint("[VRMod] Reset weapon clipping. DistanceSqr:", distanceSqr)
             collisionBoxes = {} -- Clear collisionBoxes on reset
             return pos, ang
         end
@@ -956,8 +996,6 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
         vrmod.utils.DebugPrint("[VRMod] Weapon clipping detected. Push-out pos:", correctedPos, "angle:", correctedAng)
         return correctedPos, correctedAng
     end
-
-    vrmod.utils.DebugPrint("[VRMod] No weapon clipping for right hand")
     return pos, ang
 end
 
@@ -1025,7 +1063,6 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                 righthandPos = cachedPushOutPos[hand]
             end
 
-            vrmod.utils.DebugPrint("[VRMod] Using cached push-out for:", hand, "at", cachedPushOutPos[hand])
             vrmod._lastRelFrame[hand] = {
                 pos = relPos,
                 ang = relAng
@@ -1060,7 +1097,6 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                         lastNonClippedNormal[hand] = nil
                         cachedPushOutPos[hand] = nil
                         shape.isClipped = false
-                        vrmod.utils.DebugPrint("[VRMod] Reset clipping for:", hand, "DistanceSqr:", distanceSqr)
                     else
                         local penetrationVec = pos - shape.pushOutPos
                         local penetrationDepth = penetrationVec:Dot(normal)
@@ -1299,11 +1335,47 @@ if SERVER then
             mins_vertical = net.ReadVector(),
             maxs_vertical = net.ReadVector(),
             angles = net.ReadAngle(),
-            computed = true
+            computed = true,
+            sent = true
         }
 
-        vrmod.utils.DebugPrint("Server received collision params for %s from %s", modelPath, ply:Nick())
-        modelCache[modelPath] = params
+        -- Only update + rebroadcast if different or unseen
+        local old = modelCache[modelPath]
+        if not old or old.radius ~= params.radius or old.reach ~= params.reach or old.mins_horizontal ~= params.mins_horizontal or old.maxs_horizontal ~= params.maxs_horizontal or old.mins_vertical ~= params.mins_vertical or old.maxs_vertical ~= params.maxs_vertical or old.angles ~= params.angles then
+            vrmod.utils.DebugPrint("Server received NEW collision params for %s from %s", modelPath, ply:Nick())
+            modelCache[modelPath] = params
+            net.Start("vrmod_sync_model_params")
+            net.WriteString(modelPath)
+            net.WriteFloat(params.radius)
+            net.WriteFloat(params.reach)
+            net.WriteVector(params.mins_horizontal)
+            net.WriteVector(params.maxs_horizontal)
+            net.WriteVector(params.mins_vertical)
+            net.WriteVector(params.maxs_vertical)
+            net.WriteAngle(params.angles)
+            net.Broadcast()
+            vrmod.utils.DebugPrint("Broadcasted collision params for %s to all clients", modelPath)
+        else
+            vrmod.utils.DebugPrint("Ignored duplicate collision params for %s from %s", modelPath, ply:Nick())
+        end
+    end)
+
+    hook.Add("PlayerInitialSpawn", "VRMod_SendModelCache", function(ply)
+        for modelPath, params in pairs(modelCache) do
+            if params.computed then
+                net.Start("vrmod_sync_model_params")
+                net.WriteString(modelPath)
+                net.WriteFloat(params.radius)
+                net.WriteFloat(params.reach)
+                net.WriteVector(params.mins_horizontal)
+                net.WriteVector(params.maxs_horizontal)
+                net.WriteVector(params.mins_vertical)
+                net.WriteVector(params.maxs_vertical)
+                net.WriteAngle(params.angles)
+                net.Send(ply)
+                vrmod.utils.DebugPrint("Synced cached collision params for %s to %s", modelPath, ply:Nick())
+            end
+        end
     end)
 
     cvars.AddChangeCallback("vrmod_collisions", function(cvar, old, new)
