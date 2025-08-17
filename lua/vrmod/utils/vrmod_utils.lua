@@ -417,12 +417,12 @@ function vrmod.utils.ConvertToRelativeFrame(absFrame)
     local inVehicle = lp:InVehicle()
     local plyPos = lp:GetPos()
     -- Match original base angle logic
-    local plyAng
-    if inVehicle then
-        plyAng = lp:GetAngles()
-    else
-        plyAng = Angle(0, g_VR.characterYaw, 0)
-    end
+    local plyAng = inVehicle and lp:GetVehicle():GetAngles() or Angle()
+    -- if inVehicle then
+    --     plyAng = lp:GetAngles()
+    -- else
+    --     plyAng = Angle(0, g_VR.characterYaw, 0)
+    -- end
 
     local relFrame = {
         characterYaw = absFrame.characterYaw
