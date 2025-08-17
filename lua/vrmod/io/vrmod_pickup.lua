@@ -267,8 +267,7 @@ if SERVER then
 			net.Broadcast()
 		end
 
-		local cache = vrmod.HandVelocityCache[steamid]
-		local handVel = bLeft and cache.leftVel or cache.rightVel or Vector(0, 0, 0)
+		local handVel = bLeft and vrmod.GetLeftHandVelocity(ply) or vrmod.GetRightHandVelocity(ply) or Vector(0, 0, 0)
 		for i = 1, pickupCount do
 			local t = pickupList[i]
 			if t.steamid == steamid and t.left == bLeft then
