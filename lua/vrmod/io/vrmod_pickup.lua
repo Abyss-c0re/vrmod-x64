@@ -224,26 +224,30 @@ if CLIENT then
 		end
 
 		local bLeftHand = net.ReadBool()
-		local lp, la = net.ReadVector(), net.ReadAngle()
-		if not la or la == Angle(0, 0, 0) then return end
 		local sid = ply:SteamID()
 		if not g_VR.net[sid] then return end
 		ent.VRPickupRenderOverride = function()
 			-- Use VRMod API to get hand pos and angle instead of direct frame access
-			local handPos, handAng
+			local handPos, handAng, trace
 			if bLeftHand then
 				handPos = vrmod.GetLeftHandPos(ply)
 				handAng = vrmod.GetLeftHandAng(ply)
+				trace = vrmod.utils.TraceHand(ply, "left")
 			else
 				handPos = vrmod.GetRightHandPos(ply)
 				handAng = vrmod.GetRightHandAng(ply)
+				trace = vrmod.utils.TraceHand(ply, "right")
 			end
 
-			if not handPos or not handAng then return end
-			local wpos, wang = LocalToWorld(lp, la, handPos, handAng)
-			if not wang then return end
-			ent:SetPos(wpos)
-			ent:SetAngles(wang)
+			local offset = handAng:Forward() * vrmod.DEFAULT_OFFSET * 6
+			local finalPos
+			if trace and IsValid(trace.Entity) and trace.Entity == ent then
+				finalPos = trace.HitPos + offset
+			else
+				finalPos = handPos + offset
+			end
+
+			ent:SetPos(finalPos)
 			ent:SetupBones()
 			ent:DrawModel()
 		end
@@ -268,6 +272,8 @@ if SERVER then
 		end
 
 		local handVel = bLeft and vrmod.GetLeftHandVelocity(ply) or vrmod.GetRightHandVelocity(ply) or Vector(0, 0, 0)
+		local handPos = bLeft and vrmod.GetLeftHandPos(ply) or vrmod.GetRightHandPos(ply) or Vector(0, 0, 0)
+		local handAng = bLeft and vrmod.GetLeftHandAng(ply) or vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
 		for i = 1, pickupCount do
 			local t = pickupList[i]
 			if t.steamid == steamid and t.left == bLeft then
@@ -290,8 +296,8 @@ if SERVER then
 				elseif IsValid(ent) then
 					ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 					if IsValid(t.phys) then
-						t.phys:SetPos(ent:GetPos())
-						t.phys:SetAngles(ent:GetAngles())
+						local wpos, _ = LocalToWorld(ent:GetPos(), ent:GetAngles(), handPos, handAng)
+						t.phys:SetPos(wpos)
 						t.phys:SetVelocity(handVel)
 						t.phys:Wake()
 					end
@@ -328,11 +334,9 @@ if SERVER then
 		if bLeftHand then
 			handPos = vrmod.GetLeftHandPos(ply)
 			handAng = vrmod.GetLeftHandAng(ply)
-			--tr = vrmod.utils.TraceHand(ply, "left")
 		else
 			handPos = vrmod.GetRightHandPos(ply)
 			handAng = vrmod.GetRightHandAng(ply)
-			--tr = vrmod.utils.TraceHand(ply, "right")
 		end
 
 		-- For ragdolls, store local offsets per physics bone relative to hand pose
@@ -356,14 +360,14 @@ if SERVER then
 		if not IsValid(pickupController) then
 			pickupController = ents.Create("vrmod_pickup")
 			pickupController.ShadowParams = {
-				secondstoarrive = nil,
+				secondstoarrive = engine.TickInterval(),
 				maxangular = 3000,
-				maxangulardamp = 3000,
+				maxangulardamp = 300,
 				maxspeed = 3000,
 				maxspeeddamp = 300,
 				dampfactor = 0.3,
-				teleportdistance = 100,
-				deltatime = 0
+				teleportdistance = 0,
+				deltatime = FrameTime()
 			}
 
 			function pickupController:PhysicsSimulate(phys, dt)
@@ -457,8 +461,6 @@ if SERVER then
 		net.WriteEntity(ent)
 		net.WriteBool(false)
 		net.WriteBool(bLeftHand)
-		net.WriteVector(lpos)
-		net.WriteAngle(lang)
 		net.Broadcast()
 	end
 
@@ -485,7 +487,6 @@ if SERVER then
 			for _, ent in ipairs(nearbyEntities) do
 				local canPickup = CanPickupEntity(ent, ply, cv)
 				ent:SetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), canPickup)
-				-- or use ent:SetNWBool("vrmod_pickup_valid", canPickup) if single player check suffices
 			end
 		end
 	end
