@@ -7,7 +7,7 @@ vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 --GLOBALS
 vrmod.SMOOTHING_FACTOR = 0.98
-vrmod.DEFAULT_RADIUS = 3.5
+vrmod.DEFAULT_RADIUS = 2.75
 vrmod.DEFAULT_REACH = 5.5
 vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
 vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
