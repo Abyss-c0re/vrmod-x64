@@ -448,6 +448,39 @@ function vrmod.utils.ConvertToRelativeFrame(absFrame)
     return relFrame
 end
 
+function vrmod.utils.FramesAreEqual(f1, f2)
+    if not f1 or not f2 then return false end
+    local function equalVec(a, b)
+        return a:DistToSqr(b) < 0.0001 -- tolerance
+    end
+
+    local function equalAng(a, b)
+        return math.abs(math.AngleDifference(a.p, b.p)) < 0.01 and math.abs(math.AngleDifference(a.y, b.y)) < 0.01 and math.abs(math.AngleDifference(a.r, b.r)) < 0.01
+    end
+
+    if f1.characterYaw ~= f2.characterYaw then return false end
+    for i = 1, 10 do
+        if f1["finger" .. i] ~= f2["finger" .. i] then return false end
+    end
+
+    if not equalVec(f1.hmdPos, f2.hmdPos) then return false end
+    if not equalAng(f1.hmdAng, f2.hmdAng) then return false end
+    if not equalVec(f1.lefthandPos, f2.lefthandPos) then return false end
+    if not equalAng(f1.lefthandAng, f2.lefthandAng) then return false end
+    if not equalVec(f1.righthandPos, f2.righthandPos) then return false end
+    if not equalAng(f1.righthandAng, f2.righthandAng) then return false end
+    if f1.waistPos then
+        if not f2.waistPos then return false end
+        if not equalVec(f1.waistPos, f2.waistPos) then return false end
+        if not equalAng(f1.waistAng, f2.waistAng) then return false end
+        if not equalVec(f1.leftfootPos, f2.leftfootPos) then return false end
+        if not equalAng(f1.leftfootAng, f2.leftfootAng) then return false end
+        if not equalVec(f1.rightfootPos, f2.rightfootPos) then return false end
+        if not equalAng(f1.rightfootAng, f2.rightfootAng) then return false end
+    end
+    return true
+end
+
 -- WEP UTILS
 function vrmod.utils.IsValidWep(wep, get)
     if not IsValid(wep) then return false end

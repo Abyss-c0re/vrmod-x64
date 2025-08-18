@@ -3,7 +3,8 @@ local convars, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_net_tickrate", nil, tostring(math.ceil(1 / engine.TickInterval())), FCVAR_REPLICATED, nil, nil, nil, tonumber, nil)
 local function netReadFrame()
 	local frame = {
-		ts = net.ReadFloat(),
+		--ts = net.ReadFloat(),
+		ts = net.ReadDouble(),
 		characterYaw = net.ReadUInt(6) * 5.625,
 		finger1 = net.ReadUInt(6) / 64,
 		finger2 = net.ReadUInt(6) / 64,
@@ -68,7 +69,8 @@ local function buildClientFrame(relative)
 end
 
 local function netWriteFrame(frame)
-	net.WriteFloat(SysTime())
+	--net.WriteFloat(SysTime())
+	net.WriteDouble(SysTime())
 	local tmp = frame.characterYaw + math.ceil(math.abs(frame.characterYaw) / 360) * 360 --normalize and convert characterYaw to 0-360
 	tmp = tmp - math.floor(tmp / 360) * 360
 	net.WriteUInt(frame.characterYaw * 0.17857, 6) --crush from 0-360 to 0-127
@@ -103,16 +105,29 @@ if CLIENT then
 	vrmod.AddCallbackedConvar("vrmod_net_delay", nil, "0.1", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_delaymax", nil, "0.2", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_storedframes", nil, "15", nil, nil, nil, nil, tonumber, nil)
+	local lastSentFrame
+	local function SendFrame(frame)
+		net.Start("vrutil_net_tick", true)
+		net.WriteVector(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos or Vector(0, 0, 0))
+		netWriteFrame(frame)
+		net.SendToServer()
+		lastSentFrame = frame
+	end
+
 	function VRUtilNetworkInit() --called by localplayer when they enter vr
 		-- transmit loop
 		timer.Create("vrmod_transmit", 1 / convarValues.vrmod_net_tickrate, 0, function()
-			if g_VR.threePoints then
-				net.Start("vrutil_net_tick", true)
-				--write viewHackPos
-				net.WriteVector(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos or Vector(0, 0, 0))
-				--write frame
-				netWriteFrame(buildClientFrame(true))
-				net.SendToServer()
+			if g_VR.threePoints and g_VR.active then
+				local frame = buildClientFrame(true)
+				if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
+					SendFrame(frame)
+				else
+					if lastSentFrame then
+						vrmod.utils.DebugPrint("[DEBUG] Client skipped sending identical frame.")
+					else
+						SendFrame(frame)
+					end
+				end
 			end
 		end)
 
@@ -399,7 +414,13 @@ if SERVER then
 		--print("sv received net_tick, len: "..len)
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
+		local prev = g_VR[ply:SteamID()].latestFrame
 		local frame = netReadFrame()
+		if vrmod.utils.FramesAreEqual(frame, prev) then
+			vrmod.utils.DebugPrint("[DEBUG] %s sent identical frame (no movement).", ply:Nick())
+			return
+		end
+
 		g_VR[ply:SteamID()].latestFrame = frame
 		if not viewHackPos:IsZero() and util.IsInWorld(viewHackPos) then
 			ply.viewOffset = viewHackPos - ply:EyePos() + ply.viewOffset
