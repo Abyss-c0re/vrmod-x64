@@ -108,7 +108,7 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 		if not IsValidPickupTarget(ent, ply, bLeftHand) then continue end
 		if not CanPickupEntity(ent, ply, convarValues or vrmod.GetConvars()) then continue end
 		-- AABB “point-in-box” check around the entity
-		local boost = IsImportantPickup(ent) and 3.5 or 1.0
+		local boost = IsImportantPickup(ent) and 5.5 or 1.0
 		local localPos = WorldToLocal(grabPoint, Angle(), ent:GetPos(), ent:GetAngles())
 		local mins, maxs = ent:OBBMins() * pickupRange * boost, ent:OBBMaxs() * pickupRange * boost
 		if not localPos:WithinAABox(mins, maxs) then continue end
@@ -239,10 +239,10 @@ if CLIENT then
 				trace = vrmod.utils.TraceHand(ply, "right")
 			end
 
-			local offset = handAng:Forward() * vrmod.DEFAULT_OFFSET * 6
+			local offset = handAng:Forward() * (vrmod.DEFAULT_REACH * vrmod.DEFAULT_OFFSET)
 			local finalPos
 			if trace and IsValid(trace.Entity) and trace.Entity == ent then
-				finalPos = trace.HitPos + offset
+				finalPos = handPos - trace.HitPos
 			else
 				finalPos = handPos + offset
 			end
