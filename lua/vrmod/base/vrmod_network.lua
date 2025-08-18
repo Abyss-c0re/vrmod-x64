@@ -5,7 +5,7 @@ local function netReadFrame()
 	local frame = {
 		--ts = net.ReadFloat(),
 		ts = net.ReadDouble(),
-		characterYaw = net.ReadUInt(6) * 5.625,
+		characterYaw = net.ReadUInt(7) * 2.85714,
 		finger1 = net.ReadUInt(6) / 64,
 		finger2 = net.ReadUInt(6) / 64,
 		finger3 = net.ReadUInt(6) / 64,
@@ -38,9 +38,8 @@ end
 local function buildClientFrame(relative)
 	local lp = LocalPlayer()
 	if not IsValid(lp) then return nil end
-	local inVehicle = lp:InVehicle()
 	local frame = {
-		characterYaw = inVehicle and lp:EyeAngles().yaw or g_VR.characterYaw,
+		characterYaw = LocalPlayer():InVehicle() and LocalPlayer():GetAngles().yaw or g_VR.characterYaw,
 		hmdPos = g_VR.tracking.hmd.pos,
 		hmdAng = g_VR.tracking.hmd.ang,
 		lefthandPos = g_VR.tracking.pose_lefthand.pos,
@@ -73,7 +72,7 @@ local function netWriteFrame(frame)
 	net.WriteDouble(SysTime())
 	local tmp = frame.characterYaw + math.ceil(math.abs(frame.characterYaw) / 360) * 360 --normalize and convert characterYaw to 0-360
 	tmp = tmp - math.floor(tmp / 360) * 360
-	net.WriteUInt(frame.characterYaw * 0.17857, 6) --crush from 0-360 to 0-127
+	net.WriteUInt(frame.characterYaw * 0.35, 7) --crush from 0-360 to 0-127
 	net.WriteUInt(frame.finger1 * 64, 6)
 	net.WriteUInt(frame.finger2 * 64, 6)
 	net.WriteUInt(frame.finger3 * 64, 6)
@@ -122,11 +121,7 @@ if CLIENT then
 				if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
 					SendFrame(frame)
 				else
-					if lastSentFrame then
-						vrmod.utils.DebugPrint("[DEBUG] Client skipped sending identical frame.")
-					else
-						SendFrame(frame)
-					end
+					if not lastSentFrame then SendFrame(frame) end
 				end
 			end
 		end)
@@ -144,47 +139,48 @@ if CLIENT then
 		local lerpDelayMax = convarValues.vrmod_net_delaymax
 		for k, v in pairs(g_VR.net) do
 			local ply = player.GetBySteamID(k)
-			if #v.frames < 2 or not ply then --len check discards the localplayer, ply might be invalid for a few frames before exit msg upon disconnect
-				continue
-			end
-
+			if #v.frames < 2 or not ply then continue end
 			if v.buffering then
 				if not (v.playbackTime > v.frames[v.latestFrameIndex].ts - lerpDelay) then
 					v.buffering = false
 					v.sysTime = SysTime()
 					v.debugState = "playing"
+					vrmod.utils.DebugPrint("[Lerp] %s finished buffering, entering play", k)
 				end
 			else
-				--advance playhead
+				-- advance playhead
+				local oldTime = v.playbackTime
 				v.playbackTime = v.playbackTime + SysTime() - v.sysTime
 				v.sysTime = SysTime()
-				--check if we reached the end
+				vrmod.utils.DebugPrint("[Lerp] %s playhead advanced %.4f -> %.4f", k, oldTime, v.playbackTime)
+				-- reached end
 				if v.playbackTime > v.frames[v.latestFrameIndex].ts then
 					v.buffering = true
 					v.debugState = "buffering (reached end)"
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
+					vrmod.utils.DebugPrint("[Lerp] %s reached end, entering buffer", k)
 				end
 
-				--check if we're too far behind
+				-- too far behind
 				if v.frames[v.latestFrameIndex].ts - v.playbackTime > lerpDelayMax then
 					v.buffering = true
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
 					v.debugState = "buffering (catching up)"
+					vrmod.utils.DebugPrint("[Lerp] %s behind by %.4f > max %.4f, resetting", k, v.frames[v.latestFrameIndex].ts - v.playbackTime, lerpDelayMax)
 				end
 			end
 
-			--lerp according to current playhead pos
+			-- lerp
 			for i = 1, #v.frames do
 				local nextFrame = i
 				local previousFrame = i - 1
 				if previousFrame == 0 then previousFrame = #v.frames end
 				if v.frames[nextFrame].ts >= v.playbackTime and v.frames[previousFrame].ts <= v.playbackTime then
 					local fraction = (v.playbackTime - v.frames[previousFrame].ts) / (v.frames[nextFrame].ts - v.frames[previousFrame].ts)
-					--
 					v.debugNextFrame = nextFrame
 					v.debugPreviousFrame = previousFrame
 					v.debugFraction = fraction
-					--
+					vrmod.utils.DebugPrint("[Lerp] %s using frames %d -> %d at fraction %.3f (playback=%.3f, prev=%.3f, next=%.3f)", k, previousFrame, nextFrame, fraction, v.playbackTime, v.frames[previousFrame].ts, v.frames[nextFrame].ts)
 					v.lerpedFrame = {}
 					for k2, v2 in pairs(v.frames[previousFrame]) do
 						if k2 == "characterYaw" then
@@ -198,12 +194,13 @@ if CLIENT then
 						end
 					end
 
-					--
+					-- Apply world transform
 					local plyPos, plyAng = ply:GetPos(), Angle()
 					if ply:InVehicle() then
 						plyAng = ply:GetVehicle():GetAngles()
 						local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
 						v.lerpedFrame.characterYaw = forwardAng.yaw
+						vrmod.utils.DebugPrint("[Lerp] %s in vehicle, overriding characterYaw=%d", k, forwardAng.yaw)
 					end
 
 					v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng = LocalToWorld(v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng, plyPos, plyAng)
@@ -215,7 +212,6 @@ if CLIENT then
 						v.lerpedFrame.rightfootPos, v.lerpedFrame.rightfootAng = LocalToWorld(v.lerpedFrame.rightfootPos, v.lerpedFrame.rightfootAng, plyPos, plyAng)
 					end
 
-					--
 					break
 				end
 			end
