@@ -12,6 +12,7 @@ if SERVER then
         ["weapon_pistol"] = "arcticvr_hl2_pistol",
         ["weapon_357"] = "arcticvr_hl2_357",
         ["weapon_smg1"] = "arcticvr_hl2_smg1",
+        ["weapon_annabelle"] = "arcticvr_hl2_annabelle",
         ["weapon_ar2"] = "arcticvr_hl2_ar2",
         ["weapon_shotgun"] = "arcticvr_hl2_shotgun",
         ["weapon_crossbow"] = "arcticvr_hl2_crossbow",
