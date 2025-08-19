@@ -386,7 +386,22 @@ end
 function vrmod.utils.ConvertToRelativeFrame(absFrame)
     local lp = LocalPlayer()
     if not IsValid(lp) then return nil end
-    local plyPos, plyAng = lp:GetPos(), lp:InVehicle() and lp:GetVehicle():GetAngles() or Angle()
+    local vehicle = lp:GetNWEntity("GlideVehicle")
+    local plyAng
+    if IsValid(vehicle) then
+        plyAng = vehicle:GetAngles()
+    elseif lp:InVehicle() then
+        local veh = lp:GetVehicle()
+        if IsValid(veh) then
+            plyAng = veh:GetAngles()
+        else
+            plyAng = Angle()
+        end
+    else
+        plyAng = Angle()
+    end
+
+    local plyPos = lp:GetPos()
     local relFrame = {
         characterYaw = absFrame.characterYaw
     }

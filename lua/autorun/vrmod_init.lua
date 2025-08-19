@@ -25,6 +25,7 @@ local files = {
     "vrmod/io/vrmod_gravity_and_physgun.lua",
     "vrmod/io/vrmod_buttons.lua",
     "vrmod/io/vrmod_keypad.lua",
+    "vrmod/io/vrmod_glide.lua",
     "vrmod/view/vrmod_character.lua",
     "vrmod/view/vrmod_character_hands.lua",
     "vrmod/view/vrmod_pmchange.lua",

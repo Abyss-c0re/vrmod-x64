@@ -149,7 +149,7 @@ if CLIENT then
 		local boneinfo = charinfo.boneinfo
 		local bones = charinfo.bones
 		local frame = net.lerpedFrame
-		local inVehicle = ply:InVehicle()
+		local inVehicle = ply:InVehicle() or IsValid(ply:GetNWEntity("GlideVehicle"))
 		local plyAng = inVehicle and ply:GetVehicle():GetAngles() or Angle(0, frame.characterYaw, 0)
 		if inVehicle then _, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng) end
 		-- Ensure cache is initialized

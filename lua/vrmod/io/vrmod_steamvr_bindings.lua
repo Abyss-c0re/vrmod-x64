@@ -224,7 +224,48 @@ g_VR.action_manifest = [[
 		{
 			"name": "/actions/driving/in/boolean_right_pickup",
 			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_up",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_down",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_left",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_right",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_center",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_lights",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_horn",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_switch1",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_switch2",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_switch3",
+			"type": "boolean"
 		}
+      
 	],
 
 	"action_sets": [
@@ -286,13 +327,24 @@ g_VR.action_manifest = [[
 			"/actions/driving/in/vector1_forward" : "Forward",
 			"/actions/driving/in/vector1_reverse" : "Reverse",
 			"/actions/driving/in/vector2_steer" : "Steer",
+         "/actions/driving/in/boolean_up" : "Dpad Up",
+			"/actions/driving/in/boolean_down" : "Dpad Down",
+         "/actions/driving/in/boolean_center" : "Dpad Center",
+			"/actions/driving/in/boolean_left" : "Dpad Left",
+			"/actions/driving/in/boolean_right" : "Dpad Right",
+         "/actions/driving/in/boolean_horn" : "Horn",
+         "/actions/driving/in/boolean_lights" : "Lights",
 			"/actions/driving/in/boolean_turbo" : "Turbo",
 			"/actions/driving/in/boolean_handbrake" : "Handbrake",
 			"/actions/driving/in/boolean_turret" : "Turret",
 			"/actions/driving/in/boolean_exit" : "Exit Vehicle",
 			"/actions/driving/in/boolean_spawnmenu" : "Quickmenu",
+         "/actions/driving/in/boolean_switch1" : "Switch 1",
+         "/actions/driving/in/boolean_switch2" : "Switch 2",
+         "/actions/driving/in/boolean_switch3" : "Switch 3",
 			"/actions/driving/in/boolean_left_pickup" : "Left Pickup",
 			"/actions/driving/in/boolean_right_pickup" : "Right Pickup"
+
 		}
 	]
 }
@@ -592,7 +644,31 @@ g_VR.bindings_touch = [[
          "sources" : []
       },
       "/actions/driving" : {
-         "chords" : [],
+         "chords" : [
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/grip", "click" ],
+                  [ "/user/hand/right/input/joystick", "west" ]
+               ],
+               "output" : "/actions/driving/in/boolean_switch1"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/grip", "click" ],
+                  [ "/user/hand/right/input/joystick", "east" ]
+               ],
+               "output" : "/actions/driving/in/boolean_switch2"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/grip", "click" ],
+                  [ "/user/hand/right/input/joystick", "north" ]
+               ],
+               "output" : "/actions/driving/in/boolean_switch3"
+            }
+         ],
+         "poses" : [],
+         "skeleton" : [],
          "sources" : [
             {
                "inputs" : {
@@ -601,6 +677,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "trigger",
+               "parameters" : {},
                "path" : "/user/hand/right/input/trigger"
             },
             {
@@ -610,6 +687,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "trigger",
+               "parameters" : {},
                "path" : "/user/hand/left/input/trigger"
             },
             {
@@ -619,6 +697,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "joystick",
+               "parameters" : {},
                "path" : "/user/hand/left/input/joystick"
             },
             {
@@ -628,6 +707,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/b"
             },
             {
@@ -637,6 +717,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/a"
             },
             {
@@ -646,6 +727,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/y"
             },
             {
@@ -655,15 +737,31 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/x"
             },
             {
                "inputs" : {
-                  "position" : {
-                     "output" : "/actions/driving/in/vector2_steer"
+                  "center" : {
+                     "output" : "/actions/driving/in/boolean_center"
+                  },
+                  "east" : {
+                     "output" : "/actions/driving/in/boolean_right"
+                  },
+                  "north" : {
+                     "output" : "/actions/driving/in/boolean_up"
+                  },
+                  "south" : {
+                     "output" : "/actions/driving/in/boolean_down"
+                  },
+                  "west" : {
+                     "output" : "/actions/driving/in/boolean_left"
                   }
                },
-               "mode" : "joystick",
+               "mode" : "dpad",
+               "parameters" : {
+                  "sub_mode" : "touch"
+               },
                "path" : "/user/hand/right/input/joystick"
             },
             {
@@ -673,6 +771,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/joystick"
             },
             {
@@ -682,6 +781,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "trigger",
+               "parameters" : {},
                "path" : "/user/hand/right/input/grip"
             },
             {
@@ -691,12 +791,34 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "trigger",
+               "parameters" : {},
                "path" : "/user/hand/left/input/grip"
             },
             {
                "inputs" : {},
                "mode" : "none",
+               "parameters" : {},
                "path" : "/user/hand/right/input/joystick"
+            },
+            {
+               "inputs" : {
+                  "touch" : {
+                     "output" : "/actions/driving/in/boolean_lights"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/thumbrest"
+            },
+            {
+               "inputs" : {
+                  "touch" : {
+                     "output" : "/actions/driving/in/boolean_horn"
+                  }
+               },
+               "mode" : "button",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/thumbrest"
             }
          ]
       },
@@ -717,6 +839,8 @@ g_VR.bindings_touch = [[
                "output" : "/actions/main/in/boolean_teleport"
             }
          ],
+         "poses" : [],
+         "skeleton" : [],
          "sources" : [
             {
                "inputs" : {
@@ -740,6 +864,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/grip"
             },
             {
@@ -749,6 +874,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/trigger"
             },
             {
@@ -758,6 +884,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/grip"
             },
             {
@@ -767,6 +894,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/trigger"
             },
             {
@@ -779,6 +907,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/y"
             },
             {
@@ -788,6 +917,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/b"
             },
             {
@@ -800,6 +930,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/a"
             },
             {
@@ -809,6 +940,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/joystick"
             },
             {
@@ -818,6 +950,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "joystick",
+               "parameters" : {},
                "path" : "/user/hand/right/input/joystick"
             },
             {
@@ -827,16 +960,19 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/x"
             },
             {
                "inputs" : {},
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/left/input/thumbrest"
             },
             {
                "inputs" : {},
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/thumbrest"
             },
             {
@@ -846,6 +982,7 @@ g_VR.bindings_touch = [[
                   }
                },
                "mode" : "button",
+               "parameters" : {},
                "path" : "/user/hand/right/input/joystick"
             }
          ]
@@ -855,10 +992,12 @@ g_VR.bindings_touch = [[
    "controller_type" : "oculus_touch",
    "description" : "--- On Foot ---\n\nTeleport () - Right Joystick + Right Thumb Rest\nReload - Left Thumb Rest + Right Thumb Rest\nWeapon menu - Right Joystick\nQuick menu - Y\nUse - X\nSprint - Left Joystick\nSecondary fire - Left Trigger\nCrouch - A\nJump - B\n\n--- In Vehicle ---\n\nForward - Right Trigger\nReverse - Left Trigger\nHand Break - A \nTurbo - B\nTurret - Right Joystick\nQuick menu - Y\nExit - X",
    "interaction_profile" : "",
-   "name" : "Quest 3 Gmod64 from Doom Slayer",
+   "name" : "VRMOD x64 for Quest 3 with Glide",
    "options" : {},
    "simulated_actions" : []
 }
+
+
       
 ]]
 --##############################################################################
@@ -1789,9 +1928,14 @@ g_VR.bindings_vive_tracker_waist = [[
 --##############################################################################
 --##############################################################################
 --##############################################################################
-local function WriteBindingFiles()
+local function WriteActionManifest()
    if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
    file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
+end
+
+local function WriteBindingFiles()
+   if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
+   WriteActionManifest()
    file.Write("vrmod/vrmod_bindings_holographic_controller.txt", g_VR.bindings_holographic)
    file.Write("vrmod/vrmod_bindings_oculus_touch.txt", g_VR.bindings_touch)
    file.Write("vrmod/vrmod_bindings_vive_controller.txt", g_VR.bindings_vive)
@@ -1802,10 +1946,12 @@ local function WriteBindingFiles()
    file.Write("vrmod/vrmod_bindings_vive_tracker_waist.txt", g_VR.bindings_vive_tracker_waist)
 end
 
-local cv_bindingVersion = CreateClientConVar("vrmod_bindingversion", "0", true, false)
-if cv_bindingVersion:GetInt() < 21 then
-   cv_bindingVersion:SetInt(21)
-   WriteBindingFiles()
-end
+-- local cv_bindingVersion = CreateClientConVar("vrmod_bindingversion", "0", true, false)
+-- if cv_bindingVersion:GetInt() < 22 then
+--    cv_bindingVersion:SetInt(22)
+--    WriteBindingFiles()
+-- end
 
+WriteActionManifest()
+WriteBindingFiles()
 hook.Add("VRMod_Reset", "vrmod_reset_bindings", function() WriteBindingFiles() end)
