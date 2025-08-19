@@ -198,29 +198,24 @@ if CLIENT then
 		if not IsValid(ply) then return end
 		local viewEnt = ply:GetViewEntity()
 		if not IsValid(viewEnt) then return end
+		local hmd = g_VR.tracking.hmd
+		if not hmd then return end
+		-- Transform HMD to VR origin local space
+		local rawPos, rawAng = WorldToLocal(hmd.pos, hmd.ang, g_VR.origin, g_VR.originAngle)
+		-- Base position and angle
+		local finalPos, finalAng = hmd.pos, hmd.ang
+		-- If we are viewing through an entity (not player), apply offset
 		if viewEnt ~= ply then
-			local hmd = g_VR.tracking.hmd
-			if not hmd then return end
-			-- Transform HMD to VR origin local space
-			local rawPos, rawAng = WorldToLocal(hmd.pos, hmd.ang, g_VR.origin, g_VR.originAngle)
-			-- Update offset only when view entity changes
-			if viewEnt ~= lastViewEnt then
-				local vePos = viewEnt:GetPos()
-				local veAng = viewEnt:GetAngles()
-				local worldPos, worldAng = LocalToWorld(rawPos, rawAng, vePos, veAng)
-				viewEntOffsetPos, viewEntOffsetAng = WorldToLocal(vePos, veAng, worldPos, worldAng)
-				lastViewEnt = viewEnt
-			end
-
-			-- Apply offset
-			local intermediatePos, intermediateAng = LocalToWorld(rawPos, rawAng, viewEntOffsetPos, viewEntOffsetAng)
 			local vePos = viewEnt:GetPos()
 			local veAng = viewEnt:GetAngles()
-			g_VR.view.origin, g_VR.view.angles = LocalToWorld(intermediatePos, intermediateAng, vePos, veAng)
-		else
-			g_VR.view.origin = g_VR.tracking.hmd.pos
-			g_VR.view.angles = g_VR.tracking.hmd.ang
+			finalPos, finalAng = LocalToWorld(rawPos, rawAng, vePos, veAng)
 		end
+
+		-- Detect Glide vehicle and apply small lift/forward
+		local glideVeh = ply:GetNWEntity("GlideVehicle")
+		if IsValid(glideVeh) then finalPos = finalPos + Vector(0, 0, 6) + finalAng:Forward() * 3 end
+		g_VR.view.origin = finalPos
+		g_VR.view.angles = finalAng
 	end
 
 	local function PerformRenderViews()

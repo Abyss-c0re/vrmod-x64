@@ -149,9 +149,23 @@ if CLIENT then
 		local boneinfo = charinfo.boneinfo
 		local bones = charinfo.bones
 		local frame = net.lerpedFrame
-		local inVehicle = ply:InVehicle() or IsValid(ply:GetNWEntity("GlideVehicle"))
-		local plyAng = inVehicle and ply:GetVehicle():GetAngles() or Angle(0, frame.characterYaw, 0)
-		if inVehicle then _, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng) end
+		local veh, plyAng
+		local glideEnt = ply:GetNWEntity("GlideVehicle")
+		local inVehicle = ply:InVehicle() or IsValid(glideEnt)
+		if inVehicle then veh = ply:GetVehicle() end
+		if IsValid(veh) then
+			-- Standard Source engine vehicle
+			plyAng = veh:GetAngles()
+			_, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng)
+		elseif IsValid(glideEnt) then
+			-- Custom Glide entity
+			plyAng = glideEnt:GetAngles()
+			_, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng)
+		else
+			-- On foot
+			plyAng = Angle(0, frame.characterYaw, 0)
+		end
+
 		-- Ensure cache is initialized
 		g_VR.cache = g_VR.cache or {}
 		g_VR.cache[steamid] = g_VR.cache[steamid] or {}
