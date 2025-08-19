@@ -26,12 +26,6 @@ vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCV
 vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 10000, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_npcs", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, "1", FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
-local function IsWeaponEntity(ent)
-	if not IsValid(ent) then return false end
-	local c = ent:GetClass()
-	return ent:IsWeapon() or c:find("weapon_") or c == "prop_physics" and ent:GetModel():find("w_")
-end
-
 local function IsImportantPickup(ent)
 	local class = ent:GetClass()
 	return class:find("^item_") or class:find("^spawned_") or class:find("^vr_item")
@@ -39,7 +33,7 @@ end
 
 local function HasHeldWeaponRight(ply)
 	local sid = ply:SteamID()
-	return g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[2] and IsWeaponEntity(g_VR[sid].heldItems[2].ent)
+	return g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[2] and vrmod.utils.IsWeaponEntity(g_VR[sid].heldItems[2].ent)
 end
 
 local function CanPickupEntity(v, ply, cv)
@@ -65,7 +59,7 @@ local function IsNonPickupable(ent)
 		if class:find(pattern:lower(), 1, true) then return true end
 	end
 
-	if IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then return false end
+	if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then return false end
 	local npcPickupAllowed = (convarValues and convarValues.vrmod_pickup_npcs or 0) >= 1
 	if npcPickupAllowed and (ent:IsNPC() or ent:IsNextBot()) then return false end
 	-- Final fallback: block non-physics objects
@@ -113,7 +107,7 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 		local mins, maxs = ent:OBBMins() * pickupRange * boost, ent:OBBMaxs() * pickupRange * boost
 		if not localPos:WithinAABox(mins, maxs) then continue end
 		-- Weapon‑specific rules
-		if IsWeaponEntity(ent) then
+		if vrmod.utils.IsWeaponEntity(ent) then
 			local aw = ply:GetActiveWeapon()
 			if IsValid(aw) and aw:GetClass() == ent:GetClass() then continue end
 			-- Prevent right‑hand from grabbing a second weapon if it already holds one
@@ -125,7 +119,7 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 
 	-- Prioritize weapons
 	for _, ent in ipairs(candidates) do
-		if IsWeaponEntity(ent) then return ent end
+		if vrmod.utils.IsWeaponEntity(ent) then return ent end
 	end
 	-- Fallback: first valid candidate
 	return candidates[1]
@@ -239,7 +233,7 @@ if CLIENT then
 				trace = vrmod.utils.TraceHand(ply, "right")
 			end
 
-			local offset = handAng:Forward() * (vrmod.DEFAULT_REACH * vrmod.DEFAULT_OFFSET)
+			local offset = handAng:Forward() * vrmod.DEFAULT_REACH * vrmod.DEFAULT_OFFSET
 			local finalPos
 			if trace and IsValid(trace.Entity) and trace.Entity == ent then
 				finalPos = handPos - trace.HitPos

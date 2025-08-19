@@ -253,34 +253,6 @@ local function DetectMeleeFromModel(modelPath, phys, offsetAng)
     return false
 end
 
---DEBUG
-function vrmod.utils.DebugPrint(fmt, ...)
-    if not cv_debug:GetBool() then return end
-    local prefix = string.format("[VRMod:][%s]", CLIENT and "Client" or "Server")
-    if select("#", ...) > 0 then
-        if type(fmt) == "string" and fmt:find("%%") then
-            -- format mode
-            local args = {...}
-            for i = 1, #args do
-                args[i] = tostr(args[i])
-            end
-
-            print(prefix, string.format(fmt, unpack(args)))
-        else
-            -- print mode
-            local args = {fmt, ...}
-            for i = 1, #args do
-                args[i] = tostr(args[i])
-            end
-
-            print(prefix, unpack(args))
-        end
-    else
-        -- single argument only
-        print(prefix, tostr(fmt))
-    end
-end
-
 --MATH
 function vrmod.utils.VecAlmostEqual(v1, v2, threshold)
     if not v1 or not v2 then return false end
@@ -449,11 +421,11 @@ end
 function vrmod.utils.FramesAreEqual(f1, f2)
     if not f1 or not f2 then return false end
     local function equalVec(a, b)
-        return a:DistToSqr(b) < 0.0001 -- tolerance
+        return vrmod.utils.VecAlmostEqual(a, b, 0.0001)
     end
 
     local function equalAng(a, b)
-        return math.abs(math.AngleDifference(a.p, b.p)) < 0.01 and math.abs(math.AngleDifference(a.y, b.y)) < 0.01 and math.abs(math.AngleDifference(a.r, b.r)) < 0.01
+        return vrmod.utils.AngAlmostEqual(a, b)
     end
 
     if f1.characterYaw ~= f2.characterYaw then return false end
@@ -491,6 +463,12 @@ function vrmod.utils.IsValidWep(wep, get)
     else
         return true
     end
+end
+
+function vrmod.utils.IsWeaponEntity(ent)
+    if not IsValid(ent) then return false end
+    local c = ent:GetClass()
+    return ent:IsWeapon() or c:find("weapon_") or c == "prop_physics" and ent:GetModel():find("w_")
 end
 
 function vrmod.utils.WepInfo(wep)
@@ -1344,6 +1322,34 @@ function vrmod.utils.IsRagdollDead(ent)
     local npc = ent.original_npc
     if IsValid(npc) and npc:Health() <= 0 then return true end
     return vrmod.utils.IsRagdollGibbed(ent)
+end
+
+--DEBUG
+function vrmod.utils.DebugPrint(fmt, ...)
+    if not cv_debug:GetBool() then return end
+    local prefix = string.format("[VRMod:][%s]", CLIENT and "Client" or "Server")
+    if select("#", ...) > 0 then
+        if type(fmt) == "string" and fmt:find("%%") then
+            -- format mode
+            local args = {...}
+            for i = 1, #args do
+                args[i] = tostr(args[i])
+            end
+
+            print(prefix, string.format(fmt, unpack(args)))
+        else
+            -- print mode
+            local args = {fmt, ...}
+            for i = 1, #args do
+                args[i] = tostr(args[i])
+            end
+
+            print(prefix, unpack(args))
+        end
+    else
+        -- single argument only
+        print(prefix, tostr(fmt))
+    end
 end
 
 if SERVER then
