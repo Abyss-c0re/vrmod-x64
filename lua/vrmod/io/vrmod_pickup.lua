@@ -28,7 +28,7 @@ vrmod.AddCallbackedConvar("vrmod_pickup_npcs", nil, 1, FCVAR_REPLICATED + FCVAR_
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, "1", FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 local function IsImportantPickup(ent)
 	local class = ent:GetClass()
-	return class:find("^item_") or class:find("^spawned_") or class:find("^vr_item")
+	return class:find("^item_") or class:find("^spawned_") or class:find("^vr_item") or vrmod.utils.IsWeaponEntity(ent)
 end
 
 local function HasHeldWeaponRight(ply)
@@ -102,7 +102,7 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 		if not IsValidPickupTarget(ent, ply, bLeftHand) then continue end
 		if not CanPickupEntity(ent, ply, convarValues or vrmod.GetConvars()) then continue end
 		-- AABB “point-in-box” check around the entity
-		local boost = IsImportantPickup(ent) and 5.5 or 1.0
+		local boost = IsImportantPickup(ent) and 5.0 or 1.0
 		local localPos = WorldToLocal(grabPoint, Angle(), ent:GetPos(), ent:GetAngles())
 		local mins, maxs = ent:OBBMins() * pickupRange * boost, ent:OBBMaxs() * pickupRange * boost
 		if not localPos:WithinAABox(mins, maxs) then continue end
@@ -119,7 +119,7 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 
 	-- Prioritize weapons
 	for _, ent in ipairs(candidates) do
-		if vrmod.utils.IsWeaponEntity(ent) then return ent end
+		if IsImportantPickup(ent) then return ent end
 	end
 	-- Fallback: first valid candidate
 	return candidates[1]
