@@ -24,11 +24,8 @@ if CLIENT then
 	local ipd, eyez
 	local cropVerticalMargin, cropHorizontalOffset
 	local lastPosePos = {}
-	local lastViewEnt = nil
 	local eyeOffset = nil
 	local forwardOffset = nil
-	local viewEntOffsetPos = Vector(0, 0, 0)
-	local viewEntOffsetAng = Angle(0, 0, 0)
 	local convarOverrides = {}
 	local moduleFile
 	if system.IsLinux() then
