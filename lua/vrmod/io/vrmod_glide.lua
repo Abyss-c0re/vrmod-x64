@@ -28,10 +28,11 @@ if SERVER then
             vehicle:SetInputFloat(1, "brake", brake)
             vehicle:SetInputFloat(1, "steer", steer)
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
+                vrmod.utils.DebugPrint("Server received - Pitch: " .. pitch .. ", Yaw: " .. yaw .. ", Roll: " .. roll)
                 vehicle:SetInputFloat(1, "throttle", math.Clamp(throttle, -1, 1))
-                vehicle:SetInputFloat(1, "pitch", pitch)
-                vehicle:SetInputFloat(1, "yaw", yaw)
-                vehicle:SetInputFloat(1, "roll", roll)
+                vehicle:SetInputFloat(1, "pitch", math.Clamp(pitch, -1, 1))
+                vehicle:SetInputFloat(1, "yaw", math.Clamp(yaw, -1, 1))
+                vehicle:SetInputFloat(1, "roll", math.Clamp(roll, -1, 1))
             else
                 vehicle:SetInputFloat(1, "accelerate", throttle)
             end
@@ -58,9 +59,17 @@ if SERVER then
             vehicle:SetInputBool(1, "shift_neutral", pressed)
         elseif action == "boolean_turret" then
             vehicle:SetInputBool(1, "attack", pressed)
+        elseif action == "boolean_switch1" then
+            vehicle:SetInputBool(1, "ignition", pressed)
+        elseif action == "boolean_switch2" then
+            vehicle:SetInputBool(1, "siren", pressed)
         end
     end)
 else -- CLIENT
+    local originalMouseFlyMode = nil
+    local pitchSensitivity = 1.0 -- Adjust as needed (e.g., 0.5 for less sensitive, 2.0 for more sensitive)
+    local yawSensitivity = 0.5
+    local rollSensitivity = 0.5
     local inputsToSend = {
         boolean_up = true,
         boolean_down = true,
@@ -88,6 +97,17 @@ else -- CLIENT
     }
 
     local pitch, yaw, roll = 0, 0, 0
+    local function ApplyMouseFlyMode(mode)
+        if not Glide or not Glide.Config then return end
+        local cfg = Glide.Config
+        cfg.mouseFlyMode = mode
+        -- Save & sync
+        if cfg.Save then cfg:Save() end
+        if cfg.TransmitInputSettings then cfg:TransmitInputSettings(true) end
+        if SetupFlyMouseModeSettings then SetupFlyMouseModeSettings() end
+        if Glide.MouseInput and Glide.MouseInput.Activate then Glide.MouseInput:Activate() end
+    end
+
     -- Boolean input monitoring
     hook.Add("VRMod_Input", "glide_vr_input", function(action, pressed)
         if not g_VR.active or not g_VR.input then return end
@@ -150,12 +170,46 @@ else -- CLIENT
         if IsValid(vehicle) and (vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER) then
             local ang = g_VR.tracking.pose_righthand.ang
             if ang then
-                pitch = ang.pitch
-                roll = ang.roll
-                yaw = ang.yaw
+                pitch = ang.pitch / 90 * pitchSensitivity
+                yaw = -ang.yaw / 90 * yawSensitivity
+                roll = ang.roll / 90 * rollSensitivity
+            else
+                pitch, yaw, roll = 0, 0, 0
             end
         else
             pitch, yaw, roll = 0, 0, 0
+        end
+    end)
+
+    hook.Add("VRMod_Start", "Glide_ForceMouseFlyMode", function()
+        if not (Glide and Glide.Config) then
+            print("[Glide VR] Glide not loaded, skipping mode change")
+            return
+        end
+
+        local cfg = Glide.Config
+        if cfg.mouseFlyMode ~= 2 then
+            originalMouseFlyMode = cfg.mouseFlyMode
+            print(string.format("[Glide VR] Saving original mode %s, forcing mode 2", tostring(originalMouseFlyMode)))
+            ApplyMouseFlyMode(2)
+        else
+            print("[Glide VR] Mode already 2")
+        end
+    end)
+
+    -- When VR exits
+    hook.Add("VRMod_Exit", "Glide_RestoreMouseFlyMode", function()
+        if not (Glide and Glide.Config) then
+            print("[Glide VR] Glide not loaded, cannot restore")
+            return
+        end
+
+        if originalMouseFlyMode ~= nil then
+            print(string.format("[Glide VR] Restoring original mode %s", tostring(originalMouseFlyMode)))
+            ApplyMouseFlyMode(originalMouseFlyMode)
+            originalMouseFlyMode = nil
+        else
+            print("[Glide VR] No stored mode to restore")
         end
     end)
 end
