@@ -32,7 +32,8 @@ This build focuses on **optimization** by merging essential features from semi-o
 - Keypad tool support 
 - Support for dropping and picking up non-VR weapons  
 - Melee system overhauled: trace-based with velocity-scaled damage + bonus for weapon impact  
-- Functional numpad input in VR  
+- Functional numpad input in VR
+- Glide support  
 - Motion-controlled physgun: rotation and movement based on hand motion  
 - Gravity gun now supports prop rotation, just like HL2 VR  
 - UI now works correctly while in vehicles  
