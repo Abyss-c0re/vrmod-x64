@@ -49,41 +49,61 @@ if SERVER then
             end
         elseif action == "boolean_horn" then
             vehicle:SetInputBool(1, "horn", pressed)
-        elseif action == "boolean_up" then
+        elseif action == "boolean_shift_up" then
             vehicle:SetInputBool(1, "shift_up", pressed)
-            if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then vehicle:SetInputBool(1, "landing_gear", pressed) end
-        elseif action == "boolean_down" then
+        elseif action == "boolean_shift_down" then
             vehicle:SetInputBool(1, "shift_down", pressed)
-            if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then vehicle:SetInputBool(1, "countermeasures", pressed) end
-        elseif action == "boolean_center" then
+        elseif action == "boolean_shift_neutral" then
             vehicle:SetInputBool(1, "shift_neutral", pressed)
         elseif action == "boolean_turret" then
             vehicle:SetInputBool(1, "attack", pressed)
-        elseif action == "boolean_switch1" then
-            vehicle:SetInputBool(1, "ignition", pressed)
-        elseif action == "boolean_switch2" then
+        elseif action == "boolean_alt_turret" then
+            vehicle:SetInputBool(1, "attack", pressed)
+        elseif action == "boolean_switch_weapon" then
+            vehicle:SetInputBool(1, "switch_weapon", pressed)
+        elseif action == "boolean_siren" then
             vehicle:SetInputBool(1, "siren", pressed)
+        elseif action == "boolean_signal_left" then
+            if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
+                vehicle:SetInputBool(1, "landing_gear", pressed)
+            else
+                vehicle:SetInputBool(1, "signal_left", pressed)
+            end
+        elseif action == "boolean_signal_right" then
+            if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
+                vehicle:SetInputBool(1, "countermeasures", pressed)
+            else
+                vehicle:SetInputBool(1, "signal_right", pressed)
+            end
+        elseif action == "boolean_toggle_engine" then
+            vehicle:SetInputBool(1, "toggle_engine", pressed)
+        elseif action == "boolean_switch_weapon" then
+            vehicle:SetInputBool(1, "switch_weapon", pressed)
+        elseif action == "boolen_detach_trailer" then
+            vehicle:SetInputBool(1, "detach_trailer", pressed)
         end
     end)
 else -- CLIENT
     local originalMouseFlyMode = nil
+    local originalRagdollEnable = nil
     local pitchSensitivity = 1.0 -- Adjust as needed (e.g., 0.5 for less sensitive, 2.0 for more sensitive)
     local yawSensitivity = 0.5
     local rollSensitivity = 0.5
     local inputsToSend = {
-        boolean_up = true,
-        boolean_down = true,
-        boolean_left = true,
-        boolean_right = true,
-        boolean_center = true,
         boolean_handbrake = true,
-        boolean_turbo = true,
-        boolean_turret = true,
-        boolean_horn = true,
         boolean_lights = true,
-        boolean_switch1 = true,
-        boolean_switch2 = true,
-        boolean_switch3 = true,
+        boolean_horn = true,
+        boolean_shift_up = true,
+        boolean_shift_down = true,
+        boolean_shift_neutral = true,
+        boolean_turret = true,
+        boolean_alt_turret = true,
+        boolean_switch_weapon = true,
+        boolean_siren = true,
+        boolean_signal_left = true,
+        boolean_signal_right = true,
+        boolean_toggle_engine = true,
+        boolen_detach_trailer = true
     }
 
     -- Unified state tracking for booleans and analogs
@@ -166,18 +186,24 @@ else -- CLIENT
     hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
         if not g_VR.active or not g_VR.tracking then return end
         local ply = LocalPlayer()
+        if not IsValid(ply) then return end
         local vehicle = ply:GetNWEntity("GlideVehicle")
-        if IsValid(vehicle) and (vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER) then
-            local ang = g_VR.tracking.pose_righthand.ang
-            if ang then
-                pitch = ang.pitch / 90 * pitchSensitivity
-                yaw = -ang.yaw / 90 * yawSensitivity
-                roll = ang.roll / 90 * rollSensitivity
+        if IsValid(vehicle) then
+            --     local x, y = vrmod.utils.GetHandCursorOnPlane(ply, "right")
+            --     input.SetCursorPos(x, y)
+            -- end
+            if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
+                local ang = g_VR.tracking.pose_righthand.ang
+                if ang then
+                    pitch = ang.pitch / 90 * pitchSensitivity
+                    yaw = -ang.yaw / 90 * yawSensitivity
+                    roll = ang.roll / 90 * rollSensitivity
+                else
+                    pitch, yaw, roll = 0, 0, 0
+                end
             else
                 pitch, yaw, roll = 0, 0, 0
             end
-        else
-            pitch, yaw, roll = 0, 0, 0
         end
     end)
 
@@ -188,12 +214,22 @@ else -- CLIENT
         end
 
         local cfg = Glide.Config
+        -- Store and disable ragdoll mode for VR
+        if originalRagdollEnable == nil then
+            originalRagdollEnable = cfg.glide_ragdoll_enable
+            if originalRagdollEnable ~= 0 then
+                print("[Glide VR] Disabling Glide ragdoll mode for VR")
+                cfg.glide_ragdoll_enable = 0
+            end
+        end
+
+        -- Store and force mouse fly mode
         if cfg.mouseFlyMode ~= 2 then
             originalMouseFlyMode = cfg.mouseFlyMode
             print(string.format("[Glide VR] Saving original mode %s, forcing mode 2", tostring(originalMouseFlyMode)))
             ApplyMouseFlyMode(2)
         else
-            print("[Glide VR] Mode already 2")
+            print("[Glide VR] Mouse fly mode already 2")
         end
     end)
 
@@ -204,12 +240,19 @@ else -- CLIENT
             return
         end
 
+        local cfg = Glide.Config
+        -- Restore original mouse fly mode
         if originalMouseFlyMode ~= nil then
-            print(string.format("[Glide VR] Restoring original mode %s", tostring(originalMouseFlyMode)))
+            print(string.format("[Glide VR] Restoring original mouse fly mode %s", tostring(originalMouseFlyMode)))
             ApplyMouseFlyMode(originalMouseFlyMode)
             originalMouseFlyMode = nil
-        else
-            print("[Glide VR] No stored mode to restore")
+        end
+
+        -- Restore original ragdoll mode
+        if originalRagdollEnable ~= nil then
+            print(string.format("[Glide VR] Restoring original ragdoll mode %s", tostring(originalRagdollEnable)))
+            cfg.glide_ragdoll_enable = originalRagdollEnable
+            originalRagdollEnable = nil
         end
     end)
 end
