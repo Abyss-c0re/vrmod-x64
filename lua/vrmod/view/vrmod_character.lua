@@ -149,23 +149,10 @@ if CLIENT then
 		local boneinfo = charinfo.boneinfo
 		local bones = charinfo.bones
 		local frame = net.lerpedFrame
-		local veh, plyAng
-		local glideEnt = ply:GetNWEntity("GlideVehicle")
-		local inVehicle = ply:InVehicle() or IsValid(glideEnt)
-		if inVehicle then veh = ply:GetVehicle() end
-		if IsValid(veh) then
-			-- Standard Source engine vehicle
-			plyAng = veh:GetAngles()
-			_, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng)
-		elseif IsValid(glideEnt) then
-			-- Custom Glide entity
-			plyAng = glideEnt:GetAngles()
-			_, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng)
-		else
-			-- On foot
-			plyAng = Angle(0, frame.characterYaw, 0)
-		end
-
+		local inVehicle = ply:InVehicle()
+		local inGlide = ply:GetNWEntity("GlideVehicle")
+		local plyAng = inVehicle and ply:GetVehicle():GetAngles() or Angle(0, frame.characterYaw, 0)
+		if inVehicle then _, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng) end
 		-- Ensure cache is initialized
 		g_VR.cache = g_VR.cache or {}
 		g_VR.cache[steamid] = g_VR.cache[steamid] or {}
@@ -219,13 +206,27 @@ if CLIENT then
 		--****************** LEFT ARM ******************
 		local L_TargetPos = frame.lefthandPos
 		local L_TargetAng = frame.lefthandAng
+		if inVehicle and inGlide then
+			local angLocal = vrmod.utils.GetGlideHandPose(ply, "left")
+			local wheelOffset, wheelDistance, angleOffset = vrmod.utils.GetGlideHandOffset(ply, "left")
+			if angLocal and wheelOffset and angleOffset and plyAng and charinfo.L_ClaviclePos then
+				L_TargetPos = charinfo.L_ClaviclePos + plyAng:Forward() * wheelOffset.x + plyAng:Right() * -wheelDistance / 2 + plyAng:Up() * wheelOffset.z
+				L_TargetAng = plyAng + angLocal + angleOffset
+			else
+				-- fallback / zero out if values are missing
+				L_TargetPos = L_TargetPos or Vector(0, 0, 0)
+				L_TargetAng = L_TargetAng or Angle(0, 0, 0)
+				print("Warning: missing left-hand glide data!", angLocal, wheelOffset, angleOffset)
+			end
+		end
+
 		local mtx = ply:GetBoneMatrix(bones.b_leftClavicle)
 		local L_ClaviclePos = mtx and mtx:GetTranslation() or ZERO_VEC
 		charinfo.L_ClaviclePos = L_ClaviclePos
 		local tmp1 = L_ClaviclePos + plyAng:Right() * -charinfo.clavicleLen
 		local tmp2 = tmp1 + (L_TargetPos - tmp1) * 0.15
 		local L_ClavicleTargetAng
-		if not inVehicle then
+		if not inVehicle or inVehicle and inGlide then
 			L_ClavicleTargetAng = (tmp2 - L_ClaviclePos):Angle()
 		else
 			cache.L_ClavicleWTL = cache.L_ClavicleWTL or {}
@@ -239,8 +240,8 @@ if CLIENT then
 		local L_UpperarmPos = L_ClaviclePos + L_ClavicleTargetAng:Forward() * charinfo.clavicleLen
 		local L_TargetVec = L_TargetPos - L_UpperarmPos
 		local L_TargetVecLen = L_TargetVec:Length()
-		local L_TargetVecAng, L_TargetVecAngLocal
-		if not inVehicle then
+		local L_TargetVecAng, L_TargetVecAngLocal = Angle(0, 0, 0), Angle(0, 0, 0)
+		if not inVehicle or inVehicle and inGlide then
 			L_TargetVecAng = L_TargetVec:Angle()
 		else
 			cache.L_TargetVecWTL = cache.L_TargetVecWTL or {}
@@ -251,8 +252,8 @@ if CLIENT then
 		end
 
 		local L_UpperarmTargetAng = Angle(L_TargetVecAng.pitch, L_TargetVecAng.yaw, L_TargetVecAng.roll)
-		local tmp
-		if not inVehicle then
+		local tmp = 0
+		if not inVehicle or inVehicle and inGlide then
 			tmp = Angle(L_TargetVecAng.pitch, frame.characterYaw, -90)
 		else
 			cache.L_UpperarmAng = cache.L_UpperarmAng or Angle(L_TargetVecAngLocal.pitch, 0, -90)
@@ -267,7 +268,7 @@ if CLIENT then
 		local a1 = math.deg(math.acos((charinfo.upperArmLen * charinfo.upperArmLen + L_TargetVecLen * L_TargetVecLen - charinfo.lowerArmLen * charinfo.lowerArmLen) / (2 * charinfo.upperArmLen * L_TargetVecLen)))
 		if a1 == a1 then L_UpperarmTargetAng:RotateAroundAxis(L_UpperarmTargetAng:Up(), a1) end
 		local test
-		if not inVehicle then
+		if not inVehicle or inVehicle and inGlide then
 			test = (L_TargetPos.z - L_UpperarmPos.z + 20) * 1.5
 		else
 			test = ((L_TargetPos - L_UpperarmPos):Dot(plyAng:Up()) + 20) * 1.5
@@ -289,13 +290,28 @@ if CLIENT then
 		--****************** RIGHT ARM ******************
 		local R_TargetPos = frame.righthandPos
 		local R_TargetAng = frame.righthandAng
+		if inVehicle and inGlide then
+			local angLocal = vrmod.utils.GetGlideHandPose(ply, "right")
+			local wheelOffset, wheelDistance, angleOffset = vrmod.utils.GetGlideHandOffset(ply, "right")
+			if angLocal and wheelOffset and angleOffset and plyAng and charinfo.R_ClaviclePos then
+				R_TargetPos = charinfo.R_ClaviclePos + plyAng:Forward() * wheelOffset.x + plyAng:Right() * wheelDistance / 2 + plyAng:Up() * wheelOffset.z
+				R_TargetAng = plyAng + angLocal + angleOffset
+			else
+				-- fallback if values are missing
+				R_TargetPos = R_TargetPos or Vector(0, 0, 0)
+				R_TargetAng = R_TargetAng or Angle(0, 0, 0)
+				-- optional debug
+				print("Warning: missing right-hand glide data!", angLocal, wheelOffset, angleOffset)
+			end
+		end
+
 		local mtx = ply:GetBoneMatrix(bones.b_rightClavicle)
 		local R_ClaviclePos = mtx and mtx:GetTranslation() or ZERO_VEC
 		charinfo.R_ClaviclePos = R_ClaviclePos
 		local tmp1 = R_ClaviclePos + plyAng:Right() * charinfo.clavicleLen
 		local tmp2 = tmp1 + (R_TargetPos - tmp1) * 0.15
 		local R_ClavicleTargetAng
-		if not inVehicle then
+		if not inVehicle or inVehicle and inGlide then
 			R_ClavicleTargetAng = (tmp2 - R_ClaviclePos):Angle()
 		else
 			cache.R_ClavicleWTL = cache.R_ClavicleWTL or {}
@@ -309,8 +325,8 @@ if CLIENT then
 		local R_UpperarmPos = R_ClaviclePos + R_ClavicleTargetAng:Forward() * charinfo.clavicleLen
 		local R_TargetVec = R_TargetPos - R_UpperarmPos
 		local R_TargetVecLen = R_TargetVec:Length()
-		local R_TargetVecAng, R_TargetVecAngLocal
-		if not inVehicle then
+		local R_TargetVecAng, R_TargetVecAngLocal = Angle(0, 0, 0), Angle(0, 0, 0)
+		if not inVehicle or inVehicle and inGlide then
 			R_TargetVecAng = R_TargetVec:Angle()
 		else
 			cache.R_TargetVecWTL = cache.R_TargetVecWTL or {}
@@ -322,7 +338,7 @@ if CLIENT then
 
 		local R_UpperarmTargetAng = Angle(R_TargetVecAng.pitch, R_TargetVecAng.yaw, R_TargetVecAng.roll)
 		R_UpperarmTargetAng:RotateAroundAxis(R_TargetVec, 180)
-		local tmp
+		local tmp = 0
 		if not inVehicle then
 			tmp = Angle(R_TargetVecAng.pitch, frame.characterYaw, 90)
 		else
@@ -338,7 +354,7 @@ if CLIENT then
 		local a1 = math.deg(math.acos((charinfo.upperArmLen * charinfo.upperArmLen + R_TargetVecLen * R_TargetVecLen - charinfo.lowerArmLen * charinfo.lowerArmLen) / (2 * charinfo.upperArmLen * R_TargetVecLen)))
 		if a1 == a1 then R_UpperarmTargetAng:RotateAroundAxis(R_UpperarmTargetAng:Up(), a1) end
 		local test
-		if not inVehicle then
+		if not inVehicle or inVehicle and inGlide then
 			test = (R_TargetPos.z - R_UpperarmPos.z + 20) * 1.5
 		else
 			test = ((R_TargetPos - R_UpperarmPos):Dot(plyAng:Up()) + 20) * 1.5
