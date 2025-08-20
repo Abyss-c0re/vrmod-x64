@@ -213,6 +213,14 @@ g_VR.action_manifest = [[
 			"name": "/actions/driving/in/boolean_turret",
 			"type": "boolean"
 		},
+      {
+			"name": "/actions/driving/in/boolean_alt_turret",
+			"type": "boolean"
+		},
+       {
+			"name": "/actions/driving/in/boolean_switch_weapon",
+			"type": "boolean"
+		},
 		{
 			"name": "/actions/driving/in/boolean_spawnmenu",
 			"type": "boolean"
@@ -225,24 +233,21 @@ g_VR.action_manifest = [[
 			"name": "/actions/driving/in/boolean_right_pickup",
 			"type": "boolean"
 		},
+
       {
-			"name": "/actions/driving/in/boolean_up",
+			"name": "/actions/driving/in/boolean_shift_up",
 			"type": "boolean"
 		},
       {
-			"name": "/actions/driving/in/boolean_down",
+			"name": "/actions/driving/in/boolean_shift_down",
 			"type": "boolean"
 		},
       {
-			"name": "/actions/driving/in/boolean_left",
+			"name": "/actions/driving/in/boolean_shift_neutral",
 			"type": "boolean"
 		},
       {
-			"name": "/actions/driving/in/boolean_right",
-			"type": "boolean"
-		},
-      {
-			"name": "/actions/driving/in/boolean_center",
+			"name": "/actions/driving/in/boolean_siren",
 			"type": "boolean"
 		},
       {
@@ -254,18 +259,21 @@ g_VR.action_manifest = [[
 			"type": "boolean"
 		},
       {
-			"name": "/actions/driving/in/boolean_switch1",
+			"name": "/actions/driving/in/boolean_signal_left",
 			"type": "boolean"
 		},
       {
-			"name": "/actions/driving/in/boolean_switch2",
+			"name": "/actions/driving/in/boolean_signal_right",
 			"type": "boolean"
 		},
       {
-			"name": "/actions/driving/in/boolean_switch3",
+			"name": "/actions/driving/in/boolean_toggle_engine",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/detach_trailer",
 			"type": "boolean"
 		}
-      
 	],
 
 	"action_sets": [
@@ -327,24 +335,25 @@ g_VR.action_manifest = [[
 			"/actions/driving/in/vector1_forward" : "Forward",
 			"/actions/driving/in/vector1_reverse" : "Reverse",
 			"/actions/driving/in/vector2_steer" : "Steer",
-         "/actions/driving/in/boolean_up" : "Dpad Up",
-			"/actions/driving/in/boolean_down" : "Dpad Down",
-         "/actions/driving/in/boolean_center" : "Dpad Center",
-			"/actions/driving/in/boolean_left" : "Dpad Left",
-			"/actions/driving/in/boolean_right" : "Dpad Right",
-         "/actions/driving/in/boolean_horn" : "Horn",
-         "/actions/driving/in/boolean_lights" : "Lights",
 			"/actions/driving/in/boolean_turbo" : "Turbo",
 			"/actions/driving/in/boolean_handbrake" : "Handbrake",
+         "/actions/driving/in/boolean_toggle_engine" : "Toggle Engine",
+         "/actions/driving/in/boolean_shift_up" : "Shift Up",
+         "/actions/driving/in/boolean_shift_down" : "Shift Down",
+         "/actions/driving/in/boolean_shift_neutral" : "Shift Neutral",
 			"/actions/driving/in/boolean_turret" : "Turret",
+         "/actions/driving/in/boolean_alt_turret" : "Alt Turret",
+         "/actions/driving/in/boolean_switch_weapon" : "Switch Weapon",
+         "/actions/driving/in/boolean_lights" : "Lights",
+         "/actions/driving/in/boolean_siren" : "Siren",
+         "/actions/driving/in/boolean_signal_left" : "Signal Left / Landing Gear",
+         "/actions/driving/in/boolean_signal_right" : "Signal Right / Countermeasures",
+         "/actions/driving/in/boolean_horn" : "Horn",
+         "/actions/driving/in/detach_trailer" : "Detach Trailer",
 			"/actions/driving/in/boolean_exit" : "Exit Vehicle",
 			"/actions/driving/in/boolean_spawnmenu" : "Quickmenu",
-         "/actions/driving/in/boolean_switch1" : "Switch 1",
-         "/actions/driving/in/boolean_switch2" : "Switch 2",
-         "/actions/driving/in/boolean_switch3" : "Switch 3",
 			"/actions/driving/in/boolean_left_pickup" : "Left Pickup",
 			"/actions/driving/in/boolean_right_pickup" : "Right Pickup"
-
 		}
 	]
 }
@@ -648,23 +657,37 @@ g_VR.bindings_touch = [[
             {
                "inputs" : [
                   [ "/user/hand/left/input/grip", "click" ],
+                  [ "/user/hand/right/input/joystick", "center" ]
+               ],
+               "output" : "/actions/driving/in/boolean_toggle_engine"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/right/input/grip", "click" ],
+                  [ "/user/hand/right/input/joystick", "center" ]
+               ],
+               "output" : "/actions/driving/in/boolean_alt_turret"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/thumbrest", "touch" ],
+                  [ "/user/hand/right/input/thumbrest", "touch" ]
+               ],
+               "output" : "/actions/driving/in/boolean_switch_weapon"
+            },
+            {
+               "inputs" : [
+                  [ "/user/hand/left/input/grip", "click" ],
                   [ "/user/hand/right/input/joystick", "west" ]
                ],
-               "output" : "/actions/driving/in/boolean_switch1"
+               "output" : "/actions/driving/in/boolean_signal_left"
             },
             {
                "inputs" : [
                   [ "/user/hand/left/input/grip", "click" ],
                   [ "/user/hand/right/input/joystick", "east" ]
                ],
-               "output" : "/actions/driving/in/boolean_switch2"
-            },
-            {
-               "inputs" : [
-                  [ "/user/hand/left/input/grip", "click" ],
-                  [ "/user/hand/right/input/joystick", "north" ]
-               ],
-               "output" : "/actions/driving/in/boolean_switch3"
+               "output" : "/actions/driving/in/boolean_signal_right"
             }
          ],
          "poses" : [],
@@ -692,6 +715,9 @@ g_VR.bindings_touch = [[
             },
             {
                "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_horn"
+                  },
                   "position" : {
                      "output" : "/actions/driving/in/vector2_steer"
                   }
@@ -742,20 +768,40 @@ g_VR.bindings_touch = [[
             },
             {
                "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_handbrake"
+                  }
+               },
+               "mode" : "trigger",
+               "parameters" : {},
+               "path" : "/user/hand/left/input/grip"
+            },
+            {
+               "inputs" : {
+                  "click" : {
+                     "output" : "/actions/driving/in/boolean_turret"
+                  }
+               },
+               "mode" : "trigger",
+               "parameters" : {},
+               "path" : "/user/hand/right/input/grip"
+            },
+            {
+               "inputs" : {
                   "center" : {
-                     "output" : "/actions/driving/in/boolean_center"
+                     "output" : "/actions/driving/in/boolean_shift_neutral"
                   },
                   "east" : {
-                     "output" : "/actions/driving/in/boolean_right"
+                     "output" : "/actions/driving/in/boolean_lights"
                   },
                   "north" : {
-                     "output" : "/actions/driving/in/boolean_up"
+                     "output" : "/actions/driving/in/boolean_shift_up"
                   },
                   "south" : {
-                     "output" : "/actions/driving/in/boolean_down"
+                     "output" : "/actions/driving/in/boolean_shift_down"
                   },
                   "west" : {
-                     "output" : "/actions/driving/in/boolean_left"
+                     "output" : "/actions/driving/in/boolean_siren"
                   }
                },
                "mode" : "dpad",
@@ -765,60 +811,16 @@ g_VR.bindings_touch = [[
                "path" : "/user/hand/right/input/joystick"
             },
             {
-               "inputs" : {
-                  "click" : {
-                     "output" : "/actions/driving/in/boolean_turret"
-                  }
-               },
-               "mode" : "button",
+               "inputs" : {},
+               "mode" : "toggle_button",
                "parameters" : {},
-               "path" : "/user/hand/right/input/joystick"
-            },
-            {
-               "inputs" : {
-                  "click" : {
-                     "output" : "/actions/driving/in/boolean_right_pickup"
-                  }
-               },
-               "mode" : "trigger",
-               "parameters" : {},
-               "path" : "/user/hand/right/input/grip"
-            },
-            {
-               "inputs" : {
-                  "click" : {
-                     "output" : "/actions/driving/in/boolean_left_pickup"
-                  }
-               },
-               "mode" : "trigger",
-               "parameters" : {},
-               "path" : "/user/hand/left/input/grip"
+               "path" : "/user/hand/left/input/thumbrest"
             },
             {
                "inputs" : {},
-               "mode" : "none",
-               "parameters" : {},
-               "path" : "/user/hand/right/input/joystick"
-            },
-            {
-               "inputs" : {
-                  "touch" : {
-                     "output" : "/actions/driving/in/boolean_lights"
-                  }
-               },
                "mode" : "button",
                "parameters" : {},
                "path" : "/user/hand/right/input/thumbrest"
-            },
-            {
-               "inputs" : {
-                  "touch" : {
-                     "output" : "/actions/driving/in/boolean_horn"
-                  }
-               },
-               "mode" : "button",
-               "parameters" : {},
-               "path" : "/user/hand/left/input/thumbrest"
             }
          ]
       },
@@ -1951,7 +1953,6 @@ end
 --    cv_bindingVersion:SetInt(22)
 --    WriteBindingFiles()
 -- end
-
 WriteActionManifest()
 WriteBindingFiles()
 hook.Add("VRMod_Reset", "vrmod_reset_bindings", function() WriteBindingFiles() end)
