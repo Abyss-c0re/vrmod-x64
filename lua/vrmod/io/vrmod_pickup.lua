@@ -279,7 +279,7 @@ if SERVER then
 						ent.dropped_manually = true
 						ent.noDamage = true --preventing damage by the mass increase
 						vrmod.utils.SetBoneMass(ent, 300, 0, handVel, 5)
-						timer.Simple(0.1, function() if IsValid(ent) then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end end)
+						timer.Simple(0.1, function() if IsValid(ent) then vrmod.utils.PatchOwnerCollision(ent) end end)
 						SendPickupNetMsg(t.ply, npc)
 						if not vrmod.utils.IsRagdollDead(ent) then timer.Simple(3.0, function() ent:Remove() end) end
 					else
@@ -288,7 +288,7 @@ if SERVER then
 						SendPickupNetMsg(t.ply, ent)
 					end
 				elseif IsValid(ent) then
-					ent:SetCollisionGroup(COLLISION_GROUP_NONE)
+					vrmod.utils.PatchOwnerCollision(ent)
 					if IsValid(t.phys) then
 						local wpos, _ = LocalToWorld(ent:GetPos(), ent:GetAngles(), handPos, handAng)
 						t.phys:SetPos(wpos)
@@ -359,7 +359,7 @@ if SERVER then
 				maxangulardamp = 300,
 				maxspeed = 3000,
 				maxspeeddamp = 300,
-				dampfactor = 0.3,
+				dampfactor = 0.7,
 				teleportdistance = 0,
 				deltatime = FrameTime()
 			}
@@ -449,7 +449,7 @@ if SERVER then
 		g_VR[sid].heldItems = g_VR[sid].heldItems or {}
 		g_VR[sid].heldItems[bLeftHand and 1 or 2] = pickupList[index]
 		ent.vrmod_pickup_info = pickupList[index]
-		ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
+		vrmod.utils.PatchOwnerCollision(ent, ply)
 		net.Start("vrmod_pickup")
 		net.WriteEntity(ply)
 		net.WriteEntity(ent)

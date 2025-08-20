@@ -1160,6 +1160,39 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     return lefthandPos, lefthandAng, righthandPos, righthandAng
 end
 
+-- Patches an entity to skip collision with its owner, or unpatch if already patched
+function vrmod.utils.PatchOwnerCollision(ent, ply)
+    if not IsValid(ent) then return end
+    -- Unpatch if already patched
+    if ent._originalShouldCollide then
+        ent.ShouldCollide = ent._originalShouldCollide
+        ent._originalShouldCollide = nil
+        ent._pickupOwner = nil
+        ent:SetCustomCollisionCheck(false)
+        hook.Remove("ShouldCollide", ent)
+        return
+    end
+
+    -- Store original ShouldCollide
+    ent._originalShouldCollide = ent.ShouldCollide
+    ent._pickupOwner = ply
+    -- Enable custom collision checking
+    ent:SetCustomCollisionCheck(true)
+    -- Override ShouldCollide for normal engine collisions
+    function ent:ShouldCollide(other)
+        if other == self._pickupOwner then return false end
+        if self._originalShouldCollide then return self._originalShouldCollide(self, other) end
+        return true
+    end
+
+    -- Hook global ShouldCollide for physics engine
+    hook.Add("ShouldCollide", ent, function(a, b)
+        if not IsValid(ent._pickupOwner) then return end
+        -- Skip owner only
+        if a == ent and b == ent._pickupOwner or b == ent and a == ent._pickupOwner then return false end
+    end)
+end
+
 -- NPC2RAG
 function vrmod.utils.SetBoneMass(ent, mass, damp, vel, angvel, resetmotion, delay)
     if not IsValid(ent) or not IsValid(ent:GetPhysicsObject()) then return end
