@@ -1,17 +1,7 @@
-local cl_bothkey = CreateClientConVar("vrmod_vehicle_bothkeymode", 0, true, FCVAR_ARCHIVE)
 local cl_pickupdisable = CreateClientConVar("vr_pickup_disable_client", 0, true, FCVAR_ARCHIVE)
 local cl_hudonlykey = CreateClientConVar("vrmod_hud_visible_quickmenukey", 0, true, FCVAR_ARCHIVE)
 if SERVER then return end
-
-
-hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
-	if cl_bothkey:GetBool() then
-		LocalPlayer():ConCommand("vrmod_keymode_both")
-	else
-		VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
-	end
-end)
-
+hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function() VRMOD_SetActiveActionSets("/actions/base", "/actions/driving") end)
 hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function() VRMOD_SetActiveActionSets("/actions/base", "/actions/main") end)
 hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	if hook.Call("VRMod_AllowDefaultAction", nil, action) == false then return end
