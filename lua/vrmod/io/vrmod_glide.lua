@@ -231,6 +231,9 @@ else -- CLIENT
         else
             print("[Glide VR] Mouse fly mode already 2")
         end
+
+        if not Glide or not Glide.Camera then return end
+        vrmod.utils.PatchGlideCamera()
     end)
 
     -- When VR exits
