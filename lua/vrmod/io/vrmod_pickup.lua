@@ -9,17 +9,12 @@ scripted_ents.Register({
 local blacklistedClasses = {
 	["npc_turret_floor"] = true,
 	["info_particle_system"] = true,
-	["C_BaseFlex"] = true,
-	["C_BaseViewModel"] = true,
-	["func_button"] = true,
-	["func_rot_button"] = true,
 	["item_healthcharger"] = true,
 	["item_suitcharger"] = true,
 	["item_ammo_crate"] = true,
-	["func_door_rotating"] = true,
 }
 
-local blacklistedPatterns = {"beam", "button", "laser", "sprite", "env_", "fire", "trail", "spotlight", "projectedtexture", "shadow", "keypad"}
+local blacklistedPatterns = {"beam", "button", "dynamic", "func_", "c_base", "laser", "info_", "sprite", "env_", "fire", "trail", "light", "spotlight", "texture", "shadow", "keypad"}
 local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber)
