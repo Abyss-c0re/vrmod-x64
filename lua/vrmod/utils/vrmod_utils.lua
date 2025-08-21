@@ -1405,14 +1405,67 @@ function vrmod.utils.IsRagdollDead(ent)
     return vrmod.utils.IsRagdollGibbed(ent)
 end
 
---GLIDE
-function vrmod.utils.GetGlideHandPose(ply, side)
+--Vehicles/Glide
+function vrmod.utils.GetSteeringInfo(ply)
+    if not IsValid(ply) or not ply:InVehicle() then return nil, nil, nil end
+    local vehicle = ply:GetVehicle()
+    if not IsValid(vehicle) then return nil, nil, nil end
+    local glideVeh = ply:GetNWEntity("GlideVehicle")
+    local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
+    local sitSeq = glideVeh.GetPlayerSitSequence and glideVeh:GetPlayerSitSequence(seatIndex)
+    local bonePriority = {
+        -- Motorcycles / JetSkis / Quads
+        {
+            names = {"handlebars", "handles", "Airboat.Steer"},
+            type = "motorcycle"
+        },
+        -- Cars / Boats
+        {
+            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel"},
+            type = "car"
+        }
+    }
+
+    local candidates = {}
+    if IsValid(glideVeh) then table.insert(candidates, glideVeh) end
+    table.insert(candidates, vehicle)
+    for _, candidate in ipairs(candidates) do
+        for _, entry in ipairs(bonePriority) do
+            for _, name in ipairs(entry.names) do
+                local id = candidate:LookupBone(name)
+                if id then
+                    local pos, ang = candidate:GetBonePosition(id)
+                    if pos then return pos, ang, entry.type end
+                end
+            end
+        end
+    end
+
+    if IsValid(glideVeh) then
+        local vType = glideVeh.VehicleType
+        if vType == Glide.VEHICLE_TYPE.MOTORCYCLE or sitSeq == "drive_airboat" then
+            return glideVeh:GetPos() + glideVeh:GetUp() * 40, glideVeh:GetAngles(), "motorcycle"
+        elseif vType == Glide.VEHICLE_TYPE.BOAT then
+            return glideVeh:GetPos() + glideVeh:GetUp() * 40, glideVeh:GetAngles(), "boat"
+        elseif vType == Glide.VEHICLE_TYPE.CAR then
+            return glideVeh:GetPos() + glideVeh:GetUp() * 40, glideVeh:GetAngles(), "car"
+        elseif vType == Glide.VEHICLE_TYPE.PLANE then
+            return glideVeh:GetPos() + glideVeh:GetUp() * 60, glideVeh:GetAngles(), "plane"
+        elseif vType == Glide.VEHICLE_TYPE.HELICOPTER then
+            return glideVeh:GetPos() + glideVeh:GetUp() * 70, glideVeh:GetAngles(), "helicopter"
+        elseif vType == Glide.VEHICLE_TYPE.TANK then
+            return glideVeh:GetPos() + glideVeh:GetUp() * 50, glideVeh:GetAngles(), "tank"
+        end
+    end
+    return vehicle:GetPos() + vehicle:GetUp() * 40, vehicle:GetAngles(), "unknown"
+end
+
+function vrmod.utils.GetGlideBoneAng(ply, boneName)
     if not IsValid(ply) then return Angle(0, 0, 0) end
     local vehicle = ply:GetNWEntity("GlideVehicle")
     if not IsValid(vehicle) or type(vehicle.GetSeatBoneManipulations) ~= "function" then return Angle(0, 0, 0) end
-    local seatPose = vehicle:GetSeatBoneManipulations(1)
+    local seatPose = vehicle:GetSeatBoneManipulations(ply:GlideGetSeatIndex())
     if not seatPose or type(seatPose) ~= "table" then return Angle(0, 0, 0) end
-    local boneName = side == "left" and "ValveBiped.Bip01_L_UpperArm" or "ValveBiped.Bip01_R_UpperArm"
     local ang = seatPose[boneName]
     if not ang then return Angle(0, 0, 0) end
     return ang
