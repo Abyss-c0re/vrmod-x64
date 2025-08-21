@@ -86,9 +86,11 @@ if SERVER then
 else -- CLIENT
     local originalMouseFlyMode = nil
     local originalRagdollEnable = nil
-    local pitchSensitivity = 1.0 -- Adjust as needed (e.g., 0.5 for less sensitive, 2.0 for more sensitive)
-    local yawSensitivity = 0.5
-    local rollSensitivity = 0.5
+    local pitchSensitivity = 0.75
+    local yawSensitivity = 0.45
+    local rollSensitivity = 0.3
+    local smoothedPitch, smoothedYaw, smoothedRoll = 0, 0, 0
+    local smoothFactor = 0.1
     local inputsToSend = {
         boolean_handbrake = true,
         boolean_lights = true,
@@ -189,15 +191,17 @@ else -- CLIENT
         if not IsValid(ply) then return end
         local vehicle = ply:GetNWEntity("GlideVehicle")
         if IsValid(vehicle) then
-            --     local x, y = vrmod.utils.GetHandCursorOnPlane(ply, "right")
-            --     input.SetCursorPos(x, y)
-            -- end
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
                 local ang = g_VR.tracking.pose_righthand.ang
                 if ang then
-                    pitch = ang.pitch / 90 * pitchSensitivity
-                    yaw = -ang.yaw / 90 * yawSensitivity
-                    roll = ang.roll / 90 * rollSensitivity
+                    local targetPitch = ang.pitch / 90 * pitchSensitivity
+                    local targetYaw = -ang.yaw / 90 * yawSensitivity
+                    local targetRoll = ang.roll / 90 * rollSensitivity
+                    -- Smooth the inputs
+                    smoothedPitch = Lerp(smoothFactor, smoothedPitch, targetPitch)
+                    smoothedYaw = Lerp(smoothFactor, smoothedYaw, targetYaw)
+                    smoothedRoll = Lerp(smoothFactor, smoothedRoll, targetRoll)
+                    pitch, yaw, roll = smoothedPitch, smoothedYaw, smoothedRoll
                 else
                     pitch, yaw, roll = 0, 0, 0
                 end
