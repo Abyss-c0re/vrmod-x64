@@ -1421,7 +1421,7 @@ function vrmod.utils.GetSteeringInfo(ply)
         },
         -- Cars / Boats
         {
-            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel"},
+            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel", "car.steer_wheel"},
             type = "car"
         }
     }
