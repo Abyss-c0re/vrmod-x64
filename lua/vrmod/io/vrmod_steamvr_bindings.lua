@@ -233,7 +233,14 @@ g_VR.action_manifest = [[
 			"name": "/actions/driving/in/boolean_right_pickup",
 			"type": "boolean"
 		},
-
+      {
+			"name": "/actions/driving/in/boolean_car_mouse_left",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_car_mouse_right",
+			"type": "boolean"
+		},
       {
 			"name": "/actions/driving/in/boolean_shift_up",
 			"type": "boolean"
@@ -353,7 +360,9 @@ g_VR.action_manifest = [[
 			"/actions/driving/in/boolean_exit" : "Exit Vehicle",
 			"/actions/driving/in/boolean_spawnmenu" : "Quickmenu",
 			"/actions/driving/in/boolean_left_pickup" : "Left Pickup",
-			"/actions/driving/in/boolean_right_pickup" : "Right Pickup"
+			"/actions/driving/in/boolean_right_pickup" : "Right Pickup",
+         "/actions/driving/in/boolean_car_mouse_right" : "Right mouse click",
+         "/actions/driving/in/boolean_car_mouse_left" : "Left mouse click"
 		}
 	]
 }
