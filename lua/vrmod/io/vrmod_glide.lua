@@ -1,7 +1,6 @@
 if not Glide then return end
 g_VR = g_VR or {}
 local _, convarValues = vrmod.GetConvars()
--- Updated vehicle types to include boat, plane, and helicopter
 local validVehicleTypes = {
     [Glide.VEHICLE_TYPE.CAR] = true,
     [Glide.VEHICLE_TYPE.MOTORCYCLE] = true,
@@ -89,8 +88,9 @@ else -- CLIENT
     local pitchSensitivity = 0.75
     local yawSensitivity = 0.45
     local rollSensitivity = 0.3
-    local smoothedPitch, smoothedYaw, smoothedRoll = 0, 0, 0
     local smoothFactor = 0.1
+    local smoothedPitch, smoothedYaw, smoothedRoll = 0, 0, 0
+    local pitch, yaw, roll = 0, 0, 0
     local inputsToSend = {
         boolean_handbrake = true,
         boolean_lights = true,
@@ -118,7 +118,6 @@ else -- CLIENT
         roll = 0
     }
 
-    local pitch, yaw, roll = 0, 0, 0
     local function ApplyMouseFlyMode(mode)
         if not Glide or not Glide.Config then return end
         local cfg = Glide.Config
