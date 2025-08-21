@@ -426,13 +426,7 @@ if SERVER then
 		--print("sv received net_tick, len: "..len)
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
-		local prev = g_VR[ply:SteamID()].latestFrame
 		local frame = netReadFrame()
-		if vrmod.utils.FramesAreEqual(frame, prev) then
-			vrmod.utils.DebugPrint("[DEBUG] %s sent identical frame (no movement).", ply:Nick())
-			return
-		end
-
 		g_VR[ply:SteamID()].latestFrame = frame
 		if not viewHackPos:IsZero() and util.IsInWorld(viewHackPos) then
 			ply.viewOffset = viewHackPos - ply:EyePos() + ply.viewOffset
@@ -444,7 +438,7 @@ if SERVER then
 		end
 
 		--relay frame to everyone except sender
-		net.Start("vrutil_net_tick", true)
+		net.Start("vrutil_net_tick")
 		net.WriteEntity(ply)
 		netWriteFrame(frame)
 		--net.Broadcast()

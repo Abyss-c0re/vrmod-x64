@@ -1194,7 +1194,6 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     return lefthandPos, lefthandAng, righthandPos, righthandAng
 end
 
--- Patches an entity to skip collision with its owner, or unpatch if already patched
 function vrmod.utils.PatchOwnerCollision(ent, ply)
     if not IsValid(ent) then return end
     -- Unpatch if already patched
