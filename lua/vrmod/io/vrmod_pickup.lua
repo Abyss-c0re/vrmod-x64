@@ -228,14 +228,26 @@ if CLIENT then
 				trace = vrmod.utils.TraceHand(ply, "right")
 			end
 
-			local offset = handAng:Forward() * vrmod.DEFAULT_REACH * vrmod.DEFAULT_OFFSET
+			-- Default offset along the hand's forward direction
+			local offset = handAng:Forward() * vrmod.DEFAULT_OFFSET
+			-- Get the entity's bounding box to account for its size
+			local mins, maxs = ent:GetCollisionBounds()
+			local entitySize = (maxs - mins):Length() * 0.5 -- Approximate radius of the entity
+			local minDistance = entitySize - entitySize * 0.5 -- Ensure entity is pushed out enough
 			local finalPos
 			if trace and IsValid(trace.Entity) and trace.Entity == ent then
-				finalPos = handPos - trace.HitPos
+				-- If the trace hits the entity itself, adjust the position to avoid clipping
+				local hitPos = trace.HitPos
+				local toHand = (handPos - hitPos):GetNormalized()
+				finalPos = hitPos + toHand * minDistance -- Push the entity away from the hand
 			else
+				-- No collision, use the default offset
 				finalPos = handPos + offset
 			end
 
+			-- Ensure the entity stays at least minDistance away from the hand
+			local toEntity = finalPos - handPos
+			if toEntity:Length() < minDistance then finalPos = handPos + toEntity:GetNormalized() * minDistance end
 			ent:SetPos(finalPos)
 			ent:SetupBones()
 			ent:DrawModel()
@@ -259,6 +271,7 @@ if SERVER then
 			net.WriteBool(true)
 			net.Broadcast()
 		end
+
 		local ply = player.GetBySteamID(steamid)
 		local handVel = bLeft and vrmod.GetLeftHandVelocity(ply) or vrmod.GetRightHandVelocity(ply) or Vector(0, 0, 0)
 		for i = 1, pickupCount do
@@ -282,10 +295,7 @@ if SERVER then
 					end
 				elseif IsValid(ent) then
 					vrmod.utils.PatchOwnerCollision(ent)
-					if IsValid(t.phys) then
-						t.phys:Wake()
-					end
-
+					if IsValid(t.phys) then t.phys:Wake() end
 					SendPickupNetMsg(t.ply, ent)
 				else
 					SendPickupNetMsg(t.ply, nil)
