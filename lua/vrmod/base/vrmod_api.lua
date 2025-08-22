@@ -530,14 +530,15 @@ elseif SERVER then
 
 	local function UpdateWorldPoses(ply, playerTable)
 		if not IsValid(ply) or not playerTable then return end
-		if not playerTable.latestFrameWorld or playerTable.latestFrameWorld.tick ~= engine.TickCount() then
+		if not playerTable.latestFrameWorld or playerTable.latestFrameWorld.ts ~= playerTable.latestFrame.ts then
 			playerTable.latestFrameWorld = playerTable.latestFrameWorld or {}
 			local lf = playerTable.latestFrame
 			local lfw = playerTable.latestFrameWorld
-			lfw.tick = engine.TickCount()
-			local refPos, refAng = ply:GetPos(), ply:InVehicle() and ply:GetVehicle():GetAngles() or Angle()
-			-- Ensure latestFrame has valid data
 			if not lf then return end
+			-- Timestamp
+			lfw.ts = lf.ts
+			-- Base world reference
+			local refPos, refAng = ply:GetPos(), ply:InVehicle() and ply:GetVehicle():GetAngles() or Angle()
 			-- Base world conversions
 			local rawHMDPos, rawHMDAng = LocalToWorld(lf.hmdPos or Vector(), lf.hmdAng or Angle(), refPos, refAng)
 			local rawLeftPos, rawLeftAng = LocalToWorld(lf.lefthandPos or Vector(), lf.lefthandAng or Angle(), refPos, refAng)
@@ -546,48 +547,74 @@ elseif SERVER then
 			lfw.hmdPos, lfw.hmdAng = rawHMDPos, rawHMDAng
 			lfw.lefthandPos, lfw.lefthandAng = rawLeftPos, rawLeftAng
 			lfw.righthandPos, lfw.righthandAng = rawRightPos, rawRightAng
-			-- Update velocity cache
+			-- Velocity cache
 			local sid = ply:SteamID()
 			local cache = vrmod.HandVelocityCache[sid]
 			if not cache then
-				cache = {
-					leftLastPos = lfw.lefthandPos,
-					rightLastPos = lfw.righthandPos,
-					hmdLastPos = lfw.hmdPos,
-					leftLastAng = lfw.lefthandAng or Angle(),
-					rightLastAng = lfw.righthandAng or Angle(),
-					hmdLastAng = lfw.hmdAng or Angle(),
-					leftVel = Vector(),
-					rightVel = Vector(),
-					hmdVel = Vector(),
-					leftAngVel = Angle(),
-					rightAngVel = Angle(),
-					hmdAngVel = Angle(),
-					lastTick = lfw.tick
-				}
-
+				cache = {}
 				vrmod.HandVelocityCache[sid] = cache
 			end
 
-			if cache.lastTick ~= 0 then
-				local dt = (lfw.tick - cache.lastTick) * engine.TickInterval()
-				if dt > 0 then
-					cache.leftVel = (lfw.lefthandPos - cache.leftLastPos) / dt
-					cache.rightVel = (lfw.righthandPos - cache.rightLastPos) / dt
-					cache.hmdVel = (lfw.hmdPos - cache.hmdLastPos) / dt
-					cache.leftAngVel = lfw.lefthandAng and cache.leftLastAng and (lfw.lefthandAng - cache.leftLastAng) / dt or Angle()
-					cache.rightAngVel = lfw.righthandAng and cache.rightLastAng and (lfw.righthandAng - cache.rightLastAng) / dt or Angle()
-					cache.hmdAngVel = lfw.hmdAng and cache.hmdLastAng and (lfw.hmdAng - cache.hmdLastAng) / dt or Angle()
+			-- Ensure all required fields exist (patch old caches)
+			cache.leftLastPos = cache.leftLastPos or lfw.lefthandPos
+			cache.rightLastPos = cache.rightLastPos or lfw.righthandPos
+			cache.hmdLastPos = cache.hmdLastPos or lfw.hmdPos
+			cache.leftLastAng = cache.leftLastAng or lfw.lefthandAng
+			cache.rightLastAng = cache.rightLastAng or lfw.righthandAng
+			cache.hmdLastAng = cache.hmdLastAng or lfw.hmdAng
+			cache.leftLastVelPos = cache.leftLastVelPos or lfw.lefthandPos
+			cache.rightLastVelPos = cache.rightLastVelPos or lfw.righthandPos
+			cache.hmdLastVelPos = cache.hmdLastVelPos or lfw.hmdPos
+			cache.leftLastVelAng = cache.leftLastVelAng or lfw.lefthandAng
+			cache.rightLastVelAng = cache.rightLastVelAng or lfw.righthandAng
+			cache.hmdLastVelAng = cache.hmdLastVelAng or lfw.hmdAng
+			cache.leftVel = cache.leftVel or Vector()
+			cache.rightVel = cache.rightVel or Vector()
+			cache.hmdVel = cache.hmdVel or Vector()
+			cache.leftAngVel = cache.leftAngVel or Angle()
+			cache.rightAngVel = cache.rightAngVel or Angle()
+			cache.hmdAngVel = cache.hmdAngVel or Angle()
+			cache.lastTs = cache.lastTs or lfw.ts
+			cache.lastVelUpdateTs = cache.lastVelUpdateTs or lfw.ts
+			cache.avgDt = cache.avgDt or 0.011 -- assume ~90Hz start
+			-- Delta times
+			local dt = lfw.ts - cache.lastTs
+			local totalDt = lfw.ts - cache.lastVelUpdateTs
+			-- Exponential moving average of frame time
+			if dt > 0 then cache.avgDt = cache.avgDt * 0.9 + dt * 0.1 end
+			-- Adaptive minimum dt: 2× avg frame time (at least 10ms)
+			local minDt = math.max(0.01, cache.avgDt * 2)
+			if dt > 0 and totalDt >= minDt then
+				-- Angle difference helper
+				local function AngDiff(a, b)
+					return Angle(math.AngleDifference(a.p, b.p), math.AngleDifference(a.y, b.y), math.AngleDifference(a.r, b.r))
 				end
+
+				-- Compute velocities over accumulated interval
+				cache.leftVel = (lfw.lefthandPos - cache.leftLastVelPos) / totalDt
+				cache.rightVel = (lfw.righthandPos - cache.rightLastVelPos) / totalDt
+				cache.hmdVel = (lfw.hmdPos - cache.hmdLastVelPos) / totalDt
+				cache.leftAngVel = AngDiff(lfw.lefthandAng, cache.leftLastVelAng) / totalDt
+				cache.rightAngVel = AngDiff(lfw.righthandAng, cache.rightLastVelAng) / totalDt
+				cache.hmdAngVel = AngDiff(lfw.hmdAng, cache.hmdLastVelAng) / totalDt
+				-- Reset accumulation references
+				cache.leftLastVelPos = lfw.lefthandPos
+				cache.rightLastVelPos = lfw.righthandPos
+				cache.hmdLastVelPos = lfw.hmdPos
+				cache.leftLastVelAng = lfw.lefthandAng
+				cache.rightLastVelAng = lfw.righthandAng
+				cache.hmdLastVelAng = lfw.hmdAng
+				cache.lastVelUpdateTs = lfw.ts
 			end
 
+			-- Always update frame-to-frame references
 			cache.leftLastPos = lfw.lefthandPos
 			cache.rightLastPos = lfw.righthandPos
 			cache.hmdLastPos = lfw.hmdPos
-			cache.leftLastAng = lfw.lefthandAng or Angle()
-			cache.rightLastAng = lfw.righthandAng or Angle()
-			cache.hmdLastAng = lfw.hmdAng or Angle()
-			cache.lastTick = lfw.tick
+			cache.leftLastAng = lfw.lefthandAng
+			cache.rightLastAng = lfw.righthandAng
+			cache.hmdLastAng = lfw.hmdAng
+			cache.lastTs = lfw.ts
 		end
 	end
 
@@ -615,144 +642,146 @@ elseif SERVER then
 		return playerTable.latestFrameWorld.hmdPos, playerTable.latestFrameWorld.hmdAng
 	end
 
+	-- HMD
 	function vrmod.GetHMDVelocity(ply)
-		if not IsValid(ply) then return end
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not IsValid(ply) then return Vector() end
+		local sid = ply:SteamID()
+		local cache = vrmod.HandVelocityCache[sid]
 		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
+			UpdateWorldPoses(ply, g_VR[sid])
+			cache = vrmod.HandVelocityCache[sid]
 		end
 		return cache and cache.hmdVel or Vector()
 	end
 
 	function vrmod.GetHMDAngularVelocity(ply)
-		if not IsValid(ply) then return end
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not IsValid(ply) then return Angle() end
+		local sid = ply:SteamID()
+		local cache = vrmod.HandVelocityCache[sid]
 		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
+			UpdateWorldPoses(ply, g_VR[sid])
+			cache = vrmod.HandVelocityCache[sid]
 		end
 		return cache and cache.hmdAngVel or Angle()
 	end
 
+	-- Left hand
 	function vrmod.GetLeftHandPos(ply)
-		if not IsValid(ply) then return end
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.lefthandPos
+		if not IsValid(ply) then return Vector() end
+		local t = g_VR[ply:SteamID()]
+		if not (t and t.latestFrame) then return Vector() end
+		UpdateWorldPoses(ply, t)
+		return t.latestFrameWorld.lefthandPos
 	end
 
 	function vrmod.GetLeftHandAng(ply)
-		if not IsValid(ply) then return end
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.lefthandAng
+		if not IsValid(ply) then return Angle() end
+		local t = g_VR[ply:SteamID()]
+		if not (t and t.latestFrame) then return Angle() end
+		UpdateWorldPoses(ply, t)
+		return t.latestFrameWorld.lefthandAng
 	end
 
 	function vrmod.GetLeftHandPose(ply)
-		if not IsValid(ply) then return end
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector(), Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.lefthandPos, playerTable.latestFrameWorld.lefthandAng
+		if not IsValid(ply) then return Vector(), Angle() end
+		local t = g_VR[ply:SteamID()]
+		if not (t and t.latestFrame) then return Vector(), Angle() end
+		UpdateWorldPoses(ply, t)
+		return t.latestFrameWorld.lefthandPos, t.latestFrameWorld.lefthandAng
 	end
 
 	function vrmod.GetLeftHandVelocity(ply)
-		if not IsValid(ply) then return end
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not IsValid(ply) then return Vector() end
+		local sid = ply:SteamID()
+		local cache = vrmod.HandVelocityCache[sid]
 		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
+			UpdateWorldPoses(ply, g_VR[sid])
+			cache = vrmod.HandVelocityCache[sid]
 		end
 		return cache and cache.leftVel or Vector()
 	end
 
 	function vrmod.GetLeftHandAngularVelocity(ply)
-		if not IsValid(ply) then return end
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not IsValid(ply) then return Angle() end
+		local sid = ply:SteamID()
+		local cache = vrmod.HandVelocityCache[sid]
 		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
+			UpdateWorldPoses(ply, g_VR[sid])
+			cache = vrmod.HandVelocityCache[sid]
 		end
 		return cache and cache.leftAngVel or Angle()
 	end
 
 	function vrmod.GetLeftHandVelocityRelative(ply)
-		if not IsValid(ply) then return end
-		local handVel = vrmod.GetLeftHandVelocity(ply)
-		local hmdVel = vrmod.GetHMDVelocity(ply)
-		return handVel - hmdVel
+		if not IsValid(ply) then return Vector() end
+		return vrmod.GetLeftHandVelocity(ply) - vrmod.GetHMDVelocity(ply)
 	end
 
 	function vrmod.GetLeftHandAngularVelocityRelative(ply)
-		if not IsValid(ply) then return end
-		local handAngVel = vrmod.GetLeftHandAngularVelocity(ply)
-		local hmdAngVel = vrmod.GetHMDAngularVelocity(ply)
-		return handAngVel - hmdAngVel
+		if not IsValid(ply) then return Angle() end
+		return vrmod.GetLeftHandAngularVelocity(ply) - vrmod.GetHMDAngularVelocity(ply)
 	end
 
+	-- Right hand
 	function vrmod.GetRightHandPos(ply)
-		if not IsValid(ply) then return end
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.righthandPos
+		if not IsValid(ply) then return Vector() end
+		local t = g_VR[ply:SteamID()]
+		if not (t and t.latestFrame) then return Vector() end
+		UpdateWorldPoses(ply, t)
+		return t.latestFrameWorld.righthandPos
 	end
 
 	function vrmod.GetRightHandAng(ply)
-		if not IsValid(ply) then return end
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.righthandAng
+		if not IsValid(ply) then return Angle() end
+		local t = g_VR[ply:SteamID()]
+		if not (t and t.latestFrame) then return Angle() end
+		UpdateWorldPoses(ply, t)
+		return t.latestFrameWorld.righthandAng
 	end
 
 	function vrmod.GetRightHandPose(ply)
-		if not IsValid(ply) then return end
-		local playerTable = g_VR[ply:SteamID()]
-		if not (playerTable and playerTable.latestFrame) then return Vector(), Angle() end
-		UpdateWorldPoses(ply, playerTable)
-		return playerTable.latestFrameWorld.righthandPos, playerTable.latestFrameWorld.righthandAng
+		if not IsValid(ply) then return Vector(), Angle() end
+		local t = g_VR[ply:SteamID()]
+		if not (t and t.latestFrame) then return Vector(), Angle() end
+		UpdateWorldPoses(ply, t)
+		return t.latestFrameWorld.righthandPos, t.latestFrameWorld.righthandAng
 	end
 
 	function vrmod.GetRightHandVelocity(ply)
-		if not IsValid(ply) then return end
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not IsValid(ply) then return Vector() end
+		local sid = ply:SteamID()
+		local cache = vrmod.HandVelocityCache[sid]
 		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
+			UpdateWorldPoses(ply, g_VR[sid])
+			cache = vrmod.HandVelocityCache[sid]
 		end
 		return cache and cache.rightVel or Vector()
 	end
 
 	function vrmod.GetRightHandAngularVelocity(ply)
-		if not IsValid(ply) then return end
-		local cache = vrmod.HandVelocityCache[ply:SteamID()]
+		if not IsValid(ply) then return Angle() end
+		local sid = ply:SteamID()
+		local cache = vrmod.HandVelocityCache[sid]
 		if not cache then
-			UpdateWorldPoses(ply, g_VR[ply:SteamID()])
-			cache = vrmod.HandVelocityCache[ply:SteamID()]
+			UpdateWorldPoses(ply, g_VR[sid])
+			cache = vrmod.HandVelocityCache[sid]
 		end
 		return cache and cache.rightAngVel or Angle()
 	end
 
 	function vrmod.GetRightHandVelocityRelative(ply)
-		if not IsValid(ply) then return end
-		local handVel = vrmod.GetRightHandVelocity(ply)
-		local hmdVel = vrmod.GetHMDVelocity(ply)
-		return handVel - hmdVel
+		if not IsValid(ply) then return Vector() end
+		return vrmod.GetRightHandVelocity(ply) - vrmod.GetHMDVelocity(ply)
 	end
 
 	function vrmod.GetRightHandAngularVelocityRelative(ply)
-		if not IsValid(ply) then return end
-		local handAngVel = vrmod.GetRightHandAngularVelocity(ply)
-		local hmdAngVel = vrmod.GetHMDAngularVelocity(ply)
-		return handAngVel - hmdAngVel
+		if not IsValid(ply) then return Angle() end
+		return vrmod.GetRightHandAngularVelocity(ply) - vrmod.GetHMDAngularVelocity(ply)
 	end
 
+	-- Gesture
 	function vrmod.GetPullGestureStrength(ply, hand, targetPos)
-		if not IsValid(ply) then return end
+		if not IsValid(ply) then return 0 end
 		local handPos = hand == "left" and vrmod.GetLeftHandPos(ply) or vrmod.GetRightHandPos(ply)
 		local relVel = hand == "left" and vrmod.GetLeftHandVelocityRelative(ply) or vrmod.GetRightHandVelocityRelative(ply)
 		local pullDir = (targetPos - handPos):GetNormalized()
