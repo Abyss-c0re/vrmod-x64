@@ -1423,7 +1423,9 @@ end
 --Vehicles/Glide
 function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
     if not IsValid(vehicle) or not boneId then return nil, nil end
-    return vehicle:GetBonePosition(boneId)
+    local m = vehicle:GetBoneMatrix(boneId)
+    if not m then return nil, nil end
+    return m:GetTranslation(), m:GetAngles()
 end
 
 function vrmod.utils.GetSteeringInfo(ply)
