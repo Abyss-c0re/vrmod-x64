@@ -259,10 +259,8 @@ if SERVER then
 			net.WriteBool(true)
 			net.Broadcast()
 		end
-
+		local ply = player.GetBySteamID(steamid)
 		local handVel = bLeft and vrmod.GetLeftHandVelocity(ply) or vrmod.GetRightHandVelocity(ply) or Vector(0, 0, 0)
-		local handPos = bLeft and vrmod.GetLeftHandPos(ply) or vrmod.GetRightHandPos(ply) or Vector(0, 0, 0)
-		local handAng = bLeft and vrmod.GetLeftHandAng(ply) or vrmod.GetRightHandAng(ply) or Angle(0, 0, 0)
 		for i = 1, pickupCount do
 			local t = pickupList[i]
 			if t.steamid == steamid and t.left == bLeft then
@@ -285,9 +283,6 @@ if SERVER then
 				elseif IsValid(ent) then
 					vrmod.utils.PatchOwnerCollision(ent)
 					if IsValid(t.phys) then
-						local wpos, _ = LocalToWorld(ent:GetPos(), ent:GetAngles(), handPos, handAng)
-						t.phys:SetPos(wpos)
-						t.phys:SetVelocity(handVel)
 						t.phys:Wake()
 					end
 
