@@ -206,7 +206,14 @@ local function start()
 		if not g_VR.threePoints then return end
 		if ply:InVehicle() then
 			cmd:SetForwardMove((g_VR.input.vector1_forward - g_VR.input.vector1_reverse) * 400)
-			cmd:SetSideMove(g_VR.input.vector2_steer.x * 400)
+			local inputVector
+			if g_VR.wheelGripped then
+				inputVector = g_VR.analog_input.steer
+			else
+				inputVector = g_VR.input.vector2_steer.x
+			end
+
+			cmd:SetSideMove(inputVector * 400)
 			local _, ra = WorldToLocal(Vector(), g_VR.tracking.hmd.ang, Vector(), ply:GetVehicle():GetAngles())
 			cmd:SetViewAngles(ra)
 			cmd:SetButtons(bit.bor(cmd:GetButtons(), g_VR.input.boolean_turbo and IN_SPEED or 0, g_VR.input.boolean_handbrake and IN_JUMP or 0))

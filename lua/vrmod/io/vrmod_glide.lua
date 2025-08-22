@@ -54,10 +54,10 @@ if SERVER then
             vehicle:SetInputBool(1, "shift_down", pressed)
         elseif action == "boolean_shift_neutral" then
             vehicle:SetInputBool(1, "shift_neutral", pressed)
-        elseif action == "boolean_turret" then
+        elseif action == "boolean_turret" or vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK and action == "boolean_right_pickup" then
             vehicle:SetInputBool(1, "attack", pressed)
-        elseif action == "boolean_alt_turret" then
-            vehicle:SetInputBool(1, "attack", pressed)
+        elseif action == "boolean_alt_turret" or vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK and action == "boolean_left_pickup" then
+            vehicle:SetInputBool(1, "attack_alt", pressed)
         elseif action == "boolean_switch_weapon" then
             vehicle:SetInputBool(1, "switch_weapon", pressed)
         elseif action == "boolean_siren" then
@@ -85,12 +85,6 @@ if SERVER then
 else -- CLIENT
     local originalMouseFlyMode = nil
     local originalRagdollEnable = nil
-    local pitchSensitivity = 0.75
-    local yawSensitivity = 0.45
-    local rollSensitivity = 0.3
-    local smoothFactor = 0.1
-    local smoothedPitch, smoothedYaw, smoothedRoll = 0, 0, 0
-    local pitch, yaw, roll = 0, 0, 0
     local inputsToSend = {
         boolean_handbrake = true,
         boolean_lights = true,
@@ -105,7 +99,9 @@ else -- CLIENT
         boolean_signal_left = true,
         boolean_signal_right = true,
         boolean_toggle_engine = true,
-        boolen_detach_trailer = true
+        boolen_detach_trailer = true,
+        boolean_left_pickup = true,
+        boolean_right_pickup = true,
     }
 
     -- Unified state tracking for booleans and analogs
@@ -146,7 +142,7 @@ else -- CLIENT
     end)
 
     -- Analog input monitoring with hand tracking
-    timer.Create("glide_vr_analog", 1 / convarValues.vrmod_net_tickrate, 0, function()
+    timer.Create("glide_vr_analog", 0.15, 0, function()
         if not g_VR.active or not g_VR.input then return end
         local ply = LocalPlayer()
         local vehicle = ply:GetNWEntity("GlideVehicle")
@@ -154,7 +150,13 @@ else -- CLIENT
         -- Throttle + brake
         local throttle = g_VR.input.vector1_forward or 0
         local brake = g_VR.input.vector1_reverse or 0
-        local steer = g_VR.input.vector2_steer and g_VR.input.vector2_steer.x or 0
+        local steer
+        if g_VR.wheelGripped then
+            steer = g_VR.analog_input.steer
+        else
+            steer = g_VR.input.vector2_steer.x or 0
+        end
+
         if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
             local fwd = g_VR.input.vector1_forward or 0
             local rev = g_VR.input.vector1_reverse or 0
@@ -163,53 +165,27 @@ else -- CLIENT
         end
 
         -- Check if anything changed
-        local changed = throttle ~= lastInputState.throttle or brake ~= lastInputState.brake or steer ~= lastInputState.steer or pitch ~= lastInputState.pitch or yaw ~= lastInputState.yaw or roll ~= lastInputState.roll
-        if changed or throttle ~= 0 or brake ~= 0 or steer ~= 0 or pitch ~= 0 or yaw ~= 0 or roll ~= 0 then
+        local changed = throttle ~= lastInputState.throttle or brake ~= lastInputState.brake or steer ~= lastInputState.steer or g_VR.analog_input.pitch ~= lastInputState.pitch or g_VR.analog_input.yaw ~= lastInputState.yaw or g_VR.analog_input.roll ~= lastInputState.roll
+        if changed or throttle ~= 0 or brake ~= 0 or steer ~= 0 or g_VR.analog_input.pitch ~= 0 or g_VR.analog_input.yaw ~= 0 or g_VR.analog_input.roll ~= 0 then
             lastInputState.throttle = throttle
             lastInputState.brake = brake
             lastInputState.steer = steer
-            lastInputState.pitch = pitch
-            lastInputState.yaw = yaw
-            lastInputState.roll = roll
+            lastInputState.pitch = g_VR.analog_input.pitch
+            lastInputState.yaw = g_VR.analog_input.yaw
+            lastInputState.roll = g_VR.analog_input.roll
             net.Start("glide_vr_input")
             net.WriteString("analog")
             net.WriteFloat(throttle)
             net.WriteFloat(brake)
             net.WriteFloat(steer)
-            net.WriteFloat(pitch)
-            net.WriteFloat(yaw)
-            net.WriteFloat(roll)
+            net.WriteFloat(g_VR.analog_input.pitch)
+            net.WriteFloat(g_VR.analog_input.yaw)
+            net.WriteFloat(g_VR.analog_input.roll)
             net.SendToServer()
         end
     end)
 
     -- Track right hand orientation for aircraft controls
-    hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
-        if not g_VR.active or not g_VR.tracking then return end
-        local ply = LocalPlayer()
-        if not IsValid(ply) then return end
-        local vehicle = ply:GetNWEntity("GlideVehicle")
-        if IsValid(vehicle) then
-            if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
-                local ang = g_VR.tracking.pose_righthand.ang
-                if ang then
-                    local targetPitch = ang.pitch / 90 * pitchSensitivity
-                    local targetYaw = -ang.yaw / 90 * yawSensitivity
-                    local targetRoll = ang.roll / 90 * rollSensitivity
-                    -- Smooth the inputs
-                    smoothedPitch = Lerp(smoothFactor, smoothedPitch, targetPitch)
-                    smoothedYaw = Lerp(smoothFactor, smoothedYaw, targetYaw)
-                    smoothedRoll = Lerp(smoothFactor, smoothedRoll, targetRoll)
-                    pitch, yaw, roll = smoothedPitch, smoothedYaw, smoothedRoll
-                else
-                    pitch, yaw, roll = 0, 0, 0
-                end
-            else
-                pitch, yaw, roll = 0, 0, 0
-            end
-        end
-    end)
-
     hook.Add("VRMod_Start", "Glide_ForceMouseFlyMode", function()
         if not (Glide and Glide.Config) then
             print("[Glide VR] Glide not loaded, skipping mode change")

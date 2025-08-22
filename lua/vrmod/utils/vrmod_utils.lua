@@ -253,6 +253,21 @@ local function DetectMeleeFromModel(modelPath, phys, offsetAng)
     return false
 end
 
+local function GetApproximateBoneId(vehicle, targetNames)
+    if not IsValid(vehicle) then return nil end
+    local boneCount = vehicle:GetBoneCount()
+    if boneCount <= 0 then return nil end
+    for i = 0, boneCount - 1 do
+        local boneName = vehicle:GetBoneName(i)
+        if boneName then
+            for _, target in ipairs(targetNames) do
+                if string.find(string.lower(boneName), string.lower(target), 1, true) then return i end
+            end
+        end
+    end
+    return nil
+end
+
 --MATH
 function vrmod.utils.VecAlmostEqual(v1, v2, threshold)
     if not v1 or not v2 then return false end
@@ -1406,9 +1421,14 @@ function vrmod.utils.IsRagdollDead(ent)
 end
 
 --Vehicles/Glide
+function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
+    if not IsValid(vehicle) or not boneId then return nil, nil end
+    return vehicle:GetBonePosition(boneId)
+end
+
 function vrmod.utils.GetSteeringInfo(ply)
     if not IsValid(ply) or not ply:InVehicle() then return nil, nil, nil end
-    local vehicle = ply:GetVehicle()
+    local vehicle = ply:GetVehicle() or ply:GetNWEntity("GlideVehicle")
     if not IsValid(vehicle) then return nil, nil, nil end
     local glideVeh = ply:GetNWEntity("GlideVehicle")
     local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
@@ -1416,12 +1436,12 @@ function vrmod.utils.GetSteeringInfo(ply)
     local bonePriority = {
         -- Motorcycles / JetSkis / Quads
         {
-            names = {"handlebars", "handles", "Airboat.Steer"},
+            names = {"handlebars", "handles", "Airboat.Steer", "handle"},
             type = "motorcycle"
         },
         -- Cars / Boats
         {
-            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel", "car.steer_wheel"},
+            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel", "car.steer_wheel", "steer"},
             type = "car"
         }
     }
@@ -1432,32 +1452,31 @@ function vrmod.utils.GetSteeringInfo(ply)
     for _, candidate in ipairs(candidates) do
         for _, entry in ipairs(bonePriority) do
             for _, name in ipairs(entry.names) do
-                local id = candidate:LookupBone(name)
-                if id then
-                    local pos, ang = candidate:GetBonePosition(id)
-                    if pos then return pos, ang, entry.type end
-                end
+                local boneId = candidate:LookupBone(name)
+                if boneId then return candidate, boneId, entry.type end
             end
+
+            -- Try approximate match if no exact match found
+            local boneId = GetApproximateBoneId(candidate, entry.names)
+            if boneId then return candidate, boneId, entry.type end
         end
     end
 
     if IsValid(glideVeh) then
         local vType = glideVeh.VehicleType
         if vType == Glide.VEHICLE_TYPE.MOTORCYCLE or sitSeq == "drive_airboat" then
-            return glideVeh:GetPos() + glideVeh:GetUp() * 40, glideVeh:GetAngles(), "motorcycle"
+            return vehicle, nil, "motorcycle"
         elseif vType == Glide.VEHICLE_TYPE.BOAT then
-            return glideVeh:GetPos() + glideVeh:GetUp() * 40, glideVeh:GetAngles(), "boat"
+            return vehicle, nil, "boat"
         elseif vType == Glide.VEHICLE_TYPE.CAR then
-            return glideVeh:GetPos() + glideVeh:GetUp() * 40, glideVeh:GetAngles(), "car"
-        elseif vType == Glide.VEHICLE_TYPE.PLANE then
-            return glideVeh:GetPos() + glideVeh:GetUp() * 60, glideVeh:GetAngles(), "plane"
-        elseif vType == Glide.VEHICLE_TYPE.HELICOPTER then
-            return glideVeh:GetPos() + glideVeh:GetUp() * 70, glideVeh:GetAngles(), "helicopter"
+            return vehicle, nil, "car"
+        elseif vType == Glide.VEHICLE_TYPE.PLANE or vType == Glide.VEHICLE_TYPE.HELICOPTER then
+            return vehicle, nil, "aircraft"
         elseif vType == Glide.VEHICLE_TYPE.TANK then
-            return glideVeh:GetPos() + glideVeh:GetUp() * 50, glideVeh:GetAngles(), "tank"
+            return vehicle, nil, "tank"
         end
     end
-    return vehicle:GetPos() + vehicle:GetUp() * 40, vehicle:GetAngles(), "unknown"
+    return vehicle, nil, "unknown"
 end
 
 function vrmod.utils.GetGlideBoneAng(ply, boneName)
