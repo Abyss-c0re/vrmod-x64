@@ -209,9 +209,12 @@ if CLIENT then
 		end
 
 		-- Detect Glide vehicle and apply small lift/forward
-		local glideVeh = ply:GetNWEntity("GlideVehicle")
-		if IsValid(glideVeh) then finalPos = finalPos + Vector(0, 0, 6) + finalAng:Forward() * 3 end
-		g_VR.view.origin = finalPos
+		if g_VR.vehicle.glide then
+			g_VR.view.origin = finalPos + Vector(0, 0, 6) + finalAng:Forward() * 3
+		else
+			g_VR.view.origin = finalPos
+		end
+
 		g_VR.view.angles = finalAng
 	end
 
