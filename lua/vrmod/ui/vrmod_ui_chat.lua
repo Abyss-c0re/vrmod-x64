@@ -1,33 +1,99 @@
-if CLIENT then
-	local SIZE = {
-		CHAT_WIDTH = 555,
-		PLAYERLIST_WIDTH = 150,
-		CHAT_HEIGHT_DEFAULT = 280,
-		CHAT_HEIGHT_KEYBOARD = 255,
-		CLOSE_BUTTON_WIDTH = 40,
-		CLOSE_BUTTON_HEIGHT = 25,
-		BUTTON_BAR_Y = 285,
-		BUTTON_HEIGHT = 25,
-		BUTTON_SPACING = 5,
-		MENU_WIDTH = 750,
-		MENU_HEIGHT = 350,
-		KEYBOARD_WIDTH = 555,
-		KEYBOARD_HEIGHT = 250,
-		KEYBOARD_KEY_WIDTH = 45,
-		KEYBOARD_KEY_HEIGHT = 45,
-		KEYBOARD_SPACE_WIDTH = 545,
-		KEYBOARD_ENTER_WIDTH = 65,
-		KEYBOARD_SPECIAL_WIDTH = 48,
-		KEYBOARD_KEY_SPACING = 1.5,
-		CHAT_TEXT_AREA_WIDTH = 550,
-	}
+local SIZE = {
+	CHAT_WIDTH = 555,
+	PLAYERLIST_WIDTH = 150,
+	CHAT_HEIGHT_DEFAULT = 280,
+	CHAT_HEIGHT_KEYBOARD = 255,
+	CLOSE_BUTTON_WIDTH = 40,
+	CLOSE_BUTTON_HEIGHT = 25,
+	BUTTON_BAR_Y = 285,
+	BUTTON_HEIGHT = 25,
+	BUTTON_SPACING = 5,
+	MENU_WIDTH = 750,
+	MENU_HEIGHT = 350,
+	KEYBOARD_WIDTH = 555,
+	KEYBOARD_HEIGHT = 250,
+	KEYBOARD_KEY_WIDTH = 45,
+	KEYBOARD_KEY_HEIGHT = 45,
+	KEYBOARD_SPACE_WIDTH = 545,
+	KEYBOARD_ENTER_WIDTH = 65,
+	KEYBOARD_SPECIAL_WIDTH = 48,
+	KEYBOARD_KEY_SPACING = 1.5,
+	CHAT_TEXT_AREA_WIDTH = 550,
+}
 
+-- Shared logs
+local chatLog = {}
+local consoleLog = {}
+-- Shared functions
+function addChatMessage(msg)
+	table.insert(chatLog, msg)
+	if #chatLog > 30 then table.remove(chatLog, 1) end
+end
+
+function addConsoleMessage(msg)
+	local formattedMsg
+	if type(msg) == "table" then
+		formattedMsg = {}
+		for _, v in ipairs(msg) do
+			if IsColor(v) then
+				table.insert(formattedMsg, v)
+			else
+				table.insert(formattedMsg, tostring(v))
+			end
+		end
+	else
+		formattedMsg = tostring(msg)
+	end
+
+	table.insert(consoleLog, formattedMsg)
+	if #consoleLog > 30 then table.remove(consoleLog, 1) end
+end
+
+-- Server-side logic
+if SERVER then
+	util.AddNetworkString("VRMod_ConsoleMessage")
+	-- Override server-side print
+	local oldPrint = print
+	function print(...)
+		oldPrint(...)
+		local args = {...}
+		for i = 1, #args do
+			args[i] = tostring(args[i])
+		end
+
+		local msg = table.concat(args, " ")
+		--addConsoleMessage({Color(255, 255, 255, 255),   .. msg})
+		net.Start("VRMod_ConsoleMessage")
+		net.WriteTable({Color(3, 163, 255), msg})
+		net.Broadcast()
+	end
+
+	-- Override server-side MsgC
+	local oldMsgC = MsgC
+	function MsgC(...)
+		oldMsgC(...)
+		local args = {...}
+		local formattedMsg = {}
+		for _, v in ipairs(args) do
+			if IsColor(v) then
+				table.insert(formattedMsg, v)
+			else
+				table.insert(formattedMsg, tostring(v))
+			end
+		end
+
+		--addConsoleMessage(formattedMsg)
+		net.Start("VRMod_ConsoleMessage")
+		net.WriteTable(formattedMsg)
+		net.Broadcast()
+	end
+end
+
+-- Client-side logic
+if CLIENT then
 	local TOTAL_WIDTH = SIZE.CHAT_WIDTH + SIZE.PLAYERLIST_WIDTH
 	local CLOSE_BUTTON_X = TOTAL_WIDTH - SIZE.CLOSE_BUTTON_WIDTH
 	local CLOSE_BUTTON_Y = 0
-	-- Other variables
-	local chatLog = {}
-	local consoleLog = {}
 	local showConsole = false
 	local VRClipboard = CreateClientConVar("vrmod_Clipboard", "", false, false, "")
 	local scrollOffset = 0
@@ -59,33 +125,13 @@ if CLIENT then
 		antialias = true
 	})
 
-	-- Chat message handling
-	local function addChatMessage(msg)
-		table.insert(chatLog, msg)
-		if #chatLog > 30 then table.remove(chatLog, 1) end
-	end
+	-- Receive server-side console messages
+	net.Receive("VRMod_ConsoleMessage", function()
+		local msg = net.ReadTable()
+		addConsoleMessage(msg)
+	end)
 
-	local function addConsoleMessage(msg)
-		-- Ensure msg is a string or a table with valid color and string elements
-		local formattedMsg
-		if type(msg) == "table" then
-			formattedMsg = {}
-			for _, v in ipairs(msg) do
-				if IsColor(v) then
-					table.insert(formattedMsg, v)
-				else
-					table.insert(formattedMsg, tostring(v))
-				end
-			end
-		else
-			formattedMsg = tostring(msg)
-		end
-
-		table.insert(consoleLog, formattedMsg)
-		if #consoleLog > 30 then table.remove(consoleLog, 1) end
-	end
-
-	-- Override Error function
+	-- Override client-side Error
 	local oldError = Error
 	function Error(...)
 		oldError(...)
@@ -94,7 +140,7 @@ if CLIENT then
 		addConsoleMessage({Color(255, 0, 0, 255), msg})
 	end
 
-	-- Override ErrorNoHalt function
+	-- Override client-side ErrorNoHalt
 	local oldErrorNoHalt = ErrorNoHalt
 	function ErrorNoHalt(...)
 		oldErrorNoHalt(...)
@@ -103,19 +149,20 @@ if CLIENT then
 		addConsoleMessage({Color(255, 0, 0, 255), msg})
 	end
 
-	-- Override print and MsgC
+	-- Override client-side print
 	local oldPrint = print
 	function print(...)
-		oldPrint(...) -- keeps normal print behavior
+		oldPrint(...)
 		local args = {...}
 		for i = 1, #args do
 			args[i] = tostring(args[i])
 		end
 
 		local msg = table.concat(args, " ")
-		addConsoleMessage({Color(255, 255, 255, 255), msg})
+		addConsoleMessage({Color(245, 147, 20), msg})
 	end
 
+	-- Override client-side MsgC
 	local oldMsgC = MsgC
 	function MsgC(...)
 		local args = {...}
@@ -129,7 +176,7 @@ if CLIENT then
 			if type(v) == "string" and v:match("Unknown command:") then addConsoleMessage({Color(255, 0, 0, 255), "[Unknown Command Error] " .. v}) end
 		end
 
-		if msg ~= "" then addConsoleMessage({Color(255, 255, 255, 255), msg}) end
+		if msg ~= "" then addConsoleMessage({Color(119, 228, 255), msg}) end
 		oldMsgC(...)
 	end
 
@@ -148,7 +195,6 @@ if CLIENT then
 		end
 
 		xpcall(function() oldConCommand(self, cmd) end, errorHandler)
-		-- Explicitly return nil to match original behavior
 		return
 	end
 
