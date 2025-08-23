@@ -62,10 +62,11 @@ if SERVER then
 		end
 
 		local msg = table.concat(args, " ")
-		--addConsoleMessage({Color(255, 255, 255, 255),   .. msg})
-		net.Start("VRMod_ConsoleMessage")
-		net.WriteTable({Color(3, 163, 255), msg})
-		net.Broadcast()
+		if GetConVar("vrmod_debug"):GetBool() then
+			net.Start("VRMod_ConsoleMessage")
+			net.WriteTable({Color(3, 163, 255), msg})
+			net.Broadcast()
+		end
 	end
 
 	-- Override server-side MsgC
@@ -82,10 +83,11 @@ if SERVER then
 			end
 		end
 
-		--addConsoleMessage(formattedMsg)
-		net.Start("VRMod_ConsoleMessage")
-		net.WriteTable(formattedMsg)
-		net.Broadcast()
+		if GetConVar("vrmod_debug"):GetBool() then
+			net.Start("VRMod_ConsoleMessage")
+			net.WriteTable(formattedMsg)
+			net.Broadcast()
+		end
 	end
 end
 
