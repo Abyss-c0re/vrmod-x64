@@ -917,7 +917,7 @@ end
 
 function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
     local ply = LocalPlayer()
-    if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
+    if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or ply:GetMoveType() == MOVETYPE_NOCLIP or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
         vrmod._collisionNearby = false
         return
     end
