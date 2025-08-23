@@ -44,6 +44,7 @@ local cachedPushOutPos = {
 
 local trackedRagdolls = trackedRagdolls or {}
 local lastDamageTime = {}
+local cachedBonePos, cachedBoneAng, cachedFrame = nil, nil, 0
 -- HELPERS
 local function tostr(v)
     if istable(v) then
@@ -290,6 +291,11 @@ end
 
 function vrmod.utils.SmoothVector(current, target, smoothingFactor)
     return current + (target - current) * smoothingFactor
+end
+
+function vrmod.utils.LerpAngleWrap(factor, current, target)
+    local diff = math.AngleDifference(target, current) -- handles ±180 wrap
+    return current + diff * factor
 end
 
 function vrmod.utils.SmoothAngle(current, target, smoothingFactor)
@@ -1423,9 +1429,13 @@ end
 --Vehicles/Glide
 function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
     if not IsValid(vehicle) or not boneId then return nil, nil end
+    if vehicle.IsGlideVehicle then return vehicle:GetBonePosition(boneId) end
+    if cachedFrame == FrameNumber() then return cachedBonePos, cachedBoneAng end
     local m = vehicle:GetBoneMatrix(boneId)
     if not m then return nil, nil end
-    return m:GetTranslation(), m:GetAngles()
+    cachedBonePos, cachedBoneAng = m:GetTranslation(), m:GetAngles()
+    cachedFrame = FrameNumber()
+    return cachedBonePos, cachedBoneAng
 end
 
 function vrmod.utils.GetSteeringInfo(ply)
