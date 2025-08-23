@@ -7,6 +7,7 @@ g_VR = g_VR or {}
 g_VR.vehicle = g_VR.vehicle or {
 	current = nil,
 	type = nil,
+	glide = false,
 	wheel_bone = nil
 }
 
@@ -19,26 +20,47 @@ g_VR.analog_input = g_VR.analog_input or {
 }
 
 -- Sensitivity and smoothing settings
+local lastInputState = {
+	throttle = 0,
+	brake = 0,
+	steer = 0,
+	pitch = 0,
+	yaw = 0,
+	roll = 0
+}
+
 local SENSITIVITY = {
-	pitch = 0.75,
-	yaw = 0.35,
+	pitch = 0.9,
+	yaw = 0.7,
 	roll = 0.15,
 	steer = {
-		car = 0.25,
-		motorcycle = 0.35
+		car = 1.0,
+		motorcycle = 0.75,
+	},
+	rotationRange = {
+		car = 900,
+		motorcycle = 360,
 	}
 }
 
-local SMOOTH_FACTOR = 0.4
-local smoothedPitch, smoothedYaw, smoothedRoll = 0, 0, 0
+local ANALOG_SEND_RATE = 0.066 -- 15 Hz
+local ANALOG_EPSILON = 0.05
+local MAX_WHEEL_GRAB_DIST = 13
+local MAX_ANGLE = 90
+local nextSendTime = 0
 local neutralOffsets = {}
+-- Seconds
+local aircraftNeutralAng = nil
 local leftGrip, rightGrip = false, false
+--local leftHand, rightHand
 -- Switch action set when entering vehicle
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
-	local vehicle, boneId, vType = vrmod.utils.GetSteeringInfo(LocalPlayer())
+	local ply = LocalPlayer()
+	local vehicle, boneId, vType = vrmod.utils.GetSteeringInfo(ply)
 	g_VR.vehicle.current = vehicle
 	g_VR.vehicle.type = vType
 	g_VR.vehicle.wheel_bone = boneId
+	g_VR.vehicle.glide = IsValid(ply:GetNWEntity("GlideVehicle"))
 	print("Vehicle type: " .. tostring(vType))
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
 end)
@@ -48,6 +70,7 @@ hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function()
 	g_VR.vehicle.current = nil
 	g_VR.vehicle.type = nil
 	g_VR.vehicle.wheel_bone = nil
+	g_VR.vehicle.glide = false
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
 end)
 
@@ -161,48 +184,162 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 end)
 
 hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
-	if not g_VR.active or not g_VR.tracking then return end
-	local ply = LocalPlayer()
-	if not IsValid(ply) then return end
-	local vehicle = ply:GetVehicle() or ply:GetNWEntity("GlideVehicle")
-	if not IsValid(vehicle) then return end
-	if g_VR.vehicle.type == "aircraft" and rightGrip then
+	if not g_VR.active or not g_VR.tracking or not g_VR.vehicle.current then return end
+	if CurTime() < nextSendTime then return end
+	local planeGrip = g_VR.vehicle.type == "aircraft" and rightGrip
+	-- === Aircraft pitch/yaw/roll relative control ===
+	if planeGrip then
 		local ang = g_VR.tracking.pose_righthand.ang
 		if ang then
-			local targetPitch = ang.pitch / 90 * SENSITIVITY.pitch
-			local targetYaw = ang.yaw / 90 * SENSITIVITY.yaw
-			local targetRoll = ang.roll / 90 * SENSITIVITY.roll
-			-- Smooth the inputs
-			smoothedPitch = Lerp(SMOOTH_FACTOR, smoothedPitch, targetPitch)
-			smoothedYaw = Lerp(SMOOTH_FACTOR, smoothedYaw, targetYaw)
-			smoothedRoll = Lerp(SMOOTH_FACTOR, smoothedRoll, targetRoll)
-			g_VR.analog_input.pitch = smoothedPitch
-			g_VR.analog_input.yaw = smoothedYaw
-			g_VR.analog_input.roll = smoothedRoll
+			-- Initialize neutral orientation
+			if not aircraftNeutralAng then aircraftNeutralAng = Angle(ang.pitch, ang.yaw, ang.roll) end
+			-- Calculate delta from neutral
+			local delta = ang - aircraftNeutralAng
+			delta:Normalize()
+			if delta.yaw > 180 then
+				delta.yaw = delta.yaw - 360
+			elseif delta.yaw < -180 then
+				delta.yaw = delta.yaw + 360
+			end
+
+			local targetPitch = math.Clamp(delta.pitch / MAX_ANGLE * SENSITIVITY.pitch, -1, 1)
+			local targetYaw = math.Clamp(delta.yaw / SENSITIVITY.yaw, -1, 1)
+			local targetRoll = math.Clamp(delta.roll / MAX_ANGLE * SENSITIVITY.roll, -1, 1)
+			-- Smooth
+			g_VR.analog_input.pitch = Lerp(0.35, g_VR.analog_input.pitch or 0, targetPitch)
+			g_VR.analog_input.yaw = -Lerp(0.55, g_VR.analog_input.yaw or 0, targetYaw)
+			g_VR.analog_input.roll = Lerp(0.9, g_VR.analog_input.roll or 0, targetRoll)
 		else
 			g_VR.analog_input.pitch = 0
 			g_VR.analog_input.yaw = 0
 			g_VR.analog_input.roll = 0
 		end
 	else
+		-- Reset neutral if not in aircraft
+		aircraftNeutralAng = nil
 		g_VR.analog_input.pitch = 0
 		g_VR.analog_input.yaw = 0
 		g_VR.analog_input.roll = 0
 	end
+
+	-- === Steering / throttle / brake ===
+	local throttle = g_VR.input.vector1_forward or 0
+	local brake = g_VR.input.vector1_reverse or 0
+	local steer = g_VR.wheelGripped and g_VR.analog_input.steer or g_VR.input.vector2_steer.x or 0
+	if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
+	local pitch = g_VR.analog_input.pitch + g_VR.input.vector2_steer.y or 0
+	local yaw = g_VR.analog_input.yaw + g_VR.input.vector2_steer.x or 0
+	local roll = g_VR.analog_input.roll or 0
+	-- === Send to server if significant change ===
+	local changed = math.abs(throttle - lastInputState.throttle) > ANALOG_EPSILON or math.abs(brake - lastInputState.brake) > ANALOG_EPSILON or math.abs(steer - lastInputState.steer) > ANALOG_EPSILON or math.abs(pitch - lastInputState.pitch) > ANALOG_EPSILON or math.abs(yaw - lastInputState.yaw) > ANALOG_EPSILON or math.abs(roll - lastInputState.roll) > ANALOG_EPSILON
+	if changed or throttle ~= 0 or brake ~= 0 or steer ~= 0 or pitch ~= 0 or yaw ~= 0 or roll ~= 0 then
+		lastInputState.throttle = throttle
+		lastInputState.brake = brake
+		lastInputState.steer = steer
+		lastInputState.pitch = pitch
+		lastInputState.yaw = yaw
+		lastInputState.roll = roll
+		net.Start("glide_vr_input")
+		net.WriteString("analog")
+		net.WriteFloat(throttle)
+		net.WriteFloat(brake)
+		net.WriteFloat(steer)
+		if g_VR.vehicle.type == "aircraft" then
+			net.WriteFloat(pitch)
+			net.WriteFloat(yaw)
+			net.WriteFloat(roll)
+		end
+
+		net.SendToServer()
+	end
+
+	nextSendTime = CurTime() + ANALOG_SEND_RATE
+end)
+
+-- Handle steering grip input
+hook.Add("VRMod_Tracking", "SteeringGripInput", function()
+	local ply = LocalPlayer()
+	if not IsValid(ply) or not g_VR.active or not g_VR.wheelGripped then
+		neutralOffsets = {}
+		g_VR.analog_input.steer = 0
+		return
+	end
+
+	local bonePos = vrmod.utils.GetVehicleBonePosition(g_VR.vehicle.current, g_VR.vehicle.wheel_bone)
+	if not IsValid(g_VR.vehicle.current) or not bonePos then
+		neutralOffsets = {}
+		g_VR.analog_input.steer = 0
+		return
+	end
+
+	local hmdPos, hmdAng = vrmod.GetHMDPose(ply)
+	if not hmdPos then
+		neutralOffsets = {}
+		g_VR.analog_input.steer = 0
+		return
+	end
+
+	local leftPos, leftAng = vrmod.GetLeftHandPose(ply)
+	local rightPos, rightAng = vrmod.GetRightHandPose(ply)
+	if not leftPos or not rightPos then
+		neutralOffsets = {}
+		g_VR.analog_input.steer = 0
+		return
+	end
+
+	local steerInput = 0
+	local totalWeight = 0
+	local leftGrip = g_VR.wheelGrippedLeft or g_VR.wheelGripped or false
+	local rightGrip = g_VR.wheelGrippedRight or g_VR.wheelGripped or false
+	local deadzone = 0.05 -- Deadzone threshold in meters
+	for handName, state in pairs({
+		left = leftGrip,
+		right = rightGrip
+	}) do
+		if not state then continue end
+		local handPos = handName == "left" and leftPos or rightPos
+		local handAng = handName == "left" and leftAng or rightAng
+		local relativePos = WorldToLocal(handPos, handAng, hmdPos, hmdAng)
+		-- Dynamic neutral offset recalibration
+		if not neutralOffsets[handName] or (relativePos - neutralOffsets[handName]):Length() < 0.02 then neutralOffsets[handName] = relativePos end
+		local delta = relativePos - neutralOffsets[handName]
+		local sens = SENSITIVITY.steer[g_VR.vehicle.type] or 1
+		local wheelRotationRange = SENSITIVITY.rotationRange[g_VR.vehicle.type] or 360
+		sens = sens * 360 / wheelRotationRange -- Scale sensitivity by wheel rotation range
+		local steer = 0
+		local weight = 1
+		if g_VR.vehicle.type == "motorcycle" then
+			if math.abs(delta.y) > deadzone then steer = (delta.y - math.sign(delta.y) * deadzone) * sens end
+		elseif g_VR.vehicle.type == "car" then
+			local multiplier = handName == "left" and 0.75 or -0.75
+			if math.abs(delta.z) > deadzone then
+				steer = multiplier * (delta.z - math.sign(delta.z) * deadzone) * sens
+				weight = math.min(1, delta:Length() / 0.5) -- Weight by movement distance
+			end
+		end
+
+		steerInput = steerInput + steer * weight
+		totalWeight = totalWeight + weight
+	end
+
+	if totalWeight > 0 then steerInput = math.Clamp(steerInput / totalWeight, -1, 1) end
+	-- Frame-time-based smoothing
+	local smoothingFactor = g_VR.vehicle.type == "motorcycle" and 0.05 or 0.08
+	g_VR.analog_input.steer = Lerp(FrameTime() / smoothingFactor, g_VR.analog_input.steer or 0, steerInput)
 end)
 
 -- Handle steering grip transform
 hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
-	local ply = LocalPlayer()
-	local netFrame = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
+	if not g_VR.active or not g_VR.vehicle.current then return end
+	-- Special case for tanks
 	if g_VR.vehicle.type == "tank" then
 		local glideVeh = g_VR.vehicle.current
-		if netFrame then
-			netFrame.lefthandPos = glideVeh:GetPos() + glideVeh:GetUp() * -20
-			netFrame.lefthandAng = glideVeh:GetAngles()
-			netFrame.righthandPos = glideVeh:GetPos() + glideVeh:GetUp() * -20
-			netFrame.righthandAng = glideVeh:GetAngles()
-		end
+		local attachPos = glideVeh:GetPos() + glideVeh:GetUp() * -20
+		local attachAng = glideVeh:GetAngles()
+		vrmod.SetLeftHandPose(attachedPos, attachedAng)
+		vrmod.SetLeftRightPose(attachedPos, attachedAng)
+		netFrame.lefthandPos, netFrame.lefthandAng = attachPos, attachAng
+		netFrame.righthandPos, netFrame.righthandAng = attachPos, attachAng
 		return
 	end
 
@@ -234,6 +371,7 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		right = rightGrip
 	}) do
 		if not state then
+			-- grip released
 			neutralOffsets[handName] = nil
 			if g_VR.steeringGrip[handName] then
 				g_VR.steeringGrip[handName].offset = nil
@@ -245,80 +383,26 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 
 		local handPose = handName == "left" and leftHand or rightHand
 		if not handPose then continue end
-		anyGrip = true
 		g_VR.steeringGrip[handName] = g_VR.steeringGrip[handName] or {}
-		if not g_VR.steeringGrip[handName].offset then g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
-		local attachedPos, attachedAng = LocalToWorld(g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset or Angle(0, 0, 0), bonePos, boneAng)
-		if netFrame then
+		if not g_VR.steeringGrip[handName].offset then
+			if g_VR.vehicle.type == "car" then
+				local dist = handPose.pos:Distance(bonePos)
+				if dist > MAX_WHEEL_GRAB_DIST then continue end
+			end
+
+			g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
+		end
+
+		if g_VR.steeringGrip[handName].offset then
+			anyGrip = true
+			local attachedPos, attachedAng = LocalToWorld(g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset or Angle(0, 0, 0), bonePos, boneAng)
 			if handName == "left" then
-				netFrame.lefthandPos = attachedPos
-				netFrame.lefthandAng = attachedAng
+				if g_VR.vehicle.type ~= "airplane" then vrmod.SetLeftHandPose(attachedPos, attachedAng) end
 			else
-				netFrame.righthandPos = attachedPos
-				netFrame.righthandAng = attachedAng
+				vrmod.SetRightHandPose(attachedPos, attachedAng)
 			end
 		end
 	end
 
 	g_VR.wheelGripped = anyGrip
-end)
-
--- Handle steering grip input
-hook.Add("VRMod_Tracking", "SteeringGripInput", function()
-	if not g_VR.active or not g_VR.wheelGripped or not g_VR.vehicle.type then
-		neutralOffsets = {}
-		g_VR.analog_input.steer = 0
-		return
-	end
-
-	local ply = LocalPlayer()
-	local leftHand = g_VR.tracking.pose_lefthand
-	local rightHand = g_VR.tracking.pose_righthand
-	if not leftHand and not rightHand then
-		neutralOffsets = {}
-		g_VR.analog_input.steer = 0
-		print("VRMod: No hand tracking data")
-		return
-	end
-
-	local bonePos = vrmod.utils.GetVehicleBonePosition(g_VR.vehicle.current, g_VR.vehicle.wheel_bone)
-	if not bonePos then
-		neutralOffsets = {}
-		g_VR.analog_input.steer = 0
-		print("VRMod: No vehicle bone position")
-		return
-	end
-
-	local hmdPos, hmdAng = vrmod.GetHMDPose(ply)
-	local steerInput = 0
-	local contributingHands = 0
-	local leftGrip = g_VR.wheelGrippedLeft or g_VR.wheelGripped or false
-	local rightGrip = g_VR.wheelGrippedRight or g_VR.wheelGripped or false
-	for handName, state in pairs({
-		left = leftGrip,
-		right = rightGrip
-	}) do
-		if not state then continue end
-		local handPose = handName == "left" and leftHand or rightHand
-		if not handPose then continue end
-		local relativePos = WorldToLocal(handPose.pos, handPose.ang, hmdPos, hmdAng)
-		if not neutralOffsets[handName] then neutralOffsets[handName] = relativePos end
-		local delta = relativePos - neutralOffsets[handName]
-		local multiplier = handName == "left" and 1 or 1
-		local steer = 0
-		local sens = SENSITIVITY.steer[g_VR.vehicle.type] or 1
-		if g_VR.vehicle.type == "motorcycle" then
-			steer = multiplier * delta.y * sens
-		elseif g_VR.vehicle.type == "car" then
-			multiplier = handName == "left" and 1 or -1
-			steer = multiplier * delta.z * sens
-		end
-
-		steerInput = steerInput + steer
-		contributingHands = contributingHands + 1
-	end
-
-	if contributingHands > 0 then steerInput = math.Clamp(steerInput / contributingHands, -1, 1) end
-	-- Smooth steering input
-	g_VR.analog_input.steer = Lerp(0.15, g_VR.analog_input.steer or 0, steerInput)
 end)

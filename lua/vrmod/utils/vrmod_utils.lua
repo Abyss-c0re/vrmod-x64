@@ -1459,8 +1459,12 @@ function vrmod.utils.GetSteeringInfo(ply)
     -- Find steering bone (always attempt, needed for pose alignment)
     local boneId, boneType
     local candidates = {}
-    if IsValid(glideVeh) then table.insert(candidates, glideVeh) end
-    table.insert(candidates, vehicle)
+    if IsValid(glideVeh) then
+        table.insert(candidates, glideVeh)
+    else
+        table.insert(candidates, vehicle)
+    end
+
     for _, candidate in ipairs(candidates) do
         for _, entry in ipairs(bonePriority) do
             for _, name in ipairs(entry.names) do
@@ -1504,44 +1508,42 @@ function vrmod.utils.GetSteeringInfo(ply)
     return vehicle, nil, "unknown"
 end
 
-function vrmod.utils.GetGlideBoneAng(ply, boneName)
-    if not IsValid(ply) then return Angle(0, 0, 0) end
-    local vehicle = ply:GetNWEntity("GlideVehicle")
-    if not IsValid(vehicle) or type(vehicle.GetSeatBoneManipulations) ~= "function" then return Angle(0, 0, 0) end
-    local seatPose = vehicle:GetSeatBoneManipulations(ply:GlideGetSeatIndex())
-    if not seatPose or type(seatPose) ~= "table" then return Angle(0, 0, 0) end
-    local ang = seatPose[boneName]
-    if not ang then return Angle(0, 0, 0) end
-    return ang
-end
-
-function vrmod.utils.GetGlideHandOffset(ply, side)
-    local vehicle = ply:GetNWEntity("GlideVehicle")
-    -- Define vehicle-specific offsets
-    local wheelOffset = Vector(0, 0, 0)
-    local wheelDistance = 0
-    local angleOffset = Angle(0, 0, 0)
-    if not IsValid(vehicle) then return wheelOffset, wheelDistance, angleOffset end
-    if vehicle.VehicleType == Glide.VEHICLE_TYPE.MOTORCYCLE or vehicle:GetPlayerSitSequence(1) == "drive_airboat" then
-        wheelOffset = Vector(20, 0, -5)
-        wheelDistance = 12
-        angleOffset = side == "left" and Angle(0, 0, 90) or Angle(0, 0, -90)
-    elseif vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
-        wheelOffset = Vector(15, 0, -10)
-        wheelDistance = 3
-        angleOffset = Angle(0, 0, 0)
-    elseif vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK then
-        wheelOffset = Vector(10, 0, -3)
-        wheelDistance = 8
-        angleOffset = Angle(0, 0, 0)
-    else
-        wheelOffset = Vector(20, 0, -3)
-        wheelDistance = 8
-        angleOffset = Angle(0, 0, 0)
-    end
-    return wheelOffset, wheelDistance, angleOffset
-end
-
+-- function vrmod.utils.GetGlideBoneAng(ply, boneName)
+--     if not IsValid(ply) then return Angle(0, 0, 0) end
+--     local vehicle = ply:GetNWEntity("GlideVehicle")
+--     if not IsValid(vehicle) or type(vehicle.GetSeatBoneManipulations) ~= "function" then return Angle(0, 0, 0) end
+--     local seatPose = vehicle:GetSeatBoneManipulations(ply:GlideGetSeatIndex())
+--     if not seatPose or type(seatPose) ~= "table" then return Angle(0, 0, 0) end
+--     local ang = seatPose[boneName]
+--     if not ang then return Angle(0, 0, 0) end
+--     return ang
+-- end
+-- function vrmod.utils.GetGlideHandOffset(ply, side)
+--     local vehicle = ply:GetNWEntity("GlideVehicle")
+--     -- Define vehicle-specific offsets
+--     local wheelOffset = Vector(0, 0, 0)
+--     local wheelDistance = 0
+--     local angleOffset = Angle(0, 0, 0)
+--     if not IsValid(vehicle) then return wheelOffset, wheelDistance, angleOffset end
+--     if vehicle.VehicleType == Glide.VEHICLE_TYPE.MOTORCYCLE or vehicle:GetPlayerSitSequence(1) == "drive_airboat" then
+--         wheelOffset = Vector(20, 0, -5)
+--         wheelDistance = 12
+--         angleOffset = side == "left" and Angle(0, 0, 90) or Angle(0, 0, -90)
+--     elseif vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
+--         wheelOffset = Vector(15, 0, -10)
+--         wheelDistance = 3
+--         angleOffset = Angle(0, 0, 0)
+--     elseif vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK then
+--         wheelOffset = Vector(10, 0, -3)
+--         wheelDistance = 8
+--         angleOffset = Angle(0, 0, 0)
+--     else
+--         wheelOffset = Vector(20, 0, -3)
+--         wheelDistance = 8
+--         angleOffset = Angle(0, 0, 0)
+--     end
+--     return wheelOffset, wheelDistance, angleOffset
+-- end
 function vrmod.utils.PatchGlideCamera()
     local Camera = Glide.Camera
     if not Camera then return end
