@@ -200,21 +200,37 @@ if CLIENT then
 		return Vector(), Angle(), Vector()
 	end
 
-	function vrmod.SetLeftHandPose(pos, ang)
-		local t = g_VR.net[LocalPlayer():SteamID()]
-		if t and g_VR.tracking and g_VR.tracking.pose_lefthand then
-			g_VR.tracking.pose_lefthand.pos = pos
-			g_VR.tracking.pose_lefthand.ang = ang
+	-- smoothing helper
+	local function SmoothValue(oldVal, newVal, factor)
+		if not oldVal then return newVal end
+		if not factor or factor <= 0 then return newVal end
+		if oldVal.Lerp then
+			-- Vector or Angle
+			return LerpVector(factor, oldVal, newVal)
+		else
+			-- Fallback for numbers
+			return Lerp(factor, oldVal, newVal)
 		end
 	end
 
-	function vrmod.SetRightHandPose(pos, ang)
-		local t = g_VR.net[LocalPlayer():SteamID()]
-		if t and g_VR.tracking and g_VR.tracking.pose_righthand then
-			g_VR.tracking.pose_righthand.pos = pos
-			g_VR.tracking.pose_righthand.ang = ang
-			if vrmod.utils then vrmod.utils.UpdateViewModelPos(pos, ang) end
-		end
+	function vrmod.SetLeftHandPose(pos, ang, smoothing)
+		local ply = LocalPlayer()
+		local netFrame = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
+		if not netFrame then return end
+		-- Apply smoothing
+		netFrame.lefthandPos = SmoothValue(netFrame.lefthandPos, pos, smoothing or 0)
+		netFrame.lefthandAng = SmoothValue(netFrame.lefthandAng, ang, smoothing or 0)
+	end
+
+	function vrmod.SetRightHandPose(pos, ang, smoothing)
+		local ply = LocalPlayer()
+		local netFrame = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
+		if not netFrame then return end
+		-- Apply smoothing
+		netFrame.righthandPos = SmoothValue(netFrame.righthandPos, pos, smoothing or 0)
+		netFrame.righthandAng = SmoothValue(netFrame.righthandAng, ang, smoothing or 0)
+		-- Call utils update if available
+		--if vrmod.utils then vrmod.utils.UpdateViewModelPos(netFrame.righthandPos, netFrame.righthandAng) end
 	end
 
 	local function HandleFingerAngles(mode, hand, state, tbl)
