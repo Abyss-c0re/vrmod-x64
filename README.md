@@ -37,8 +37,7 @@ This build focuses on **optimization** by merging essential features from semi-o
 - Motion driving with wheel gripping (engine based vehicles + Glide)
 - Motion-controlled physgun: rotation and movement based on hand motion  
 - Gravity gun now supports prop rotation, just like HL2 VR  
-- UI now works correctly while in vehicles  
-  - (Bind left/right pickup actions in SteamVR to simulate mouse clicks inside vehicles)  
+- UI now works correctly while in vehicles (given the mouse click is set in bindings for vehicle)
 - Likely more small fixes and improvements under the hood
 
 
