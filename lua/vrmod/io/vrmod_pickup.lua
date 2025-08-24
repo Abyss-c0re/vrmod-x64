@@ -21,6 +21,7 @@ vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCV
 vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 10000, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_npcs", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, "1", FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
+local pickupableCache = {}
 local function IsImportantPickup(ent)
 	local class = ent:GetClass()
 	return class:find("^item_") or class:find("^spawned_") or class:find("^vr_item") or vrmod.utils.IsWeaponEntity(ent)
@@ -43,30 +44,45 @@ local function CanPickupEntity(v, ply, cv)
 	return true
 end
 
+
 local function IsNonPickupable(ent)
 	if not IsValid(ent) then return true end
+
 	local class = ent:GetClass():lower()
 	local model = (ent:GetModel() or ""):lower()
+	local key = class .. "|" .. model
+
+	if pickupableCache[key] ~= nil then
+		return pickupableCache[key]
+	end
+
 	-- Class blacklist (exact)
-	if blacklistedClasses[class] then return true end
-	-- Class blacklist (patterns)
-	for _, pattern in ipairs(blacklistedPatterns) do
-		if class:find(pattern:lower(), 1, true) then return true end
+	if blacklistedClasses[class] then
+		pickupableCache[key] = true
+		return true
 	end
 
-	-- Model blacklist (exact)
-	if blacklistedModels and blacklistedModels[model] then return true end
-	-- Model blacklist (patterns)
+	-- Class & model patterns
 	for _, pattern in ipairs(blacklistedPatterns) do
-		if model:find(pattern:lower(), 1, true) then return true end
+		pattern = pattern:lower()
+		if class:find(pattern, 1, true) or model:find(pattern, 1, true) then
+			pickupableCache[key] = true
+			return true
+		end
 	end
 
-	-- Weapons, props, or "important" items are always allowed
-	if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then return false end
-	-- NPC pickup rules (controlled by ConVar)
+	-- Weapons, props, or "important" items
+	if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then
+		pickupableCache[key] = false
+		return false
+	end
+
 	local npcPickupAllowed = (convarValues and convarValues.vrmod_pickup_npcs or 0) >= 1
-	if npcPickupAllowed and (ent:IsNPC() or ent:IsNextBot()) then return false end
-	-- Final fallback: block anything without physics
+	if npcPickupAllowed and (ent:IsNPC() or ent:IsNextBot()) then
+		pickupableCache[key] = false
+		return false
+	end
+
 	if ent:GetMoveType() ~= MOVETYPE_VPHYSICS then
 		if CLIENT and GetConVar("vrmod_pickup_debug"):GetBool() and not debugPrintedClasses[class] then
 			debugPrintedClasses[class] = true
@@ -76,10 +92,14 @@ local function IsNonPickupable(ent)
 			print("  MoveType: " .. tostring(ent:GetMoveType()))
 			print("  Owner: " .. tostring(ent:GetOwner()))
 		end
+		pickupableCache[key] = true
 		return true
 	end
+
+	pickupableCache[key] = false
 	return false
 end
+
 
 local function IsValidPickupTarget(ent, ply, bLeftHand)
 	if not IsValid(ent) or ent:GetNoDraw() or ent:IsDormant() then return false end
