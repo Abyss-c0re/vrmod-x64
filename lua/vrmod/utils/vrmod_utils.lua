@@ -1427,9 +1427,16 @@ function vrmod.utils.IsRagdollDead(ent)
 end
 
 --Vehicles/Glide
+function vrmod.utils.GetGlideVehicle(vehicle)
+    if not IsValid(vehicle) then return nil end
+    local parent = vehicle:GetParent()
+    if not IsValid(parent) or not parent.IsGlideVehicle then return nil end
+    return parent
+end
+
 function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
     if not IsValid(vehicle) or not boneId then return nil, nil end
-    if vehicle.IsGlideVehicle then return vehicle:GetBonePosition(boneId) end
+    if g_VR.vehicle.glide then return vehicle:GetBonePosition(boneId) end
     if cachedFrame == FrameNumber() then return cachedBonePos, cachedBoneAng end
     local m = vehicle:GetBoneMatrix(boneId)
     if not m then return nil, nil end
@@ -1440,9 +1447,9 @@ end
 
 function vrmod.utils.GetSteeringInfo(ply)
     if not IsValid(ply) or not ply:InVehicle() then return nil, nil, nil end
-    local vehicle = ply:GetVehicle() or ply:GetNWEntity("GlideVehicle")
+    local vehicle = ply:GetVehicle()
     if not IsValid(vehicle) then return nil, nil, nil end
-    local glideVeh = ply:GetNWEntity("GlideVehicle")
+    local glideVeh = vrmod.utils.GetGlideVehicle(vehicle)
     local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
     local sitSeq = glideVeh and glideVeh.GetPlayerSitSequence and glideVeh:GetPlayerSitSequence(seatIndex)
     local bonePriority = {
@@ -1490,22 +1497,22 @@ function vrmod.utils.GetSteeringInfo(ply)
     if IsValid(glideVeh) then
         local vType = glideVeh.VehicleType
         if vType == Glide.VEHICLE_TYPE.MOTORCYCLE or sitSeq == "drive_airboat" then
-            return glideVeh, boneId, "motorcycle"
+            return glideVeh, boneId, "motorcycle", true
         elseif vType == Glide.VEHICLE_TYPE.BOAT then
-            return glideVeh, boneId, "boat"
+            return glideVeh, boneId, "boat", true
         elseif vType == Glide.VEHICLE_TYPE.CAR then
-            return glideVeh, boneId, "car"
+            return glideVeh, boneId, "car", true
         elseif vType == Glide.VEHICLE_TYPE.PLANE or vType == Glide.VEHICLE_TYPE.HELICOPTER then
-            return glideVeh, boneId, "aircraft"
+            return glideVeh, boneId, "aircraft", true
         elseif vType == Glide.VEHICLE_TYPE.TANK then
-            return glideVeh, boneId, "tank"
+            return glideVeh, boneId, "tank", true
         end
     end
 
     -- If no Glide type, fall back to bone-derived type (if any)
-    if boneId then return vehicle, boneId, boneType end
+    if boneId then return vehicle, boneId, boneType, false end
     -- Otherwise, nothing known
-    return vehicle, nil, "unknown"
+    return vehicle, nil, "unknown", false
 end
 
 -- function vrmod.utils.GetGlideBoneAng(ply, boneName)

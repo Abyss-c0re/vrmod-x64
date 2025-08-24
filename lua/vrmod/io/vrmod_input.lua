@@ -56,11 +56,11 @@ local leftGrip, rightGrip = false, false
 -- Switch action set when entering vehicle
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 	local ply = LocalPlayer()
-	local vehicle, boneId, vType = vrmod.utils.GetSteeringInfo(ply)
+	local vehicle, boneId, vType, glide = vrmod.utils.GetSteeringInfo(ply)
 	g_VR.vehicle.current = vehicle
 	g_VR.vehicle.type = vType
 	g_VR.vehicle.wheel_bone = boneId
-	g_VR.vehicle.glide = IsValid(ply:GetNWEntity("GlideVehicle"))
+	g_VR.vehicle.glide = glide
 	print("Vehicle type: " .. tostring(vType))
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
 end)
@@ -287,6 +287,10 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 		return
 	end
 
+	local function sign(x)
+		return x > 0 and 1 or x < 0 and -1 or 0
+	end
+
 	local steerInput = 0
 	local totalWeight = 0
 	local leftGrip = g_VR.wheelGrippedLeft or g_VR.wheelGripped or false
@@ -309,11 +313,11 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 		local steer = 0
 		local weight = 1
 		if g_VR.vehicle.type == "motorcycle" then
-			if math.abs(delta.y) > deadzone then steer = (delta.y - math.sign(delta.y) * deadzone) * sens end
+			if math.abs(delta.y) > deadzone then steer = (delta.y - sign(delta.y) * deadzone) * sens end
 		elseif g_VR.vehicle.type == "car" then
 			local multiplier = handName == "left" and 0.75 or -0.75
 			if math.abs(delta.z) > deadzone then
-				steer = multiplier * (delta.z - math.sign(delta.z) * deadzone) * sens
+				steer = multiplier * (delta.z - sign(delta.z) * deadzone) * sens
 				weight = math.min(1, delta:Length() / 0.5) -- Weight by movement distance
 			end
 		end
@@ -324,7 +328,7 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 
 	if totalWeight > 0 then steerInput = math.Clamp(steerInput / totalWeight, -1, 1) end
 	-- Frame-time-based smoothing
-	local smoothingFactor = g_VR.vehicle.type == "motorcycle" and 0.05 or 0.08
+	local smoothingFactor = g_VR.vehicle.type == "motorcycle" and 0.05 or 0.01
 	g_VR.analog_input.steer = Lerp(FrameTime() / smoothingFactor, g_VR.analog_input.steer or 0, steerInput)
 end)
 
