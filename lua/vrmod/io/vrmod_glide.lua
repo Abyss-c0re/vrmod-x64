@@ -10,6 +10,12 @@ local validVehicleTypes = {
 }
 
 if SERVER then
+    local cvar = GetConVar("glide_ragdoll_enable")
+    if cvar then
+        cvar:SetInt(0)
+        timer.Create("ForceGlideRagdollDisable", 30, 0, function() if g_VR.active and cvar:GetInt() ~= 0 then cvar:SetInt(0) end end)
+    end
+
     util.AddNetworkString("glide_vr_input")
     net.Receive("glide_vr_input", function(_, ply)
         if not IsValid(ply) then return end
