@@ -14,7 +14,7 @@ local blacklistedClasses = {
 	["item_ammo_crate"] = true,
 }
 
-local blacklistedPatterns = {"beam", "button", "dynamic", "func_", "c_base", "laser", "info_", "sprite", "env_", "fire", "trail", "light", "spotlight", "texture", "shadow", "keypad"}
+local blacklistedPatterns = {"beam", "button", "dynamic", "func_", "c_base", "laser", "info_", "sprite", "env_", "fire", "trail", "light", "spotlight", "streetlight", "traffic", "texture", "shadow", "keypad"}
 local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber)
@@ -47,17 +47,26 @@ local function IsNonPickupable(ent)
 	if not IsValid(ent) then return true end
 	local class = ent:GetClass():lower()
 	local model = (ent:GetModel() or ""):lower()
-	-- Static blacklist
+	-- Class blacklist (exact)
 	if blacklistedClasses[class] then return true end
-	-- Pattern-based class filter
+	-- Class blacklist (patterns)
 	for _, pattern in ipairs(blacklistedPatterns) do
 		if class:find(pattern:lower(), 1, true) then return true end
 	end
 
+	-- Model blacklist (exact)
+	if blacklistedModels and blacklistedModels[model] then return true end
+	-- Model blacklist (patterns)
+	for _, pattern in ipairs(blacklistedPatterns) do
+		if model:find(pattern:lower(), 1, true) then return true end
+	end
+
+	-- Weapons, props, or "important" items are always allowed
 	if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or IsImportantPickup(ent) then return false end
+	-- NPC pickup rules (controlled by ConVar)
 	local npcPickupAllowed = (convarValues and convarValues.vrmod_pickup_npcs or 0) >= 1
 	if npcPickupAllowed and (ent:IsNPC() or ent:IsNextBot()) then return false end
-	-- Final fallback: block non-physics objects
+	-- Final fallback: block anything without physics
 	if ent:GetMoveType() ~= MOVETYPE_VPHYSICS then
 		if CLIENT and GetConVar("vrmod_pickup_debug"):GetBool() and not debugPrintedClasses[class] then
 			debugPrintedClasses[class] = true
