@@ -34,8 +34,8 @@ local SENSITIVITY = {
 	yaw = 0.7,
 	roll = 0.15,
 	steer = {
-		car = 1.0,
-		motorcycle = 0.75,
+		car = 0.75,
+		motorcycle = 0.25,
 	},
 	rotationRange = {
 		car = 900,
@@ -328,7 +328,7 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 
 	if totalWeight > 0 then steerInput = math.Clamp(steerInput / totalWeight, -1, 1) end
 	-- Frame-time-based smoothing
-	local smoothingFactor = g_VR.vehicle.type == "motorcycle" and 0.05 or 0.01
+	local smoothingFactor = g_VR.vehicle.type == "motorcycle" and 0.03 or 0.05
 	g_VR.analog_input.steer = Lerp(FrameTime() / smoothingFactor, g_VR.analog_input.steer or 0, steerInput)
 end)
 
