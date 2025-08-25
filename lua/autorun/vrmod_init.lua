@@ -1,8 +1,13 @@
-AddCSLuaFile()
+vrmod = vrmod or {}
 
+vrmod.status = {
+    api = false
+}
+AddCSLuaFile()
+include("vrmod/core/loader.lua")
+VRMod_Loader("vrmod/api")
 local files = {
-    
-    "vrmod/core/vrmod_api.lua",
+
     "vrmod/utils/vrmod_utils.lua",
     "vrmod/core/vrmod_startup.lua",
     "vrmod/core/vrmod.lua",
@@ -45,8 +50,10 @@ local files = {
     "vrmod/ui/vrmod_settings.lua",
     "vrmod/ui/vrmod_ui_buttons.lua"
 }
-
-for _, path in ipairs(files) do
-    AddCSLuaFile(path)
-    include(path)
+if vrmod.status.api then
+    print("!!!!!")
+    for _, path in ipairs(files) do
+        AddCSLuaFile(path)
+        include(path)
+    end
 end
