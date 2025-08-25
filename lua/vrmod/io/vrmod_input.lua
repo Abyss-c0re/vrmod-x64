@@ -55,13 +55,16 @@ local leftGrip, rightGrip = false, false
 --local leftHand, rightHand
 -- Switch action set when entering vehicle
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
-	local ply = LocalPlayer()
-	local vehicle, boneId, vType, glide = vrmod.utils.GetSteeringInfo(ply)
-	g_VR.vehicle.current = vehicle
-	g_VR.vehicle.type = vType
-	g_VR.vehicle.wheel_bone = boneId
-	g_VR.vehicle.glide = glide
-	print("Vehicle type: " .. tostring(vType))
+	timer.Simple(1, function()
+		local ply = LocalPlayer()
+		local vehicle, boneId, vType, glide = vrmod.utils.GetSteeringInfo(ply)
+		g_VR.vehicle.current = vehicle
+		g_VR.vehicle.type = vType
+		g_VR.vehicle.wheel_bone = boneId
+		g_VR.vehicle.glide = glide
+		print("Vehicle type: " .. tostring(vType))
+	end)
+
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
 end)
 
@@ -222,38 +225,40 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 		g_VR.analog_input.roll = 0
 	end
 
-	-- === Steering / throttle / brake ===
-	local throttle = g_VR.input.vector1_forward or 0
-	local brake = g_VR.input.vector1_reverse or 0
-	local steer = g_VR.wheelGripped and g_VR.analog_input.steer or g_VR.input.vector2_steer.x or 0
-	if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
-	local pitch = g_VR.analog_input.pitch + g_VR.input.vector2_steer.y or 0
-	local yaw = g_VR.analog_input.yaw + g_VR.input.vector2_steer.x or 0
-	local roll = g_VR.analog_input.roll or 0
-	-- === Send to server if significant change ===
-	local changed = math.abs(throttle - lastInputState.throttle) > ANALOG_EPSILON or math.abs(brake - lastInputState.brake) > ANALOG_EPSILON or math.abs(steer - lastInputState.steer) > ANALOG_EPSILON or math.abs(pitch - lastInputState.pitch) > ANALOG_EPSILON or math.abs(yaw - lastInputState.yaw) > ANALOG_EPSILON or math.abs(roll - lastInputState.roll) > ANALOG_EPSILON
-	if changed or throttle ~= 0 or brake ~= 0 or steer ~= 0 or pitch ~= 0 or yaw ~= 0 or roll ~= 0 then
-		lastInputState.throttle = throttle
-		lastInputState.brake = brake
-		lastInputState.steer = steer
-		lastInputState.pitch = pitch
-		lastInputState.yaw = yaw
-		lastInputState.roll = roll
-		net.Start("glide_vr_input")
-		net.WriteString("analog")
-		net.WriteFloat(throttle)
-		net.WriteFloat(brake)
-		net.WriteFloat(steer)
-		if g_VR.vehicle.type == "aircraft" then
-			net.WriteFloat(pitch)
-			net.WriteFloat(yaw)
-			net.WriteFloat(roll)
+	if Glide then
+		-- === Steering / throttle / brake ===
+		local throttle = g_VR.input.vector1_forward or 0
+		local brake = g_VR.input.vector1_reverse or 0
+		local steer = g_VR.wheelGripped and g_VR.analog_input.steer or g_VR.input.vector2_steer.x or 0
+		if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
+		local pitch = g_VR.analog_input.pitch + g_VR.input.vector2_steer.y or 0
+		local yaw = g_VR.analog_input.yaw + g_VR.input.vector2_steer.x or 0
+		local roll = g_VR.analog_input.roll or 0
+		-- === Send to server if significant change ===
+		local changed = math.abs(throttle - lastInputState.throttle) > ANALOG_EPSILON or math.abs(brake - lastInputState.brake) > ANALOG_EPSILON or math.abs(steer - lastInputState.steer) > ANALOG_EPSILON or math.abs(pitch - lastInputState.pitch) > ANALOG_EPSILON or math.abs(yaw - lastInputState.yaw) > ANALOG_EPSILON or math.abs(roll - lastInputState.roll) > ANALOG_EPSILON
+		if changed or throttle ~= 0 or brake ~= 0 or steer ~= 0 or pitch ~= 0 or yaw ~= 0 or roll ~= 0 then
+			lastInputState.throttle = throttle
+			lastInputState.brake = brake
+			lastInputState.steer = steer
+			lastInputState.pitch = pitch
+			lastInputState.yaw = yaw
+			lastInputState.roll = roll
+			net.Start("glide_vr_input")
+			net.WriteString("analog")
+			net.WriteFloat(throttle)
+			net.WriteFloat(brake)
+			net.WriteFloat(steer)
+			if g_VR.vehicle.type == "aircraft" then
+				net.WriteFloat(pitch)
+				net.WriteFloat(yaw)
+				net.WriteFloat(roll)
+			end
+
+			net.SendToServer()
 		end
 
-		net.SendToServer()
+		nextSendTime = CurTime() + ANALOG_SEND_RATE
 	end
-
-	nextSendTime = CurTime() + ANALOG_SEND_RATE
 end)
 
 -- Handle steering grip input
