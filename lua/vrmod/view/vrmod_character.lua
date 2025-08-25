@@ -467,12 +467,11 @@ if CLIENT then
 	end
 
 	-------------------------------------------------------------
-	local prevFrameNumber = 0
-	local updatedPlayers = {}
+	local lastLerpedFrames = {} -- Add this at the top, outside any functions
 	local function PrePlayerDrawFunc(ply)
 		local steamid = ply:SteamID()
 		if not activePlayers[steamid] or not g_VR.net[steamid].lerpedFrame then return end
-		--hide head in first person
+		-- Hide head in first person
 		if ply == LocalPlayer() then
 			local ep = EyePos()
 			local hide = (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight) and ply:GetViewEntity() == ply
@@ -488,20 +487,14 @@ if CLIENT then
 		end
 
 		ply:SetupBones()
-		--update ik once per frame per player
-		if prevFrameNumber ~= FrameNumber() then
-			prevFrameNumber = FrameNumber()
-			updatedPlayers = {}
-		end
-
-		if not updatedPlayers[steamid] then
+		-- Update IK only if the lerped frame has changed
+		local currentFrame = g_VR.net[steamid].lerpedFrame
+		if not lastLerpedFrames[steamid] or not vrmod.utils.FramesAreEqual(currentFrame, lastLerpedFrames[steamid]) then
 			UpdateIK(ply)
-			updatedPlayers[steamid] = 1
+			lastLerpedFrames[steamid] = table.Copy(currentFrame) -- Shallow copy; sufficient since FramesAreEqual checks fields deeply
 		end
 
-		--
-		--if ply:InVehicle() and ply:GetVehicle():GetClass() ~= "prop_vehicle_prisoner_pod" then return end
-		--manipulate arms
+		-- Manipulate arms
 		for i = 1, #characterInfo[steamid].boneorder do
 			local bone = characterInfo[steamid].boneorder[i]
 			if ply:GetBoneMatrix(bone) then ply:SetBoneMatrix(bone, characterInfo[steamid].boneinfo[bone].targetMatrix) end
