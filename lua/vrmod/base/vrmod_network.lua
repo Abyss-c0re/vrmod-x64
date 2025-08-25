@@ -477,10 +477,11 @@ if SERVER then
 		if g_VR[steamid] ~= nil then
 			g_VR[steamid] = nil
 			local ply = player.GetBySteamID(steamid)
-			ply:SetCurrentViewOffset(ply.originalViewOffset)
-			ply:SetViewOffset(ply.originalViewOffset)
-			-- ply:StripWeapon("weapon_vrmod_empty")
-			--relay exit message to everyone
+			if ply.originalViewOffset then
+				ply:SetCurrentViewOffset(ply.originalViewOffset)
+				ply:SetViewOffset(ply.originalViewOffset)
+			end
+
 			net.Start("vrutil_net_exit")
 			net.WriteString(steamid)
 			net.Broadcast()
