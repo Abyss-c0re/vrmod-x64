@@ -225,7 +225,7 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 		g_VR.analog_input.roll = 0
 	end
 
-	if Glide then
+	if Glide and g_VR.vehicle.glide then
 		-- === Steering / throttle / brake ===
 		local throttle = g_VR.input.vector1_forward or 0
 		local brake = g_VR.input.vector1_reverse or 0
