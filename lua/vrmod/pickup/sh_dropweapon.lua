@@ -1,4 +1,3 @@
-AddCSLuaFile()
 local blacklist_path = "vrmod/vrmod_drop_blacklist.txt"
 -- Shared blacklist check
 local function InBlackList(weaponClass)

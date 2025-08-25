@@ -15,14 +15,14 @@ function VRMod_Loader(folder)
         if f:StartWith("sh_") then
             if SERVER then AddCSLuaFile(path) end
             include(path)
-            MsgC(Color(150, 0, 200), "[VRMod] [SH] ", color_white, f, "\n")
+            --MsgC(Color(150, 0, 200), "[VRMod] [SH] ", color_white, f, "\n")
             return
         end
 
         if f:StartWith("sv_") then
             if SERVER then
                 include(path)
-                MsgC(Color(200, 150, 0), "[VRMod] [SV] ", color_white, f, "\n")
+                --MsgC(Color(200, 150, 0), "[VRMod] [SV] ", color_white, f, "\n")
             end
             return
         end
@@ -30,10 +30,10 @@ function VRMod_Loader(folder)
         if f:StartWith("cl_") then
             if SERVER then
                 AddCSLuaFile(path)
-                MsgC(Color(0, 180, 255), "[VRMod] [->CL] ", color_white, f, "\n")
+                --MsgC(Color(0, 180, 255), "[VRMod] [->CL] ", color_white, f, "\n")
             else
                 include(path)
-                MsgC(Color(0, 180, 255), "[VRMod] [CL] ", color_white, f, "\n")
+                --MsgC(Color(0, 180, 255), "[VRMod] [CL] ", color_white, f, "\n")
             end
             return
         end
@@ -74,5 +74,6 @@ function VRMod_Loader(folder)
     vrmod.status = vrmod.status or {}
     vrmod.status[subsystemName] = true
     -- Final log
-    MsgC(Color(0, 200, 0), "[VRMod] Subsystem initialized: ", color_white, subsystemName, "\n")
+    MsgC(Color(0, 200, 0), "[VRMod] Subsystem initialized: ", color_white, string.upper(subsystemName), "\n")
+
 end
