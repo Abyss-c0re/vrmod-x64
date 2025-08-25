@@ -6,16 +6,16 @@ local function netReadFrame()
 		--ts = net.ReadFloat(),
 		ts = net.ReadDouble(),
 		characterYaw = net.ReadUInt(7) * 2.85714,
-		finger1 = net.ReadUInt(6) / 64,
-		finger2 = net.ReadUInt(6) / 64,
-		finger3 = net.ReadUInt(6) / 64,
-		finger4 = net.ReadUInt(6) / 64,
-		finger5 = net.ReadUInt(6) / 64,
-		finger6 = net.ReadUInt(6) / 64,
-		finger7 = net.ReadUInt(6) / 64,
-		finger8 = net.ReadUInt(6) / 64,
-		finger9 = net.ReadUInt(6) / 64,
-		finger10 = net.ReadUInt(6) / 64,
+		finger1 = net.ReadUInt(7) / 100,
+		finger2 = net.ReadUInt(7) / 100,
+		finger3 = net.ReadUInt(7) / 100,
+		finger4 = net.ReadUInt(7) / 100,
+		finger5 = net.ReadUInt(7) / 100,
+		finger6 = net.ReadUInt(7) / 100,
+		finger7 = net.ReadUInt(7) / 100,
+		finger8 = net.ReadUInt(7) / 100,
+		finger9 = net.ReadUInt(7) / 100,
+		finger10 = net.ReadUInt(7) / 100,
 		hmdPos = net.ReadVector(),
 		hmdAng = net.ReadAngle(),
 		lefthandPos = net.ReadVector(),
@@ -88,17 +88,17 @@ local function netWriteFrame(frame)
 	net.WriteDouble(SysTime())
 	local tmp = frame.characterYaw + math.ceil(math.abs(frame.characterYaw) / 360) * 360 --normalize and convert characterYaw to 0-360
 	tmp = tmp - math.floor(tmp / 360) * 360
-	net.WriteUInt(frame.characterYaw * 0.35, 7) --crush from 0-360 to 0-127
-	net.WriteUInt(frame.finger1 * 64, 6)
-	net.WriteUInt(frame.finger2 * 64, 6)
-	net.WriteUInt(frame.finger3 * 64, 6)
-	net.WriteUInt(frame.finger4 * 64, 6)
-	net.WriteUInt(frame.finger5 * 64, 6)
-	net.WriteUInt(frame.finger6 * 64, 6)
-	net.WriteUInt(frame.finger7 * 64, 6)
-	net.WriteUInt(frame.finger8 * 64, 6)
-	net.WriteUInt(frame.finger9 * 64, 6)
-	net.WriteUInt(frame.finger10 * 64, 6)
+	net.WriteUInt(tmp * 0.35, 7) --crush from 0-360 to 0-127
+	net.WriteUInt(frame.finger1 * 100, 7)
+	net.WriteUInt(frame.finger2 * 100, 7)
+	net.WriteUInt(frame.finger3 * 100, 7)
+	net.WriteUInt(frame.finger4 * 100, 7)
+	net.WriteUInt(frame.finger5 * 100, 7)
+	net.WriteUInt(frame.finger6 * 100, 7)
+	net.WriteUInt(frame.finger7 * 100, 7)
+	net.WriteUInt(frame.finger8 * 100, 7)
+	net.WriteUInt(frame.finger9 * 100, 7)
+	net.WriteUInt(frame.finger10 * 100, 7)
 	net.WriteVector(frame.hmdPos)
 	net.WriteAngle(frame.hmdAng)
 	net.WriteVector(frame.lefthandPos)
@@ -126,7 +126,7 @@ if CLIENT then
 		net.WriteVector(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos or Vector(0, 0, 0))
 		netWriteFrame(frame)
 		net.SendToServer()
-		lastSentFrame = frame
+		lastSentFrame = vrmod.utils.CopyFrame(frame)
 	end
 
 	function VRUtilNetworkInit() --called by localplayer when they enter vr
