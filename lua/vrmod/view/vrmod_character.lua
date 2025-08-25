@@ -491,7 +491,7 @@ if CLIENT then
 		local currentFrame = g_VR.net[steamid].lerpedFrame
 		if not lastLerpedFrames[steamid] or not vrmod.utils.FramesAreEqual(currentFrame, lastLerpedFrames[steamid]) then
 			UpdateIK(ply)
-			lastLerpedFrames[steamid] = table.Copy(currentFrame) -- Shallow copy; sufficient since FramesAreEqual checks fields deeply
+			lastLerpedFrames[steamid] = vrmod.utils.CopyFrame(currentFrame)
 		end
 
 		-- Manipulate arms
@@ -576,6 +576,7 @@ if CLIENT then
 		activePlayers[steamid] = nil
 		characterInfo[steamid] = nil
 		g_VR.cache[steamid] = nil
+		lastLerpedFrames[steamid] = nil
 		if table.Count(activePlayers) == 0 then
 			hook.Remove("PrePlayerDraw", "vrutil_hook_preplayerdraw")
 			hook.Remove("PostPlayerDraw", "vrutil_hook_postplayerdraw")

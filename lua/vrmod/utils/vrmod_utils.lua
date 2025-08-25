@@ -404,14 +404,43 @@ function vrmod.utils.DrawDeathAnimation(rtWidth, rtHeight)
     cam.End2D()
 end
 
+-- FRAME UTILS
+function vrmod.utils.CopyFrame(srcFrame)
+    if not srcFrame then return nil end
+    local copy = {}
+    -- Copy primitive values directly
+    copy.characterYaw = srcFrame.characterYaw
+    -- Copy fingers
+    for i = 1, 10 do
+        copy["finger" .. i] = srcFrame["finger" .. i]
+    end
+
+    -- Helper for copying Vector/Angle safely
+    local function copyPosAng(posKey, angKey)
+        local pos = srcFrame[posKey]
+        local ang = srcFrame[angKey]
+        if pos then copy[posKey] = Vector(pos) end
+        if ang then copy[angKey] = Angle(ang) end
+    end
+
+    -- Main tracked points
+    copyPosAng("hmdPos", "hmdAng")
+    copyPosAng("lefthandPos", "lefthandAng")
+    copyPosAng("righthandPos", "righthandAng")
+    -- Six point tracking, if present
+    if srcFrame.waistPos or srcFrame.leftfootPos or srcFrame.rightfootPos then
+        copyPosAng("waistPos", "waistAng")
+        copyPosAng("leftfootPos", "leftfootAng")
+        copyPosAng("rightfootPos", "rightfootAng")
+    end
+    return copy
+end
+
 function vrmod.utils.ConvertToRelativeFrame(absFrame)
     local lp = LocalPlayer()
     if not IsValid(lp) then return nil end
-    local vehicle = lp:GetNWEntity("GlideVehicle")
     local plyAng
-    if IsValid(vehicle) then
-        plyAng = vehicle:GetAngles()
-    elseif lp:InVehicle() then
+    if lp:InVehicle() then
         local veh = lp:GetVehicle()
         if IsValid(veh) then
             plyAng = veh:GetAngles()
@@ -484,41 +513,8 @@ function vrmod.utils.FramesAreEqual(f1, f2)
         if not equalVec(f1.rightfootPos, f2.rightfootPos) then return false end
         if not equalAng(f1.rightfootAng, f2.rightfootAng) then return false end
     end
+    vrmod.utils.DebugPrint("Equal frame detected")
     return true
-end
-
-function vrmod.utils.GetHandCursorOnPlane(ply, hand, planeOffset)
-    planeOffset = planeOffset or 50 -- units in front of eyes
-    local startPos, dir
-    if hand == "left" then
-        startPos = vrmod.GetLeftHandPos(ply)
-        local ang = vrmod.GetLeftHandAng(ply)
-        if not startPos or not ang then return nil end
-        local ang2 = Angle(ang.p, ang.y, ang.r + 180)
-        dir = ang2:Forward()
-    else
-        startPos = vrmod.GetRightHandPos(ply)
-        local ang = vrmod.GetRightHandAng(ply)
-        if not startPos or not ang then return nil end
-        dir = ang:Forward()
-    end
-
-    -- fallback to head if hand is missing
-    if not startPos or not dir then
-        startPos = ply:EyePos()
-        dir = ply:EyeAngles():Forward()
-    end
-
-    local planeNormal = ply:EyeAngles():Forward()
-    local planePoint = ply:EyePos() + planeNormal * planeOffset
-    local denom = planeNormal:Dot(dir)
-    if math.abs(denom) < 0.0001 then return nil end
-    local t = (planePoint - startPos):Dot(planeNormal) / denom
-    if t < 0 then return nil end
-    local hitPos = startPos + dir * t
-    local screenPos = hitPos:ToScreen()
-    if not screenPos then return nil end
-    return screenPos.x, screenPos.y
 end
 
 -- WEP UTILS
@@ -1515,42 +1511,6 @@ function vrmod.utils.GetSteeringInfo(ply)
     return vehicle, nil, "unknown", false
 end
 
--- function vrmod.utils.GetGlideBoneAng(ply, boneName)
---     if not IsValid(ply) then return Angle(0, 0, 0) end
---     local vehicle = ply:GetNWEntity("GlideVehicle")
---     if not IsValid(vehicle) or type(vehicle.GetSeatBoneManipulations) ~= "function" then return Angle(0, 0, 0) end
---     local seatPose = vehicle:GetSeatBoneManipulations(ply:GlideGetSeatIndex())
---     if not seatPose or type(seatPose) ~= "table" then return Angle(0, 0, 0) end
---     local ang = seatPose[boneName]
---     if not ang then return Angle(0, 0, 0) end
---     return ang
--- end
--- function vrmod.utils.GetGlideHandOffset(ply, side)
---     local vehicle = ply:GetNWEntity("GlideVehicle")
---     -- Define vehicle-specific offsets
---     local wheelOffset = Vector(0, 0, 0)
---     local wheelDistance = 0
---     local angleOffset = Angle(0, 0, 0)
---     if not IsValid(vehicle) then return wheelOffset, wheelDistance, angleOffset end
---     if vehicle.VehicleType == Glide.VEHICLE_TYPE.MOTORCYCLE or vehicle:GetPlayerSitSequence(1) == "drive_airboat" then
---         wheelOffset = Vector(20, 0, -5)
---         wheelDistance = 12
---         angleOffset = side == "left" and Angle(0, 0, 90) or Angle(0, 0, -90)
---     elseif vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
---         wheelOffset = Vector(15, 0, -10)
---         wheelDistance = 3
---         angleOffset = Angle(0, 0, 0)
---     elseif vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK then
---         wheelOffset = Vector(10, 0, -3)
---         wheelDistance = 8
---         angleOffset = Angle(0, 0, 0)
---     else
---         wheelOffset = Vector(20, 0, -3)
---         wheelDistance = 8
---         angleOffset = Angle(0, 0, 0)
---     end
---     return wheelOffset, wheelDistance, angleOffset
--- end
 function vrmod.utils.PatchGlideCamera()
     local Camera = Glide.Camera
     if not Camera then return end
