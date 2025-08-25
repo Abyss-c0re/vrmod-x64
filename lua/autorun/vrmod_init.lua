@@ -13,6 +13,7 @@ vrmod.status = {
 }
 
 AddCSLuaFile()
+include("vrmod/logger.lua")
 include("vrmod/loader.lua")
 local subsystemOrder = {"api", "utils", "core", "network", "input", "player", "physics", "pickup", "combat", "ui",}
 local baseFolder = "vrmod/"
