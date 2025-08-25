@@ -2,11 +2,11 @@ AddCSLuaFile()
 
 local files = {
     
-    "vrmod/base/vrmod_api.lua",
+    "vrmod/core/vrmod_api.lua",
     "vrmod/utils/vrmod_utils.lua",
-    "vrmod/base/vrmod_startup.lua",
-    "vrmod/base/vrmod.lua",
-    "vrmod/base/vrmod_network.lua",
+    "vrmod/core/vrmod_startup.lua",
+    "vrmod/core/vrmod.lua",
+    "vrmod/core/vrmod_network.lua",
     "vrmod/utils/vrmod_weaponreplacer.lua",
     "vrmod/io/vrmod_locomotion.lua",
     "vrmod/io/vrmod_climbing.lua",
