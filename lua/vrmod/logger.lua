@@ -2,7 +2,7 @@ vrmod = vrmod or {}
 vrmod.logger = vrmod.logger or {}
 -- ConVars for log levels
 local cv_console = CreateConVar("vrmod_log_console", "3", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Minimum log level for console (0=OFF, 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG)")
-local cv_file = CreateConVar("vrmod_log_file", "4", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Minimum log level for file (0=OFF, 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG)")
+local cv_file = CreateConVar("vrmod_log_file", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Minimum log level for file (0=OFF, 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG)")
 -- Level table
 local levels = {
     ERROR = 1,
