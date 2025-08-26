@@ -41,8 +41,7 @@ if CLIENT then
 	end
 
 	if moduleFile then
-		local tmp = vrmod
-		vrmod = {}
+		vrmod = vrmod or {}
 		local success, err = pcall(function() require("vrmod") end)
 		if success then
 			for k, v in pairs(vrmod) do
@@ -53,8 +52,6 @@ if CLIENT then
 		else
 			vrmod.logger.Err("Failed to load module:", err)
 		end
-
-		vrmod = tmp
 	else
 		vrmod.logger.Err("No compatible module file found.")
 	end

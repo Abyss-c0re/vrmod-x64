@@ -1,8 +1,3 @@
--- lua/vrmod/core/loader.lua
-if VRMod_Loader then -- prevent redefinition
-    return
-end
-
 function VRMod_Loader(folder)
     -- Ensure folder ends with a slash (pure Lua, no EndWith)
     if folder:sub(-1) ~= "/" then folder = folder .. "/" end
@@ -75,5 +70,4 @@ function VRMod_Loader(folder)
     vrmod.status[subsystemName] = true
     -- Final log
     MsgC(Color(0, 200, 0), "[VRMod] Subsystem initialized: ", color_white, string.upper(subsystemName), "\n")
-
 end
