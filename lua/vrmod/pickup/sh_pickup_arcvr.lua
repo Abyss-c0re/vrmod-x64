@@ -1,7 +1,6 @@
 local function init()
 	if CLIENT then
 		net.Receive("vrutil_net_pickup", function(len)
-			--print("client received arcvr pickup")
 			local ply = net.ReadEntity()
 			local ent = net.ReadEntity()
 			local leftHand = net.ReadBool()
@@ -38,7 +37,6 @@ local function init()
 			hook.Call("VRMod_Pickup", nil, ply, ent)
 			hook.Add("VRMod_Input", "arc_pickup_compat", function(action, pressed)
 				if action == "boolean_left_pickup" and not pressed then
-					--print("client sending arcvr drop")
 					net.Start("vrutil_net_drop")
 					net.WriteBool(true)
 					net.WriteVector(g_VR.tracking.pose_lefthand.pos)
@@ -55,7 +53,6 @@ local function init()
 		end)
 
 		net.Receive("vrutil_net_drop", function(len)
-			--print("client received arcvr drop")
 			local ply = net.ReadEntity()
 			local ent = net.ReadEntity()
 			if IsValid(ent) and ent.RenderOverride == ent.VRPickupRenderOverride then ent.RenderOverride = nil end
@@ -94,7 +91,6 @@ local function init()
 		end
 
 		vrmod.NetReceiveLimited("vrutil_net_pickup", 10, 0, function(len, ply)
-			--print("arcvr compatibility position update hook started")
 			local tickrate = GetConVar("vrmod_net_tickrate"):GetInt()
 			hook.Add("Tick", "arc_pickup_compat", function()
 				local updates = false
@@ -121,15 +117,11 @@ local function init()
 					end
 				end
 
-				if not updates then
-					hook.Remove("Tick", "arc_pickup_compat")
-					--print("position update hook removed")
-				end
+				if not updates then hook.Remove("Tick", "arc_pickup_compat") end
 			end)
 		end)
 
 		vrmod.NetReceiveLimited("vrutil_net_drop", 10, 300, function(len, ply)
-			--print("server received arcvr drop")
 			local leftHand = net.ReadBool()
 			local handPos = net.ReadVector()
 			local handAng = net.ReadAngle()

@@ -1,6 +1,13 @@
 g_VR = g_VR or {}
 local convars, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_net_tickrate", nil, tostring(math.ceil(1 / engine.TickInterval())), FCVAR_REPLICATED, nil, nil, nil, tonumber, nil)
+if SERVER then CreateConVar("vrmod_debug_network", "0", FCVAR_REPLICATED, "Enable detailed collision debug info (shared between server and clients)") end
+-- HELPERS
+local function DebugEnabled()
+	local cv = GetConVar("vrmod_debug_network")
+	return cv and cv:GetBool() or false
+end
+
 local function netReadFrame()
 	local frame = {
 		--ts = net.ReadFloat(),
@@ -117,7 +124,6 @@ local function netWriteFrame(frame)
 end
 
 if CLIENT then
-	local cl_debug_net = CreateClientConVar("vrmod_debug_network", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 	vrmod.AddCallbackedConvar("vrmod_net_delay", nil, "0.1", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_delaymax", nil, "0.2", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_storedframes", nil, "15", nil, nil, nil, nil, tonumber, nil)
@@ -163,20 +169,20 @@ if CLIENT then
 					v.buffering = false
 					v.sysTime = SysTime()
 					v.debugState = "playing"
-					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s finished buffering, entering play", k) end
+					if DebugEnabled() then vrmod.logger.Debug("[NET] %s finished buffering, entering play", k) end
 				end
 			else
 				-- advance playhead
 				local oldTime = v.playbackTime
 				v.playbackTime = v.playbackTime + SysTime() - v.sysTime
 				v.sysTime = SysTime()
-				if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s playhead advanced %.4f -> %.4f", k, oldTime, v.playbackTime) end
+				if DebugEnabled() then vrmod.logger.Debug("[NET] %s playhead advanced %.4f -> %.4f", k, oldTime, v.playbackTime) end
 				-- reached end
 				if v.playbackTime > v.frames[v.latestFrameIndex].ts then
 					v.buffering = true
 					v.debugState = "buffering (reached end)"
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
-					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s reached end, entering buffer", k) end
+					if DebugEnabled() then vrmod.logger.Debug("[NET] %s reached end, entering buffer", k) end
 				end
 
 				-- too far behind
@@ -184,7 +190,7 @@ if CLIENT then
 					v.buffering = true
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
 					v.debugState = "buffering (catching up)"
-					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s behind by %.4f > max %.4f, resetting", k, v.frames[v.latestFrameIndex].ts - v.playbackTime, lerpDelayMax) end
+					if DebugEnabled() then vrmod.logger.Debug("[NET] %s behind by %.4f > max %.4f, resetting", k, v.frames[v.latestFrameIndex].ts - v.playbackTime, lerpDelayMax) end
 				end
 			end
 
@@ -198,7 +204,7 @@ if CLIENT then
 					v.debugNextFrame = nextFrame
 					v.debugPreviousFrame = previousFrame
 					v.debugFraction = fraction
-					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s using frames %d -> %d at fraction %.3f (playback=%.3f, prev=%.3f, next=%.3f)", k, previousFrame, nextFrame, fraction, v.playbackTime, v.frames[previousFrame].ts, v.frames[nextFrame].ts) end
+					if DebugEnabled() then vrmod.logger.Debug("[NET] %s using frames %d -> %d at fraction %.3f (playback=%.3f, prev=%.3f, next=%.3f)", k, previousFrame, nextFrame, fraction, v.playbackTime, v.frames[previousFrame].ts, v.frames[nextFrame].ts) end
 					v.lerpedFrame = {}
 					for k2, v2 in pairs(v.frames[previousFrame]) do
 						if k2 == "characterYaw" then
@@ -218,7 +224,7 @@ if CLIENT then
 						plyAng = ply:GetVehicle():GetAngles()
 						local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
 						v.lerpedFrame.characterYaw = forwardAng.yaw
-						if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s in vehicle, overriding characterYaw=%d", k, forwardAng.yaw) end
+						if DebugEnabled() then vrmod.logger.Debug("[NET] %s in vehicle, overriding characterYaw=%d", k, forwardAng.yaw) end
 					end
 
 					v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng = LocalToWorld(v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng, plyPos, plyAng)
@@ -425,7 +431,7 @@ if SERVER then
 	util.AddNetworkString("vrutil_net_entervehicle")
 	util.AddNetworkString("vrutil_net_exitvehicle")
 	vrmod.NetReceiveLimited("vrutil_net_tick", convarValues.vrmod_net_tickrate + 5, 1200, function(len, ply)
-		--print("sv received net_tick, len: "..len)
+		if DebugEnabled() then vrmod.logger.Debug("[NET] received net_tick, len: " .. len) end
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
 		local frame = netReadFrame()
@@ -505,7 +511,7 @@ if SERVER then
 					net.WriteBool(v.dontHideBullets)
 					net.Send(ply)
 				else
-					print("VRMod: Invalid SteamID \"" .. k .. "\" found in player table")
+					vrmod.logger.Err("Invalid SteamID \"" .. k .. "\" found in player table")
 				end
 			end
 		end

@@ -1,5 +1,4 @@
 if CLIENT then return end
-print("[VRHand] Running VR physical hands system.")
 local vrHands = {}
 -- Utility to get cached physics data from weapon
 local function GetCachedWeaponParams(wep, ply, side)

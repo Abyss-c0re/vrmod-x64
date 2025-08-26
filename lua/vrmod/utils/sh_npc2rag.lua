@@ -138,7 +138,7 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
         end
 
         if vrmod.utils.IsRagdollGibbed(rag) then
-            print("Ragdoll gibbed during runtime, removing")
+            vrmod.logger.Info("Ragdoll gibbed during runtime, removing")
             rag:Remove()
             hook.Remove("Think", "VRMod_MonitorRagdollGibbing_" .. rag:EntIndex())
         end

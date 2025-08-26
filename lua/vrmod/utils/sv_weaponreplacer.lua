@@ -67,7 +67,7 @@ if SERVER then
 
     local function LoadPairs()
         if not file.Exists(datafile, "DATA") then
-            print("[VRWeps] No file found — writing default table.")
+            vrmod.logger.Info("[VRWeps] No file found — writing default table.")
             file.Write(datafile, util.TableToJSON(defaultWeaponPairs, true))
             replacer = table.Copy(defaultWeaponPairs)
             return
@@ -77,20 +77,20 @@ if SERVER then
         local tbl = util.JSONToTable(raw) or {}
         for flat, vr in pairs(defaultWeaponPairs) do
             if not tbl[flat] then
-                print("[VRWeps] Adding missing default pair:", flat, "→", vr)
+                vrmod.logger.Info("[VRWeps] Adding missing default pair:", flat, "→", vr)
                 tbl[flat] = vr
             end
         end
 
         replacer = tbl
         SavePairs()
-        print("[VRWeps] Loaded", table.Count(replacer), "weapon pairs.")
+        vrmod.logger.Info("[VRWeps] Loaded", table.Count(replacer), "weapon pairs.")
     end
 
     local function AddPair(flat, vr)
         replacer[flat] = vr
         SavePairs()
-        print("[VRWeps] Added pair:", flat, "→", vr)
+        vrmod.logger.Info("[VRWeps] Added pair:", flat, "→", vr)
     end
 
     function vrmod.utils.ReplaceWeapon(ply, thing)
@@ -102,7 +102,7 @@ if SERVER then
         local vrClass = replacer[class]
         if not vrClass then return false end
         if not weapons.GetStored(vrClass) then
-            print("[VRWeps] Missing VR weapon:", vrClass, "for", class)
+            vrmod.logger.Info("[VRWeps] Missing VR weapon:", vrClass, "for", class)
             return false
         end
 
@@ -142,9 +142,9 @@ if SERVER then
             if ply:HasWeapon(info.from) then
                 ply:Give(info.to, true)
                 ply:StripWeapon(info.from)
-                print("[VRWeps] Restored:", info.to, "←", info.from)
+                vrmod.logger.Info("[VRWeps] Restored:", info.to, "←", info.from)
             else
-                print("[VRWeps] Player doesn't have VR weapon:", info.from)
+                vrmod.logger.Info("[VRWeps] Player doesn't have VR weapon:", info.from)
             end
         end
 

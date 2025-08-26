@@ -562,7 +562,6 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
     mins = mins or vrmod.DEFAULT_MINS
     maxs = maxs or vrmod.DEFAULT_MAXS
     reach = reach or vrmod.DEFAULT_REACH
-    --print(isMelee)
     if not isnumber(reach) then reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2 end
     local adjustedPos = vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
     local shape = vrmod.utils.CheckWorldCollisions(adjustedPos, nil, mins, maxs, ang, "right", reach)

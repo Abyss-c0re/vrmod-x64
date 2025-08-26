@@ -399,7 +399,7 @@ if CLIENT then
 				if ply == LocalPlayer() then g_VR.errorText = "Incompatible player model. Missing bone " .. v end
 				cm:Remove()
 				g_VR.StopCharacterSystem(steamid)
-				print("VRMod: CharacterInit failed for " .. steamid)
+				if cl_debug_character:GetBool() then vrmod.logger.Err("CharacterInit failed for " .. steamid) end
 				return false
 			end
 		end
@@ -589,7 +589,7 @@ if CLIENT then
 			hook.Remove("Think", "DetectLocalPlayerModelChange")
 		end
 
-		print("VRMod: Stopped character system for " .. steamid)
+		if cl_debug_character:GetBool() then vrmod.logger.Info("Stopped character system for " .. steamid) end
 	end
 
 	hook.Add("VRMod_Start", "vrmod_characterstart", function(ply) g_VR.StartCharacterSystem(ply) end)

@@ -854,7 +854,7 @@ function VRUtilOpenMenu()
 			checks = checks + 1
 			if checks >= maxChecks then
 				timer.Remove("VRMod_CheckArcVR")
-				print("[VRMod] Timed out waiting for ArcVR convars.")
+				vrmod.logger.Warn("Timed out waiting for ArcVR convars.")
 			end
 		end
 	end)
