@@ -110,7 +110,5 @@ function vrmod.utils.FramesAreEqual(f1, f2)
         if not equalVec(f1.rightfootPos, f2.rightfootPos) then return false end
         if not equalAng(f1.rightfootAng, f2.rightfootAng) then return false end
     end
-
-    vrmod.utils.DebugPrint("Equal frame detected")
     return true
 end

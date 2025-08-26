@@ -1,4 +1,9 @@
 local cl_debug_collisions = CreateClientConVar("vrmod_debug_collisions", "0", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+local function DebugEnabled()
+    local cv = GetConVar("vrmod_debug_collision_info")
+    return cv and cv:GetBool() or false
+end
+
 if SERVER then
     CreateConVar("vrmod_collisions", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY + FCVAR_REPLICATED, "Enable VR hand collision correction")
     util.AddNetworkString("vrmod_sync_model_params")
@@ -19,7 +24,7 @@ if SERVER then
         -- Only update + rebroadcast if different or unseen
         local old = vrmod.modelCache[modelPath]
         if not old or old.radius ~= params.radius or old.reach ~= params.reach or old.mins_horizontal ~= params.mins_horizontal or old.maxs_horizontal ~= params.maxs_horizontal or old.mins_vertical ~= params.mins_vertical or old.maxs_vertical ~= params.maxs_vertical or old.angles ~= params.angles then
-            vrmod.utils.DebugPrint("Server received NEW collision params for %s from %s", modelPath, ply:Nick())
+            if DebugEnabled() then vrmod.logger.Info("Server received NEW collision params for %s from %s", modelPath, ply:Nick()) end
             vrmod.modelCache[modelPath] = params
             net.Start("vrmod_sync_model_params")
             net.WriteString(modelPath)
@@ -31,9 +36,9 @@ if SERVER then
             net.WriteVector(params.maxs_vertical)
             net.WriteAngle(params.angles)
             net.Broadcast()
-            vrmod.utils.DebugPrint("Broadcasted collision params for %s to all clients", modelPath)
+            if DebugEnabled() then vrmod.logger.Info("Broadcasted collision params for %s to all clients", modelPath) end
         else
-            vrmod.utils.DebugPrint("Ignored duplicate collision params for %s from %s", modelPath, ply:Nick())
+            if DebugEnabled() then vrmod.logger.Info("Ignored duplicate collision params for %s from %s", modelPath, ply:Nick()) end
         end
     end)
 
@@ -50,7 +55,7 @@ if SERVER then
                 net.WriteVector(params.maxs_vertical)
                 net.WriteAngle(params.angles)
                 net.Send(ply)
-                vrmod.utils.DebugPrint("Synced cached collision params for %s to %s", modelPath, ply:Nick())
+                if DebugEnabled() then vrmod.logger.Info("Synced cached collision params for %s to %s", modelPath, ply:Nick()) end
             end
         end
     end)
@@ -78,7 +83,7 @@ if CLIENT then
             computed = true
         }
 
-        vrmod.utils.DebugPrint("Received synced collision params for %s from server", modelPath)
+        if DebugEnabled() then vrmod.logger.Debug("Received synced collision params for %s from server", modelPath) end
         vrmod.modelCache[modelPath] = params
     end)
 

@@ -8,7 +8,7 @@ local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "1.5", FCV
 local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "3", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
-local cv_debug = GetConVar("vrmod_debug"):GetBool()
+local cv_debug = CreateConVar("vrmod_debug_melee", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Print detailed stats for melee system")
 -- Updated impactSounds with verified sound paths
 local impactSounds = {
     fist = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_soft1.wav"},

@@ -117,6 +117,7 @@ local function netWriteFrame(frame)
 end
 
 if CLIENT then
+	local cl_debug_net = CreateClientConVar("vrmod_debug_network", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 	vrmod.AddCallbackedConvar("vrmod_net_delay", nil, "0.1", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_delaymax", nil, "0.2", nil, nil, nil, nil, tonumber, nil)
 	vrmod.AddCallbackedConvar("vrmod_net_storedframes", nil, "15", nil, nil, nil, nil, tonumber, nil)
@@ -137,6 +138,7 @@ if CLIENT then
 				if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
 					SendFrame(frame)
 				else
+					vrmod.logger.Debug("[NET] Skipping identical frame")
 					if not lastSentFrame then SendFrame(frame) end
 				end
 			end
@@ -161,20 +163,20 @@ if CLIENT then
 					v.buffering = false
 					v.sysTime = SysTime()
 					v.debugState = "playing"
-					vrmod.utils.DebugPrint("[Lerp] %s finished buffering, entering play", k)
+					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s finished buffering, entering play", k) end
 				end
 			else
 				-- advance playhead
 				local oldTime = v.playbackTime
 				v.playbackTime = v.playbackTime + SysTime() - v.sysTime
 				v.sysTime = SysTime()
-				vrmod.utils.DebugPrint("[Lerp] %s playhead advanced %.4f -> %.4f", k, oldTime, v.playbackTime)
+				if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s playhead advanced %.4f -> %.4f", k, oldTime, v.playbackTime) end
 				-- reached end
 				if v.playbackTime > v.frames[v.latestFrameIndex].ts then
 					v.buffering = true
 					v.debugState = "buffering (reached end)"
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
-					vrmod.utils.DebugPrint("[Lerp] %s reached end, entering buffer", k)
+					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s reached end, entering buffer", k) end
 				end
 
 				-- too far behind
@@ -182,7 +184,7 @@ if CLIENT then
 					v.buffering = true
 					v.playbackTime = v.frames[v.latestFrameIndex].ts
 					v.debugState = "buffering (catching up)"
-					vrmod.utils.DebugPrint("[Lerp] %s behind by %.4f > max %.4f, resetting", k, v.frames[v.latestFrameIndex].ts - v.playbackTime, lerpDelayMax)
+					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s behind by %.4f > max %.4f, resetting", k, v.frames[v.latestFrameIndex].ts - v.playbackTime, lerpDelayMax) end
 				end
 			end
 
@@ -196,7 +198,7 @@ if CLIENT then
 					v.debugNextFrame = nextFrame
 					v.debugPreviousFrame = previousFrame
 					v.debugFraction = fraction
-					vrmod.utils.DebugPrint("[Lerp] %s using frames %d -> %d at fraction %.3f (playback=%.3f, prev=%.3f, next=%.3f)", k, previousFrame, nextFrame, fraction, v.playbackTime, v.frames[previousFrame].ts, v.frames[nextFrame].ts)
+					if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s using frames %d -> %d at fraction %.3f (playback=%.3f, prev=%.3f, next=%.3f)", k, previousFrame, nextFrame, fraction, v.playbackTime, v.frames[previousFrame].ts, v.frames[nextFrame].ts) end
 					v.lerpedFrame = {}
 					for k2, v2 in pairs(v.frames[previousFrame]) do
 						if k2 == "characterYaw" then
@@ -216,7 +218,7 @@ if CLIENT then
 						plyAng = ply:GetVehicle():GetAngles()
 						local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
 						v.lerpedFrame.characterYaw = forwardAng.yaw
-						vrmod.utils.DebugPrint("[Lerp] %s in vehicle, overriding characterYaw=%d", k, forwardAng.yaw)
+						if cl_debug_net:GetBool() then vrmod.logger.Debug("[NET] %s in vehicle, overriding characterYaw=%d", k, forwardAng.yaw) end
 					end
 
 					v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng = LocalToWorld(v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng, plyPos, plyAng)

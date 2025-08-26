@@ -374,6 +374,7 @@ function VRUtilOpenMenu()
 			label:SetFont("BoldSliderFont")
 			y = y + 35
 		end
+
 		--
 		do
 			local s = vgui.Create("DNumSlider", t)
@@ -497,9 +498,6 @@ function VRUtilOpenMenu()
 		AddCB("Weight limit (Server)", "vrmod_pickup_limit")
 		AddCB("Pickup NPCs (Server)", "vrmod_pickup_npcs")
 		AddCB("Show Pickup halos (Client)", "vrmod_pickup_halos")
-		AddCB("[DEBUG] Print halos info", "vrmod_pickup_debug")
-		AddCB("[DEBUG] Visible wall collision", "vrmod_debug_collisions")
-		AddCB("[DEBUG] Print detailed stats", "vrmod_debug")
 		local function AddSl(lbl, cv, mn, mx, dec)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -541,9 +539,6 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_pickup_npcs", "1")
 			RunConsoleCommand("vrmod_pickup_halos", "1")
 			RunConsoleCommand("vrmod_collisions", "1")
-			RunConsoleCommand("vrmod_debug", "0")
-			RunConsoleCommand("vrmod_debug_collisions", "0")
-			RunConsoleCommand("vrmod_pickup_debug", "0")
 		end
 
 		y = y + 45
@@ -739,7 +734,64 @@ function VRUtilOpenMenu()
 		y = y + 110
 	end
 
-	local maxChecks = 30
+	-- ─────────────── Debug Tab ───────────────
+	do
+		local t = vgui.Create("DPanel", sheet)
+		sheet:AddSheet("Debug", t, "icon16/bug.png")
+		local y = 10
+		local function AddCB(lbl, cv)
+			local cb = t:Add("DCheckBoxLabel")
+			cb:SetDark(true)
+			cb:SetText(lbl)
+			cb:SetConVar(cv)
+			cb:SetPos(20, y)
+			cb:SizeToContents()
+			y = y + 20
+		end
+
+		-- ComboBox for log levels with label
+		local function AddLogLevelCB(lbl, cv)
+			-- Add label first
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y)
+			label:SetText(lbl)
+			label:SetDark(true)
+			label:SizeToContents()
+			y = y + 20
+			local combo = vgui.Create("DComboBox", t)
+			combo:SetPos(20, y)
+			combo:SetSize(150, 20)
+			-- Add choices, mark the one that matches the ConVar
+			local levelMap = {
+				OFF = 0,
+				ERROR = 1,
+				WARN = 2,
+				INFO = 3,
+				DEBUG = 4
+			}
+
+			for name, val in pairs(levelMap) do
+				combo:AddChoice(name, val, val == cv:GetInt())
+			end
+
+			combo.OnSelect = function(self, index, value, data) RunConsoleCommand(cv:GetName(), data) end
+			y = y + 30
+		end
+
+		AddLogLevelCB("Console log level", GetConVar("vrmod_log_console"))
+		AddLogLevelCB("File log level", GetConVar("vrmod_log_file"))
+		AddCB("Debug network", "vrmod_debug_network")
+		AddCB("Print halos info", "vrmod_pickup_debug")
+		AddCB("Visible wall collision", "vrmod_debug_collisions")
+		AddCB("Debug collisions", "vrmod_debug_collision_info")
+		AddCB("Debug melee", "vrmod_debug_melee")
+		AddCB("Debug character", "vrmod_debug_character")
+		AddCB("Debug Glide input", "vrmod_debug_glide_input")
+		AddCB("Redirect server prints to VR console (can cause lags)", "vrmod_console_redirect")
+	end
+
+	-- ─────────────── ArcVR Tab ───────────────
+	local maxChecks = 3
 	local checks = 0
 	timer.Create("VRMod_CheckArcVR", 1, 0, function()
 		if ConVarExists("arcticvr_virtualstock") then

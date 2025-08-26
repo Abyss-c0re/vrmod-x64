@@ -37,11 +37,17 @@ local cachedPushOutPos = {
     right = nil
 }
 
+if SERVER then CreateConVar("vrmod_debug_collision_info", "0", FCVAR_REPLICATED, "Enable detailed collision debug info (shared between server and clients)") end
 -- HELPERS
+local function DebugEnabled()
+    local cv = GetConVar("vrmod_debug_collision_info")
+    return cv and cv:GetBool() or false
+end
+
 local function GetWeaponCollisionBox(phys, isVertical)
     local mins, maxs = phys:GetAABB()
     if not mins or not maxs then
-        vrmod.utils.DebugPrint("GetWeaponCollisionBox: Invalid AABB, returning defaults")
+        if DebugEnabled() then vrmod.logger.Debug("GetWeaponCollisionBox: Invalid AABB, returning defaults") end
         return vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, isVertical, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS
     end
 
@@ -52,12 +58,12 @@ local function GetWeaponCollisionBox(phys, isVertical)
         -- Vertical alignment: prioritize z-axis, swap x and z extents
         mins = Vector(-extents.z * 0.35, -extents.y * 0.35, -extents.x)
         maxs = Vector(extents.z * 0.35, extents.y * 0.35, extents.x)
-        vrmod.utils.DebugPrint("GetWeaponCollisionBox: Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs))
+        if DebugEnabled() then vrmod.logger.Debug("GetWeaponCollisionBox: Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs)) end
     else
         -- Forward alignment: prioritize x-axis
         mins = Vector(-extents.x * 0.8, -extents.y * 0.35, -extents.z * 0.35)
         maxs = Vector(extents.x * 0.8, extents.y * 0.35, extents.z * 0.35)
-        vrmod.utils.DebugPrint("GetWeaponCollisionBox: Forward-aligned (x-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs))
+        if DebugEnabled() then vrmod.logger.Debug("GetWeaponCollisionBox: Forward-aligned (x-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs)) end
     end
 
     -- Ensure the box isn't too small by enforcing minimum dimensions
@@ -221,7 +227,7 @@ end
 -- COLLISIONS
 function vrmod.utils.ComputePhysicsParams(modelPath)
     if not modelPath or modelPath == "" then
-        vrmod.utils.DebugPrint("Invalid or empty model path, caching defaults")
+        if DebugEnabled() then vrmod.logger.Warn("Invalid or empty model path, caching defaults") end
         vrmod.modelCache[modelPath] = {
             radius = vrmod.DEFAULT_RADIUS,
             reach = vrmod.DEFAULT_REACH,
@@ -243,10 +249,10 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
         if baseName then
             local fallback = "models/weapons/w_" .. baseName .. ".mdl"
             if file.Exists(fallback, "GAME") then
-                vrmod.utils.DebugPrint("Replacing %s with valid worldmodel %s", modelPath, fallback)
+                if DebugEnabled() then vrmod.logger.Debug("Replacing %s with valid worldmodel %s", modelPath, fallback) end
                 modelPath = fallback
             else
-                vrmod.utils.DebugPrint("No valid fallback for %s, caching defaults", modelPath)
+                if DebugEnabled() then vrmod.logger.Debug("No valid fallback for %s, caching defaults", modelPath) end
                 vrmod.modelCache[originalModelPath] = {
                     radius = vrmod.DEFAULT_RADIUS,
                     reach = vrmod.DEFAULT_REACH,
@@ -271,7 +277,7 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
     }
 
     if pending[originalModelPath].attempts >= 2 then
-        vrmod.utils.DebugPrint("Max retries (2) reached for %s, caching defaults", originalModelPath)
+        if DebugEnabled() then vrmod.logger.Warn("Max retries (2) reached for %s, caching defaults", originalModelPath) end
         vrmod.modelCache[originalModelPath] = {
             radius = vrmod.DEFAULT_RADIUS,
             reach = vrmod.DEFAULT_REACH,
@@ -292,7 +298,7 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
     util.PrecacheModel(modelPath)
     local ent = CLIENT and ents.CreateClientProp(modelPath) or ents.Create("prop_physics")
     if not IsValid(ent) then
-        vrmod.utils.DebugPrint("Failed to spawn %s (attempt %d)", modelPath, pending[originalModelPath].attempts)
+        if DebugEnabled() then vrmod.logger.Err("Failed to spawn %s (attempt %d)", modelPath, pending[originalModelPath].attempts) end
         pending[originalModelPath].lastAttempt = CurTime()
         return
     end
@@ -332,9 +338,9 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
             isMelee = isMelee
         }
 
-        vrmod.utils.DebugPrint("Computed collision boxes for %s → reach: %.2f units, melee: %s", modelPath, reach, tostring(isMelee))
+        if DebugEnabled() then vrmod.logger.Info("Computed collision boxes for %s → reach: %.2f units, melee: %s", modelPath, reach, tostring(isMelee)) end
     else
-        vrmod.utils.DebugPrint("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts)
+        if DebugEnabled() then vrmod.logger.Info("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts) end
     end
 
     ent:Remove()
@@ -364,7 +370,7 @@ function vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
                     net.WriteVector(cache.maxs_vertical)
                     net.WriteAngle(cache.angles)
                     net.SendToServer()
-                    vrmod.utils.DebugPrint("GetModelParams: Sent computed params for %s to server", modelPath)
+                    if DebugEnabled() then vrmod.logger.Info("GetModelParams: Sent computed params for %s to server", modelPath) end
                 elseif SERVER then
                     net.Start("vrmod_sync_model_params")
                     net.WriteString(modelPath)
@@ -376,14 +382,14 @@ function vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
                     net.WriteVector(cache.maxs_vertical)
                     net.WriteAngle(cache.angles)
                     net.Broadcast()
-                    vrmod.utils.DebugPrint("GetModelParams: Sent computed params for %s to clients", modelPath)
+                    if DebugEnabled() then vrmod.logger.Info("GetModelParams: Sent computed params for %s to clients", modelPath) end
                 end
 
                 -- mark as sent
                 cache.sent = true
             end
         else
-            vrmod.utils.DebugPrint("GetModelParams: Skipping sync for %s due to default parameters", modelPath)
+            if DebugEnabled() then vrmod.logger.Info("GetModelParams: Skipping sync for %s due to default parameters", modelPath) end
         end
         return cache.radius, cache.reach, mins, maxs, ang, cache.isMelee
     end
@@ -400,7 +406,7 @@ function vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
             if vrmod.modelCache[modelPath] and vrmod.modelCache[modelPath].computed then vrmod.utils.GetModelParams(modelPath, ply, offsetAng) end
         end)
 
-        vrmod.utils.DebugPrint("GetModelParams: Scheduled computation for %s", modelPath)
+        if DebugEnabled() then vrmod.logger.Debug("GetModelParams: Scheduled computation for %s", modelPath) end
     end
     return vrmod.DEFAULT_RADIUS, vrmod.DEFAULT_REACH, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, vrmod.GetRightHandAng(ply), false
 end
@@ -430,19 +436,21 @@ function vrmod.utils.GetCachedWeaponParams(wep, ply, side)
     local model = vrmod.utils.WepInfo(wep)
     if SERVER and vrmod.modelCache[model] and vrmod.modelCache[model].computed then
         local c = vrmod.modelCache[model]
-        vrmod.utils.DebugPrint("GetCachedWeaponParams: Using server-side synced params for %s", model)
+        if DebugEnabled() then vrmod.logger.Info("GetCachedWeaponParams: Using server-side synced params for %s", model) end
         return c.radius, c.reach, c.mins_horizontal, c.maxs_horizontal, c.angles, c.isMelee
     end
 
     if pending[model] and CurTime() - (pending[model].lastAttempt or 0) < 2 then
-        vrmod.utils.DebugPrint("GetCachedWeaponParams: Computation pending for %s, waiting", model)
+        if DebugEnabled() then vrmod.logger.Debug("GetCachedWeaponParams: Computation pending for %s, waiting", model) end
         return nil
     end
 
     if radius ~= vrmod.DEFAULT_RADIUS or reach ~= vrmod.DEFAULT_REACH or mins ~= vrmod.DEFAULT_MINS then return radius, reach, mins, maxs, angles, isMelee end
     if not pending[model] then
-        vrmod.utils.DebugPrint("GetCachedWeaponParams: Scheduling computation for %s", model)
-        timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(model) end)
+        if DebugEnabled() then
+            vrmod.logger.Debug("GetCachedWeaponParams: Scheduling computation for %s", model)
+            timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(model) end)
+        end
     end
     return nil
 end
@@ -479,11 +487,11 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
         -- Clipping check: full box, no reach
         --isClipped, hitNormal = SphereCollidesWithWorld(pos, reach)
         isClipped, hitNormal = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs)
-        if isClipped then vrmod.utils.DebugPrint("[VRMod] Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped) end
+        if DebugEnabled() then if isClipped then vrmod.logger.Debug("[VRMod] Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped) end end
     else
         if not radius then radius = vrmod.DEFAULT_RADIUS end
         isClipped, hitNormal = SphereCollidesWithWorld(pos, radius)
-        if isClipped then vrmod.utils.DebugPrint("[VRMod] Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped) end
+        if DebugEnabled() then if isClipped then vrmod.logger.Debug("[VRMod] Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped) end end
     end
 
     local pushOutPos = pos
@@ -605,7 +613,7 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
             correctedAng:RotateAroundAxis(newRight, ang:Up():Dot(newUp) < 0 and -90 or 90)
         end
 
-        vrmod.utils.DebugPrint("[VRMod] Weapon clipping detected. Push-out pos:", correctedPos, "angle:", correctedAng)
+        if DebugEnabled() then vrmod.logger.Debug("[VRMod] Weapon clipping detected. Push-out pos:", correctedPos, "angle:", correctedAng) end
         return correctedPos, correctedAng
     end
     return pos, ang
@@ -729,15 +737,14 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                             righthandPos = corrected
                         end
 
-                        cachedPushOutPos[hand] = corrected
-                        vrmod.utils.DebugPrint("[VRMod] Clipping detected for:", hand, "Push-out pos:", corrected)
+                        if DebugEnabled() then vrmod.logger.Debug("[VRMod] Clipping detected for:", hand, "Push-out pos:", corrected) end
                     end
                 else
                     lastNonClippedPos[hand] = nil
                     lastNonClippedNormal[hand] = nil
                     cachedPushOutPos[hand] = nil
                     shape.isClipped = false
-                    vrmod.utils.DebugPrint("[VRMod] Invalid pushOutPos or player for:", hand)
+                    if DebugEnabled() then vrmod.logger.Debug("[VRMod] Invalid pushOutPos or player for:", hand) end
                 end
 
                 if not shape.isClipped then

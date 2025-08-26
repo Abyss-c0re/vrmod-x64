@@ -18,6 +18,7 @@ if CLIENT then
 		g_VR.zeroHandAngles[i] = Angle(0, 0, 0)
 	end
 
+	local cl_debug_character = CreateClientConVar("vrmod_debug_character", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 	g_VR.defaultOpenHandAngles = {
 		-- LEFT HAND
 		-- Thumb
@@ -443,7 +444,7 @@ if CLIENT then
 	local up = Vector(0, 0, 1)
 	local function PreRenderFunc()
 		if convars.vrmod_oldcharacteryaw:GetBool() then
-			local unused, relativeAng = WorldToLocal(zeroVec, Angle(0, g_VR.tracking.hmd.ang.yaw, 0), zeroVec, Angle(0, g_VR.characterYaw, 0))
+			local _, relativeAng = WorldToLocal(zeroVec, Angle(0, g_VR.tracking.hmd.ang.yaw, 0), zeroVec, Angle(0, g_VR.characterYaw, 0))
 			if relativeAng.yaw > 45 then
 				g_VR.characterYaw = g_VR.characterYaw + relativeAng.yaw - 45
 			elseif relativeAng.yaw < -45 then
@@ -492,6 +493,8 @@ if CLIENT then
 		if not lastLerpedFrames[steamid] or not vrmod.utils.FramesAreEqual(currentFrame, lastLerpedFrames[steamid]) then
 			UpdateIK(ply)
 			lastLerpedFrames[steamid] = vrmod.utils.CopyFrame(currentFrame)
+		else
+			if cl_debug_character:GetBool() then vrmod.logger.Debug("[Lerp] Identical frame, skipping bone calculations for " .. steamid) end
 		end
 
 		-- Manipulate arms

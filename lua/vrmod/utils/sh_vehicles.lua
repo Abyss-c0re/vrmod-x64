@@ -110,7 +110,7 @@ function vrmod.utils.PatchGlideCamera()
     local Camera = Glide.Camera
     if not Camera then return end
     local Config = Glide.Config
-    if not Config then print("[VRMod] Warning: Glide.Config not found, using fallback values") end
+    if not Config then vrmod.logger.Warn("[Glide] Warning: Glide.Config not found, using fallback values") end
     -- Store original functions
     if not Camera._OrigCalcView then Camera._OrigCalcView = Camera.CalcView end
     if not Camera._OrigCreateMove then Camera._OrigCreateMove = Camera.CreateMove end
@@ -191,6 +191,4 @@ function vrmod.utils.PatchGlideCamera()
         -- Non-VR mode: Call original CreateMove
         self:_OrigCreateMove(cmd)
     end
-
-    print("[VRMod] Patched Glide.Camera for VR support")
 end

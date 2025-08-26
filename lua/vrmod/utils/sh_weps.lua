@@ -43,7 +43,7 @@ function vrmod.utils.UpdateViewModelPos(pos, ang, override)
         local collisionShape = vrmod._collisionShapeByHand and vrmod._collisionShapeByHand.right
         if collisionShape and collisionShape.isClipped and collisionShape.pushOutPos then
             modelPos = collisionShape.pushOutPos
-            vrmod.utils.DebugPrint("[VRMod] Applying collision-corrected pos for viewmodel:", modelPos)
+            vrmod.logger.Debug("[VRMod] Applying collision-corrected pos for viewmodel:", modelPos)
         end
 
         local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, modelPos, ang)
