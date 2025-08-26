@@ -44,18 +44,12 @@ local function CanPickupEntity(v, ply, cv)
 	return true
 end
 
-
 local function IsNonPickupable(ent)
 	if not IsValid(ent) then return true end
-
 	local class = ent:GetClass():lower()
 	local model = (ent:GetModel() or ""):lower()
 	local key = class .. "|" .. model
-
-	if pickupableCache[key] ~= nil then
-		return pickupableCache[key]
-	end
-
+	if pickupableCache[key] ~= nil then return pickupableCache[key] end
 	-- Class blacklist (exact)
 	if blacklistedClasses[class] then
 		pickupableCache[key] = true
@@ -86,12 +80,9 @@ local function IsNonPickupable(ent)
 	if ent:GetMoveType() ~= MOVETYPE_VPHYSICS then
 		if CLIENT and GetConVar("vrmod_pickup_debug"):GetBool() and not debugPrintedClasses[class] then
 			debugPrintedClasses[class] = true
-			print("[VRMod] DEBUG fallback: non-blacklisted non-physics entity")
-			print("  Class: " .. class)
-			print("  Model: " .. model)
-			print("  MoveType: " .. tostring(ent:GetMoveType()))
-			print("  Owner: " .. tostring(ent:GetOwner()))
+			vrmod.logger.Debug("Class: " .. class .. " | Model: " .. model .. " | MoveType: " .. tostring(ent:GetMoveType()) .. " | Owner: " .. tostring(ent:GetOwner()))
 		end
+
 		pickupableCache[key] = true
 		return true
 	end
@@ -99,7 +90,6 @@ local function IsNonPickupable(ent)
 	pickupableCache[key] = false
 	return false
 end
-
 
 local function IsValidPickupTarget(ent, ply, bLeftHand)
 	if not IsValid(ent) or ent:GetNoDraw() or ent:IsDormant() then return false end
