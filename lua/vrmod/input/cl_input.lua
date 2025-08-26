@@ -62,7 +62,7 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 		g_VR.vehicle.type = vType
 		g_VR.vehicle.wheel_bone = boneId
 		g_VR.vehicle.glide = glide
-		print("Vehicle type: " .. tostring(vType))
+		vrmod.logger.Info("Steer grip type: " .. tostring(vType))
 	end)
 
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")

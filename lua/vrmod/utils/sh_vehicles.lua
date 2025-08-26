@@ -90,7 +90,7 @@ function vrmod.utils.GetSteeringInfo(ply)
         if vType == Glide.VEHICLE_TYPE.MOTORCYCLE or sitSeq == "drive_airboat" then
             return glideVeh, boneId, "motorcycle", true
         elseif vType == Glide.VEHICLE_TYPE.BOAT then
-            return glideVeh, boneId, "boat", true
+            return glideVeh, boneId, boneType, true
         elseif vType == Glide.VEHICLE_TYPE.CAR then
             return glideVeh, boneId, "car", true
         elseif vType == Glide.VEHICLE_TYPE.PLANE or vType == Glide.VEHICLE_TYPE.HELICOPTER then
