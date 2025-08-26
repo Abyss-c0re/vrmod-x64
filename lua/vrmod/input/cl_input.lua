@@ -55,7 +55,7 @@ local leftGrip, rightGrip = false, false
 --local leftHand, rightHand
 -- Switch action set when entering vehicle
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
-	timer.Simple(1, function()
+	timer.Simple(0.1, function()
 		local ply = LocalPlayer()
 		local vehicle, boneId, vType, glide = vrmod.utils.GetSteeringInfo(ply)
 		g_VR.vehicle.current = vehicle
