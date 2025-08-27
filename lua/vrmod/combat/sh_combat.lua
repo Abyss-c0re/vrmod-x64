@@ -301,7 +301,7 @@ if SERVER then
             local list = impactSounds[customImpactType]
             if not list then
                 list = impactSounds.fist
-                print("[VRMod_Melee] Warning: Invalid impactType '" .. tostring(customImpactType) .. "', falling back to 'fist'")
+                vrmod.logger.Warn("[Melee] Invalid impactType '" .. tostring(customImpactType) .. "', falling back to 'fist'")
             end
 
             snd = list[math.random(#list)]
@@ -314,9 +314,9 @@ if SERVER then
         local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
         if cv_debug then
             local targetVelDot = targetVel:Dot(dir)
-            print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
+            vrmod.logger.Debug(string.format("[Melee] %s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
         else
-            print(string.format("[VRMod_Melee][Server] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
+            print(string.format("[Melee] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
         end
     end)
 end
