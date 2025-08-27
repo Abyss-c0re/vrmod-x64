@@ -216,7 +216,6 @@ if CLIENT then
 		end
 	end
 
-	-- Handle server response
 	net.Receive("vrmod_pickup", function()
 		local ply, ent = net.ReadEntity(), net.ReadEntity()
 		if not IsValid(ply) or not IsValid(ent) then return end
@@ -234,39 +233,58 @@ if CLIENT then
 		local bLeftHand = net.ReadBool()
 		local sid = ply:SteamID()
 		if not g_VR.net[sid] then return end
+		-- get hand position
+		local handPos
+		if bLeftHand then
+			handPos = vrmod.GetLeftHandPos(ply)
+		else
+			handPos = vrmod.GetRightHandPos(ply)
+		end
+
+		if not handPos then return end
+		-- compute "close enough" threshold
+		local mins, maxs = ent:GetCollisionBounds()
+		local entitySize = (maxs - mins):Length() * 0.5
+		local tolerance = entitySize * 1.5
+		-- check distance
+		local distSqr = handPos:DistToSqr(ent:GetPos())
+		if distSqr < tolerance * tolerance then
+			-- too close → don’t override, keep whatever ent.RenderOverride was before
+			return
+		end
+
+		-- only create override if far enough
 		ent.VRPickupRenderOverride = function()
-			-- Use VRMod API to get hand pos and angle instead of direct frame access
-			local handPos, handAng, trace
+			local handPos, handAng
 			if bLeftHand then
 				handPos = vrmod.GetLeftHandPos(ply)
 				handAng = vrmod.GetLeftHandAng(ply)
-				trace = vrmod.utils.TraceHand(ply, "left")
 			else
 				handPos = vrmod.GetRightHandPos(ply)
 				handAng = vrmod.GetRightHandAng(ply)
-				trace = vrmod.utils.TraceHand(ply, "right")
 			end
 
-			-- Default offset along the hand's forward direction
-			local offset = handAng:Forward() * vrmod.DEFAULT_OFFSET
-			-- Get the entity's bounding box to account for its size
+			if not handPos or not handAng then return end
+			-- Use bounding box to approximate entity radius
 			local mins, maxs = ent:GetCollisionBounds()
-			local entitySize = (maxs - mins):Length() * 0.5 -- Approximate radius of the entity
-			local minDistance = entitySize - entitySize * 0.5 -- Ensure entity is pushed out enough
-			local finalPos
-			if trace and IsValid(trace.Entity) and trace.Entity == ent then
-				-- If the trace hits the entity itself, adjust the position to avoid clipping
-				local hitPos = trace.HitPos
-				local toHand = (handPos - hitPos):GetNormalized()
-				finalPos = hitPos + toHand * minDistance -- Push the entity away from the hand
-			else
-				-- No collision, use the default offset
-				finalPos = handPos + offset
+			local entityRadius = (maxs - mins):Length() * 0.3
+			-- Desired position: in front of hand
+			local finalPos = handPos + handAng:Forward()
+			-- Vector from hand to entity
+			local toEntity = finalPos - handPos
+			local dist = toEntity:Length()
+			-- Ensure the hand never ends up inside the bounding radius
+			local safeDistance = math.max(entityRadius, vrmod.DEFAULT_OFFSET)
+			if dist < safeDistance then
+				if dist == 0 then
+					-- Avoid zero-length vector
+					toEntity = handAng:Forward()
+					dist = 1
+				end
+
+				finalPos = handPos + toEntity:GetNormalized() * safeDistance
 			end
 
-			-- Ensure the entity stays at least minDistance away from the hand
-			local toEntity = finalPos - handPos
-			if toEntity:Length() < minDistance then finalPos = handPos + toEntity:GetNormalized() * minDistance end
 			ent:SetPos(finalPos)
 			ent:SetupBones()
 			ent:DrawModel()
@@ -373,14 +391,14 @@ if SERVER then
 		if not IsValid(pickupController) then
 			pickupController = ents.Create("vrmod_pickup")
 			pickupController.ShadowParams = {
-				secondstoarrive = engine.TickInterval(),
-				maxangular = 3000,
-				maxangulardamp = 300,
-				maxspeed = 3000,
-				maxspeeddamp = 300,
-				dampfactor = 0.7,
+				secondstoarrive = 0.001,
+				maxangular = 999999,
+				maxangulardamp = 999999,
+				maxspeed = 999999,
+				maxspeeddamp = 999999,
+				dampfactor = 0.3,
 				teleportdistance = 0,
-				deltatime = FrameTime()
+				deltatime = 0
 			}
 
 			function pickupController:PhysicsSimulate(phys, dt)
