@@ -221,11 +221,6 @@ if CLIENT then
 		if not IsValid(ply) or not IsValid(ent) then return end
 		local bDrop = net.ReadBool()
 		if bDrop then
-			if ent.RenderOverride == ent.VRPickupRenderOverride then
-				ent.RenderOverride = nil
-				ent.VRPickupRenderOverride = nil
-			end
-
 			hook.Call("VRMod_Drop", nil, ply, ent)
 			return
 		end
@@ -233,64 +228,6 @@ if CLIENT then
 		local bLeftHand = net.ReadBool()
 		local sid = ply:SteamID()
 		if not g_VR.net[sid] then return end
-		-- get hand position
-		local handPos
-		if bLeftHand then
-			handPos = vrmod.GetLeftHandPos(ply)
-		else
-			handPos = vrmod.GetRightHandPos(ply)
-		end
-
-		if not handPos then return end
-		-- compute "close enough" threshold
-		local mins, maxs = ent:GetCollisionBounds()
-		local entitySize = (maxs - mins):Length() * 0.5
-		local tolerance = entitySize * 1.5
-		-- check distance
-		local distSqr = handPos:DistToSqr(ent:GetPos())
-		if distSqr < tolerance * tolerance then
-			-- too close → don’t override, keep whatever ent.RenderOverride was before
-			return
-		end
-
-		-- only create override if far enough
-		ent.VRPickupRenderOverride = function()
-			local handPos, handAng
-			if bLeftHand then
-				handPos = vrmod.GetLeftHandPos(ply)
-				handAng = vrmod.GetLeftHandAng(ply)
-			else
-				handPos = vrmod.GetRightHandPos(ply)
-				handAng = vrmod.GetRightHandAng(ply)
-			end
-
-			if not handPos or not handAng then return end
-			-- Use bounding box to approximate entity radius
-			local mins, maxs = ent:GetCollisionBounds()
-			local entityRadius = (maxs - mins):Length() * 0.3
-			-- Desired position: in front of hand
-			local finalPos = handPos + handAng:Forward()
-			-- Vector from hand to entity
-			local toEntity = finalPos - handPos
-			local dist = toEntity:Length()
-			-- Ensure the hand never ends up inside the bounding radius
-			local safeDistance = math.max(entityRadius, vrmod.DEFAULT_OFFSET)
-			if dist < safeDistance then
-				if dist == 0 then
-					-- Avoid zero-length vector
-					toEntity = handAng:Forward()
-					dist = 1
-				end
-
-				finalPos = handPos + toEntity:GetNormalized() * safeDistance
-			end
-
-			ent:SetPos(finalPos)
-			ent:SetupBones()
-			ent:DrawModel()
-		end
-
-		ent.RenderOverride = ent.VRPickupRenderOverride
 		if ply == LocalPlayer() then g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] = ent end
 		hook.Call("VRMod_Pickup", nil, ply, ent)
 	end)
@@ -445,6 +382,7 @@ if SERVER then
 			pickupController:StartMotionController()
 		end
 
+		-- determine index (same as your code)
 		local index = pickupCount + 1
 		for k, v2 in ipairs(pickupList) do
 			if v2.ent == ent then
@@ -457,19 +395,14 @@ if SERVER then
 		if index > pickupCount then
 			pickupCount = pickupCount + 1
 			if ent:GetClass() == "prop_ragdoll" then vrmod.utils.SetBoneMass(ent, 15, 0.5) end
-			local phys = ent:GetPhysicsObject()
-			if IsValid(phys) then
-				pickupController:AddToMotionController(phys)
-				phys:Wake()
-			end
 		end
 
-		-- For non-ragdoll, store localPos/localAng relative to hand pose for entity root
+		local didSnap = vrmod.utils.SnapEntityToHand(ent, handPos, handAng)
 		local lpos, lang
 		if ent:GetClass() ~= "prop_ragdoll" then
 			lpos, lang = WorldToLocal(ent:GetPos(), ent:GetAngles(), handPos, handAng)
 		else
-			lpos, lang = Vector(0, 0, 0), Angle(0, 0, 0) -- Not used for ragdolls, since per-physobj offsets exist
+			lpos, lang = Vector(0, 0, 0), Angle(0, 0, 0)
 		end
 
 		pickupList[index] = {
@@ -480,13 +413,19 @@ if SERVER then
 			localAng = lang,
 			collisionGroup = ent:GetCollisionGroup(),
 			steamid = sid,
-			ply = ply
+			ply = ply,
+			snapped = didSnap
 		}
 
 		g_VR[sid].heldItems = g_VR[sid].heldItems or {}
 		g_VR[sid].heldItems[bLeftHand and 1 or 2] = pickupList[index]
 		ent.vrmod_pickup_info = pickupList[index]
-		vrmod.utils.PatchOwnerCollision(ent, ply)
+		local phys = IsValid(ent) and ent:GetPhysicsObject()
+		if IsValid(phys) and IsValid(pickupController) then
+			pickupController:AddToMotionController(phys)
+			phys:Wake()
+		end
+
 		net.Start("vrmod_pickup")
 		net.WriteEntity(ply)
 		net.WriteEntity(ent)
