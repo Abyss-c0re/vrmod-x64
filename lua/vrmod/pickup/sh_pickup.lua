@@ -28,8 +28,7 @@ local function IsImportantPickup(ent)
 end
 
 local function HasHeldWeaponRight(ply)
-	local sid = ply:SteamID()
-	return g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[2] and vrmod.utils.IsWeaponEntity(g_VR[sid].heldItems[2].ent)
+	return vrmod.utils.IsValidWep(ply:GetActiveWeapon())
 end
 
 local function CanPickupEntity(v, ply, cv)
@@ -104,39 +103,26 @@ end
 local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	-- Ensure a sane default
 	if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
-	-- Compute grab origin in worldspace
-	local grabOffset = Vector(3, bLeftHand and -1.5 or 1.5, 0)
-	local grabPoint = LocalToWorld(grabOffset, Angle(), handPos, handAng)
-	local radius = pickupRange * 100
-	-- Gather candidates
-	local candidates = {}
-	for _, ent in ipairs(ents.FindInSphere(grabPoint, radius)) do
-		-- Basic filters
-		if ent == ply then continue end
-		if not IsValidPickupTarget(ent, ply, bLeftHand) then continue end
-		if not CanPickupEntity(ent, ply, convarValues or vrmod.GetConvars()) then continue end
-		-- AABB “point-in-box” check around the entity
-		local boost = IsImportantPickup(ent) and 5.0 or 1.0
-		local localPos = WorldToLocal(grabPoint, Angle(), ent:GetPos(), ent:GetAngles())
-		local mins, maxs = ent:OBBMins() * pickupRange * boost, ent:OBBMaxs() * pickupRange * boost
-		if not localPos:WithinAABox(mins, maxs) then continue end
-		-- Weapon‑specific rules
-		if vrmod.utils.IsWeaponEntity(ent) then
-			local aw = ply:GetActiveWeapon()
-			if IsValid(aw) and aw:GetClass() == ent:GetClass() then continue end
-			-- Prevent right‑hand from grabbing a second weapon if it already holds one
-			if not bLeftHand and HasHeldWeaponRight(ply) then continue end
-		end
-
-		table.insert(candidates, ent)
+	-- Trace from palm
+	local hand = bLeftHand and "left" or "right"
+	local tr = vrmod.utils.TraceHand(ply, hand, true)
+	if not tr or not tr.Entity or not IsValid(tr.Entity) then return nil end
+	local ent = tr.Entity
+	-- Basic filters
+	if ent == ply then return nil end
+	if not IsValidPickupTarget(ent, ply, bLeftHand) then return nil end
+	if not CanPickupEntity(ent, ply, convarValues or vrmod.GetConvars()) then return nil end
+	-- Range check with boost
+	local boost = IsImportantPickup(ent) and 5.0 or 1.0
+	local maxDist = pickupRange * 100 * boost
+	if tr.HitPos:DistToSqr(handPos) > maxDist ^ 2 then return nil end
+	-- Weapon-specific rules
+	if vrmod.utils.IsWeaponEntity(ent) then
+		local aw = ply:GetActiveWeapon()
+		if IsValid(aw) and aw:GetClass() == ent:GetClass() then return nil end
+		if not bLeftHand and HasHeldWeaponRight(ply) then return nil end
 	end
-
-	-- Prioritize weapons
-	for _, ent in ipairs(candidates) do
-		if IsImportantPickup(ent) then return ent end
-	end
-	-- Fallback: first valid candidate
-	return candidates[1]
+	return ent
 end
 
 if CLIENT then
@@ -200,13 +186,7 @@ if CLIENT then
 			g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] = nil
 		else
 			local targetEnt = bLeftHand and pickupTargetEntLeft or pickupTargetEntRight
-			local handSlot = bLeftHand and 1 or 2
-			if g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[handSlot] then
-				local ent = g_VR[sid].heldItems[handSlot].ent
-				if not IsValid(ent) then g_VR[sid].heldItems[handSlot] = nil end
-			end
-
-			if IsValid(targetEnt) and not (g_VR[sid] and g_VR[sid].heldItems and g_VR[sid].heldItems[handSlot]) then
+			if IsValid(targetEnt) and g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] ~= targetEnt then
 				net.Start("vrmod_pickup")
 				net.WriteBool(bLeftHand)
 				net.WriteBool(false)
