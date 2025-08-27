@@ -1,6 +1,13 @@
 g_VR = g_VR or {}
 local convars, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_net_tickrate", nil, tostring(math.ceil(1 / engine.TickInterval())), FCVAR_REPLICATED, nil, nil, nil, tonumber, nil)
+if SERVER then CreateConVar("vrmod_debug_network", "0", FCVAR_REPLICATED, "Enable detailed collision debug info (shared between server and clients)") end
+-- HELPERS
+local function DebugEnabled()
+	local cv = GetConVar("vrmod_debug_network")
+	return cv and cv:GetBool() or false
+end
+
 local function netReadFrame()
 	local frame = {
 		--ts = net.ReadFloat(),
@@ -137,6 +144,7 @@ if CLIENT then
 				if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
 					SendFrame(frame)
 				else
+					vrmod.logger.Debug("[NET] Skipping identical frame")
 					if not lastSentFrame then SendFrame(frame) end
 				end
 			end
@@ -149,87 +157,53 @@ if CLIENT then
 		net.SendToServer()
 	end
 
-	-- update all lerpedFrames, except for the local player (this function will be hooked to PreRender)
+	local lastLerpedFrames = {}
 	local function LerpOtherVRPlayers()
-		local lerpDelay = convarValues.vrmod_net_delay
-		local lerpDelayMax = convarValues.vrmod_net_delaymax
 		for k, v in pairs(g_VR.net) do
 			local ply = player.GetBySteamID(k)
-			if #v.frames < 2 or not ply then continue end
-			if v.buffering then
-				if not (v.playbackTime > v.frames[v.latestFrameIndex].ts - lerpDelay) then
-					v.buffering = false
-					v.sysTime = SysTime()
-					v.debugState = "playing"
-					vrmod.utils.DebugPrint("[Lerp] %s finished buffering, entering play", k)
-				end
-			else
-				-- advance playhead
-				local oldTime = v.playbackTime
-				v.playbackTime = v.playbackTime + SysTime() - v.sysTime
-				v.sysTime = SysTime()
-				vrmod.utils.DebugPrint("[Lerp] %s playhead advanced %.4f -> %.4f", k, oldTime, v.playbackTime)
-				-- reached end
-				if v.playbackTime > v.frames[v.latestFrameIndex].ts then
-					v.buffering = true
-					v.debugState = "buffering (reached end)"
-					v.playbackTime = v.frames[v.latestFrameIndex].ts
-					vrmod.utils.DebugPrint("[Lerp] %s reached end, entering buffer", k)
-				end
+			if not ply or #v.frames < 1 then
+				if DebugEnabled() then vrmod.logger.Debug("Skipping player " .. tostring(k) .. " (no frames or invalid)") end
+				continue
+			end
 
-				-- too far behind
-				if v.frames[v.latestFrameIndex].ts - v.playbackTime > lerpDelayMax then
-					v.buffering = true
-					v.playbackTime = v.frames[v.latestFrameIndex].ts
-					v.debugState = "buffering (catching up)"
-					vrmod.utils.DebugPrint("[Lerp] %s behind by %.4f > max %.4f, resetting", k, v.frames[v.latestFrameIndex].ts - v.playbackTime, lerpDelayMax)
+			local latestFrame = v.frames[v.latestFrameIndex]
+			-- Build lerped frame by copying the latest frame
+			local lerpedFrame = {}
+			for k2, v2 in pairs(latestFrame) do
+				if k2 == "characterYaw" then
+					lerpedFrame[k2] = v2
+				elseif isnumber(v2) or isvector(v2) or isangle(v2) then
+					lerpedFrame[k2] = v2
 				end
 			end
 
-			-- lerp
-			for i = 1, #v.frames do
-				local nextFrame = i
-				local previousFrame = i - 1
-				if previousFrame == 0 then previousFrame = #v.frames end
-				if v.frames[nextFrame].ts >= v.playbackTime and v.frames[previousFrame].ts <= v.playbackTime then
-					local fraction = (v.playbackTime - v.frames[previousFrame].ts) / (v.frames[nextFrame].ts - v.frames[previousFrame].ts)
-					v.debugNextFrame = nextFrame
-					v.debugPreviousFrame = previousFrame
-					v.debugFraction = fraction
-					vrmod.utils.DebugPrint("[Lerp] %s using frames %d -> %d at fraction %.3f (playback=%.3f, prev=%.3f, next=%.3f)", k, previousFrame, nextFrame, fraction, v.playbackTime, v.frames[previousFrame].ts, v.frames[nextFrame].ts)
-					v.lerpedFrame = {}
-					for k2, v2 in pairs(v.frames[previousFrame]) do
-						if k2 == "characterYaw" then
-							v.lerpedFrame[k2] = LerpAngle(fraction, Angle(0, v2, 0), Angle(0, v.frames[nextFrame][k2], 0)).yaw
-						elseif isnumber(v2) then
-							v.lerpedFrame[k2] = Lerp(fraction, v2, v.frames[nextFrame][k2])
-						elseif isvector(v2) then
-							v.lerpedFrame[k2] = LerpVector(fraction, v2, v.frames[nextFrame][k2])
-						elseif isangle(v2) then
-							v.lerpedFrame[k2] = LerpAngle(fraction, v2, v.frames[nextFrame][k2])
-						end
-					end
+			-- Apply world transform
+			local plyPos, plyAng = ply:GetPos(), Angle()
+			if ply:InVehicle() then
+				plyAng = ply:GetVehicle():GetAngles()
+				local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
+				lerpedFrame.characterYaw = forwardAng.yaw
+			end
 
-					-- Apply world transform
-					local plyPos, plyAng = ply:GetPos(), Angle()
-					if ply:InVehicle() then
-						plyAng = ply:GetVehicle():GetAngles()
-						local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
-						v.lerpedFrame.characterYaw = forwardAng.yaw
-						vrmod.utils.DebugPrint("[Lerp] %s in vehicle, overriding characterYaw=%d", k, forwardAng.yaw)
-					end
+			for _, part in ipairs({"hmd", "lefthand", "righthand", "waist", "leftfoot", "rightfoot"}) do
+				if lerpedFrame[part .. "Pos"] then lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"] = LocalToWorld(lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"], plyPos, plyAng) end
+			end
 
-					v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng = LocalToWorld(v.lerpedFrame.hmdPos, v.lerpedFrame.hmdAng, plyPos, plyAng)
-					v.lerpedFrame.lefthandPos, v.lerpedFrame.lefthandAng = LocalToWorld(v.lerpedFrame.lefthandPos, v.lerpedFrame.lefthandAng, plyPos, plyAng)
-					v.lerpedFrame.righthandPos, v.lerpedFrame.righthandAng = LocalToWorld(v.lerpedFrame.righthandPos, v.lerpedFrame.righthandAng, plyPos, plyAng)
-					if v.lerpedFrame.waistPos then
-						v.lerpedFrame.waistPos, v.lerpedFrame.waistAng = LocalToWorld(v.lerpedFrame.waistPos, v.lerpedFrame.waistAng, plyPos, plyAng)
-						v.lerpedFrame.leftfootPos, v.lerpedFrame.leftfootAng = LocalToWorld(v.lerpedFrame.leftfootPos, v.lerpedFrame.leftfootAng, plyPos, plyAng)
-						v.lerpedFrame.rightfootPos, v.lerpedFrame.rightfootAng = LocalToWorld(v.lerpedFrame.rightfootPos, v.lerpedFrame.rightfootAng, plyPos, plyAng)
-					end
+			-- First frame: snap
+			if not lastLerpedFrames[k] then
+				v.lerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
+				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
+				if DebugEnabled() then vrmod.logger.Debug("Initialized lerpedFrame for " .. tostring(ply)) end
+				continue
+			end
 
-					break
-				end
+			-- Normal: only update if changed
+			if not vrmod.utils.FramesAreEqual(lerpedFrame, lastLerpedFrames[k]) then
+				v.lerpedFrame = lerpedFrame
+				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
+				if DebugEnabled() then vrmod.logger.Debug("Updated lerpedFrame for " .. tostring(ply)) end
+			else
+				if DebugEnabled() then vrmod.logger.Debug("No change in frame for " .. tostring(ply)) end
 			end
 		end
 	end
@@ -423,7 +397,7 @@ if SERVER then
 	util.AddNetworkString("vrutil_net_entervehicle")
 	util.AddNetworkString("vrutil_net_exitvehicle")
 	vrmod.NetReceiveLimited("vrutil_net_tick", convarValues.vrmod_net_tickrate + 5, 1200, function(len, ply)
-		--print("sv received net_tick, len: "..len)
+		if DebugEnabled() then vrmod.logger.Debug("[NET] received net_tick, len: " .. len) end
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
 		local frame = netReadFrame()
@@ -503,7 +477,7 @@ if SERVER then
 					net.WriteBool(v.dontHideBullets)
 					net.Send(ply)
 				else
-					print("VRMod: Invalid SteamID \"" .. k .. "\" found in player table")
+					vrmod.logger.Err("Invalid SteamID \"" .. k .. "\" found in player table")
 				end
 			end
 		end

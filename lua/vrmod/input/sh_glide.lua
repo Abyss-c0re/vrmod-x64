@@ -9,6 +9,12 @@ local validVehicleTypes = {
     [Glide.VEHICLE_TYPE.HELICOPTER] = true
 }
 
+if SERVER then CreateConVar("vrmod_debug_glide_input", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED, "Enable detailed collision debug info (shared between server and clients)") end
+local function DebugEnabled()
+    local cv = GetConVar("vrmod_debug_glide_input")
+    return cv and cv:GetBool() or false
+end
+
 if SERVER then
     local cvar = GetConVar("glide_ragdoll_enable")
     if cvar then
@@ -32,7 +38,7 @@ if SERVER then
             vehicle:SetInputFloat(1, "brake", brake)
             vehicle:SetInputFloat(1, "steer", steer)
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
-                vrmod.utils.DebugPrint("Server received - Pitch: " .. pitch .. ", Yaw: " .. yaw .. ", Roll: " .. roll)
+                if DebugEnabled() then vrmod.logger.Debug("Server received - Pitch: " .. pitch .. ", Yaw: " .. yaw .. ", Roll: " .. roll) end
                 vehicle:SetInputFloat(1, "throttle", math.Clamp(throttle, -1, 1))
                 vehicle:SetInputFloat(1, "pitch", math.Clamp(pitch, -1, 1))
                 vehicle:SetInputFloat(1, "yaw", math.Clamp(yaw, -1, 1))
@@ -138,7 +144,7 @@ else -- CLIENT
 
     hook.Add("VRMod_Start", "Glide_ForceMouseFlyMode", function()
         if not (Glide and Glide.Config) then
-            print("[Glide VR] Glide not loaded, skipping mode change")
+            if DebugEnabled() then vrmod.logger.Debug("[Glide] Glide not loaded, skipping mode change") end
             return
         end
 
@@ -147,7 +153,7 @@ else -- CLIENT
         if originalRagdollEnable == nil then
             originalRagdollEnable = cfg.glide_ragdoll_enable
             if originalRagdollEnable ~= 0 then
-                print("[Glide VR] Disabling Glide ragdoll mode for VR")
+                if DebugEnabled() then vrmod.logger.Debug("[Glide] Disabling Glide ragdoll mode for VR") end
                 cfg.glide_ragdoll_enable = 0
             end
         end
@@ -155,34 +161,35 @@ else -- CLIENT
         -- Store and force mouse fly mode
         if cfg.mouseFlyMode ~= 2 then
             originalMouseFlyMode = cfg.mouseFlyMode
-            print(string.format("[Glide VR] Saving original mode %s, forcing mode 2", tostring(originalMouseFlyMode)))
+            if DebugEnabled() then vrmod.logger.Debug(string.format("[Glide] Saving original mode %s, forcing mode 2", tostring(originalMouseFlyMode))) end
             ApplyMouseFlyMode(2)
         else
-            print("[Glide VR] Mouse fly mode already 2")
+            if DebugEnabled() then vrmod.logger.Debug("[Glide] Mouse fly mode already 2") end
         end
 
         if not Glide or not Glide.Camera then return end
         vrmod.utils.PatchGlideCamera()
+        if DebugEnabled() then vrmod.logger.Debug("[Glide] Patched Glide.Camera for VR support") end
     end)
 
     -- When VR exits
     hook.Add("VRMod_Exit", "Glide_RestoreMouseFlyMode", function()
         if not (Glide and Glide.Config) then
-            print("[Glide VR] Glide not loaded, cannot restore")
+            if DebugEnabled() then vrmod.logger.Debug("[Glide] Glide not loaded, cannot restore") end
             return
         end
 
         local cfg = Glide.Config
         -- Restore original mouse fly mode
         if originalMouseFlyMode ~= nil then
-            print(string.format("[Glide VR] Restoring original mouse fly mode %s", tostring(originalMouseFlyMode)))
+            if DebugEnabled() then vrmod.logger.Debug(string.format("[Glide] Restoring original mouse fly mode %s", tostring(originalMouseFlyMode))) end
             ApplyMouseFlyMode(originalMouseFlyMode)
             originalMouseFlyMode = nil
         end
 
         -- Restore original ragdoll mode
         if originalRagdollEnable ~= nil then
-            print(string.format("[Glide VR] Restoring original ragdoll mode %s", tostring(originalRagdollEnable)))
+            if DebugEnabled() then vrmod.logger.Debug(string.format("[Glide] Restoring original ragdoll mode %s", tostring(originalRagdollEnable))) end
             cfg.glide_ragdoll_enable = originalRagdollEnable
             originalRagdollEnable = nil
         end

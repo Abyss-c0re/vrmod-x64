@@ -51,6 +51,7 @@ end
 
 -- Server-side logic
 if SERVER then
+	local sv_redirect = CreateConVar("vrmod_console_redirect", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Redirect VRMod logs to player consoles (0=off, 1=on)")
 	util.AddNetworkString("VRMod_ConsoleMessage")
 	-- Override server-side print
 	local oldPrint = print
@@ -62,7 +63,7 @@ if SERVER then
 		end
 
 		local msg = table.concat(args, " ")
-		if GetConVar("vrmod_debug"):GetBool() then
+		if sv_redirect:GetBool() then
 			net.Start("VRMod_ConsoleMessage")
 			net.WriteTable({Color(3, 163, 255), msg})
 			net.Broadcast()
@@ -83,7 +84,7 @@ if SERVER then
 			end
 		end
 
-		if GetConVar("vrmod_debug"):GetBool() then
+		if sv_redirect:GetBool() then
 			net.Start("VRMod_ConsoleMessage")
 			net.WriteTable(formattedMsg)
 			net.Broadcast()

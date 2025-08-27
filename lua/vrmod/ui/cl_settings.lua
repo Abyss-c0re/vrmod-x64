@@ -374,6 +374,7 @@ function VRUtilOpenMenu()
 			label:SetFont("BoldSliderFont")
 			y = y + 35
 		end
+
 		--
 		do
 			local s = vgui.Create("DNumSlider", t)
@@ -497,9 +498,6 @@ function VRUtilOpenMenu()
 		AddCB("Weight limit (Server)", "vrmod_pickup_limit")
 		AddCB("Pickup NPCs (Server)", "vrmod_pickup_npcs")
 		AddCB("Show Pickup halos (Client)", "vrmod_pickup_halos")
-		AddCB("[DEBUG] Print halos info", "vrmod_pickup_debug")
-		AddCB("[DEBUG] Visible wall collision", "vrmod_debug_collisions")
-		AddCB("[DEBUG] Print detailed stats", "vrmod_debug")
 		local function AddSl(lbl, cv, mn, mx, dec)
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -541,9 +539,6 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_pickup_npcs", "1")
 			RunConsoleCommand("vrmod_pickup_halos", "1")
 			RunConsoleCommand("vrmod_collisions", "1")
-			RunConsoleCommand("vrmod_debug", "0")
-			RunConsoleCommand("vrmod_debug_collisions", "0")
-			RunConsoleCommand("vrmod_pickup_debug", "0")
 		end
 
 		y = y + 45
@@ -739,7 +734,143 @@ function VRUtilOpenMenu()
 		y = y + 110
 	end
 
-	local maxChecks = 30
+	-- ─────────────── Driving Tab ───────────────
+	do
+		local t = vgui.Create("DScrollPanel", sheet)
+		sheet:AddSheet("Motion Driving", t, "icon16/car.png")
+		function t:Paint(w, h)
+			surface.SetDrawColor(234, 234, 234)
+			surface.DrawRect(0, 0, w, h)
+		end
+
+		-- Utility to add a slider
+		local function AddSl(lbl, cv, mn, mx, dec, py)
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, py)
+			s:SetSize(370, 25)
+			s:SetDark(true)
+			s:SetText(lbl)
+			s:SetMin(mn)
+			s:SetMax(mx)
+			s:SetDecimals(dec)
+			s:SetConVar(cv)
+		end
+
+		-- Utility to add a reset button
+		local function AddResetButton(px, py)
+			local btn = vgui.Create("DButton", t)
+			btn:SetText("Reset Defaults")
+			btn:SetPos(px, py)
+			btn:SetSize(160, 30)
+			btn.DoClick = function()
+				RunConsoleCommand("vrmod_sens_pitch", "1.5")
+				RunConsoleCommand("vrmod_sens_pitch_smooth", "0.1")
+				RunConsoleCommand("vrmod_sens_yaw", "1.25")
+				RunConsoleCommand("vrmod_sens_yaw_smooth", "0.1")
+				RunConsoleCommand("vrmod_sens_roll", "0.15")
+				RunConsoleCommand("vrmod_sens_roll_smooth", "0.1")
+				RunConsoleCommand("vrmod_sens_steer_car", "0.75")
+				RunConsoleCommand("vrmod_sens_steer_car_smooth", "0154")
+				RunConsoleCommand("vrmod_rot_range_car", "900")
+				RunConsoleCommand("vrmod_sens_steer_motorcycle", "0.30")
+				RunConsoleCommand("vrmod_sens_steer_motorcycle_smooth", "0.15")
+				RunConsoleCommand("vrmod_rot_range_motorcycle", "360")
+			end
+		end
+
+		-- Vertical position tracker
+		local cY = 10
+		-- Pitch sliders
+		AddSl("Pitch Sensitivity", "vrmod_sens_pitch", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Pitch Smooth", "vrmod_sens_pitch_smooth", 0, 1, 2, cY)
+		cY = cY + 40
+		-- Yaw sliders
+		AddSl("Yaw Sensitivity", "vrmod_sens_yaw", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Yaw Smooth", "vrmod_sens_yaw_smooth", 0, 1, 2, cY)
+		cY = cY + 40
+		-- Roll sliders
+		AddSl("Roll Sensitivity", "vrmod_sens_roll", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Roll Smooth", "vrmod_sens_roll_smooth", 0, 1, 2, cY)
+		cY = cY + 40
+		-- Car steering
+		AddSl("Car Steering Sensitivity", "vrmod_sens_steer_car", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Car Steering Smooth", "vrmod_sens_steer_car_smooth", 0, 1, 2, cY)
+		cY = cY + 30
+		AddSl("Car Rotation Range", "vrmod_rot_range_car", 0, 1080, 0, cY)
+		cY = cY + 40
+		-- Motorcycle steering
+		AddSl("Motorcycle Steering Sensitivity", "vrmod_sens_steer_motorcycle", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Motorcycle Steering Smooth", "vrmod_sens_steer_motorcycle_smooth", 0, 1, 2, cY)
+		cY = cY + 30
+		AddSl("Motorcycle Rotation Range", "vrmod_rot_range_motorcycle", 0, 1080, 0, cY)
+		cY = cY + 40
+		-- Reset button
+		AddResetButton(190, cY)
+	end
+
+	-- ─────────────── Debug Tab ───────────────
+	do
+		local t = vgui.Create("DPanel", sheet)
+		sheet:AddSheet("Debug", t, "icon16/bug.png")
+		local y = 10
+		local function AddCB(lbl, cv)
+			local cb = t:Add("DCheckBoxLabel")
+			cb:SetDark(true)
+			cb:SetText(lbl)
+			cb:SetConVar(cv)
+			cb:SetPos(20, y)
+			cb:SizeToContents()
+			y = y + 20
+		end
+
+		-- ComboBox for log levels with label
+		local function AddLogLevelCB(lbl, cv)
+			-- Add label first
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y)
+			label:SetText(lbl)
+			label:SetDark(true)
+			label:SizeToContents()
+			y = y + 20
+			local combo = vgui.Create("DComboBox", t)
+			combo:SetPos(20, y)
+			combo:SetSize(150, 20)
+			-- Add choices, mark the one that matches the ConVar
+			local levelMap = {
+				OFF = 0,
+				ERROR = 1,
+				WARN = 2,
+				INFO = 3,
+				DEBUG = 4
+			}
+
+			for name, val in pairs(levelMap) do
+				combo:AddChoice(name, val, val == cv:GetInt())
+			end
+
+			combo.OnSelect = function(self, index, value, data) RunConsoleCommand(cv:GetName(), data) end
+			y = y + 30
+		end
+
+		AddLogLevelCB("Console log level", GetConVar("vrmod_log_console"))
+		AddLogLevelCB("File log level", GetConVar("vrmod_log_file"))
+		AddCB("Debug network", "vrmod_debug_network")
+		AddCB("Print halos info", "vrmod_pickup_debug")
+		AddCB("Visible wall collision", "vrmod_debug_collisions")
+		AddCB("Debug collisions", "vrmod_debug_collision_info")
+		AddCB("Debug melee", "vrmod_debug_melee")
+		AddCB("Debug character", "vrmod_debug_character")
+		AddCB("Debug Glide input", "vrmod_debug_glide_input")
+		AddCB("Redirect server prints to VR console (can cause lags)", "vrmod_console_redirect")
+	end
+
+	-- ─────────────── ArcVR Tab ───────────────
+	local maxChecks = 3
 	local checks = 0
 	timer.Create("VRMod_CheckArcVR", 1, 0, function()
 		if ConVarExists("arcticvr_virtualstock") then
@@ -802,7 +933,7 @@ function VRUtilOpenMenu()
 			checks = checks + 1
 			if checks >= maxChecks then
 				timer.Remove("VRMod_CheckArcVR")
-				print("[VRMod] Timed out waiting for ArcVR convars.")
+				vrmod.logger.Warn("Timed out waiting for ArcVR convars.")
 			end
 		end
 	end)

@@ -124,7 +124,6 @@ hook.Add("VRMod_Start", "worldtips", function(ply)
 				ent = ent,
 				mat = mat
 			}
-			--LocalPlayer():ChatPrint(tostring(SysTime()).." AddWorldTip update")
 		end
 
 		tips[index].dietime = SysTime() + 0.1

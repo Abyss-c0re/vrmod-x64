@@ -84,8 +84,7 @@ function VRUtilCreateMapBrowserWindow()
 		end
 	end
 
-	--PrintTable(mapCategories)
-	local files, dirs = file.Find("maps/*", "GAME")
+	local files, _ = file.Find("maps/*", "GAME")
 	for i = 1, #files do
 		if not string.find(files[i], ".bsp$") then continue end
 		local cont = false
@@ -131,7 +130,6 @@ function VRUtilCreateMapBrowserWindow()
 		if sortedMaps[index][#sortedMaps[index]].icon:IsError() then sortedMaps[index][#sortedMaps[index]].icon = Material("materials/gui/noicon.png") end
 	end
 
-	--PrintTable(sortedMaps)
 	local selectedCategory = 1
 	local categoryLists = {}
 	local selectedMap = sortedMaps[1][1]
@@ -214,4 +212,3 @@ function VRUtilCreateMapBrowserWindow()
 	end
 	return window
 end
-

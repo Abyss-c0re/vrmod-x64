@@ -41,8 +41,7 @@ if CLIENT then
 	end
 
 	if moduleFile then
-		local tmp = vrmod
-		vrmod = {}
+		vrmod = vrmod or {}
 		local success, err = pcall(function() require("vrmod") end)
 		if success then
 			for k, v in pairs(vrmod) do
@@ -51,12 +50,10 @@ if CLIENT then
 
 			g_VR.moduleVersion = VRMOD_GetVersion and VRMOD_GetVersion() or 0
 		else
-			print("[VRMod] Failed to load module:", err)
+			vrmod.logger.Err("Failed to load module:", err)
 		end
-
-		vrmod = tmp
 	else
-		print("[VRMod] No compatible module file found.")
+		vrmod.logger.Err("No compatible module file found.")
 	end
 
 	-- 0) Helper functions
@@ -273,13 +270,13 @@ if CLIENT then
 	local function PerformStartup()
 		local err = vrmod.GetStartupError()
 		if err then
-			print("VRMod failed to start: " .. err)
+			vrmod.logger.Err("VRMod failed to start: " .. err)
 			return false
 		end
 
 		VRMOD_Shutdown() -- ensure clean state
 		if VRMOD_Init() == false then
-			print("vr init failed")
+			vrmod.logger.Err("vr init failed")
 			return false
 		end
 		return true

@@ -1,5 +1,4 @@
 if CLIENT then return end
-print("[VRHand] Running VR physical hands system.")
 local vrHands = {}
 -- Utility to get cached physics data from weapon
 local function GetCachedWeaponParams(wep, ply, side)
@@ -38,26 +37,26 @@ local function UpdateWeaponCollisionShape(ply, wep)
         if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
         local hands = vrHands[ply]
         if not hands or not hands.right or not IsValid(hands.right.ent) then
-            vrmod.utils.DebugPrint("UpdateWeaponCollisionShape: No valid right hand for %s", ply:Nick())
+            vrmod.logger.Debug("UpdateWeaponCollisionShape: No valid right hand for %s", ply:Nick())
             return
         end
 
         local right = hands.right
         local hand = right.ent
         if not vrmod.utils.IsValidWep(wep) then
-            vrmod.utils.DebugPrint("UpdateWeaponCollisionShape: Invalid weapon %s, applying default sphere", tostring(wep))
+            vrmod.logger.Debug("UpdateWeaponCollisionShape: Invalid weapon %s, applying default sphere", tostring(wep))
             timer.Simple(0, function() ApplySphere(hand, right, vrmod.DEFAULT_RADIUS) end)
             return
         end
 
         local radius, reach, mins, maxs, angles = GetCachedWeaponParams(wep, ply, "right")
         if not radius or not mins or not maxs or not angles or radius == vrmod.DEFAULT_RADIUS and reach == vrmod.DEFAULT_REACH and mins == vrmod.DEFAULT_MINS and maxs == vrmod.DEFAULT_MAXS then
-            vrmod.utils.DebugPrint("UpdateWeaponCollisionShape: Invalid or default params for %s, retrying", wep:GetClass())
+            vrmod.logger.Debug("UpdateWeaponCollisionShape: Invalid or default params for %s, retrying", wep:GetClass())
             timer.Simple(0.5, function() UpdateWeaponCollisionShape(ply, wep) end)
             return
         end
 
-        vrmod.utils.DebugPrint("UpdateWeaponCollisionShape: Applying box for %s, mins=%s, maxs=%s", wep:GetClass(), tostring(mins), tostring(maxs))
+        vrmod.logger.Debug("UpdateWeaponCollisionShape: Applying box for %s, mins=%s, maxs=%s", wep:GetClass(), tostring(mins), tostring(maxs))
         timer.Simple(0, function() ApplyBox(hand, right, mins, maxs, angles) end)
     end)
 end
