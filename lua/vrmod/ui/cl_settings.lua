@@ -734,6 +734,85 @@ function VRUtilOpenMenu()
 		y = y + 110
 	end
 
+	-- ─────────────── Driving Tab ───────────────
+	do
+		local t = vgui.Create("DScrollPanel", sheet)
+		sheet:AddSheet("Motion Driving", t, "icon16/car.png")
+		function t:Paint(w, h)
+			surface.SetDrawColor(234, 234, 234)
+			surface.DrawRect(0, 0, w, h)
+		end
+
+		-- Utility to add a slider
+		local function AddSl(lbl, cv, mn, mx, dec, py)
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, py)
+			s:SetSize(370, 25)
+			s:SetDark(true)
+			s:SetText(lbl)
+			s:SetMin(mn)
+			s:SetMax(mx)
+			s:SetDecimals(dec)
+			s:SetConVar(cv)
+		end
+
+		-- Utility to add a reset button
+		local function AddResetButton(px, py)
+			local btn = vgui.Create("DButton", t)
+			btn:SetText("Reset Defaults")
+			btn:SetPos(px, py)
+			btn:SetSize(160, 30)
+			btn.DoClick = function()
+				RunConsoleCommand("vrmod_sens_pitch", "1.5")
+				RunConsoleCommand("vrmod_sens_pitch_smooth", "0.1")
+				RunConsoleCommand("vrmod_sens_yaw", "1.25")
+				RunConsoleCommand("vrmod_sens_yaw_smooth", "0.1")
+				RunConsoleCommand("vrmod_sens_roll", "0.15")
+				RunConsoleCommand("vrmod_sens_roll_smooth", "0.1")
+				RunConsoleCommand("vrmod_sens_steer_car", "0.75")
+				RunConsoleCommand("vrmod_sens_steer_car_smooth", "0154")
+				RunConsoleCommand("vrmod_rot_range_car", "900")
+				RunConsoleCommand("vrmod_sens_steer_motorcycle", "0.30")
+				RunConsoleCommand("vrmod_sens_steer_motorcycle_smooth", "0.15")
+				RunConsoleCommand("vrmod_rot_range_motorcycle", "360")
+			end
+		end
+
+		-- Vertical position tracker
+		local cY = 10
+		-- Pitch sliders
+		AddSl("Pitch Sensitivity", "vrmod_sens_pitch", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Pitch Smooth", "vrmod_sens_pitch_smooth", 0, 1, 2, cY)
+		cY = cY + 40
+		-- Yaw sliders
+		AddSl("Yaw Sensitivity", "vrmod_sens_yaw", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Yaw Smooth", "vrmod_sens_yaw_smooth", 0, 1, 2, cY)
+		cY = cY + 40
+		-- Roll sliders
+		AddSl("Roll Sensitivity", "vrmod_sens_roll", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Roll Smooth", "vrmod_sens_roll_smooth", 0, 1, 2, cY)
+		cY = cY + 40
+		-- Car steering
+		AddSl("Car Steering Sensitivity", "vrmod_sens_steer_car", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Car Steering Smooth", "vrmod_sens_steer_car_smooth", 0, 1, 2, cY)
+		cY = cY + 30
+		AddSl("Car Rotation Range", "vrmod_rot_range_car", 0, 1080, 0, cY)
+		cY = cY + 40
+		-- Motorcycle steering
+		AddSl("Motorcycle Steering Sensitivity", "vrmod_sens_steer_motorcycle", 0, 5, 2, cY)
+		cY = cY + 30
+		AddSl("Motorcycle Steering Smooth", "vrmod_sens_steer_motorcycle_smooth", 0, 1, 2, cY)
+		cY = cY + 30
+		AddSl("Motorcycle Rotation Range", "vrmod_rot_range_motorcycle", 0, 1080, 0, cY)
+		cY = cY + 40
+		-- Reset button
+		AddResetButton(190, cY)
+	end
+
 	-- ─────────────── Debug Tab ───────────────
 	do
 		local t = vgui.Create("DPanel", sheet)

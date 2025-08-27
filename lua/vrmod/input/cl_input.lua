@@ -1,6 +1,23 @@
 local cl_pickupdisable = CreateClientConVar("vr_pickup_disable_client", 0, true, FCVAR_ARCHIVE)
 local cl_hudonlykey = CreateClientConVar("vrmod_hud_visible_quickmenukey", 0, true, FCVAR_ARCHIVE)
 if SERVER then return end
+-- Pitch
+local cv_pitch = CreateConVar("vrmod_sens_pitch", "1.5", FCVAR_ARCHIVE, "VRMod pitch sensitivity")
+local cv_pitch_smooth = CreateConVar("vrmod_sens_pitch_smooth", "0.1", FCVAR_ARCHIVE, "VRMod pitch smoothing factor")
+-- Yaw
+local cv_yaw = CreateConVar("vrmod_sens_yaw", "1.25", FCVAR_ARCHIVE, "VRMod yaw sensitivity")
+local cv_yaw_smooth = CreateConVar("vrmod_sens_yaw_smooth", "0.1", FCVAR_ARCHIVE, "VRMod yaw smoothing factor")
+-- Roll
+local cv_roll = CreateConVar("vrmod_sens_roll", "0.15", FCVAR_ARCHIVE, "VRMod roll sensitivity")
+local cv_roll_smooth = CreateConVar("vrmod_sens_roll_smooth", "0.1", FCVAR_ARCHIVE, "VRMod roll smoothing factor")
+-- Car steering
+local cv_steer_car = CreateConVar("vrmod_sens_steer_car", "0.75", FCVAR_ARCHIVE, "VRMod car steering sensitivity")
+local cv_steer_car_smooth = CreateConVar("vrmod_sens_steer_car_smooth", "0.15", FCVAR_ARCHIVE, "VRMod car steering smoothing factor")
+local cv_steer_car_rot = CreateConVar("vrmod_rot_range_car", "900", FCVAR_ARCHIVE, "VRMod car rotation range")
+-- Motorcycle steering
+local cv_steer_bike = CreateConVar("vrmod_sens_steer_motorcycle", "0.30", FCVAR_ARCHIVE, "VRMod motorcycle steering sensitivity")
+local cv_steer_bike_smooth = CreateConVar("vrmod_sens_steer_motorcycle_smooth", "0.15", FCVAR_ARCHIVE, "VRMod motorcycle steering smoothing factor")
+local cv_steer_bike_rot = CreateConVar("vrmod_rot_range_motorcycle", "360", FCVAR_ARCHIVE, "VRMod motorcycle rotation range")
 -- Initialize global VR table
 g_VR = g_VR or {}
 -- Vehicle-related variables
@@ -29,27 +46,15 @@ local lastInputState = {
 	roll = 0
 }
 
-local SENSITIVITY = {
-	pitch = 0.9,
-	yaw = 0.7,
-	roll = 0.15,
-	steer = {
-		car = 0.75,
-		motorcycle = 0.25,
-	},
-	rotationRange = {
-		car = 900,
-		motorcycle = 360,
-	}
-}
-
-local ANALOG_SEND_RATE = 0.066 -- 15 Hz
+local ANALOG_SEND_RATE = 0.095
 local ANALOG_EPSILON = 0.05
 local MAX_WHEEL_GRAB_DIST = 13
 local MAX_ANGLE = 90
 local nextSendTime = 0
 local neutralOffsets = {}
--- Seconds
+local sensCache = {}
+local nextUpdate = 0
+local UPDATE_RATE = 1
 local aircraftNeutralAng = nil
 local leftGrip, rightGrip = false, false
 --local leftHand, rightHand
@@ -57,6 +62,7 @@ local leftGrip, rightGrip = false, false
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 	timer.Simple(0.1, function()
 		local ply = LocalPlayer()
+		if g_VR.vehicle.current then return end
 		local vehicle, boneId, vType, glide = vrmod.utils.GetSteeringInfo(ply)
 		g_VR.vehicle.current = vehicle
 		g_VR.vehicle.type = vType
@@ -186,6 +192,39 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 end)
 
+hook.Add("Think", "VRMOD_UpdateSensCache", function()
+	if not g_VR.vehicle.current then return end
+	if CurTime() < nextUpdate then return end
+	nextUpdate = CurTime() + UPDATE_RATE
+	sensCache.pitch = {
+		value = cv_pitch:GetFloat(),
+		smooth = cv_pitch_smooth:GetFloat()
+	}
+
+	sensCache.yaw = {
+		value = cv_yaw:GetFloat(),
+		smooth = cv_yaw_smooth:GetFloat()
+	}
+
+	sensCache.roll = {
+		value = cv_roll:GetFloat(),
+		smooth = cv_roll_smooth:GetFloat()
+	}
+
+	sensCache.steer = {
+		car = {
+			value = cv_steer_car:GetFloat(),
+			smooth = cv_steer_car_smooth:GetFloat(),
+			rotationRange = cv_steer_car_rot:GetFloat()
+		},
+		motorcycle = {
+			value = cv_steer_bike:GetFloat(),
+			smooth = cv_steer_bike_smooth:GetFloat(),
+			rotationRange = cv_steer_bike_rot:GetFloat()
+		}
+	}
+end)
+
 hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 	if not g_VR.active or not g_VR.tracking or not g_VR.vehicle.current then return end
 	if CurTime() < nextSendTime then return end
@@ -205,13 +244,20 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 				delta.yaw = delta.yaw + 360
 			end
 
-			local targetPitch = math.Clamp(delta.pitch / MAX_ANGLE * SENSITIVITY.pitch, -1, 1)
-			local targetYaw = math.Clamp(delta.yaw / SENSITIVITY.yaw, -1, 1)
-			local targetRoll = math.Clamp(delta.roll / MAX_ANGLE * SENSITIVITY.roll, -1, 1)
+			-- Fetch sensitivities from sensCache
+			local pitchSens = sensCache.pitch.value or 1
+			local yawSens = sensCache.yaw.value or 1
+			local rollSens = sensCache.roll.value or 1
+			local targetPitch = math.Clamp(delta.pitch / MAX_ANGLE * pitchSens, -1, 1)
+			local targetYaw = math.Clamp(delta.yaw / yawSens, -1, 1)
+			local targetRoll = math.Clamp(delta.roll / MAX_ANGLE * rollSens, -1, 1)
 			-- Smooth
-			g_VR.analog_input.pitch = Lerp(0.35, g_VR.analog_input.pitch or 0, targetPitch)
-			g_VR.analog_input.yaw = -Lerp(0.55, g_VR.analog_input.yaw or 0, targetYaw)
-			g_VR.analog_input.roll = Lerp(0.9, g_VR.analog_input.roll or 0, targetRoll)
+			local pitchSmooth = sensCache.pitch.smooth or 0.1
+			local yawSmooth = sensCache.yaw.smooth or 0.1
+			local rollSmooth = sensCache.roll.smooth or 0.1
+			g_VR.analog_input.pitch = Lerp(FrameTime() / pitchSmooth, g_VR.analog_input.pitch or 0, targetPitch)
+			g_VR.analog_input.yaw = -Lerp(FrameTime() / yawSmooth * 5, g_VR.analog_input.yaw or 0, targetYaw)
+			g_VR.analog_input.roll = Lerp(FrameTime() / rollSmooth, g_VR.analog_input.roll or 0, targetRoll)
 		else
 			g_VR.analog_input.pitch = 0
 			g_VR.analog_input.yaw = 0
@@ -270,8 +316,9 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 		return
 	end
 
-	local bonePos = vrmod.utils.GetVehicleBonePosition(g_VR.vehicle.current, g_VR.vehicle.wheel_bone)
-	if not IsValid(g_VR.vehicle.current) or not bonePos then
+	local vehicle = g_VR.vehicle.current
+	local vehicleType = g_VR.vehicle.type
+	if not IsValid(vehicle) or not vrmod.utils.GetVehicleBonePosition(vehicle, g_VR.vehicle.wheel_bone) then
 		neutralOffsets = {}
 		g_VR.analog_input.steer = 0
 		return
@@ -312,18 +359,19 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 		-- Dynamic neutral offset recalibration
 		if not neutralOffsets[handName] or (relativePos - neutralOffsets[handName]):Length() < 0.02 then neutralOffsets[handName] = relativePos end
 		local delta = relativePos - neutralOffsets[handName]
-		local sens = SENSITIVITY.steer[g_VR.vehicle.type] or 1
-		local wheelRotationRange = SENSITIVITY.rotationRange[g_VR.vehicle.type] or 360
+		-- Fetch sensitivity and rotation range from sensCache
+		local sens = sensCache.steer[vehicleType].value or 1
+		local wheelRotationRange = sensCache.steer[vehicleType].rotationRange or 360
 		sens = sens * 360 / wheelRotationRange -- Scale sensitivity by wheel rotation range
 		local steer = 0
 		local weight = 1
-		if g_VR.vehicle.type == "motorcycle" then
+		if vehicleType == "motorcycle" then
 			if math.abs(delta.y) > deadzone then steer = (delta.y - sign(delta.y) * deadzone) * sens end
-		elseif g_VR.vehicle.type == "car" then
+		elseif vehicleType == "car" then
 			local multiplier = handName == "left" and 0.75 or -0.75
 			if math.abs(delta.z) > deadzone then
 				steer = multiplier * (delta.z - sign(delta.z) * deadzone) * sens
-				weight = math.min(1, delta:Length() / 0.5) -- Weight by movement distance
+				weight = math.min(1, delta:Length() / 0.5)
 			end
 		end
 
@@ -332,8 +380,8 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 	end
 
 	if totalWeight > 0 then steerInput = math.Clamp(steerInput / totalWeight, -1, 1) end
-	-- Frame-time-based smoothing
-	local smoothingFactor = g_VR.vehicle.type == "motorcycle" and 0.03 or 0.05
+	-- Apply frame-time-based smoothing using sensCache
+	local smoothingFactor = sensCache.steer[vehicleType].smooth or 0.1
 	g_VR.analog_input.steer = Lerp(FrameTime() / smoothingFactor, g_VR.analog_input.steer or 0, steerInput)
 end)
 
