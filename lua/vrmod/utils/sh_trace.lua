@@ -1,9 +1,7 @@
 g_VR = g_VR or {}
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
-
 local magCache = {}
-
 local function IsMagazine(ent)
     local class = ent:GetClass()
     if magCache[class] ~= nil then return magCache[class] end
@@ -28,19 +26,27 @@ function vrmod.utils.MeleeFilter(ent, ply, hand)
     return vrmod.utils.HitFilter(ent, ply, hand) and not IsMagazine(ent)
 end
 
-function vrmod.utils.TraceHand(ply, hand)
+function vrmod.utils.TraceHand(ply, hand, fromPalm)
     local startPos, ang, dir
     if hand == "left" then
         startPos = vrmod.GetLeftHandPos(ply)
         ang = vrmod.GetLeftHandAng(ply)
         if not ang then return nil end
-        local ang2 = Angle(ang.p, ang.y, ang.r + 180)
-        dir = ang2:Forward()
+        if fromPalm then
+            dir = ang:Right()
+        else
+            local ang2 = Angle(ang.p, ang.y, ang.r + 180)
+            dir = ang2:Forward()
+        end
     else
         startPos = vrmod.GetRightHandPos(ply)
         ang = vrmod.GetRightHandAng(ply)
         if not ang then return nil end
-        dir = ang:Forward()
+        if fromPalm then
+            dir = -ang:Right()
+        else
+            dir = ang:Forward()
+        end
     end
 
     if not startPos or not dir then return nil end
