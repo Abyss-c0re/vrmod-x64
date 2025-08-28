@@ -487,11 +487,11 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
         -- Clipping check: full box, no reach
         --isClipped, hitNormal = SphereCollidesWithWorld(pos, reach)
         isClipped, hitNormal = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs)
-        if DebugEnabled() then if isClipped then vrmod.logger.Debug("[VRMod] Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped) end end
+        if DebugEnabled() then if isClipped then vrmod.logger.Debug("Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped) end end
     else
         if not radius then radius = vrmod.DEFAULT_RADIUS end
         isClipped, hitNormal = SphereCollidesWithWorld(pos, radius)
-        if DebugEnabled() then if isClipped then vrmod.logger.Debug("[VRMod] Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped) end end
+        if DebugEnabled() then if isClipped then vrmod.logger.Debug("Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped) end end
     end
 
     local pushOutPos = pos
@@ -612,7 +612,7 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
             correctedAng:RotateAroundAxis(newRight, ang:Up():Dot(newUp) < 0 and -90 or 90)
         end
 
-        if DebugEnabled() then vrmod.logger.Debug("[VRMod] Weapon clipping detected. Push-out pos:", correctedPos, "angle:", correctedAng) end
+        if DebugEnabled() then vrmod.logger.Debug("Weapon clipping detected. Push-out pos:", correctedPos, "angle:", correctedAng) end
         return correctedPos, correctedAng
     end
     return pos, ang
@@ -736,14 +736,14 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                             righthandPos = corrected
                         end
 
-                        if DebugEnabled() then vrmod.logger.Debug("[VRMod] Clipping detected for:", hand, "Push-out pos:", corrected) end
+                        if DebugEnabled() then vrmod.logger.Debug("Clipping detected for:", hand, "Push-out pos:", corrected) end
                     end
                 else
                     lastNonClippedPos[hand] = nil
                     lastNonClippedNormal[hand] = nil
                     cachedPushOutPos[hand] = nil
                     shape.isClipped = false
-                    if DebugEnabled() then vrmod.logger.Debug("[VRMod] Invalid pushOutPos or player for:", hand) end
+                    if DebugEnabled() then vrmod.logger.Debug("Invalid pushOutPos or player for:", hand) end
                 end
 
                 if not shape.isClipped then
@@ -763,32 +763,66 @@ end
 
 function vrmod.utils.PatchOwnerCollision(ent, ply)
     if not IsValid(ent) then return end
-    -- Unpatch if already patched
-    if ent._originalShouldCollide then
-        ent.ShouldCollide = ent._originalShouldCollide
-        ent._originalShouldCollide = nil
+    -- ========== UNPATCH ==========
+    if ent._collisionPatched then
+        -- Restore ShouldCollide
+        if ent._originalShouldCollide then
+            ent.ShouldCollide = ent._originalShouldCollide
+            ent._originalShouldCollide = nil
+        end
+
+        -- Remove nocollide constraint
+        if IsValid(ent._nocollideConstraint) then
+            ent._nocollideConstraint:Remove()
+            ent._nocollideConstraint = nil
+            if DebugEnabled() then vrmod.logger.Debug("Removed nocollide constraint for", ent) end
+        end
+
+        -- Cleanup bookkeeping
         ent._pickupOwner = nil
         ent:SetCustomCollisionCheck(false)
         hook.Remove("ShouldCollide", ent)
+        ent._collisionPatched = nil
+        if DebugEnabled() then vrmod.logger.Debug("Unpatched collision for", ent) end
         return
     end
 
-    -- Store original ShouldCollide
-    ent._originalShouldCollide = ent.ShouldCollide
+    -- ========== PATCH ==========
     ent._pickupOwner = ply
-    -- Enable custom collision checking
+    ent._originalShouldCollide = ent.ShouldCollide
+    local nc = constraint.NoCollide(ent, ply, 0, 0)
+    ent._nocollideConstraint = nc
+    if DebugEnabled() then vrmod.logger.Debug("Added nocollide constraint between", ent, "and", ply) end
     ent:SetCustomCollisionCheck(true)
-    -- Override ShouldCollide for normal engine collisions
+    if DebugEnabled() then vrmod.logger.Debug("Patched collision for", ent, "owned by", ply) end
     function ent:ShouldCollide(other)
-        if other == self._pickupOwner then return false end
+        if other == self._pickupOwner then
+            if DebugEnabled() then vrmod.logger.Debug("(Entity) Blocked collision with owner:", self, other) end
+            return false
+        end
+
+        if IsValid(other) and other:GetNWBool("isVRHand", false) then
+            if DebugEnabled() then vrmod.logger.Debug("(Entity) Allowed collision with VRHand:", self, other) end
+            return true
+        end
+
         if self._originalShouldCollide then return self._originalShouldCollide(self, other) end
         return true
     end
 
-    -- Hook global ShouldCollide for physics engine
     hook.Add("ShouldCollide", ent, function(a, b)
         if not IsValid(ent._pickupOwner) then return end
-        -- Skip owner only
-        if a == ent and b == ent._pickupOwner or b == ent and a == ent._pickupOwner then return false end
+        local owner = ent._pickupOwner
+        if a == ent and b == owner or b == ent and a == owner then
+            if DebugEnabled() then vrmod.logger.Debug("(Global) Blocked ent ↔ owner collision:", a, b) end
+            return false
+        end
+
+        if IsValid(a) and a:GetNWBool("isVRHand", false) or IsValid(b) and b:GetNWBool("isVRHand", false) then
+            if DebugEnabled() then vrmod.logger.Debug("(Global) Allowed collision with VRHand:", a, b) end
+            return true
+        end
     end)
+
+    ent._collisionPatched = true
 end

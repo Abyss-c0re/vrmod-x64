@@ -9,7 +9,7 @@ function vrmod.utils.SnapEntityToHand(ent, handPos, handAng)
     local mins, maxs = ent:GetCollisionBounds()
     if mins and maxs then
         local entitySize = (maxs - mins):Length() * 0.5
-        local tolerance = entitySize * 1.1
+        local tolerance = entitySize * 1.2
         local distSqr = handPos:DistToSqr(ent:GetPos())
         if distSqr < tolerance * tolerance then
             -- Too close → do not snap; keep entity where it is
@@ -17,15 +17,13 @@ function vrmod.utils.SnapEntityToHand(ent, handPos, handAng)
         end
     end
 
-    -- Compute finalPos exactly like the client:
-    -- Desired position: in front of hand
     local forward = handAng:Forward()
     local finalPos = handPos + forward
     local toEntity = finalPos - handPos
     local dist = toEntity:Length()
     local entityRadius = 0
-    if mins and maxs then entityRadius = (maxs - mins):Length() * 0.3 end
-    local safeDistance = math.max(entityRadius, DEFAULT_OFFSET)
+    if mins and maxs then entityRadius = (maxs - mins):Length() * 0.2 end
+    local safeDistance = math.max(entityRadius, DEFAULT_OFFSET) * 1.2
     if dist < safeDistance then
         if dist == 0 then
             toEntity = forward

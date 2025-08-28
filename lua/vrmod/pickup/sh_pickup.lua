@@ -103,19 +103,35 @@ end
 local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	-- Ensure a sane default
 	if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
-	-- Trace from palm
+	local ent
 	local hand = bLeftHand and "left" or "right"
-	local tr = vrmod.utils.TraceHand(ply, hand, true)
-	if not tr or not tr.Entity or not IsValid(tr.Entity) then return nil end
-	local ent = tr.Entity
-	-- Basic filters
-	if ent == ply then return nil end
-	if not IsValidPickupTarget(ent, ply, bLeftHand) then return nil end
-	if not CanPickupEntity(ent, ply, convarValues or vrmod.GetConvars()) then return nil end
+	-- Sphere search first (tiny radius)
+	local nearby = ents.FindInSphere(handPos, 5)
+	local closestDistSq = math.huge
+	for _, e in ipairs(nearby) do
+		if e ~= ply and IsValidPickupTarget(e, ply, bLeftHand) and CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then
+			local distSq = e:GetPos():DistToSqr(handPos)
+			if distSq < closestDistSq then
+				ent = e
+				closestDistSq = distSq
+			end
+		end
+	end
+
+	-- Fallback to trace if nothing found
+	if not IsValid(ent) then
+		local tr = vrmod.utils.TraceHand(ply, hand, true)
+		if tr and tr.Entity and IsValid(tr.Entity) then
+			local e = tr.Entity
+			if e ~= ply and IsValidPickupTarget(e, ply, bLeftHand) and CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then ent = e end
+		end
+	end
+
+	if not IsValid(ent) then return nil end
 	-- Range check with boost
 	local boost = IsImportantPickup(ent) and 5.0 or 1.0
 	local maxDist = pickupRange * 100 * boost
-	if tr.HitPos:DistToSqr(handPos) > maxDist ^ 2 then return nil end
+	if (ent:GetPos() - handPos):LengthSqr() > maxDist ^ 2 then return nil end
 	-- Weapon-specific rules
 	if vrmod.utils.IsWeaponEntity(ent) then
 		local aw = ply:GetActiveWeapon()
@@ -248,7 +264,9 @@ if SERVER then
 						SendPickupNetMsg(t.ply, ent)
 					end
 				elseif IsValid(ent) then
-					vrmod.utils.PatchOwnerCollision(ent)
+					local phys = ent:GetPhysicsObject()
+					if IsValid(phys) and pickupController then pickupController:RemoveFromMotionController(phys) end
+					vrmod.utils.PatchOwnerCollision(t.ent, t.ply)
 					if IsValid(t.phys) then t.phys:Wake() end
 					SendPickupNetMsg(t.ply, ent)
 				else
@@ -305,16 +323,23 @@ if SERVER then
 			ent.vrmod_physOffsets = physOffsets
 		end
 
+		local phys = ent:GetPhysicsObject()
+		local mass = IsValid(phys) and phys:GetMass() or 1
+		local damp = 0.35
+		local secondstoarrive = 0.001
+		local teleportdistance = 0
+		if ent:GetClass() ~= "prop_ragdoll" then damp = math.Clamp(0.0058 * mass * 1.5, 0.15, 0.35) end
+		vrmod.utils.PatchOwnerCollision(ent, ply)
 		if not IsValid(pickupController) then
 			pickupController = ents.Create("vrmod_pickup")
 			pickupController.ShadowParams = {
-				secondstoarrive = 0.001,
-				maxangular = 999999,
-				maxangulardamp = 999999,
-				maxspeed = 999999,
-				maxspeeddamp = 999999,
-				dampfactor = 0.3,
-				teleportdistance = 0,
+				secondstoarrive = secondstoarrive,
+				maxangular = 99999,
+				maxangulardamp = 999,
+				maxspeed = 99999,
+				maxspeeddamp = 999,
+				dampfactor = damp,
+				teleportdistance = teleportdistance,
 				deltatime = 0
 			}
 
@@ -334,11 +359,11 @@ if SERVER then
 				end
 
 				if not handPos or not handAng then return end
-				-- Special case for ragdoll: apply per-physobj local offsets
-				if phys:GetEntity():GetClass() == "prop_ragdoll" and phys:GetEntity().vrmod_physOffsets then
-					local physIndex = nil
-					-- Find physics index in ragdoll
-					local ent = phys:GetEntity()
+				local targetPos, targetAng
+				local ent = phys:GetEntity()
+				-- Ragdoll special case
+				if ent:GetClass() == "prop_ragdoll" and ent.vrmod_physOffsets then
+					local physIndex
 					for i = 0, ent:GetPhysicsObjectCount() - 1 do
 						if ent:GetPhysicsObjectNum(i) == phys then
 							physIndex = i
@@ -348,14 +373,23 @@ if SERVER then
 
 					if physIndex and ent.vrmod_physOffsets[physIndex] then
 						local offset = ent.vrmod_physOffsets[physIndex]
-						self.ShadowParams.pos, self.ShadowParams.angle = LocalToWorld(offset.localPos, offset.localAng, handPos, handAng)
-						phys:ComputeShadowControl(self.ShadowParams)
-						return
+						targetPos, targetAng = LocalToWorld(offset.localPos, offset.localAng, handPos, handAng)
+					end
+				else
+					targetPos, targetAng = LocalToWorld(info.localPos, info.localAng, handPos, handAng)
+					-- Optional tiny jitter for light props
+					if mass < 3 then
+						local jitter = 0.5 * 1 / mass
+						targetPos = targetPos + VectorRand() * jitter
 					end
 				end
 
-				-- Default fallback: use stored localPos/localAng for non-ragdolls
-				self.ShadowParams.pos, self.ShadowParams.angle = LocalToWorld(info.localPos, info.localAng, handPos, handAng)
+				if not targetPos then return end
+				-- Apply player velocity scaled by effective mass
+				local effectiveMass = math.max(mass, 2)
+				phys:AddVelocity(ply:GetVelocity() * dt * effectiveMass)
+				self.ShadowParams.pos = targetPos
+				self.ShadowParams.angle = targetAng
 				phys:ComputeShadowControl(self.ShadowParams)
 			end
 
@@ -427,7 +461,7 @@ if SERVER then
 
 	local function UpdatePickupFlags()
 		for _, ply in ipairs(player.GetAll()) do
-			local nearbyEntities = ents.FindInSphere(ply:GetPos(), 300) -- adjust radius as needed
+			local nearbyEntities = ents.FindInSphere(ply:GetPos(), 300)
 			local cv = {
 				vrmod_pickup_npcs = GetConVar("vrmod_pickup_npcs"):GetInt(),
 				vrmod_pickup_limit = GetConVar("vrmod_pickup_limit"):GetInt(),
