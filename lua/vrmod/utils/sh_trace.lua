@@ -33,32 +33,33 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
         ang = vrmod.GetLeftHandAng(ply)
         if not ang then return nil end
         if fromPalm then
-            dir = ang:Right()
+            dir = ang:Right() -- palm facing sideways
         else
-            dir = Angle(ang.p, ang.y, ang.r + 180):Forward()
+            dir = Angle(ang.p, ang.y, ang.r + 180):Forward() -- your original forward
         end
     else
         startPos = vrmod.GetRightHandPos(ply)
         ang = vrmod.GetRightHandAng(ply)
         if not ang then return nil end
         if fromPalm then
-            dir = -ang:Right()
+            dir = -ang:Right() -- palm facing sideways
         else
-            dir = ang:Forward()
+            dir = ang:Forward() -- normal forward
         end
     end
 
     if not startPos or not dir then return nil end
     dir:Normalize()
-    -- Sphere size for the palm
-    local radius = 4 -- tweak this (palm "thickness")
-    local ignore = {}
+    -- Sphere radius to represent hand
+    local radius = fromPalm and 4 or 2 -- palm fatter, finger forward thinner
+    local range = 32768
     local maxDepth = 10
+    local ignore = {}
     local traceStart = startPos
     for i = 1, maxDepth do
         local tr = util.TraceHull({
             start = traceStart,
-            endpos = traceStart + dir * 32768,
+            endpos = traceStart + dir * range,
             mins = Vector(-radius, -radius, -radius),
             maxs = Vector(radius, radius, radius),
             filter = ignore,
@@ -70,7 +71,7 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
             return tr
         else
             table.insert(ignore, tr.Entity)
-            traceStart = tr.HitPos + dir * 1
+            traceStart = tr.HitPos + dir * 1 -- nudge forward
         end
     end
     return nil
