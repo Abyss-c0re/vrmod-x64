@@ -35,8 +35,7 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
         if fromPalm then
             dir = ang:Right()
         else
-            local ang2 = Angle(ang.p, ang.y, ang.r + 180)
-            dir = ang2:Forward()
+            dir = Angle(ang.p, ang.y, ang.r + 180):Forward()
         end
     else
         startPos = vrmod.GetRightHandPos(ply)
@@ -50,13 +49,20 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
     end
 
     if not startPos or not dir then return nil end
+    dir:Normalize()
+    -- Sphere size for the palm
+    local radius = 4 -- tweak this (palm "thickness")
     local ignore = {}
     local maxDepth = 10
+    local traceStart = startPos
     for i = 1, maxDepth do
-        local tr = util.TraceLine({
-            start = startPos,
-            endpos = startPos + dir * 32768,
-            filter = ignore
+        local tr = util.TraceHull({
+            start = traceStart,
+            endpos = traceStart + dir * 32768,
+            mins = Vector(-radius, -radius, -radius),
+            maxs = Vector(radius, radius, radius),
+            filter = ignore,
+            mask = MASK_SHOT_HULL
         })
 
         if not tr.Entity or not IsValid(tr.Entity) then return tr end
@@ -64,10 +70,10 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
             return tr
         else
             table.insert(ignore, tr.Entity)
-            startPos = tr.HitPos + dir * 1 -- Avoid infinite loops on same surface
+            traceStart = tr.HitPos + dir * 1
         end
     end
-    return nil -- Nothing valid hit after maxDepth
+    return nil
 end
 
 function vrmod.utils.TraceBoxOrSphere(data)
