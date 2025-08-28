@@ -34,8 +34,9 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
         if not ang then return nil end
         if fromPalm then
             dir = ang:Right() -- palm facing sideways
+            startPos = startPos + ang:Up() * 2 -- offset upward from hand center
         else
-            dir = Angle(ang.p, ang.y, ang.r + 180):Forward() -- your original forward
+            dir = Angle(ang.p, ang.y, ang.r + 180):Forward() -- original forward
         end
     else
         startPos = vrmod.GetRightHandPos(ply)
@@ -43,6 +44,7 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
         if not ang then return nil end
         if fromPalm then
             dir = -ang:Right() -- palm facing sideways
+            startPos = startPos + ang:Up() * 2 -- offset upward
         else
             dir = ang:Forward() -- normal forward
         end
@@ -50,8 +52,7 @@ function vrmod.utils.TraceHand(ply, hand, fromPalm)
 
     if not startPos or not dir then return nil end
     dir:Normalize()
-    -- Sphere radius to represent hand
-    local radius = fromPalm and 4 or 2 -- palm fatter, finger forward thinner
+    local radius = fromPalm and 6 or 2 -- palm fatter, finger forward thinner
     local range = 32768
     local maxDepth = 10
     local ignore = {}
