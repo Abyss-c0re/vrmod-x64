@@ -1,12 +1,9 @@
 g_VR = g_VR or {}
-local convars, convarValues = vrmod.GetConvars()
+local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_net_tickrate", nil, tostring(math.ceil(1 / engine.TickInterval())), FCVAR_REPLICATED, nil, nil, nil, tonumber, nil)
-if SERVER then CreateConVar("vrmod_debug_network", "0", FCVAR_REPLICATED, "Enable detailed collision debug info (shared between server and clients)") end
+
 -- HELPERS
-local function DebugEnabled()
-	local cv = GetConVar("vrmod_debug_network")
-	return cv and cv:GetBool() or false
-end
+
 
 local function netReadFrame()
 	local frame = {
@@ -144,7 +141,7 @@ if CLIENT then
 				if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
 					SendFrame(frame)
 				else
-					vrmod.logger.Debug("[NET] Skipping identical frame")
+					vrmod.logger.Debug("Skipping identical frame")
 					if not lastSentFrame then SendFrame(frame) end
 				end
 			end
@@ -162,7 +159,7 @@ if CLIENT then
 		for k, v in pairs(g_VR.net) do
 			local ply = player.GetBySteamID(k)
 			if not ply or #v.frames < 1 then
-				if DebugEnabled() then vrmod.logger.Debug("Skipping player " .. tostring(k) .. " (no frames or invalid)") end
+				vrmod.logger.Debug("Skipping player " .. tostring(k) .. " (no frames or invalid)")
 				continue
 			end
 
@@ -193,7 +190,7 @@ if CLIENT then
 			if not lastLerpedFrames[k] then
 				v.lerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
 				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
-				if DebugEnabled() then vrmod.logger.Debug("Initialized lerpedFrame for " .. tostring(ply)) end
+				vrmod.logger.Debug("Initialized lerpedFrame for " .. tostring(ply))
 				continue
 			end
 
@@ -201,9 +198,9 @@ if CLIENT then
 			if not vrmod.utils.FramesAreEqual(lerpedFrame, lastLerpedFrames[k]) then
 				v.lerpedFrame = lerpedFrame
 				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
-				if DebugEnabled() then vrmod.logger.Debug("Updated lerpedFrame for " .. tostring(ply)) end
+				vrmod.logger.Debug("Updated lerpedFrame for " .. tostring(ply))
 			else
-				if DebugEnabled() then vrmod.logger.Debug("No change in frame for " .. tostring(ply)) end
+				vrmod.logger.Debug("No change in frame for " .. tostring(ply))
 			end
 		end
 	end
@@ -397,7 +394,7 @@ if SERVER then
 	util.AddNetworkString("vrutil_net_entervehicle")
 	util.AddNetworkString("vrutil_net_exitvehicle")
 	vrmod.NetReceiveLimited("vrutil_net_tick", convarValues.vrmod_net_tickrate + 5, 1200, function(len, ply)
-		if DebugEnabled() then vrmod.logger.Debug("[NET] received net_tick, len: " .. len) end
+		vrmod.logger.Debug("received net_tick, len: " .. len)
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
 		local frame = netReadFrame()

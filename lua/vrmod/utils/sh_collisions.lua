@@ -37,10 +37,10 @@ local cachedPushOutPos = {
     right = nil
 }
 
-if SERVER then CreateConVar("vrmod_debug_collision_info", "0", FCVAR_REPLICATED, "Enable detailed collision debug info (shared between server and clients)") end
+
 -- HELPERS
 local function DebugEnabled()
-    local cv = GetConVar("vrmod_debug_collision_info")
+    local cv = vrmod.debug_cvars.physics
     return cv and cv:GetBool() or false
 end
 

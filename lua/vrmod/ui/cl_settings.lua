@@ -857,15 +857,41 @@ function VRUtilOpenMenu()
 			y = y + 30
 		end
 
+		-- pretty name for labels
+		local function ProperSubName(s)
+			if s == "api" then return "API" end
+			if s == "ui" then return "UI" end
+			return s:sub(1, 1):upper() .. s:sub(2)
+		end
+
+		local function PopulateDebugSettings()
+			-- Prefer an explicit order if you have it
+			local order = vrmod.subsystemOrder or {"api", "utils", "core", "network", "input", "player", "physics", "pickup", "combat", "ui"}
+			-- First: ordered ones
+			for _, subsystem in ipairs(order) do
+				local cvarName = "vrmod_debug_" .. subsystem
+				-- Try to fetch the ConVar by name (works if server created it with FCVAR_REPLICATED
+				-- or if client created it too)
+				local cv = GetConVar(cvarName) or vrmod.debug_cvars and vrmod.debug_cvars[subsystem]
+				if cv then AddCB("Debug " .. ProperSubName(subsystem), cvarName) end
+			end
+
+			-- Then: any extra subsystems not listed in 'order'
+			if vrmod.debug_cvars then
+				for subsystem, _ in pairs(vrmod.debug_cvars) do
+					if not table.HasValue(order, subsystem) then
+						local cvarName = "vrmod_debug_" .. subsystem
+						local cv = GetConVar(cvarName)
+						if cv then AddCB("Debug " .. ProperSubName(subsystem), cvarName) end
+					end
+				end
+			end
+		end
+
 		AddLogLevelCB("Console log level", GetConVar("vrmod_log_console"))
 		AddLogLevelCB("File log level", GetConVar("vrmod_log_file"))
-		AddCB("Debug network", "vrmod_debug_network")
-		AddCB("Print halos info", "vrmod_pickup_debug")
+		PopulateDebugSettings()
 		AddCB("Visible wall collision", "vrmod_debug_collisions")
-		AddCB("Debug collisions", "vrmod_debug_collision_info")
-		AddCB("Debug melee", "vrmod_debug_melee")
-		AddCB("Debug character", "vrmod_debug_character")
-		AddCB("Debug Glide input", "vrmod_debug_glide_input")
 		AddCB("Redirect server prints to VR console (can cause lags)", "vrmod_console_redirect")
 	end
 
