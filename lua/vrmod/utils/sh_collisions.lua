@@ -338,7 +338,7 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
 
         if DebugEnabled() then vrmod.logger.Info("Computed collision boxes for %s → reach: %.2f units, melee: %s", modelPath, reach, tostring(isMelee)) end
     else
-        if DebugEnabled() then vrmod.logger.Info("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts) end
+        if DebugEnabled() then vrmod.logger.Warn("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts) end
     end
 
     ent:Remove()
