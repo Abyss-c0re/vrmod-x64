@@ -126,6 +126,7 @@ if CLIENT then
 						cursorY = -tp.y * 1 / v.scale
 					end
 				end
+
 				if not cursorX or not cursorY or not v or not v.width or not v.height or not dist or not menuFocusDist then return end
 				if cursorX > 0 and cursorY > 0 and cursorX < v.width and cursorY < v.height and dist < menuFocusDist then
 					g_VR.menuFocus = k
@@ -239,9 +240,9 @@ if CLIENT then
 	hook.Add("VRMod_Input", "ui", function(action, pressed)
 		if not g_VR.menuFocus then return end
 		local mouseButton = nil
-		if action == "boolean_primaryfire" or "boolean_car_mouse_left" then
+		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
 			mouseButton = MOUSE_LEFT
-		elseif action == "boolean_secondaryfire" or "boolean_car_mouse_right" then
+		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right" then
 			mouseButton = MOUSE_RIGHT
 		elseif action == "boolean_sprint" then
 			mouseButton = MOUSE_MIDDLE

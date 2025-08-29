@@ -207,8 +207,7 @@ if CLIENT then
 		end)
 
 		hook.Add("VRMod_Input", "vrmod_chat_clickdetect", function(action, pressed)
-			local clickInCar = LocalPlayer():InVehicle() and action == "boolean_right_pickup"
-			if action == "boolean_primaryfire" or clickInCar then
+			if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
 				justClicked = pressed and not wasClicking
 				wasClicking = pressed
 			end
