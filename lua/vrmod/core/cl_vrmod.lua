@@ -28,6 +28,7 @@ if CLIENT then
 	local forwardOffset = nil
 	local convarOverrides = {}
 	local moduleFile
+	local wasPaused = false
 	if system.IsLinux() then
 		moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
 	elseif system.IsWindows() then
@@ -176,18 +177,24 @@ if CLIENT then
 	end
 
 	local function DrawErrorOverlay()
-		if not system.HasFocus() or #g_VR.errorText > 0 then
+		local isPaused = not system.HasFocus() or #g_VR.errorText > 0
+		if isPaused then
 			render.Clear(0, 0, 0, 255, true, true)
 			cam.Start2D()
 			local text = not system.HasFocus() and "Please focus the game window" or g_VR.errorText
 			draw.DrawText(text, "DermaLarge", ScrW() / 2, ScrH() / 2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER)
 			cam.End2D()
 			g_VR.active = false
-			vrmod.logger.Info("VR session paused")
+			-- Only log on state change
+			if not wasPaused then vrmod.logger.Info("VR session paused") end
+			wasPaused = true
 			return true
+		else
+			g_VR.active = true
+			-- Only log unpause on state change
+			if wasPaused then vrmod.logger.Info("VR session resumed") end
+			wasPaused = false
 		end
-
-		g_VR.active = true
 	end
 
 	local function UpdateViewFromEntity()
@@ -510,7 +517,6 @@ if CLIENT then
 			VRMOD_Shutdown()
 			vrmod.logger.Info("Ended VR session")
 		end
-		
 
 		hook.Add("ShutDown", "vrutil_hook_shutdown", function() if IsValid(LocalPlayer()) and g_VR.net[LocalPlayer():SteamID()] then VRUtilClientExit() end end)
 	end
