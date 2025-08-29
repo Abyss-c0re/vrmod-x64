@@ -150,7 +150,7 @@ if CLIENT then
 	local haloTargetsRight = {}
 	hook.Add("Tick", "vrmod_find_pickup_target", function()
 		local ply = LocalPlayer()
-		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) then return end
+		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) or not ply:Alive() then return end
 		local pickupRange = GetConVar("vrmod_pickup_range"):GetFloat()
 		local heldLeft = g_VR.heldEntityLeft
 		local heldRight = g_VR.heldEntityRight
