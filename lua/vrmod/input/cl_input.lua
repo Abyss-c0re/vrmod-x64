@@ -393,10 +393,8 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		local glideVeh = g_VR.vehicle.current
 		local attachPos = glideVeh:GetPos() + glideVeh:GetUp() * -20
 		local attachAng = glideVeh:GetAngles()
-		vrmod.SetLeftHandPose(attachedPos, attachedAng)
-		vrmod.SetLeftRightPose(attachedPos, attachedAng)
-		netFrame.lefthandPos, netFrame.lefthandAng = attachPos, attachAng
-		netFrame.righthandPos, netFrame.righthandAng = attachPos, attachAng
+		vrmod.SetLeftHandPose(attachPos, attachAng)
+		vrmod.SetRightHandPose(attachPos, attachAng)
 		return
 	end
 
