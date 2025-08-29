@@ -37,7 +37,7 @@ if CLIENT then
 			moduleFile = "lua/bin/gmcl_vrmod_win32.dll"
 		end
 	else
-		error("[VRMod] Unsupported OS.")
+		vrmod.logger.Err("Unsupported OS.")
 	end
 
 	if moduleFile then
@@ -117,10 +117,10 @@ if CLIENT then
 				local delta = vrmod.utils.SubVec(currentPos, lastPos)
 				local deltaLenSqr = vrmod.utils.LengthSqr(delta)
 				if deltaLenSqr > maxPosDeltaSqr then
-					-- Clamp delta to max allowed delta
 					local deltaLen = math.sqrt(deltaLenSqr)
 					local clampedDelta = vrmod.utils.MulVec(delta, maxPosDeltaSqr / deltaLen)
 					currentPos = vrmod.utils.AddVec(lastPos, clampedDelta)
+					vrmod.logger.Warn("Pose %s exceeded max delta, clamped.", k)
 				end
 			end
 
@@ -147,6 +147,8 @@ if CLIENT then
 				worldPose.pos = worldPose.pos + offsetWorldPos
 				worldPose.ang = offsetWorldAng
 			end
+
+			vrmod.logger.Debug("Updated tracking for %s: pos=%s ang=%s", k, tostring(worldPose.pos), tostring(worldPose.ang))
 		end
 
 		g_VR.sixPoints = g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot
@@ -181,6 +183,7 @@ if CLIENT then
 			draw.DrawText(text, "DermaLarge", ScrW() / 2, ScrH() / 2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER)
 			cam.End2D()
 			g_VR.active = false
+			vrmod.logger.Info("VR session paused")
 			return true
 		end
 
@@ -228,11 +231,11 @@ if CLIENT then
 		render.PushRenderTarget(g_VR.rt)
 		if DrawErrorOverlay() then
 			render.PopRenderTarget()
+			vrmod.logger.Warn("Render skipped due to error overlay.")
 			return
 		end
 
 		render.Clear(0, 0, 0, 255, true, true)
-		-- Base view parameters
 		local view = g_VR.view
 		view.drawmonitors = true
 		view.drawviewmodel = false
@@ -252,6 +255,7 @@ if CLIENT then
 		render.RenderView(view)
 		if not LocalPlayer():Alive() then
 			vrmod.utils.DrawDeathAnimation(g_VR.rtWidth, g_VR.rtHeight)
+			vrmod.logger.Debug("Player is dead, drawing death animation.")
 		else
 			g_VR.deathTime = nil
 		end
@@ -263,6 +267,7 @@ if CLIENT then
 			surface.SetMaterial(g_VR.rtMaterial)
 			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
 			render.CullMode(0)
+			vrmod.logger.Debug("Desktop view rendered.")
 		end
 	end
 
@@ -270,13 +275,13 @@ if CLIENT then
 	local function PerformStartup()
 		local err = vrmod.GetStartupError()
 		if err then
-			vrmod.logger.Err("VRMod failed to start: " .. err)
+			vrmod.logger.Err("Failed to start: " .. err)
 			return false
 		end
 
 		VRMOD_Shutdown() -- ensure clean state
 		if VRMOD_Init() == false then
-			vrmod.logger.Err("vr init failed")
+			vrmod.logger.Err("Init failed")
 			return false
 		end
 		return true
@@ -503,7 +508,9 @@ if CLIENT then
 
 			g_VR.active = false
 			VRMOD_Shutdown()
+			vrmod.logger.Info("Ended VR session")
 		end
+		
 
 		hook.Add("ShutDown", "vrutil_hook_shutdown", function() if IsValid(LocalPlayer()) and g_VR.net[LocalPlayer():SteamID()] then VRUtilClientExit() end end)
 	end
@@ -526,5 +533,6 @@ if CLIENT then
 		vrmod.StartLocomotion()
 		VRMOD_UpdatePosesAndActions()
 		g_VR.active = true
+		vrmod.logger.Info("Started VR session")
 	end
 end

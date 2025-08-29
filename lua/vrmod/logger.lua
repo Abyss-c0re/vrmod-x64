@@ -6,10 +6,12 @@ local cv_console = CreateConVar("vrmod_log_console", "3", FCVAR_REPLICATED + FCV
 local cv_file = CreateConVar("vrmod_log_file", "0", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Minimum log level for file (0=OFF, 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG)")
 -- Subsystem convars
 for subsystem, _ in pairs(vrmod.status or {}) do
-    local name = "vrmod_debug_" .. subsystem
-    if not vrmod.debug_cvars[subsystem] then
-        local convar = CreateConVar(name, "0", FCVAR_ARCHIVE + FCVAR_REPLICATED, "Enable debug for VRMod subsystem: " .. subsystem)
-        vrmod.debug_cvars[subsystem] = convar
+    if subsystem ~= "api" then -- exclude the "api" subsystem
+        local name = "vrmod_debug_" .. subsystem
+        if not vrmod.debug_cvars[subsystem] then
+            local convar = CreateConVar(name, "0", FCVAR_ARCHIVE + FCVAR_REPLICATED, "Enable debug for VRMod subsystem: " .. subsystem)
+            vrmod.debug_cvars[subsystem] = convar
+        end
     end
 end
 
@@ -108,7 +110,7 @@ local function Log(level, fmt, ...)
         if not (cv and cv:GetBool()) then return end
     end
 
-    local prefix = string.format("[VR][%s][%s][%s]", side, subsystem:upper(), level)
+    -- Prepare message
     local msg
     if select("#", ...) > 0 then
         local args = {...}
@@ -126,18 +128,19 @@ local function Log(level, fmt, ...)
         msg = tostr(fmt)
     end
 
-    local line = string.format("%s %s", prefix, msg)
     -- Console output
     if lvlNum <= cv_console:GetInt() then
         local colLvl = levelColors[level] or color_white
         local colSide = sideColors[side] or color_white
         local colSub = getSubsystemColor(subsystem)
-        MsgC(colSide, "[" .. side .. "] ", colSub, "[" .. subsystem:upper() .. "] ", -- <-- uppercase here
-            colLvl, "[" .. level .. "] ", color_white, msg .. "\n")
+        MsgC(colSide, "[VR][" .. side .. "]", colSub, "[" .. subsystem:upper() .. "]", colLvl, "[" .. level .. "]", color_white, msg .. "\n")
     end
 
     -- File output
-    if lvlNum <= cv_file:GetInt() then writeFileLine(os.date("[%H:%M:%S] ") .. line) end
+    if lvlNum <= cv_file:GetInt() then
+        local line = string.format("[VR][%s][%s][%s] %s", side, subsystem:upper(), level, msg)
+        writeFileLine(os.date("[%H:%M:%S] ") .. line)
+    end
 end
 
 -- Public shorthands

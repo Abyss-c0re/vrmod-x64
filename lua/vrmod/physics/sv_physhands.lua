@@ -114,7 +114,7 @@ local function RemoveVRHands(ply)
         if IsValid(ent) then
             ent:SetNoDraw(true)
             ent:SetCollisionGroup(COLLISION_GROUP_DEBRIS)
-            ent:SetPos(Vector(0, 0, -99999))
+            ent:SetPos(Vector(0, 0, -10000))
             if IsValid(side.phys) then
                 side.phys:EnableMotion(false)
                 side.phys:Sleep()

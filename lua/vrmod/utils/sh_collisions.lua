@@ -37,10 +37,8 @@ local cachedPushOutPos = {
     right = nil
 }
 
-
--- HELPERS
 local function DebugEnabled()
-    local cv = vrmod.debug_cvars.physics
+    local cv = GetConVar("vrmod_debug_physics")
     return cv and cv:GetBool() or false
 end
 
