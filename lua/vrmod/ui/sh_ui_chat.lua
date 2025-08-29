@@ -183,24 +183,6 @@ if CLIENT then
 		oldMsgC(...)
 	end
 
-	-- Override Player:ConCommand
-	local meta = FindMetaTable("Player")
-	local oldConCommand = meta.ConCommand
-	function meta:ConCommand(cmd)
-		addConsoleMessage({Color(0, 255, 255, 255), "[Command] " .. tostring(cmd)})
-		local function errorHandler(err)
-			local errorMsg = "[Lua Error] " .. tostring(err)
-			addConsoleMessage({Color(255, 0, 0, 255), errorMsg})
-			local stackTrace = debug.traceback("", 2)
-			for _, line in ipairs(string.Split(tostring(stackTrace), "\n")) do
-				if line ~= "" then addConsoleMessage({Color(255, 0, 0, 255), "  " .. line}) end
-			end
-		end
-
-		xpcall(function() oldConCommand(self, cmd) end, errorHandler)
-		return
-	end
-
 	local function ToggleChat()
 		if VRUtilIsMenuOpen("chat") then
 			VRUtilMenuClose("chat")
