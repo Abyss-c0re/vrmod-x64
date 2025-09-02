@@ -290,6 +290,13 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 			lastInputState.pitch = pitch
 			lastInputState.yaw = yaw
 			lastInputState.roll = roll
+			-- === Debug before sending ===
+			if g_VR.vehicle.type == "aircraft" then
+				vrmod.logger.Debug(string.format("Client sending - Throttle: %.2f, Brake: %.2f, Steer: %.2f, Pitch: %.2f, Yaw: %.2f, Roll: %.2f", throttle, brake, steer, pitch, yaw, roll))
+			else
+				vrmod.logger.Debug(string.format("Client sending - Throttle: %.2f, Brake: %.2f, Steer: %.2f", throttle, brake, steer))
+			end
+
 			net.Start("glide_vr_input")
 			net.WriteString("analog")
 			net.WriteFloat(throttle)

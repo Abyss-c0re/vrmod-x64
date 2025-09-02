@@ -31,6 +31,8 @@ if SERVER then
             local roll = net.ReadFloat()
             vehicle:SetInputFloat(1, "brake", brake)
             vehicle:SetInputFloat(1, "steer", steer)
+            -- Debug for accel/steer/brake
+            vrmod.logger.Debug("Server received - Throttle: " .. throttle .. ", Brake: " .. brake .. ", Steer: " .. steer)
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
                 vrmod.logger.Debug("Server received - Pitch: " .. pitch .. ", Yaw: " .. yaw .. ", Roll: " .. roll)
                 vehicle:SetInputFloat(1, "throttle", math.Clamp(throttle, -1, 1))
