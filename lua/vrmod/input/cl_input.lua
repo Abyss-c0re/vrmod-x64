@@ -319,6 +319,7 @@ end)
 hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 	local ply = LocalPlayer()
 	if not IsValid(ply) or not g_VR.active or not g_VR.wheelGripped then
+		if g_VR.analog_input.steer ~= 0 then vrmod.logger.Debug("Steering reset: no grip or VR inactive") end
 		neutralOffsets = {}
 		g_VR.analog_input.steer = 0
 		return
@@ -327,6 +328,7 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 	local vehicle = g_VR.vehicle.current
 	local vehicleType = g_VR.vehicle.type
 	if not IsValid(vehicle) or not vrmod.utils.GetVehicleBonePosition(vehicle, g_VR.vehicle.wheel_bone) then
+		vrmod.logger.Debug("Steering reset: invalid vehicle or wheel bone missing")
 		neutralOffsets = {}
 		g_VR.analog_input.steer = 0
 		return
@@ -334,6 +336,7 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 
 	local hmdPos, hmdAng = vrmod.GetHMDPose(ply)
 	if not hmdPos then
+		vrmod.logger.Debug("Steering reset: HMD pose not available")
 		neutralOffsets = {}
 		g_VR.analog_input.steer = 0
 		return
@@ -342,6 +345,7 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 	local leftPos, leftAng = vrmod.GetLeftHandPose(ply)
 	local rightPos, rightAng = vrmod.GetRightHandPose(ply)
 	if not leftPos or not rightPos then
+		vrmod.logger.Debug("Steering reset: hand poses not available")
 		neutralOffsets = {}
 		g_VR.analog_input.steer = 0
 		return
@@ -365,7 +369,11 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 		local handAng = handName == "left" and leftAng or rightAng
 		local relativePos = WorldToLocal(handPos, handAng, hmdPos, hmdAng)
 		-- Dynamic neutral offset recalibration
-		if not neutralOffsets[handName] or (relativePos - neutralOffsets[handName]):Length() < 0.02 then neutralOffsets[handName] = relativePos end
+		if not neutralOffsets[handName] or (relativePos - neutralOffsets[handName]):Length() < 0.02 then
+			neutralOffsets[handName] = relativePos
+			vrmod.logger.Debug("Neutral offset recalibrated for " .. handName .. " hand")
+		end
+
 		local delta = relativePos - neutralOffsets[handName]
 		-- Fetch sensitivity and rotation range from sensCache
 		local sens = sensCache.steer[vehicleType].value or 1
@@ -374,12 +382,16 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 		local steer = 0
 		local weight = 1
 		if vehicleType == "motorcycle" then
-			if math.abs(delta.y) > deadzone then steer = (delta.y - sign(delta.y) * deadzone) * sens end
+			if math.abs(delta.y) > deadzone then
+				steer = (delta.y - sign(delta.y) * deadzone) * sens
+				vrmod.logger.Debug(string.format("Motorcycle steer (%s hand): delta.y=%.3f steer=%.3f", handName, delta.y, steer))
+			end
 		elseif vehicleType == "car" then
 			local multiplier = handName == "left" and 0.75 or -0.75
 			if math.abs(delta.z) > deadzone then
 				steer = multiplier * (delta.z - sign(delta.z) * deadzone) * sens
 				weight = math.min(1, delta:Length() / 0.5)
+				vrmod.logger.Debug(string.format("Car steer (%s hand): delta.z=%.3f steer=%.3f weight=%.2f", handName, delta.z, steer, weight))
 			end
 		end
 
@@ -390,7 +402,9 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 	if totalWeight > 0 then steerInput = math.Clamp(steerInput / totalWeight, -1, 1) end
 	-- Apply frame-time-based smoothing using sensCache
 	local smoothingFactor = sensCache.steer[vehicleType].smooth or 0.1
-	g_VR.analog_input.steer = Lerp(FrameTime() / smoothingFactor, g_VR.analog_input.steer or 0, steerInput)
+	local prevSteer = g_VR.analog_input.steer or 0
+	g_VR.analog_input.steer = Lerp(FrameTime() / smoothingFactor, prevSteer, steerInput)
+	if math.abs(g_VR.analog_input.steer - prevSteer) > 0.01 then vrmod.logger.Debug(string.format("Smoothed steer updated: %.3f -> %.3f (target=%.3f)", prevSteer, g_VR.analog_input.steer, steerInput)) end
 end)
 
 -- Handle steering grip transform
