@@ -16,7 +16,7 @@ local blacklistedClasses = {
 local blacklistedPatterns = {"beam", "button", "dynamic", "func_", "c_base", "laser", "info_", "sprite", "env_", "fire", "trail", "light", "spotlight", "streetlight", "traffic", "texture", "shadow", "keypad"}
 local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
-vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 1.2, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber)
+vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 2.5, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0.0, 999.0, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 10000, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_npcs", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, "1", FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
@@ -172,8 +172,14 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 
 	if not IsValid(ent) then return nil end
 	-- Range check with boost
-	local boost = IsImportantPickup(ent) and 5.0 or 1.0
-	local maxDist = pickupRange * 100 * boost
+	local boost = 1.0
+	if IsImportantPickup(ent) then
+		boost = 5.0
+	else
+		if ent:IsNPC() then boost = 3.0 end
+	end
+
+	local maxDist = pickupRange * 10 * boost
 	if (ent:GetPos() - handPos):LengthSqr() > maxDist ^ 2 then return nil end
 	-- Weapon-specific rules
 	if vrmod.utils.IsWeaponEntity(ent) then
