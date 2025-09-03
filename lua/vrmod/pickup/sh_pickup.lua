@@ -1,5 +1,10 @@
 g_VR = g_VR or {}
 vrmod = vrmod or {}
+scripted_ents.Register({
+	Type = "anim",
+	Base = "vrmod_pickup"
+}, "vrmod_pickup")
+
 local blacklistedClasses = {
 	["npc_turret_floor"] = true,
 	["info_particle_system"] = true,
