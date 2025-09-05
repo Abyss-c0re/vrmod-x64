@@ -20,6 +20,7 @@ if SERVER then
     net.Receive("glide_vr_input", function(_, ply)
         if not IsValid(ply) then return end
         local vehicle = ply:GetNWEntity("GlideVehicle")
+        local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
         if not IsValid(vehicle) or not validVehicleTypes[vehicle.VehicleType] then return end
         local action = net.ReadString()
         if action == "analog" then
@@ -29,64 +30,64 @@ if SERVER then
             local pitch = net.ReadFloat()
             local yaw = net.ReadFloat()
             local roll = net.ReadFloat()
-            vehicle:SetInputFloat(1, "brake", brake)
-            vehicle:SetInputFloat(1, "steer", steer)
+            vehicle:SetInputFloat(seatIndex, "brake", brake)
+            vehicle:SetInputFloat(seatIndex, "steer", steer)
             -- Debug for accel/steer/brake
             vrmod.logger.Debug("Server received - Throttle: " .. throttle .. ", Brake: " .. brake .. ", Steer: " .. steer)
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
                 vrmod.logger.Debug("Server received - Pitch: " .. pitch .. ", Yaw: " .. yaw .. ", Roll: " .. roll)
-                vehicle:SetInputFloat(1, "throttle", math.Clamp(throttle, -1, 1))
-                vehicle:SetInputFloat(1, "pitch", math.Clamp(pitch, -1, 1))
-                vehicle:SetInputFloat(1, "yaw", math.Clamp(yaw, -1, 1))
-                vehicle:SetInputFloat(1, "roll", math.Clamp(roll, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "throttle", math.Clamp(throttle, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "pitch", math.Clamp(pitch, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "yaw", math.Clamp(yaw, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "roll", math.Clamp(roll, -1, 1))
             else
-                vehicle:SetInputFloat(1, "accelerate", throttle)
+                vehicle:SetInputFloat(seatIndex, "accelerate", throttle)
             end
             return
         end
 
         local pressed = net.ReadBool()
         if action == "boolean_handbrake" then
-            vehicle:SetInputBool(1, "handbrake", pressed)
+            vehicle:SetInputBool(seatIndex, "handbrake", pressed)
         elseif action == "boolean_lights" then
             if pressed then
                 local newState = vehicle:GetHeadlightState() == 0 and 2 or 0
                 vehicle:ChangeHeadlightState(newState)
             end
         elseif action == "boolean_horn" then
-            vehicle:SetInputBool(1, "horn", pressed)
+            vehicle:SetInputBool(seatIndex, "horn", pressed)
         elseif action == "boolean_shift_up" then
-            vehicle:SetInputBool(1, "shift_up", pressed)
+            vehicle:SetInputBool(seatIndex, "shift_up", pressed)
         elseif action == "boolean_shift_down" then
-            vehicle:SetInputBool(1, "shift_down", pressed)
+            vehicle:SetInputBool(seatIndex, "shift_down", pressed)
         elseif action == "boolean_shift_neutral" then
-            vehicle:SetInputBool(1, "shift_neutral", pressed)
+            vehicle:SetInputBool(seatIndex, "shift_neutral", pressed)
         elseif action == "boolean_turret" or vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK and action == "boolean_right_pickup" then
-            vehicle:SetInputBool(1, "attack", pressed)
+            vehicle:SetInputBool(seatIndex, "attack", pressed)
         elseif action == "boolean_alt_turret" or vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK and action == "boolean_left_pickup" then
-            vehicle:SetInputBool(1, "attack_alt", pressed)
+            vehicle:SetInputBool(seatIndex, "attack_alt", pressed)
         elseif action == "boolean_switch_weapon" then
-            vehicle:SetInputBool(1, "switch_weapon", pressed)
+            vehicle:SetInputBool(seatIndex, "switch_weapon", pressed)
         elseif action == "boolean_siren" then
-            vehicle:SetInputBool(1, "siren", pressed)
+            vehicle:SetInputBool(seatIndex, "siren", pressed)
         elseif action == "boolean_signal_left" then
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
-                vehicle:SetInputBool(1, "landing_gear", pressed)
+                vehicle:SetInputBool(seatIndex, "landing_gear", pressed)
             else
-                vehicle:SetInputBool(1, "signal_left", pressed)
+                vehicle:SetInputBool(seatIndex, "signal_left", pressed)
             end
         elseif action == "boolean_signal_right" then
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
-                vehicle:SetInputBool(1, "countermeasures", pressed)
+                vehicle:SetInputBool(seatIndex, "countermeasures", pressed)
             else
-                vehicle:SetInputBool(1, "signal_right", pressed)
+                vehicle:SetInputBool(seatIndex, "signal_right", pressed)
             end
         elseif action == "boolean_toggle_engine" then
-            vehicle:SetInputBool(1, "toggle_engine", pressed)
+            vehicle:SetInputBool(seatIndex, "toggle_engine", pressed)
         elseif action == "boolean_switch_weapon" then
-            vehicle:SetInputBool(1, "switch_weapon", pressed)
+            vehicle:SetInputBool(seatIndex, "switch_weapon", pressed)
         elseif action == "boolen_detach_trailer" then
-            vehicle:SetInputBool(1, "detach_trailer", pressed)
+            vehicle:SetInputBool(seatIndex, "detach_trailer", pressed)
         end
     end)
 else -- CLIENT
