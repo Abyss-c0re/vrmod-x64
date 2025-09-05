@@ -25,6 +25,7 @@ g_VR.vehicle = g_VR.vehicle or {
 	current = nil,
 	type = nil,
 	glide = false,
+	driving = false,
 	wheel_bone = nil
 }
 
@@ -69,6 +70,7 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 		g_VR.vehicle.wheel_bone = boneId
 		g_VR.vehicle.glide = glide
 		vrmod.logger.Info("Steer grip type selected: " .. tostring(vType))
+		if glide and ply:GlideGetSeatIndex() == 1 or not glide then g_VR.vehicle.driving = true end
 	end)
 
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
@@ -80,6 +82,7 @@ hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function()
 	g_VR.vehicle.type = nil
 	g_VR.vehicle.wheel_bone = nil
 	g_VR.vehicle.glide = false
+	g_VR.vehicle.driving = false
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
 end)
 
@@ -227,7 +230,7 @@ hook.Add("Think", "VRMOD_UpdateSensCache", function()
 end)
 
 hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
-	if not g_VR.active or not g_VR.tracking or not g_VR.vehicle.current then return end
+	if not g_VR.active or not g_VR.tracking or not g_VR.vehicle.driving then return end
 	if CurTime() < nextSendTime then return end
 	local planeGrip = g_VR.vehicle.type == "aircraft" and rightGrip
 	-- === Aircraft pitch/yaw/roll relative control ===
@@ -409,7 +412,7 @@ end)
 
 -- Handle steering grip transform
 hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
-	if not g_VR.active or not g_VR.vehicle.current then return end
+	if not g_VR.active or not g_VR.vehicle.driving then return end
 	-- Special case for tanks
 	if g_VR.vehicle.type == "tank" then
 		local glideVeh = g_VR.vehicle.current

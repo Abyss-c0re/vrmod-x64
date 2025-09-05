@@ -126,7 +126,7 @@ else -- CLIENT
 
     -- Boolean input monitoring
     hook.Add("VRMod_Input", "glide_vr_input", function(action, pressed)
-        if not g_VR.active or not g_VR.input or not g_VR.vehicle.current or not g_VR.vehicle.current.IsGlideVehicle then return end
+        if not g_VR.active or not g_VR.input or not g_VR.vehicle.driving or not g_VR.vehicle.current.IsGlideVehicle then return end
         local vehicle = g_VR.vehicle.current
         if not IsValid(vehicle) or not validVehicleTypes[vehicle.VehicleType] then return end
         if not inputsToSend[action] then return end
