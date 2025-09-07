@@ -1,6 +1,58 @@
 g_VR = g_VR or {}
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
+local function DebugEnabled()
+    local cv = GetConVar("vrmod_debug_pickup")
+    return cv and cv:GetBool() or false
+end
+
+function vrmod.utils.PatchOwnerCollision(ent, ply)
+    if not IsValid(ent) or not IsValid(ply) then return end
+    if ent._collisionPatched then return end
+    -- Mark ownership
+    ent._pickupOwner = ply
+    -- Add nocollide constraint
+    local nc = constraint.NoCollide(ent, ply, 0, 0)
+    ent._nocollideConstraint = nc
+    ent._collisionPatched = true
+    if DebugEnabled() then vrmod.logger.Debug("Added nocollide constraint between", ent, "and", ply) end
+end
+
+function vrmod.utils.UnpatchOwnerCollision(ent)
+    if not IsValid(ent) or not ent._collisionPatched then return end
+    local ply = ent._pickupOwner
+    ent._pickupOwner = nil
+    local phys = ent:GetPhysicsObject()
+    if IsValid(phys) then phys:Wake() end
+    -- Temporarily disable collisions between player and prop
+    if IsValid(ply) then
+        ent:SetCustomCollisionCheck(true)
+        ply:SetCustomCollisionCheck(true)
+        phys:EnableCollisions(false)
+    end
+
+    -- Remove nocollide constraint after a short delay
+    if IsValid(ent._nocollideConstraint) then
+        timer.Simple(0.01, function()
+            if IsValid(ent._nocollideConstraint) then
+                ent._nocollideConstraint:Remove()
+                ent._nocollideConstraint = nil
+            end
+
+            -- Re-enable collisions
+            if IsValid(phys) then phys:EnableCollisions(true) end
+            if IsValid(ply) then
+                ent:SetCustomCollisionCheck(false)
+                ply:SetCustomCollisionCheck(false)
+            end
+        end)
+    end
+
+    ent._collisionPatched = nil
+    if DebugEnabled() then vrmod.logger.Debug("Unpatched collision for", ent) end
+end
+
+
 function vrmod.utils.SnapEntityToHand(ent, handPos, handAng)
     if not IsValid(ent) then return false end
     -- safe defaults for DEFAULT_OFFSET
