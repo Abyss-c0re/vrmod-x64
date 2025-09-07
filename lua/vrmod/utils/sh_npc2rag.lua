@@ -1,10 +1,124 @@
 g_VR = g_VR or {}
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
-
 local trackedRagdolls = trackedRagdolls or {}
 local lastDamageTime = {}
 -- NPC2RAG
+-- Returns either a single mass (if physIndex provided) or a table of masses indexed by phys-index.
+function vrmod.utils.GetBoneMass(ent, physIndex)
+    if not IsValid(ent) then return nil end
+    local physCount = 0
+    -- Try to get a safe count; fallback to single physics object
+    if ent.GetPhysicsObjectCount then physCount = ent:GetPhysicsObjectCount() or 0 end
+    -- If there's no count but there's a physics object, treat it as one
+    if physCount <= 0 then
+        local p = ent:GetPhysicsObject()
+        if not IsValid(p) then return nil end
+        if physIndex == nil then
+            return {
+                [0] = p:GetMass()
+            }
+        else
+            return physIndex == 0 and p:GetMass() or nil
+        end
+    end
+
+    -- If a specific index requested, return that mass (or nil)
+    if physIndex ~= nil then
+        local p = ent:GetPhysicsObjectNum(physIndex)
+        if IsValid(p) then return p:GetMass() end
+        return nil
+    end
+
+    -- Otherwise return all masses as a table
+    local masses = {}
+    for i = 0, physCount - 1 do
+        local p = ent:GetPhysicsObjectNum(i)
+        if IsValid(p) then masses[i] = p:GetMass() end
+    end
+    return masses
+end
+
+-- Cache original masses on the entity (stored as ent.vrmod_original_masses).
+-- If force==true it will overwrite an existing cache.
+function vrmod.utils.CacheBoneMasses(ent, force)
+    if not IsValid(ent) then return end
+    if ent.vrmod_original_masses and not force then return end
+    ent.vrmod_original_masses = vrmod.utils.GetBoneMass(ent) or {}
+end
+
+-- Restore cached masses. delay (seconds) optional.
+-- Accepts same motion/damping/vel/angvel flags similar to your SetBoneMass logic.
+function vrmod.utils.RestoreBoneMasses(ent, delay, damp, vel, angvel, resetmotion)
+    if not IsValid(ent) then return end
+    local original = ent.vrmod_original_masses
+    if not original then return end
+    local function doRestore()
+        if not IsValid(ent) then return end
+        for i, mass in pairs(original) do
+            local phys = ent:GetPhysicsObjectNum(i)
+            if not IsValid(phys) then
+                -- fallback to primary phys if index 0 missing
+                if i == 0 then phys = ent:GetPhysicsObject() end
+            end
+
+            if IsValid(phys) then
+                if resetmotion then
+                    phys:EnableMotion(false)
+                else
+                    phys:EnableMotion(true)
+                end
+
+                phys:SetMass(mass)
+                if damp then phys:SetDamping(damp, damp) end
+                if vel then phys:SetVelocity(vel) end
+                if angvel then phys:AddAngleVelocity(VectorRand() * angvel) end
+                phys:EnableGravity(true)
+                phys:Wake()
+            end
+        end
+    end
+
+    if delay and delay > 0 then
+        timer.Simple(delay, doRestore)
+    else
+        doRestore()
+    end
+end
+
+-- Clear the cached mass table (call after restore if you want to free it)
+function vrmod.utils.ClearCachedBoneMasses(ent)
+    if not IsValid(ent) then return end
+    ent.vrmod_original_masses = nil
+end
+
+-- Utility: Temporarily set damping, also clamp material to reduce bounce
+function vrmod.utils.TempSetDamping(ent, highDamp, restoreDamp, delay)
+    if not IsValid(ent) then return end
+    if not delay then delay = 0.01 end
+    for i = 0, ent:GetPhysicsObjectCount() - 1 do
+        local phys = ent:GetPhysicsObjectNum(i)
+        if IsValid(phys) then
+            phys:SetDamping(highDamp, highDamp)
+            -- prevent "bouncy" ragdolls
+            phys:SetMaterial("default_silent") -- low restitution material
+            phys:Wake()
+        end
+    end
+
+    timer.Simple(delay, function()
+        if not IsValid(ent) then return end
+        for i = 0, ent:GetPhysicsObjectCount() - 1 do
+            local phys = ent:GetPhysicsObjectNum(i)
+            if IsValid(phys) then
+                phys:SetDamping(restoreDamp, restoreDamp)
+                phys:SetMaterial("flesh") -- typical ragdoll material
+                phys:Wake()
+            end
+        end
+    end)
+end
+
 function vrmod.utils.SetBoneMass(ent, mass, damp, vel, angvel, resetmotion, delay)
     if not IsValid(ent) or not IsValid(ent:GetPhysicsObject()) then return end
     if not delay then delay = 0 end
@@ -14,6 +128,7 @@ function vrmod.utils.SetBoneMass(ent, mass, damp, vel, angvel, resetmotion, dela
             if not IsValid(phys) then continue end
             if resetmotion then
                 phys:EnableMotion(false)
+                phys:EnableMotion(true)
             else
                 phys:EnableMotion(true)
             end
@@ -99,8 +214,8 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
             dmginfo:SetAttacker(game.GetWorld())
             dmginfo:SetInflictor(game.GetWorld())
             dmginfo:SetDamageForce(Vector(0, 0, -speed * 100))
-            vrmod.utils.SetBoneMass(rag, 50, 25, nil, nil, true)
-            vrmod.utils.SetBoneMass(rag, 50, 0.5, nil, nil, false, 0.01)
+            -- Temporary high damping, no freeze
+            vrmod.utils.TempSetDamping(rag, 25, 0.5, 0.01)
             rag.noDamage = false
             vrmod.utils.ForwardRagdollDamage(rag, dmginfo)
         end
