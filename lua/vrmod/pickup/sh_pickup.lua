@@ -21,6 +21,7 @@ vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FC
 vrmod.AddCallbackedConvar("vrmod_pickup_npcs", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, "1", FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 local pickupableCache = {}
+local invalidPickupCache = {}
 local function IsImportantPickup(ent)
 	local class = ent:GetClass()
 	return class:find("^item_") or class:find("^spawned_") or class:find("^vr_item") or vrmod.utils.IsWeaponEntity(ent)
@@ -100,46 +101,61 @@ end
 
 local function IsValidPickupTarget(ent, ply, bLeftHand)
 	if not IsValid(ent) then
-		vrmod.logger.Debug("IsValidPickupTarget: Entity invalid")
+		if not invalidPickupCache[ent] then
+			vrmod.logger.Debug("IsValidPickupTarget: Entity invalid")
+			invalidPickupCache[ent] = false
+		end
 		return false
+	end
+
+	if invalidPickupCache[ent] ~= nil then
+		return invalidPickupCache[ent] -- Return cached result without logging
 	end
 
 	if ent:GetNoDraw() then
 		vrmod.logger.Debug("IsValidPickupTarget: Entity has NoDraw -> " .. ent:GetClass())
+		invalidPickupCache[ent] = false
 		return false
 	end
 
 	if ent:IsDormant() then
 		vrmod.logger.Debug("IsValidPickupTarget: Entity is dormant -> " .. ent:GetClass())
+		invalidPickupCache[ent] = false
 		return false
 	end
 
 	if IsNonPickupable(ent) then
 		vrmod.logger.Debug("IsValidPickupTarget: Entity is non-pickupable -> " .. ent:GetClass())
+		invalidPickupCache[ent] = false
 		return false
 	end
 
 	if ent:GetNWBool("is_npc_ragdoll", false) then
 		vrmod.logger.Debug("IsValidPickupTarget: Entity is NPC ragdoll -> " .. ent:GetClass())
+		invalidPickupCache[ent] = false
 		return false
 	end
 
 	if bLeftHand and ent == g_VR.heldEntityLeft then
 		vrmod.logger.Debug("IsValidPickupTarget: Already held in left hand -> " .. ent:GetClass())
+		invalidPickupCache[ent] = false
 		return false
 	end
 
 	if not bLeftHand and ent == g_VR.heldEntityRight then
 		vrmod.logger.Debug("IsValidPickupTarget: Already held in right hand -> " .. ent:GetClass())
+		invalidPickupCache[ent] = false
 		return false
 	end
 
 	if ent:IsWeapon() and ent:GetOwner() == ply then
 		vrmod.logger.Debug("IsValidPickupTarget: Weapon already owned by player -> " .. ent:GetClass())
+		invalidPickupCache[ent] = false
 		return false
 	end
 
 	vrmod.logger.Debug("IsValidPickupTarget: Valid pickup -> " .. ent:GetClass())
+	invalidPickupCache[ent] = true
 	return true
 end
 
@@ -149,14 +165,28 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	local ent
 	local hand = bLeftHand and "left" or "right"
 	-- Sphere search first (tiny radius)
-	local nearby = ents.FindInSphere(handPos, 5)
+	-- Sphere search first (tiny radius)
+	local nearby = ents.FindInSphere(handPos, pickupRange * 3)
 	local closestDistSq = math.huge
 	for _, e in ipairs(nearby) do
 		if e ~= ply and IsValidPickupTarget(e, ply, bLeftHand) and CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then
-			local distSq = e:GetPos():DistToSqr(handPos)
-			if distSq < closestDistSq then
+			-- use bounding box center instead of origin
+			local min, max = e:OBBMins(), e:OBBMaxs()
+			local center = e:LocalToWorld((min + max) * 0.5)
+			-- distance
+			local distSq = center:DistToSqr(handPos)
+			-- slight directional bias: prefer things in front of the hand
+			local dir = (center - handPos):GetNormalized()
+			local dot = handAng:Forward():Dot(dir)
+			if dot < 0.3 then -- ignore things too far off to the side
+				continue
+			end
+
+			-- weighted distance (closer + more aligned wins)
+			local score = distSq / math.max(dot, 0.01)
+			if score < closestDistSq then
 				ent = e
-				closestDistSq = distSq
+				closestDistSq = score
 			end
 		end
 	end
@@ -341,24 +371,26 @@ if SERVER then
 						ent.dropped_manually = true
 						ent.noDamage = true
 						vrmod.logger.Debug("Setting bone mass for entity: " .. tostring(ent))
+						-- temporarily inflate
 						vrmod.utils.SetBoneMass(ent, 300, 0, handVel, 5)
-						timer.Simple(0.1, function()
-							if IsValid(ent) then
-								vrmod.logger.Debug("Patching owner collision for entity: " .. tostring(ent))
-								vrmod.utils.PatchOwnerCollision(ent)
-							end
-						end)
-
 						SendPickupNetMsg(t.ply, npc)
 						if not vrmod.utils.IsRagdollDead(ent) then
 							vrmod.logger.Debug("Scheduling entity removal: " .. tostring(ent))
 							timer.Simple(3.0, function() ent:Remove() end)
+						else
+							timer.Simple(1, function()
+								if IsValid(ent) then
+									vrmod.utils.RestoreBoneMasses(ent, 0, 0, handVel, 5, false)
+									vrmod.utils.ClearCachedBoneMasses(ent)
+								end
+							end)
 						end
 					else
 						ent.dropped_manually = false
 						if IsValid(ent) then
 							vrmod.logger.Debug("Setting NWBool is_npc_ragdoll to false for entity: " .. tostring(ent))
 							ent:SetNWBool("is_npc_ragdoll", false)
+							ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 						end
 
 						SendPickupNetMsg(t.ply, ent)
@@ -368,13 +400,6 @@ if SERVER then
 					if IsValid(phys) and pickupController then
 						vrmod.logger.Debug("Removing physics object from motion controller: " .. tostring(phys))
 						pickupController:RemoveFromMotionController(phys)
-					end
-
-					vrmod.logger.Debug("Patching owner collision for entity: " .. tostring(t.ent))
-					vrmod.utils.PatchOwnerCollision(t.ent, t.ply)
-					if IsValid(t.phys) then
-						vrmod.logger.Debug("Waking physics object: " .. tostring(t.phys))
-						t.phys:Wake()
 					end
 
 					SendPickupNetMsg(t.ply, ent)
@@ -404,6 +429,7 @@ if SERVER then
 				end
 
 				vrmod.logger.Debug("Calling VRMod_Drop hook for player: " .. tostring(t.ply) .. ", entity: " .. tostring(t.ent))
+				if t.ent:GetClass() ~= "prop_ragdoll" then vrmod.utils.UnpatchOwnerCollision(ent) end
 				hook.Call("VRMod_Drop", nil, t.ply, t.ent)
 				return
 			end
@@ -461,6 +487,7 @@ if SERVER then
 
 			ent.vrmod_physOffsets = physOffsets
 			vrmod.logger.Debug("Stored physOffsets for ragdoll: " .. tostring(ent))
+			ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
 		end
 
 		local phys = ent:GetPhysicsObject()
@@ -470,11 +497,11 @@ if SERVER then
 		local secondstoarrive = 0.001
 		local teleportdistance = 0
 		if ent:GetClass() ~= "prop_ragdoll" then
-			damp = math.Clamp(0.0058 * mass * 1.5, 0.15, 0.35)
+			damp = math.Clamp(mass / 200, 0.15, 0.75)
 			vrmod.logger.Debug("Non-ragdoll damping: " .. damp)
 		end
 
-		vrmod.logger.Debug("Patching owner collision for entity: " .. tostring(ent) .. ", player: " .. tostring(ply))
+		--vrmod.logger.Debug("Patching owner collision for entity: " .. tostring(ent) .. ", player: " .. tostring(ply))
 		vrmod.utils.PatchOwnerCollision(ent, ply)
 		if not IsValid(pickupController) then
 			vrmod.logger.Debug("Creating new pickup controller")
@@ -487,13 +514,14 @@ if SERVER then
 				maxspeeddamp = 999,
 				dampfactor = damp,
 				teleportdistance = teleportdistance,
-				deltatime = 0
+				deltatime = 0.001
 			}
 
 			function pickupController:PhysicsSimulate(phys, dt)
 				vrmod.logger.Debug("PhysicsSimulate for phys: " .. tostring(phys) .. ", deltaTime: " .. dt)
 				phys:Wake()
-				local info = phys:GetEntity().vrmod_pickup_info
+				local ent = phys:GetEntity()
+				local info = ent.vrmod_pickup_info
 				if not info then
 					vrmod.logger.Debug("No pickup info found for phys: " .. tostring(phys))
 					return
@@ -505,24 +533,25 @@ if SERVER then
 					return
 				end
 
-				local handPos, handAng
+				-- Determine hand position, angle, linear/angular velocity
+				local handPos, handAng, handVel, handAngVel
 				if info.left then
 					handPos = vrmod.GetLeftHandPos(ply)
 					handAng = vrmod.GetLeftHandAng(ply)
-					vrmod.logger.Debug("PhysicsSimulate left hand pos: " .. tostring(handPos) .. ", ang: " .. tostring(handAng))
+					handVel = vrmod.GetLeftHandVelocityRelative(ply)
+					handAngVel = vrmod.GetLeftHandAngularVelocity(ply)
 				else
 					handPos = vrmod.GetRightHandPos(ply)
 					handAng = vrmod.GetRightHandAng(ply)
-					vrmod.logger.Debug("PhysicsSimulate right hand pos: " .. tostring(handPos) .. ", ang: " .. tostring(handAng))
+					handVel = vrmod.GetRightHandVelocityRelative(ply)
+					handAngVel = vrmod.GetRightHandAngularVelocity(ply)
 				end
 
-				if not handPos or not handAng then
-					vrmod.logger.Debug("Invalid hand position or angle")
-					return
-				end
-
+				if not handPos or not handAng then return end
+				local mass = phys:GetMass()
+				local effectiveMass = mass
+				-- Target position/angle
 				local targetPos, targetAng
-				local ent = phys:GetEntity()
 				if ent:GetClass() == "prop_ragdoll" and ent.vrmod_physOffsets then
 					local physIndex
 					for i = 0, ent:GetPhysicsObjectCount() - 1 do
@@ -535,29 +564,38 @@ if SERVER then
 					if physIndex and ent.vrmod_physOffsets[physIndex] then
 						local offset = ent.vrmod_physOffsets[physIndex]
 						targetPos, targetAng = LocalToWorld(offset.localPos, offset.localAng, handPos, handAng)
-						vrmod.logger.Debug("Ragdoll target pos: " .. tostring(targetPos) .. ", ang: " .. tostring(targetAng) .. " for phys index: " .. physIndex)
 					end
 				else
 					targetPos, targetAng = LocalToWorld(info.localPos, info.localAng, handPos, handAng)
-					vrmod.logger.Debug("Non-ragdoll target pos: " .. tostring(targetPos) .. ", ang: " .. tostring(targetAng))
-					if mass < 3 then
-						local jitter = 0.5 * 1 / mass
-						targetPos = targetPos + VectorRand() * jitter
-						vrmod.logger.Debug("Applied jitter to target pos: " .. tostring(targetPos) .. ", jitter amount: " .. jitter)
-					end
+					effectiveMass = math.max(mass, 10)
+					--if mass < 3 then targetPos = targetPos + VectorRand() * 0.5 / mass end
 				end
 
-				if not targetPos then
-					vrmod.logger.Debug("No target position calculated")
-					return
-				end
-
-				local effectiveMass = math.max(mass, 2)
-				vrmod.logger.Debug("Applying player velocity, effective mass: " .. effectiveMass)
+				if not targetPos then return end
+				-- Player-relative forward offset
+				local plyPos = ply:GetPos()
+				local forwardOffset = 0.1
+				local dir = (targetPos - plyPos):GetNormalized()
+				targetPos = targetPos + dir * forwardOffset
+				-- Apply velocities
 				phys:AddVelocity(ply:GetVelocity() * dt * effectiveMass)
+				if handVel then phys:AddVelocity(handVel * dt * effectiveMass) end
+				if handAngVel then
+					local angVelVec = Vector(handAngVel.p, handAngVel.y, handAngVel.r)
+					phys:AddAngleVelocity(angVelVec)
+				end
+
+				-- Dynamic ShadowParams
+				local velMagnitude = handVel and handVel:Length() or 0
+				local angVelMagnitude = handAngVel and math.max(math.abs(handAngVel.p), math.abs(handAngVel.y), math.abs(handAngVel.r)) or 0
 				pickupController.ShadowParams.pos = targetPos
 				pickupController.ShadowParams.angle = targetAng
-				vrmod.logger.Debug("Computing shadow control with pos: " .. tostring(targetPos) .. ", angle: " .. tostring(targetAng))
+				pickupController.ShadowParams.secondstoarrive = math.Clamp(0.001 - velMagnitude * 0.0001, 0.0005, 0.01)
+				pickupController.ShadowParams.dampfactor = math.Clamp(0.35 - velMagnitude * 0.01, 0.15, 0.5)
+				pickupController.ShadowParams.maxspeed = 99999 + velMagnitude * 10
+				pickupController.ShadowParams.maxangular = 99999 + angVelMagnitude * 10
+				vrmod.logger.Debug(string.format("ShadowControl -> pos: %s, angle: %s, dtArrive: %.4f, damp: %.4f, maxSpeed: %.1f, maxAngular: %.1f", tostring(targetPos), tostring(targetAng), pickupController.ShadowParams.secondstoarrive, pickupController.ShadowParams.dampfactor, pickupController.ShadowParams.maxspeed, pickupController.ShadowParams.maxangular))
+				-- Apply ShadowControl
 				phys:ComputeShadowControl(pickupController.ShadowParams)
 			end
 
@@ -579,8 +617,9 @@ if SERVER then
 			pickupCount = pickupCount + 1
 			vrmod.logger.Debug("Incremented pickupCount to: " .. pickupCount)
 			if ent:GetClass() == "prop_ragdoll" then
+				vrmod.utils.CacheBoneMasses(ent)
 				vrmod.logger.Debug("Setting bone mass for ragdoll: " .. tostring(ent))
-				vrmod.utils.SetBoneMass(ent, 15, 0.5)
+				vrmod.utils.SetBoneMass(ent, 35, 0.5)
 			end
 		end
 
