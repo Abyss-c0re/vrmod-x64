@@ -600,7 +600,7 @@ if CLIENT then
 		activePlayers[steamid] = nil
 		characterInfo[steamid] = nil
 		g_VR.cache[steamid] = nil
-		lastLerpedFrames[steamid] = nil
+		lastFrames[steamid] = nil
 		if table.Count(activePlayers) == 0 then
 			hook.Remove("PrePlayerDraw", "vrutil_hook_preplayerdraw")
 			hook.Remove("PostPlayerDraw", "vrutil_hook_postplayerdraw")
