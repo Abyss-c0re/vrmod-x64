@@ -6,52 +6,83 @@ local function DebugEnabled()
     return cv and cv:GetBool() or false
 end
 
+-- Damage filter: prevent self-harm from own prop
+hook.Add("EntityTakeDamage", "VRMod_PreventOwnerSelfDamage", function(target, dmg)
+    local inflictor = dmg:GetInflictor()
+    if IsValid(inflictor) and inflictor._pickupOwner == target then
+        return true -- block damage from owned prop
+    end
+end)
+
+-- Collision filter: ignore only owner + their VR hands
+hook.Add("ShouldCollide", "VRMod_IgnoreOwnerAndHandCollisions", function(ent1, ent2)
+    if not (IsValid(ent1) and IsValid(ent2)) then return end
+    -- Case 1: ent1 is a patched prop
+    if ent1._collisionPatched then
+        if ent2 == ent1._pickupOwner then return false end
+        if ent2:GetNWBool("isVRHand", false) and ent2:GetOwner() == ent1._pickupOwner then return false end
+    end
+
+    -- Case 2: ent2 is a patched prop
+    if ent2._collisionPatched then
+        if ent1 == ent2._pickupOwner then return false end
+        if ent1:GetNWBool("isVRHand", false) and ent1:GetOwner() == ent2._pickupOwner then return false end
+    end
+end)
+
+-- Apply "owner safe" state + reduced pushback + floaty fix
 function vrmod.utils.PatchOwnerCollision(ent, ply)
     if not IsValid(ent) or not IsValid(ply) then return end
     if ent._collisionPatched then return end
-    -- Mark ownership
+    local phys = ent:GetPhysicsObject()
+    if IsValid(phys) then
+        -- Save original physics settings
+        ent._oldMass = phys:GetMass()
+        ent._oldDampingLinear, ent._oldDampingAngular = phys:GetDamping()
+        local mass = ent._oldMass or 10
+        -- Clamp minimum mass so light props aren't floaty
+        local newMass = math.max(mass, 20)
+        -- Scale damping: lighter objects get less damping so they're responsive
+        local newLinearDamp, newAngularDamp
+        if newMass <= 30 then
+            newLinearDamp, newAngularDamp = 1, 1 -- light props: low damping
+        elseif newMass <= 80 then
+            newLinearDamp, newAngularDamp = 5, 5 -- medium props
+        else
+            newLinearDamp, newAngularDamp = 10, 10 -- heavy props
+        end
+
+        -- Reduce pushback by lowering effective mass while held
+        phys:SetMass(math.max(1, newMass * 0.5))
+        phys:SetDamping(newLinearDamp, newAngularDamp)
+    end
+
     ent._pickupOwner = ply
-    -- Add nocollide constraint
-    local nc = constraint.NoCollide(ent, ply, 0, 0)
-    ent._nocollideConstraint = nc
     ent._collisionPatched = true
-    if DebugEnabled() then vrmod.logger.Debug("Added nocollide constraint between", ent, "and", ply) end
+    if DebugEnabled() then vrmod.logger.Debug("Patched collisions for", ent, "(owner:", ply, ") mass/damping adjusted for floaty fix + pushback reduction") end
 end
 
+-- Restore normal collision behavior + physics
 function vrmod.utils.UnpatchOwnerCollision(ent)
     if not IsValid(ent) or not ent._collisionPatched then return end
-    local ply = ent._pickupOwner
-    ent._pickupOwner = nil
     local phys = ent:GetPhysicsObject()
-    if IsValid(phys) then phys:Wake() end
-    -- Temporarily disable collisions between player and prop
-    if IsValid(ply) then
-        ent:SetCustomCollisionCheck(true)
-        ply:SetCustomCollisionCheck(true)
-        phys:EnableCollisions(false)
+    if IsValid(phys) then
+        -- Restore original mass/damping if saved
+        if ent._oldMass then
+            phys:SetMass(ent._oldMass)
+            ent._oldMass = nil
+        end
+
+        if ent._oldDampingLinear and ent._oldDampingAngular then
+            phys:SetDamping(ent._oldDampingLinear, ent._oldDampingAngular)
+            ent._oldDampingLinear, ent._oldDampingAngular = nil, nil
+        end
     end
 
-    -- Remove nocollide constraint after a short delay
-    if IsValid(ent._nocollideConstraint) then
-        timer.Simple(0.01, function()
-            if IsValid(ent._nocollideConstraint) then
-                ent._nocollideConstraint:Remove()
-                ent._nocollideConstraint = nil
-            end
-
-            -- Re-enable collisions
-            if IsValid(phys) then phys:EnableCollisions(true) end
-            if IsValid(ply) then
-                ent:SetCustomCollisionCheck(false)
-                ply:SetCustomCollisionCheck(false)
-            end
-        end)
-    end
-
+    ent._pickupOwner = nil
     ent._collisionPatched = nil
-    if DebugEnabled() then vrmod.logger.Debug("Unpatched collision for", ent) end
+    if DebugEnabled() then vrmod.logger.Debug("Unpatched collisions + restored physics for", ent) end
 end
-
 
 function vrmod.utils.SnapEntityToHand(ent, handPos, handAng)
     if not IsValid(ent) then return false end

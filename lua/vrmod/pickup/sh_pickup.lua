@@ -165,39 +165,10 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	local ent
 	local hand = bLeftHand and "left" or "right"
 	-- Sphere search first (tiny radius)
-	-- Sphere search first (tiny radius)
-	local nearby = ents.FindInSphere(handPos, pickupRange * 3)
-	local closestDistSq = math.huge
-	for _, e in ipairs(nearby) do
-		if e ~= ply and IsValidPickupTarget(e, ply, bLeftHand) and CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then
-			-- use bounding box center instead of origin
-			local min, max = e:OBBMins(), e:OBBMaxs()
-			local center = e:LocalToWorld((min + max) * 0.5)
-			-- distance
-			local distSq = center:DistToSqr(handPos)
-			-- slight directional bias: prefer things in front of the hand
-			local dir = (center - handPos):GetNormalized()
-			local dot = handAng:Forward():Dot(dir)
-			if dot < 0.3 then -- ignore things too far off to the side
-				continue
-			end
-
-			-- weighted distance (closer + more aligned wins)
-			local score = distSq / math.max(dot, 0.01)
-			if score < closestDistSq then
-				ent = e
-				closestDistSq = score
-			end
-		end
-	end
-
-	-- Fallback to trace if nothing found
-	if not IsValid(ent) then
-		local tr = vrmod.utils.TraceHand(ply, hand, true)
-		if tr and tr.Entity and IsValid(tr.Entity) then
-			local e = tr.Entity
-			if e ~= ply and IsValidPickupTarget(e, ply, bLeftHand) and CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then ent = e end
-		end
+	local tr = vrmod.utils.TraceHand(ply, hand, true)
+	if tr and tr.Entity and IsValid(tr.Entity) then
+		local e = tr.Entity
+		if e ~= ply and IsValidPickupTarget(e, ply, bLeftHand) and CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then ent = e end
 	end
 
 	if not IsValid(ent) then return nil end
@@ -402,6 +373,7 @@ if SERVER then
 						pickupController:RemoveFromMotionController(phys)
 					end
 
+					--if ent.ogMass and IsValid(phys) then phys:SetMass(ent.ogMass) end
 					SendPickupNetMsg(t.ply, ent)
 				else
 					vrmod.logger.Debug("Sending pickup net message with nil entity for player: " .. tostring(t.ply))
@@ -488,33 +460,35 @@ if SERVER then
 			ent.vrmod_physOffsets = physOffsets
 			vrmod.logger.Debug("Stored physOffsets for ragdoll: " .. tostring(ent))
 			ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
+		else
+			vrmod.logger.Debug("Patching owner collision for entity: " .. tostring(ent) .. ", player: " .. tostring(ply))
+			vrmod.utils.PatchOwnerCollision(ent, ply)
 		end
 
 		local phys = ent:GetPhysicsObject()
 		local mass = IsValid(phys) and phys:GetMass() or 1
 		vrmod.logger.Debug("Entity physics mass: " .. mass)
-		local damp = 0.35
-		local secondstoarrive = 0.001
-		local teleportdistance = 0
-		if ent:GetClass() ~= "prop_ragdoll" then
-			damp = math.Clamp(mass / 200, 0.15, 0.75)
-			vrmod.logger.Debug("Non-ragdoll damping: " .. damp)
-		end
+		local damp = 0.95
+		local secondstoarrive = 0.0001
+	
+		-- if ent:GetClass() ~= "prop_ragdoll" then
+	
+		-- 	damp = math.Clamp(mass / 200, 0.35, 0.75)
+		-- 	vrmod.logger.Debug("Non-ragdoll damping: " .. damp)
+		-- end
 
-		--vrmod.logger.Debug("Patching owner collision for entity: " .. tostring(ent) .. ", player: " .. tostring(ply))
-		vrmod.utils.PatchOwnerCollision(ent, ply)
 		if not IsValid(pickupController) then
 			vrmod.logger.Debug("Creating new pickup controller")
 			pickupController = ents.Create("vrmod_pickup")
 			pickupController.ShadowParams = {
+				pos = handPos,
+				angle = handAng,
 				secondstoarrive = secondstoarrive,
 				maxangular = 99999,
 				maxangulardamp = 999,
 				maxspeed = 99999,
 				maxspeeddamp = 999,
 				dampfactor = damp,
-				teleportdistance = teleportdistance,
-				deltatime = 0.001
 			}
 
 			function pickupController:PhysicsSimulate(phys, dt)
@@ -548,8 +522,7 @@ if SERVER then
 				end
 
 				if not handPos or not handAng then return end
-				local mass = phys:GetMass()
-				local effectiveMass = mass
+				local effectiveMass = phys:GetMass()
 				-- Target position/angle
 				local targetPos, targetAng
 				if ent:GetClass() == "prop_ragdoll" and ent.vrmod_physOffsets then
@@ -567,8 +540,6 @@ if SERVER then
 					end
 				else
 					targetPos, targetAng = LocalToWorld(info.localPos, info.localAng, handPos, handAng)
-					effectiveMass = math.max(mass, 10)
-					--if mass < 3 then targetPos = targetPos + VectorRand() * 0.5 / mass end
 				end
 
 				if not targetPos then return end
