@@ -12,13 +12,13 @@ if CLIENT then
 	local RIGHT_HAND_OFFSET = Angle(0, 0, 180)
 	local ANGLE_THRESHOLD = 0.01
 	local POS_THRESHOLD = 0.01
+	local zeroVec, zeroAng = ZERO_VEC, ZERO_ANG
 	-- Generate hand angles
 	g_VR.zeroHandAngles = {}
 	for i = 1, NUM_FINGER_BONES do
 		g_VR.zeroHandAngles[i] = Angle(0, 0, 0)
 	end
 
-	local cl_debug_character = CreateClientConVar("vrmod_debug_character", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 	g_VR.defaultOpenHandAngles = {
 		-- LEFT HAND
 		-- Thumb
@@ -112,9 +112,11 @@ if CLIENT then
 	g_VR.openHandAngles = g_VR.defaultOpenHandAngles
 	g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
 	----------------------------------------------------------------------------------------------------------------------------------------------------
+	local prevFrameNumber = 0
 	local characterInfo = {}
 	local activePlayers = {}
-	local zeroVec, zeroAng = ZERO_VEC, ZERO_ANG
+	local updatedPlayers = {}
+	local lastFrames = {}
 	local function RecursiveBoneTable2(ent, parentbone, infotab, ordertab, notfirst)
 		local bones = notfirst and ent:GetChildBones(parentbone) or {parentbone}
 		for k, v in pairs(bones) do
@@ -399,7 +401,7 @@ if CLIENT then
 				if ply == LocalPlayer() then g_VR.errorText = "Incompatible player model. Missing bone " .. v end
 				cm:Remove()
 				g_VR.StopCharacterSystem(steamid)
-				if cl_debug_character:GetBool() then vrmod.logger.Err("CharacterInit failed for " .. steamid) end
+				vrmod.logger.Err("CharacterInit failed for " .. steamid)
 				return false
 			end
 		end
@@ -468,10 +470,17 @@ if CLIENT then
 	end
 
 	-------------------------------------------------------------
-	local lastLerpedFrames = {} -- Add this at the top, outside any functions
 	local function PrePlayerDrawFunc(ply)
+		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
-		if not activePlayers[steamid] or not g_VR.net[steamid].lerpedFrame then return end
+		if not activePlayers[steamid] or not g_VR.net[steamid] or not g_VR.net[steamid].lerpedFrame then return end
+		if not characterInfo or not characterInfo[steamid] or not characterInfo[steamid].bones then return end
+		-- Reset updatedPlayers each render frame
+		if prevFrameNumber ~= FrameNumber() then
+			prevFrameNumber = FrameNumber()
+			updatedPlayers = {}
+		end
+
 		-- Hide head in first person
 		if ply == LocalPlayer() then
 			local ep = EyePos()
@@ -488,19 +497,31 @@ if CLIENT then
 		end
 
 		ply:SetupBones()
-		-- Update IK only if the lerped frame has changed
-		local currentFrame = g_VR.net[steamid].lerpedFrame
-		if not lastLerpedFrames[steamid] or not vrmod.utils.FramesAreEqual(currentFrame, lastLerpedFrames[steamid]) then
-			UpdateIK(ply)
-			lastLerpedFrames[steamid] = vrmod.utils.CopyFrame(currentFrame)
-		else
-			if cl_debug_character:GetBool() then vrmod.logger.Debug("[Lerp] Identical frame, skipping bone calculations for " .. steamid) end
+		-- Update IK only once per player per frame, and only if frame changed
+		if not updatedPlayers[steamid] then
+			local frame = g_VR.net[steamid].lerpedFrame
+			local last = lastFrames[steamid]
+			if not last then
+				vrmod.logger.Debug("[Lerp] First frame for " .. steamid .. " → running IK")
+				UpdateIK(ply)
+				lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
+			elseif not vrmod.utils.FramesAreEqual(frame, last) then
+				vrmod.logger.Debug("[Lerp] Frame changed for " .. steamid .. " → running IK")
+				UpdateIK(ply)
+				lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
+			else
+				vrmod.logger.Debug("[Lerp] Identical frame for " .. steamid .. " → skipping IK")
+			end
+
+			updatedPlayers[steamid] = true
 		end
 
-		-- Manipulate arms
-		for i = 1, #characterInfo[steamid].boneorder do
-			local bone = characterInfo[steamid].boneorder[i]
-			if ply:GetBoneMatrix(bone) then ply:SetBoneMatrix(bone, characterInfo[steamid].boneinfo[bone].targetMatrix) end
+		-- Apply bone matrices
+		if characterInfo[steamid].boneorder and characterInfo[steamid].boneinfo then
+			for i = 1, #characterInfo[steamid].boneorder do
+				local bone = characterInfo[steamid].boneorder[i]
+				if ply:GetBoneMatrix(bone) and characterInfo[steamid].boneinfo[bone] and characterInfo[steamid].boneinfo[bone].targetMatrix then ply:SetBoneMatrix(bone, characterInfo[steamid].boneinfo[bone].targetMatrix) end
+			end
 		end
 	end
 
@@ -589,7 +610,7 @@ if CLIENT then
 			hook.Remove("Think", "DetectLocalPlayerModelChange")
 		end
 
-		if cl_debug_character:GetBool() then vrmod.logger.Info("Stopped character system for " .. steamid) end
+		vrmod.logger.Info("Stopped character system for " .. steamid)
 	end
 
 	hook.Add("VRMod_Start", "vrmod_characterstart", function(ply) g_VR.StartCharacterSystem(ply) end)
