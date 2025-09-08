@@ -1,10 +1,7 @@
 g_VR = g_VR or {}
 local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_net_tickrate", nil, tostring(math.ceil(1 / engine.TickInterval())), FCVAR_REPLICATED, nil, nil, nil, tonumber, nil)
-
 -- HELPERS
-
-
 local function netReadFrame()
 	local frame = {
 		--ts = net.ReadFloat(),
@@ -154,53 +151,73 @@ if CLIENT then
 		net.SendToServer()
 	end
 
-	local lastLerpedFrames = {}
 	local function LerpOtherVRPlayers()
-		for k, v in pairs(g_VR.net) do
-			local ply = player.GetBySteamID(k)
-			if not ply or #v.frames < 1 then
-				vrmod.logger.Debug("Skipping player " .. tostring(k) .. " (no frames or invalid)")
-				continue
-			end
-
-			local latestFrame = v.frames[v.latestFrameIndex]
-			-- Build lerped frame by copying the latest frame
-			local lerpedFrame = {}
-			for k2, v2 in pairs(latestFrame) do
-				if k2 == "characterYaw" then
-					lerpedFrame[k2] = v2
-				elseif isnumber(v2) or isvector(v2) or isangle(v2) then
-					lerpedFrame[k2] = v2
+		for steamid, data in pairs(g_VR.net) do
+			-- Resolve the player entity if possible
+			local ply = data.resolvedPlayer
+			if not IsValid(ply) then
+				ply = player.GetBySteamID(steamid)
+				if IsValid(ply) then
+					data.resolvedPlayer = ply
+					vrmod.logger.Debug("Resolved player entity for " .. steamid)
 				end
 			end
 
-			-- Apply world transform
-			local plyPos, plyAng = ply:GetPos(), Angle()
-			if ply:InVehicle() then
-				plyAng = ply:GetVehicle():GetAngles()
-				local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
-				lerpedFrame.characterYaw = forwardAng.yaw
-			end
-
-			for _, part in ipairs({"hmd", "lefthand", "righthand", "waist", "leftfoot", "rightfoot"}) do
-				if lerpedFrame[part .. "Pos"] then lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"] = LocalToWorld(lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"], plyPos, plyAng) end
-			end
-
-			-- First frame: snap
-			if not lastLerpedFrames[k] then
-				v.lerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
-				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
-				vrmod.logger.Debug("Initialized lerpedFrame for " .. tostring(ply))
+			-- Require at least one frame to do anything
+			if not data.frames or #data.frames < 1 then
+				vrmod.logger.Debug("Skipping " .. steamid .. " (no frames yet)")
 				continue
 			end
 
-			-- Normal: only update if changed
-			if not vrmod.utils.FramesAreEqual(lerpedFrame, lastLerpedFrames[k]) then
-				v.lerpedFrame = lerpedFrame
-				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
-				vrmod.logger.Debug("Updated lerpedFrame for " .. tostring(ply))
+			-- Take the latest frame
+			local latestFrame = data.frames[data.latestFrameIndex]
+			if not latestFrame then
+				vrmod.logger.Debug("Skipping " .. steamid .. " (no latest frame)")
+				continue
+			end
+
+			-- Build a lerped frame by copying valid fields
+			local lerpedFrame = {}
+			for k, v in pairs(latestFrame) do
+				if k == "characterYaw" then
+					lerpedFrame[k] = v
+				elseif isnumber(v) or isvector(v) or isangle(v) then
+					lerpedFrame[k] = v
+				end
+			end
+
+			-- If we have a valid player entity, transform relative → world
+			if IsValid(ply) then
+				local plyPos, plyAng = ply:GetPos(), Angle()
+				if ply:InVehicle() then
+					plyAng = ply:GetVehicle():GetAngles()
+					local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
+					lerpedFrame.characterYaw = forwardAng.yaw
+				end
+
+				for _, part in ipairs({"hmd", "lefthand", "righthand", "waist", "leftfoot", "rightfoot"}) do
+					local posKey, angKey = part .. "Pos", part .. "Ang"
+					if lerpedFrame[posKey] then lerpedFrame[posKey], lerpedFrame[angKey] = LocalToWorld(lerpedFrame[posKey], lerpedFrame[angKey], plyPos, plyAng) end
+				end
 			else
-				vrmod.logger.Debug("No change in frame for " .. tostring(ply))
+				vrmod.logger.Debug("Player entity unresolved for " .. steamid .. " (keeping relative frame)")
+			end
+
+			-- First frame for this player: snap immediately
+			if not data.lastLerpedFrame then
+				data.lerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
+				data.lastLerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
+				vrmod.logger.Debug("Initialized lerped frame for " .. steamid)
+				continue
+			end
+
+			-- Only update if something changed
+			if not vrmod.utils.FramesAreEqual(lerpedFrame, data.lastLerpedFrame) then
+				data.lerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
+				data.lastLerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
+				vrmod.logger.Debug("Updated lerped frame for " .. steamid)
+			else
+				vrmod.logger.Debug("No change in frame for " .. steamid)
 			end
 		end
 	end
@@ -220,11 +237,20 @@ if CLIENT then
 	end
 
 	net.Receive("vrutil_net_tick", function(len)
-		local ply = net.ReadEntity()
-		if not IsValid(ply) or ply == LocalPlayer() then return end
-		local tab = g_VR.net[ply:SteamID()]
-		if not tab then return end
-		tab.debugTickCount = tab.debugTickCount + 1
+		local steamid = net.ReadString()
+		if steamid == LocalPlayer():SteamID() then return end
+		local tab = g_VR.net[steamid]
+		if not tab then
+			-- got a tick for an unknown steamid: create a minimal stub so future frames are stored
+			tab = {
+				frames = {},
+				latestFrameIndex = 0,
+				resolvedPlayer = player.GetBySteamID(steamid)
+			}
+
+			g_VR.net[steamid] = tab
+		end
+
 		local frame = netReadFrame()
 		if tab.latestFrameIndex == 0 then
 			tab.playbackTime = frame.ts
@@ -239,23 +265,27 @@ if CLIENT then
 	end)
 
 	net.Receive("vrutil_net_join", function(len)
-		local ply = net.ReadEntity()
-		if not IsValid(ply) then --todo fix this properly lol
-			return
-		end
-
-		g_VR.net[ply:SteamID()] = {
-			characterAltHead = net.ReadBool(),
-			dontHideBullets = net.ReadBool(),
+		local steamid = net.ReadString()
+		local charAltHead = net.ReadBool()
+		local dontHide = net.ReadBool()
+		-- ensure entry exists even if entity isn't valid yet
+		g_VR.net[steamid] = g_VR.net[steamid] or {
+			characterAltHead = charAltHead,
+			dontHideBullets = dontHide,
 			frames = {},
 			latestFrameIndex = 0,
-			buffering = true,
-			debugState = "buffering (initial)",
-			debugTickCount = 0,
+			resolvedPlayer = nil, -- we'll try to link later
 		}
 
-		hook.Add("PreRender", "vrutil_hook_netlerp", LerpOtherVRPlayers)
-		hook.Run("VRMod_Start", ply)
+		-- try to resolve the player to an entity immediately
+		local ply = player.GetBySteamID(steamid)
+		if IsValid(ply) then
+			g_VR.net[steamid].resolvedPlayer = ply
+			hook.Run("VRMod_Start", ply)
+		end
+
+		-- ensure the lerp hook is present
+		if not hook.GetTable().PreRender or not hook.GetTable().PreRender.vrutil_hook_netlerp then hook.Add("PreRender", "vrutil_hook_netlerp", LerpOtherVRPlayers) end
 	end)
 
 	local swepOriginalFovs = {}
@@ -410,7 +440,7 @@ if SERVER then
 
 		--relay frame to everyone except sender
 		net.Start("vrutil_net_tick")
-		net.WriteEntity(ply)
+		net.WriteString(ply:SteamID())
 		netWriteFrame(frame)
 		--net.Broadcast()
 		net.SendOmit(ply)
@@ -437,7 +467,7 @@ if SERVER then
 		end
 
 		net.Start("vrutil_net_join")
-		net.WriteEntity(ply)
+		net.WriteString(ply:SteamID())
 		net.WriteBool(g_VR[ply:SteamID()].characterAltHead)
 		net.WriteBool(g_VR[ply:SteamID()].dontHideBullets)
 		net.SendOmit(omittedPlayers)
