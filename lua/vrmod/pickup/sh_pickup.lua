@@ -401,7 +401,7 @@ if SERVER then
 				end
 
 				vrmod.logger.Debug("Calling VRMod_Drop hook for player: " .. tostring(t.ply) .. ", entity: " .. tostring(t.ent))
-				if t.ent:GetClass() ~= "prop_ragdoll" then vrmod.utils.UnpatchOwnerCollision(ent) end
+				if IsValid(t.ent) and t.ent:GetClass() ~= "prop_ragdoll" then vrmod.utils.UnpatchOwnerCollision(ent) end
 				hook.Call("VRMod_Drop", nil, t.ply, t.ent)
 				return
 			end
