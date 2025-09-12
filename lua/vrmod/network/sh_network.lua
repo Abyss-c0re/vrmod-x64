@@ -144,7 +144,7 @@ if CLIENT then
 			end
 		end)
 
-		net.Start("vrutil_net_join")
+		net.Start("vrutil_net_join", true)
 		--send some stuff here that doesnt need to be in every frame
 		net.WriteBool(GetConVar("vrmod_althead"):GetBool())
 		net.WriteBool(GetConVar("vrmod_floatinghands"):GetBool())
@@ -152,17 +152,22 @@ if CLIENT then
 	end
 
 	local lastLerpedFrames = {}
+	-- Update lerped poses for *other* players
 	local function LerpOtherVRPlayers()
-		for k, v in pairs(g_VR.net) do
-			local ply = player.GetBySteamID(k)
-			if not ply or #v.frames < 1 then
-				vrmod.logger.Debug("Skipping player " .. tostring(k) .. " (no frames or invalid)")
+		local lp = LocalPlayer()
+		for steamid, v in pairs(g_VR.net) do
+			local ply = player.GetBySteamID(steamid)
+			-- skip invalid or local player
+			if not IsValid(ply) or ply == lp then continue end
+			-- skip if no frame available
+			if not v.lastFrame then
+				vrmod.logger.Debug("Skipping player " .. tostring(steamid) .. " (no frame)")
 				continue
 			end
 
-			local latestFrame = v.frames[v.latestFrameIndex]
-			-- Build lerped frame by copying the latest frame
+			local latestFrame = v.lastFrame
 			local lerpedFrame = {}
+			-- shallow copy numeric/vector/angle fields
 			for k2, v2 in pairs(latestFrame) do
 				if k2 == "characterYaw" then
 					lerpedFrame[k2] = v2
@@ -171,7 +176,7 @@ if CLIENT then
 				end
 			end
 
-			-- Apply world transform
+			-- transform to world space
 			local plyPos, plyAng = ply:GetPos(), Angle()
 			if ply:InVehicle() then
 				plyAng = ply:GetVehicle():GetAngles()
@@ -183,18 +188,18 @@ if CLIENT then
 				if lerpedFrame[part .. "Pos"] then lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"] = LocalToWorld(lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"], plyPos, plyAng) end
 			end
 
-			-- First frame: snap
-			if not lastLerpedFrames[k] then
+			-- first frame: snap directly
+			if not lastLerpedFrames[steamid] then
 				v.lerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
-				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
+				lastLerpedFrames[steamid] = vrmod.utils.CopyFrame(lerpedFrame)
 				vrmod.logger.Debug("Initialized lerpedFrame for " .. tostring(ply))
 				continue
 			end
 
-			-- Normal: only update if changed
-			if not vrmod.utils.FramesAreEqual(lerpedFrame, lastLerpedFrames[k]) then
+			-- update if different
+			if not vrmod.utils.FramesAreEqual(lerpedFrame, lastLerpedFrames[steamid]) then
 				v.lerpedFrame = lerpedFrame
-				lastLerpedFrames[k] = vrmod.utils.CopyFrame(lerpedFrame)
+				lastLerpedFrames[steamid] = vrmod.utils.CopyFrame(lerpedFrame)
 				vrmod.logger.Debug("Updated lerpedFrame for " .. tostring(ply))
 			else
 				vrmod.logger.Debug("No change in frame for " .. tostring(ply))
@@ -202,6 +207,7 @@ if CLIENT then
 		end
 	end
 
+	-- Update self
 	function VRUtilNetUpdateLocalPly(relative)
 		local tab = g_VR.net[LocalPlayer():SteamID()]
 		if g_VR.threePoints and tab then
@@ -210,41 +216,44 @@ if CLIENT then
 		end
 	end
 
-	function VRUtilNetworkCleanup() --called by localplayer when they exit vr
+	-- Cleanup on exit
+	function VRUtilNetworkCleanup()
 		timer.Remove("vrmod_transmit")
 		net.Start("vrutil_net_exit")
 		net.SendToServer()
 	end
 
+	-- Receive remote tick frames
 	net.Receive("vrutil_net_tick", function(len)
 		local ply = net.ReadEntity()
 		if not IsValid(ply) or ply == LocalPlayer() then return end
-		local tab = g_VR.net[ply:SteamID()]
+		local steamid = ply:SteamID()
+		local tab = g_VR.net[steamid]
 		if not tab then return end
 		local frame = netReadFrame()
-		if tab.latestFrameIndex == 0 then
+		-- first frame
+		if not tab.lastFrame then
+			tab.lastFrame = frame
 			tab.playbackTime = frame.ts
-		elseif frame.ts <= tab.frames[tab.latestFrameIndex].ts then
 			return
 		end
 
-		local index = tab.latestFrameIndex + 1
-		if index > convarValues.vrmod_net_storedframes then index = 1 end
-		tab.frames[index] = frame
-		tab.latestFrameIndex = index
+		-- skip if same as last frame
+		if vrmod.utils.FramesAreEqual(frame, tab.lastFrame) then return end
+		-- accept new frame
+		tab.lastFrame = frame
+		tab.playbackTime = frame.ts
 	end)
 
+	-- When another player joins
 	net.Receive("vrutil_net_join", function(len)
 		local ply = net.ReadEntity()
-		if not IsValid(ply) then --todo fix this properly lol
-			return
-		end
-
+		if not IsValid(ply) then return end
 		g_VR.net[ply:SteamID()] = {
 			characterAltHead = net.ReadBool(),
 			dontHideBullets = net.ReadBool(),
-			frames = {},
-			latestFrameIndex = 0,
+			lastFrame = nil,
+			playbackTime = 0,
 		}
 
 		hook.Add("PreRender", "vrutil_hook_netlerp", LerpOtherVRPlayers)
@@ -356,7 +365,7 @@ if CLIENT then
 	hook.Add("CreateMove", "vrutil_hook_joincreatemove", function(cmd)
 		hook.Remove("CreateMove", "vrutil_hook_joincreatemove")
 		timer.Simple(2, function()
-			net.Start("vrutil_net_requestvrplayers")
+			net.Start("vrutil_net_requestvrplayers", true)
 			net.SendToServer()
 		end)
 
@@ -402,7 +411,7 @@ if SERVER then
 		end
 
 		--relay frame to everyone except sender
-		net.Start("vrutil_net_tick")
+		net.Start("vrutil_net_tick", true)
 		net.WriteEntity(ply)
 		netWriteFrame(frame)
 		--net.Broadcast()
@@ -461,7 +470,7 @@ if SERVER then
 			if type(k) == "string" and k:match("^STEAM_[0-5]:[01]:%d+$") then
 				local vrPly = player.GetBySteamID(k)
 				if IsValid(vrPly) then
-					net.Start("vrutil_net_join")
+					net.Start("vrutil_net_join", true)
 					net.WriteEntity(vrPly)
 					net.WriteBool(v.characterAltHead)
 					net.WriteBool(v.dontHideBullets)
@@ -484,7 +493,7 @@ if SERVER then
 	hook.Add("PlayerSpawn", "vrutil_hook_playerspawn", function(ply)
 		if g_VR[ply:SteamID()] ~= nil then
 			ply:Give("weapon_vrmod_empty")
-			net.Start("vrutil_net_join")
+			net.Start("vrutil_net_join", true)
 			net.WriteEntity(ply)
 			net.WriteBool(g_VR[ply:SteamID()].characterAltHead)
 			net.WriteBool(g_VR[ply:SteamID()].dontHideBullets)
@@ -494,7 +503,7 @@ if SERVER then
 
 	hook.Add("PlayerSwitchWeapon", "vrutil_hook_playerswitchweapon", function(ply, old, new)
 		if g_VR[ply:SteamID()] ~= nil then
-			net.Start("vrutil_net_switchweapon")
+			net.Start("vrutil_net_switchweapon",true)
 			local class, vm = vrmod.utils.WepInfo(new)
 			if class and vm then
 				timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(vm) end)
@@ -514,7 +523,7 @@ if SERVER then
 		if g_VR[ply:SteamID()] ~= nil then
 			ply:SelectWeapon("weapon_vrmod_empty")
 			ply:SetActiveWeapon(ply:GetWeapon("weapon_vrmod_empty"))
-			net.Start("vrutil_net_entervehicle")
+			net.Start("vrutil_net_entervehicle", true)
 			net.Send(ply)
 			ply:SetAllowWeaponsInVehicle(1)
 		end
@@ -522,7 +531,7 @@ if SERVER then
 
 	hook.Add("PlayerLeaveVehicle", "vrutil_hook_playerleavevehicle", function(ply, veh)
 		if g_VR[ply:SteamID()] ~= nil then
-			net.Start("vrutil_net_exitvehicle")
+			net.Start("vrutil_net_exitvehicle", true)
 			net.Send(ply)
 		end
 	end)
