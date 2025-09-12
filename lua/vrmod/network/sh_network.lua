@@ -151,8 +151,6 @@ if CLIENT then
 		net.SendToServer()
 	end
 
-	local lastLerpedFrames = {}
-	-- Update lerped poses for *other* players
 	local function LerpOtherVRPlayers()
 		local lp = LocalPlayer()
 		for steamid, v in pairs(g_VR.net) do
@@ -188,22 +186,8 @@ if CLIENT then
 				if lerpedFrame[part .. "Pos"] then lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"] = LocalToWorld(lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"], plyPos, plyAng) end
 			end
 
-			-- first frame: snap directly
-			if not lastLerpedFrames[steamid] then
-				v.lerpedFrame = vrmod.utils.CopyFrame(lerpedFrame)
-				lastLerpedFrames[steamid] = vrmod.utils.CopyFrame(lerpedFrame)
-				vrmod.logger.Debug("Initialized lerpedFrame for " .. tostring(ply))
-				continue
-			end
-
-			-- update if different
-			if not vrmod.utils.FramesAreEqual(lerpedFrame, lastLerpedFrames[steamid]) then
-				v.lerpedFrame = lerpedFrame
-				lastLerpedFrames[steamid] = vrmod.utils.CopyFrame(lerpedFrame)
-				vrmod.logger.Debug("Updated lerpedFrame for " .. tostring(ply))
-			else
-				vrmod.logger.Debug("No change in frame for " .. tostring(ply))
-			end
+			-- assign the lerped frame directly
+			v.lerpedFrame = lerpedFrame
 		end
 	end
 
@@ -503,7 +487,7 @@ if SERVER then
 
 	hook.Add("PlayerSwitchWeapon", "vrutil_hook_playerswitchweapon", function(ply, old, new)
 		if g_VR[ply:SteamID()] ~= nil then
-			net.Start("vrutil_net_switchweapon",true)
+			net.Start("vrutil_net_switchweapon", true)
 			local class, vm = vrmod.utils.WepInfo(new)
 			if class and vm then
 				timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(vm) end)
