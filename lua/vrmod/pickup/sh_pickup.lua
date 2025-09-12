@@ -470,13 +470,10 @@ if SERVER then
 		vrmod.logger.Debug("Entity physics mass: " .. mass)
 		local damp = 0.95
 		local secondstoarrive = 0.0001
-	
 		-- if ent:GetClass() ~= "prop_ragdoll" then
-	
 		-- 	damp = math.Clamp(mass / 200, 0.35, 0.75)
 		-- 	vrmod.logger.Debug("Non-ragdoll damping: " .. damp)
 		-- end
-
 		if not IsValid(pickupController) then
 			vrmod.logger.Debug("Creating new pickup controller")
 			pickupController = ents.Create("vrmod_pickup")
@@ -512,12 +509,12 @@ if SERVER then
 				if info.left then
 					handPos = vrmod.GetLeftHandPos(ply)
 					handAng = vrmod.GetLeftHandAng(ply)
-					handVel = vrmod.GetLeftHandVelocityRelative(ply)
+					handVel = vrmod.GetLeftHandVelocity(ply)
 					handAngVel = vrmod.GetLeftHandAngularVelocity(ply)
 				else
 					handPos = vrmod.GetRightHandPos(ply)
 					handAng = vrmod.GetRightHandAng(ply)
-					handVel = vrmod.GetRightHandVelocityRelative(ply)
+					handVel = vrmod.GetRightHandVelocity(ply)
 					handAngVel = vrmod.GetRightHandAngularVelocity(ply)
 				end
 
@@ -550,7 +547,11 @@ if SERVER then
 				targetPos = targetPos + dir * forwardOffset
 				-- Apply velocities
 				phys:AddVelocity(ply:GetVelocity() * dt * effectiveMass)
-				if handVel then phys:AddVelocity(handVel * dt * effectiveMass) end
+				if handVel then
+					local velFactor = math.Clamp(effectiveMass * dt, 0.5, 5) -- tune as needed
+					phys:AddVelocity(handVel * velFactor)
+				end
+
 				if handAngVel then
 					local angVelVec = Vector(handAngVel.p, handAngVel.y, handAngVel.r)
 					phys:AddAngleVelocity(angVelVec)
@@ -561,10 +562,10 @@ if SERVER then
 				local angVelMagnitude = handAngVel and math.max(math.abs(handAngVel.p), math.abs(handAngVel.y), math.abs(handAngVel.r)) or 0
 				pickupController.ShadowParams.pos = targetPos
 				pickupController.ShadowParams.angle = targetAng
-				pickupController.ShadowParams.secondstoarrive = math.Clamp(0.001 - velMagnitude * 0.0001, 0.0005, 0.01)
+				--pickupController.ShadowParams.secondstoarrive = math.Clamp(dt + 0.001 - velMagnitude * 0.0001, 0.0005, 0.01)
 				pickupController.ShadowParams.dampfactor = math.Clamp(0.35 - velMagnitude * 0.01, 0.15, 0.5)
-				pickupController.ShadowParams.maxspeed = 99999 + velMagnitude * 10
-				pickupController.ShadowParams.maxangular = 99999 + angVelMagnitude * 10
+				--pickupController.ShadowParams.maxspeed = 99999 + velMagnitude * 10
+				--pickupController.ShadowParams.maxangular = 99999 + angVelMagnitude * 10
 				vrmod.logger.Debug(string.format("ShadowControl -> pos: %s, angle: %s, dtArrive: %.4f, damp: %.4f, maxSpeed: %.1f, maxAngular: %.1f", tostring(targetPos), tostring(targetAng), pickupController.ShadowParams.secondstoarrive, pickupController.ShadowParams.dampfactor, pickupController.ShadowParams.maxspeed, pickupController.ShadowParams.maxangular))
 				-- Apply ShadowControl
 				phys:ComputeShadowControl(pickupController.ShadowParams)
