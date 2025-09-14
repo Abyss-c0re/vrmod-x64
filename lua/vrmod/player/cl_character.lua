@@ -116,7 +116,6 @@ if CLIENT then
 	local characterInfo = {}
 	local activePlayers = {}
 	local updatedPlayers = {}
-	local lastFrames = {}
 	local function RecursiveBoneTable2(ent, parentbone, infotab, ordertab, notfirst)
 		local bones = notfirst and ent:GetChildBones(parentbone) or {parentbone}
 		for k, v in pairs(bones) do
@@ -552,7 +551,6 @@ if CLIENT then
 	function g_VR.StartCharacterSystem(ply)
 		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
-		lastModel = ply:GetModel()
 		if CharacterInit(ply) == false then return end
 		if not g_VR.net or not g_VR.net[steamid] then return end
 		if characterInfo and characterInfo[steamid] then
@@ -571,18 +569,6 @@ if CLIENT then
 			hook.Add("CalcMainActivity", "vrutil_hook_calcmainactivity", CalcMainActivityFunc)
 			hook.Remove("DoAnimationEvent", "vrutil_hook_doanimationevent")
 			hook.Add("DoAnimationEvent", "vrutil_hook_doanimationevent", DoAnimationEventFunc)
-			-- hook.Remove("Think", "DetectLocalPlayerModelChange")
-			-- hook.Add("Think", "DetectLocalPlayerModelChange", function()
-			-- 	local ply = LocalPlayer()
-			-- 	if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
-			-- 	local mdl = ply:GetModel()
-			-- 	if mdl ~= lastModel then
-			-- 		lastModel = mdl
-			-- 		g_VR.StopCharacterSystem(steamid)
-			-- 		g_VR.StartCharacterSystem(ply)
-			-- 	end
-			-- end)
-
 			activePlayers[steamid] = true
 		end
 	end
@@ -612,7 +598,6 @@ if CLIENT then
 			hook.Remove("UpdateAnimation", "vrutil_hook_updateanimation")
 			hook.Remove("CalcMainActivity", "vrutil_hook_calcmainactivity")
 			hook.Remove("DoAnimationEvent", "vrutil_hook_doanimationevent")
-			--hook.Remove("Think", "DetectLocalPlayerModelChange")
 		end
 
 		vrmod.logger.Info("Stopped character system for " .. steamid)
