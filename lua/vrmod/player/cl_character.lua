@@ -501,6 +501,7 @@ if CLIENT then
 		if not updatedPlayers[steamid] then
 			UpdateIK(ply)
 			updatedPlayers[steamid] = 1
+			if ply ~= LocalPlayer() then vrmod.logger.Debug("Updating IK for " .. steamid) end
 		end
 
 		-- Apply bone matrices
@@ -549,27 +550,41 @@ if CLIENT then
 
 	-------------------------------------------------------------
 	function g_VR.StartCharacterSystem(ply)
+		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
 		lastModel = ply:GetModel()
-		if not g_VR.net[steamid] or CharacterInit(ply) == false then return end
-		characterInfo[steamid].boneCallback = ply:AddCallback("BuildBonePositions", BoneCallbackFunc)
-		if ply == LocalPlayer() then hook.Add("VRMod_PreRender", "vrutil_hook_calcplyrenderpos", PreRenderFunc) end
-		hook.Add("PrePlayerDraw", "vrutil_hook_preplayerdraw", PrePlayerDrawFunc)
-		hook.Add("PostPlayerDraw", "vrutil_hook_postplayerdraw", PostPlayerDrawFunc)
-		hook.Add("CalcMainActivity", "vrutil_hook_calcmainactivity", CalcMainActivityFunc)
-		hook.Add("DoAnimationEvent", "vrutil_hook_doanimationevent", DoAnimationEventFunc)
-		hook.Add("Think", "DetectLocalPlayerModelChange", function()
-			local ply = LocalPlayer()
-			if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
-			local mdl = ply:GetModel()
-			if mdl ~= lastModel then
-				lastModel = mdl
-				g_VR.StopCharacterSystem(steamid)
-				g_VR.StartCharacterSystem(ply)
+		if CharacterInit(ply) == false then return end
+		if not g_VR.net or not g_VR.net[steamid] then return end
+		if characterInfo and characterInfo[steamid] then
+			if characterInfo[steamid].boneCallback then ply:RemoveCallback("BuildBonePositions", characterInfo[steamid].boneCallback) end
+			characterInfo[steamid].boneCallback = ply:AddCallback("BuildBonePositions", BoneCallbackFunc)
+			if ply == LocalPlayer() then
+				hook.Remove("VRMod_PreRender", "vrutil_hook_calcplyrenderpos")
+				hook.Add("VRMod_PreRender", "vrutil_hook_calcplyrenderpos", PreRenderFunc)
 			end
-		end)
 
-		activePlayers[steamid] = true
+			hook.Remove("PrePlayerDraw", "vrutil_hook_preplayerdraw")
+			hook.Add("PrePlayerDraw", "vrutil_hook_preplayerdraw", PrePlayerDrawFunc)
+			hook.Remove("PostPlayerDraw", "vrutil_hook_postplayerdraw")
+			hook.Add("PostPlayerDraw", "vrutil_hook_postplayerdraw", PostPlayerDrawFunc)
+			hook.Remove("CalcMainActivity", "vrutil_hook_calcmainactivity")
+			hook.Add("CalcMainActivity", "vrutil_hook_calcmainactivity", CalcMainActivityFunc)
+			hook.Remove("DoAnimationEvent", "vrutil_hook_doanimationevent")
+			hook.Add("DoAnimationEvent", "vrutil_hook_doanimationevent", DoAnimationEventFunc)
+			hook.Remove("Think", "DetectLocalPlayerModelChange")
+			hook.Add("Think", "DetectLocalPlayerModelChange", function()
+				local ply = LocalPlayer()
+				if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+				local mdl = ply:GetModel()
+				if mdl ~= lastModel then
+					lastModel = mdl
+					g_VR.StopCharacterSystem(steamid)
+					g_VR.StartCharacterSystem(ply)
+				end
+			end)
+
+			activePlayers[steamid] = true
+		end
 	end
 
 	function g_VR.StopCharacterSystem(steamid)
