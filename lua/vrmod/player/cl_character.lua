@@ -571,17 +571,17 @@ if CLIENT then
 			hook.Add("CalcMainActivity", "vrutil_hook_calcmainactivity", CalcMainActivityFunc)
 			hook.Remove("DoAnimationEvent", "vrutil_hook_doanimationevent")
 			hook.Add("DoAnimationEvent", "vrutil_hook_doanimationevent", DoAnimationEventFunc)
-			hook.Remove("Think", "DetectLocalPlayerModelChange")
-			hook.Add("Think", "DetectLocalPlayerModelChange", function()
-				local ply = LocalPlayer()
-				if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
-				local mdl = ply:GetModel()
-				if mdl ~= lastModel then
-					lastModel = mdl
-					g_VR.StopCharacterSystem(steamid)
-					g_VR.StartCharacterSystem(ply)
-				end
-			end)
+			-- hook.Remove("Think", "DetectLocalPlayerModelChange")
+			-- hook.Add("Think", "DetectLocalPlayerModelChange", function()
+			-- 	local ply = LocalPlayer()
+			-- 	if not IsValid(ply) or not vrmod.IsPlayerInVR(ply) then return end
+			-- 	local mdl = ply:GetModel()
+			-- 	if mdl ~= lastModel then
+			-- 		lastModel = mdl
+			-- 		g_VR.StopCharacterSystem(steamid)
+			-- 		g_VR.StartCharacterSystem(ply)
+			-- 	end
+			-- end)
 
 			activePlayers[steamid] = true
 		end
@@ -612,7 +612,7 @@ if CLIENT then
 			hook.Remove("UpdateAnimation", "vrutil_hook_updateanimation")
 			hook.Remove("CalcMainActivity", "vrutil_hook_calcmainactivity")
 			hook.Remove("DoAnimationEvent", "vrutil_hook_doanimationevent")
-			hook.Remove("Think", "DetectLocalPlayerModelChange")
+			--hook.Remove("Think", "DetectLocalPlayerModelChange")
 		end
 
 		vrmod.logger.Info("Stopped character system for " .. steamid)
