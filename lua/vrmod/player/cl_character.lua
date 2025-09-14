@@ -315,7 +315,7 @@ if CLIENT then
 		local steamid = ply:SteamID()
 		g_VR.cache = g_VR.cache or {}
 		g_VR.cache[steamid] = g_VR.cache[steamid] or {}
-		local pmname = ply.vrmod_pm or ply:GetModel()
+		local pmname = ply:GetModel()
 		if characterInfo[steamid] and characterInfo[steamid].modelName == pmname then return end
 		if ply == LocalPlayer() then
 			timer.Create("vrutil_timer_validatefingertracking", 0.1, 0, function()
@@ -475,12 +475,6 @@ if CLIENT then
 		local steamid = ply:SteamID()
 		if not activePlayers[steamid] or not g_VR.net[steamid] or not g_VR.net[steamid].lerpedFrame then return end
 		if not characterInfo or not characterInfo[steamid] or not characterInfo[steamid].bones then return end
-		-- Reset updatedPlayers each render frame
-		if prevFrameNumber ~= FrameNumber() then
-			prevFrameNumber = FrameNumber()
-			updatedPlayers = {}
-		end
-
 		-- Hide head in first person
 		if ply == LocalPlayer() then
 			local ep = EyePos()
@@ -497,23 +491,16 @@ if CLIENT then
 		end
 
 		ply:SetupBones()
+		-- Reset updatedPlayers each render frame
+		if prevFrameNumber ~= FrameNumber() then
+			prevFrameNumber = FrameNumber()
+			updatedPlayers = {}
+		end
+
 		-- Update IK only once per player per frame, and only if frame changed
 		if not updatedPlayers[steamid] then
-			local frame = g_VR.net[steamid].lerpedFrame
-			local last = lastFrames[steamid]
-			if not last then
-				vrmod.logger.Debug("[Lerp] First frame for " .. steamid .. " → running IK")
-				UpdateIK(ply)
-				lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
-			elseif not vrmod.utils.FramesAreEqual(frame, last) then
-				vrmod.logger.Debug("[Lerp] Frame changed for " .. steamid .. " → running IK")
-				UpdateIK(ply)
-				lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
-			else
-				vrmod.logger.Debug("[Lerp] Identical frame for " .. steamid .. " → skipping IK")
-			end
-
-			updatedPlayers[steamid] = true
+			UpdateIK(ply)
+			updatedPlayers[steamid] = 1
 		end
 
 		-- Apply bone matrices
@@ -527,8 +514,12 @@ if CLIENT then
 
 	-------------------------------------------------------------
 	local function PostPlayerDrawFunc(ply)
+		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
-		if not activePlayers[steamid] or not g_VR.net[steamid].lerpedFrame or ply:InVehicle() then return end
+		if activePlayers[steamid] == nil then return end
+		if not g_VR.net or not g_VR.net[steamid] or not g_VR.net[steamid].lerpedFrame then return end
+		if not characterInfo or not characterInfo[steamid] then return end
+		if g_VR.vehicle.current then return end
 		ply:SetPos(characterInfo[steamid].preRenderPos)
 	end
 
@@ -600,7 +591,6 @@ if CLIENT then
 		activePlayers[steamid] = nil
 		characterInfo[steamid] = nil
 		g_VR.cache[steamid] = nil
-		lastFrames[steamid] = nil
 		if table.Count(activePlayers) == 0 then
 			hook.Remove("PrePlayerDraw", "vrutil_hook_preplayerdraw")
 			hook.Remove("PostPlayerDraw", "vrutil_hook_postplayerdraw")
