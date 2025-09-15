@@ -40,17 +40,10 @@ local function buildClientFrame(relative)
 	local lp = LocalPlayer()
 	if not IsValid(lp) then return nil end
 	-- Determine character yaw with Glide support
-	local vehicle = lp:GetNWEntity("GlideVehicle")
+	local vehicle = g_VR.vehicle.current
 	local characterYaw
-	if IsValid(vehicle) then
+	if g_VR.vehicle.inside and IsValid(vehicle) then
 		characterYaw = vehicle:GetAngles().yaw
-	elseif lp:InVehicle() then
-		local veh = lp:GetVehicle()
-		if IsValid(veh) then
-			characterYaw = veh:GetAngles().yaw
-		else
-			characterYaw = g_VR.characterYaw
-		end
 	else
 		characterYaw = g_VR.characterYaw
 	end
