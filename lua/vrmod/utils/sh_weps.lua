@@ -36,7 +36,7 @@ function vrmod.utils.UpdateViewModelPos(pos, ang, override)
 
     pos, ang = vrmod.utils.CheckWeaponPushout(pos, ang)
     if not IsValid(ply) or not g_VR.active then return end
-    if not ply:Alive() or ply:InVehicle() then return end
+    if not ply:Alive() then return end
     local currentvmi = g_VR.currentvmi
     local modelPos = pos
     if currentvmi then
