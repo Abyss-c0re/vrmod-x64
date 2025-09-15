@@ -217,7 +217,7 @@ g_VR.action_manifest = [[
 			"name": "/actions/driving/in/boolean_alt_turret",
 			"type": "boolean"
 		},
-       {
+      {
 			"name": "/actions/driving/in/boolean_switch_weapon",
 			"type": "boolean"
 		},
@@ -239,6 +239,14 @@ g_VR.action_manifest = [[
 		},
       {
 			"name": "/actions/driving/in/boolean_car_mouse_right",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_changeweapon",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/driving/in/boolean_reload",
 			"type": "boolean"
 		},
       {
@@ -350,6 +358,7 @@ g_VR.action_manifest = [[
          "/actions/driving/in/boolean_shift_neutral" : "Shift Neutral",
 			"/actions/driving/in/boolean_turret" : "Turret",
          "/actions/driving/in/boolean_alt_turret" : "Alt Turret",
+         "/actions/driving/in/boolean_reload" : "Reload",
          "/actions/driving/in/boolean_switch_weapon" : "Switch Weapon",
          "/actions/driving/in/boolean_lights" : "Lights",
          "/actions/driving/in/boolean_siren" : "Siren",
@@ -362,7 +371,8 @@ g_VR.action_manifest = [[
 			"/actions/driving/in/boolean_left_pickup" : "Left Pickup",
 			"/actions/driving/in/boolean_right_pickup" : "Right Pickup",
          "/actions/driving/in/boolean_car_mouse_right" : "Right mouse click",
-         "/actions/driving/in/boolean_car_mouse_left" : "Left mouse click"
+         "/actions/driving/in/boolean_car_mouse_left" : "Left mouse click",
+         "/actions/driving/in/boolean_changeweapon" : "Weapon Menu"
 		}
 	]
 }
