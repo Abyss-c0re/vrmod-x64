@@ -59,12 +59,13 @@ local UPDATE_RATE = 1
 local aircraftNeutralAng = nil
 local leftGrip, rightGrip = false, false
 --local leftHand, rightHand
--- Switch action set when entering vehicle
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
-	timer.Simple(0.1, function()
+	-- Cancel/restart a single timer tied to this hook
+	timer.Create("vrmod_enter_vehicle_timer", 0.1, 1, function()
 		local ply = LocalPlayer()
-		if g_VR.vehicle.current then return end
+		if not IsValid(ply) then return end
 		local vehicle, boneId, vType, glide = vrmod.utils.GetSteeringInfo(ply)
+		g_VR.vehicle.inside = true
 		g_VR.vehicle.current = vehicle
 		g_VR.vehicle.type = vType
 		g_VR.vehicle.wheel_bone = boneId
@@ -78,6 +79,7 @@ end)
 
 -- Reset vehicle data and switch action set when exiting vehicle
 hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function()
+	g_VR.vehicle.inside = false
 	g_VR.vehicle.current = nil
 	g_VR.vehicle.type = nil
 	g_VR.vehicle.wheel_bone = nil
@@ -94,7 +96,7 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		return
 	end
 
-	if action == "boolean_secondaryfire" then
+	if (action == "boolean_secondaryfire" or action == "boolean_alt_turret") then
 		LocalPlayer():ConCommand(pressed and "+attack2" or "-attack2")
 		return
 	end
