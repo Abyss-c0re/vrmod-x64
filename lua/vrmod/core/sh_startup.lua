@@ -158,4 +158,75 @@ elseif SERVER then
             end
         end
     end)
+
+    hook.Add("EntityFireBullets", "VRMod_NoShootOwnVehicle", function(ply, data)
+        if not ply:IsPlayer() or not ply:InVehicle() then return end
+        local veh = ply:GetVehicle()
+        if not IsValid(veh) then return end
+        -- Walk to top-level vehicle
+        while IsValid(veh:GetParent()) do
+            veh = veh:GetParent()
+        end
+
+        -- Build ignore list (vehicle + welded children)
+        local ignore = {veh}
+        for _, c in ipairs(veh:GetChildren()) do
+            table.insert(ignore, c)
+        end
+
+        if constraint then
+            for _, c in ipairs(constraint.GetTable(veh) or {}) do
+                if IsValid(c.Ent1) then table.insert(ignore, c.Ent1) end
+                if IsValid(c.Ent2) then table.insert(ignore, c.Ent2) end
+            end
+        end
+
+        -- Merge with existing IgnoreEntity
+        if not data.IgnoreEntity then
+            data.IgnoreEntity = ignore
+        elseif type(data.IgnoreEntity) == "Entity" then
+            data.IgnoreEntity = {data.IgnoreEntity}
+            for _, e in ipairs(ignore) do
+                table.insert(data.IgnoreEntity, e)
+            end
+        elseif type(data.IgnoreEntity) == "table" then
+            for _, e in ipairs(ignore) do
+                table.insert(data.IgnoreEntity, e)
+            end
+        end
+        return true, data
+    end)
+
+    -- Shared VRMod Vehicle Aim Fix with debug prints
+    local _vrVehicleAimPatched = false
+    local function PatchVRVehicleAim()
+        if _vrVehicleAimPatched then return end
+        _vrVehicleAimPatched = true
+        local plyMeta = FindMetaTable("Player")
+        if not plyMeta then return end
+        local HAND_CORRECTION = Angle(2, 6, 0) -- adjust after testing
+        local _GetAimVector = plyMeta.GetAimVector
+        function plyMeta:GetAimVector()
+            -- Only override for VR players in vehicles
+            if self:InVehicle() then
+                local vrData = g_VR and g_VR[self:SteamID()]
+                -- Prefer muzzle if available
+                if vrData and vrData.muzzlePos and vrData.muzzleAng then return vrData.muzzleAng:Forward() end
+                -- Fallback to hand pose
+                if vrmod and vrmod.GetRightHandPose then
+                    local hand = g_VR.tracking.pose_righthand
+                    local handPos, handAng = hand.Pos, hand.Ang
+                    --= vrmod.GetRightHandPose(self)
+                    if handPos and handAng then
+                        local dir = (handAng + HAND_CORRECTION):Forward()
+                        return dir
+                    end
+                end
+            end
+            -- Fallback to normal GetAimVector
+            return _GetAimVector(self)
+        end
+    end
+
+    PatchVRVehicleAim()
 end
