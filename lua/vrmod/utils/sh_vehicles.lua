@@ -37,9 +37,9 @@ function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
 end
 
 function vrmod.utils.GetSteeringInfo(ply)
-    if not IsValid(ply) or not ply:InVehicle() then return nil, nil, nil end
+    if not IsValid(ply) or not ply:InVehicle() then return nil, nil, nil, nil end
     local vehicle = ply:GetVehicle()
-    if not IsValid(vehicle) then return nil, nil, nil end
+    if not IsValid(vehicle) then return nil, nil, nil, nil end
     local glideVeh = vrmod.utils.GetGlideVehicle(vehicle)
     local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
     local sitSeq = glideVeh and glideVeh.GetPlayerSitSequence and glideVeh:GetPlayerSitSequence(seatIndex)
@@ -54,28 +54,21 @@ function vrmod.utils.GetSteeringInfo(ply)
         }
     }
 
-    -- Find steering bone (always attempt, needed for pose alignment)
-    local boneId, boneType
-    local candidates = {}
-    if IsValid(glideVeh) then
-        table.insert(candidates, glideVeh)
-    else
-        table.insert(candidates, vehicle)
-    end
-
+    local boneId, boneType, boneName
+    local candidates = {IsValid(glideVeh) and glideVeh or vehicle}
     for _, candidate in ipairs(candidates) do
         for _, entry in ipairs(bonePriority) do
             for _, name in ipairs(entry.names) do
                 local id = candidate:LookupBone(name)
                 if id then
-                    boneId, boneType = id, entry.type
+                    boneId, boneType, boneName = id, entry.type, name
                     break
                 end
             end
 
             if not boneId then
-                local id = GetApproximateBoneId(candidate, entry.names)
-                if id then boneId, boneType = id, entry.type end
+                local id, approxName = GetApproximateBoneId(candidate, entry.names)
+                if id then boneId, boneType, boneName = id, entry.type, approxName end
             end
 
             if boneId then break end
@@ -84,26 +77,24 @@ function vrmod.utils.GetSteeringInfo(ply)
         if boneId then break end
     end
 
-    -- Glide type takes precedence over boneType
+    -- Glide vehicle type takes precedence
     if IsValid(glideVeh) then
         local vType = glideVeh.VehicleType
         if vType == Glide.VEHICLE_TYPE.MOTORCYCLE or sitSeq == "drive_airboat" then
-            return glideVeh, boneId, "motorcycle", true
+            return glideVeh, boneId, "motorcycle", true, boneName
         elseif vType == Glide.VEHICLE_TYPE.BOAT then
-            return glideVeh, boneId, boneType, true
+            return glideVeh, boneId, boneType, true, boneName
         elseif vType == Glide.VEHICLE_TYPE.CAR then
-            return glideVeh, boneId, "car", true
+            return glideVeh, boneId, "car", true, boneName
         elseif vType == Glide.VEHICLE_TYPE.PLANE or vType == Glide.VEHICLE_TYPE.HELICOPTER then
-            return glideVeh, boneId, "aircraft", true
+            return glideVeh, boneId, "aircraft", true, boneName
         elseif vType == Glide.VEHICLE_TYPE.TANK then
-            return glideVeh, boneId, "tank", true
+            return glideVeh, boneId, "tank", true, boneName
         end
     end
 
-    -- If no Glide type, fall back to bone-derived type (if any)
-    if boneId then return vehicle, boneId, boneType, false end
-    -- Otherwise, nothing known
-    return vehicle, nil, "unknown", false
+    if boneId then return vehicle, boneId, boneType, false, boneName end
+    return vehicle, nil, "unknown", false, nil
 end
 
 function vrmod.utils.PatchGlideCamera()

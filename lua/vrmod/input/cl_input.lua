@@ -26,7 +26,8 @@ g_VR.vehicle = g_VR.vehicle or {
 	type = nil,
 	glide = false,
 	driving = false,
-	wheel_bone = nil
+	wheel_bone = nil,
+	bone_name = nil
 }
 
 -- Analog input variables
@@ -64,12 +65,13 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 	timer.Create("vrmod_enter_vehicle_timer", 0.1, 1, function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
-		local vehicle, boneId, vType, glide = vrmod.utils.GetSteeringInfo(ply)
+		local vehicle, boneId, vType, glide, name = vrmod.utils.GetSteeringInfo(ply)
 		g_VR.vehicle.inside = true
 		g_VR.vehicle.current = vehicle
 		g_VR.vehicle.type = vType
 		g_VR.vehicle.wheel_bone = boneId
 		g_VR.vehicle.glide = glide
+		g_VR.vehicle.bone_name = name
 		vrmod.logger.Info("Steer grip type selected: " .. tostring(vType))
 		if glide and ply:GlideGetSeatIndex() == 1 or not glide then g_VR.vehicle.driving = true end
 	end)
@@ -85,6 +87,7 @@ hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function()
 	g_VR.vehicle.wheel_bone = nil
 	g_VR.vehicle.glide = false
 	g_VR.vehicle.driving = false
+	g_VR.vehicle.bone_name = name
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
 end)
 
@@ -96,7 +99,7 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		return
 	end
 
-	if (action == "boolean_secondaryfire" or action == "boolean_alt_turret") then
+	if (action == "boolean_secondaryfire" or action == "boolean_alt_turret") and not g_VR.menuFocus then
 		LocalPlayer():ConCommand(pressed and "+attack2" or "-attack2")
 		return
 	end
@@ -412,10 +415,10 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 	if math.abs(g_VR.analog_input.steer - prevSteer) > 0.01 then vrmod.logger.Debug(string.format("Smoothed steer updated: %.3f -> %.3f (target=%.3f)", prevSteer, g_VR.analog_input.steer, steerInput)) end
 end)
 
--- Handle steering grip transform
 hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
-	if not g_VR.active or not g_VR.vehicle.driving then return end
-	-- Special case for tanks
+	local ply = LocalPlayer()
+	if not IsValid(ply) or not g_VR.active or not g_VR.vehicle.driving then return end
+	-- Special case: tanks (center stick-like grip)
 	if g_VR.vehicle.type == "tank" then
 		local glideVeh = g_VR.vehicle.current
 		local attachPos = glideVeh:GetPos() + glideVeh:GetUp() * -20
@@ -425,7 +428,8 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		return
 	end
 
-	if not g_VR.vehicle.wheel_bone then
+	local veh = g_VR.vehicle.current
+	if not IsValid(veh) or not g_VR.vehicle.wheel_bone then
 		g_VR.wheelGripped = false
 		neutralOffsets = {}
 		return
@@ -439,21 +443,24 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		return
 	end
 
-	local bonePos, boneAng = vrmod.utils.GetVehicleBonePosition(g_VR.vehicle.current, g_VR.vehicle.wheel_bone)
+	local bonePos, boneAng = vrmod.utils.GetVehicleBonePosition(veh, g_VR.vehicle.wheel_bone)
 	if not bonePos then
 		g_VR.wheelGripped = false
 		neutralOffsets = {}
 		return
 	end
 
+	local heldLeft = g_VR.heldEntityLeft
+	local heldRight = vrmod.utils.IsValidWep(ply:GetActiveWeapon())
 	g_VR.steeringGrip = g_VR.steeringGrip or {}
 	local anyGrip = false
 	for handName, state in pairs({
 		left = leftGrip,
 		right = rightGrip
 	}) do
+		if handName == "left" and heldLeft then continue end
+		if handName == "right" and heldRight then continue end
 		if not state then
-			-- grip released
 			neutralOffsets[handName] = nil
 			if g_VR.steeringGrip[handName] then
 				g_VR.steeringGrip[handName].offset = nil
@@ -466,15 +473,26 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		local handPose = handName == "left" and leftHand or rightHand
 		if not handPose then continue end
 		g_VR.steeringGrip[handName] = g_VR.steeringGrip[handName] or {}
+		-- Initialize offset if not already grabbed
 		if not g_VR.steeringGrip[handName].offset then
-			if g_VR.vehicle.type == "car" then
-				local dist = handPose.pos:Distance(bonePos)
-				if dist > MAX_WHEEL_GRAB_DIST then continue end
+			local dist
+			local maxDist = MAX_WHEEL_GRAB_DIST
+			-- Increase max grab distance for Airboat steering
+			if g_VR.vehicle.bone_name == "Airboat.Steer" then maxDist = maxDist * 1.5 end
+			-- Fallback for motorcycles that aren’t airboats
+			if g_VR.vehicle.type == "motorcycle" and g_VR.vehicle.bone_name ~= "Airboat.Steer" then
+				local gripPos = veh:GetPos() + veh:GetUp() * 1.15
+				dist = handPose.pos:Distance(gripPos)
+				if dist > 30 then return end
+			else
+				dist = handPose.pos:Distance(bonePos)
+				if dist > maxDist then return end
 			end
 
 			g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
 		end
 
+		-- Apply grip every frame
 		if g_VR.steeringGrip[handName].offset then
 			anyGrip = true
 			local attachedPos, attachedAng = LocalToWorld(g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset or Angle(0, 0, 0), bonePos, boneAng)
