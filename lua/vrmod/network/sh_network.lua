@@ -118,6 +118,7 @@ if CLIENT then
 	local function SendFrame(frame)
 		net.Start("vrutil_net_tick", true)
 		net.WriteVector(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos or Vector(0, 0, 0))
+		net.WriteAngle(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang or Angle(0, 0, 0))
 		netWriteFrame(frame)
 		net.SendToServer()
 		lastSentFrame = vrmod.utils.CopyFrame(frame)
@@ -376,6 +377,10 @@ if SERVER then
 		vrmod.logger.Debug("received net_tick, len: " .. len)
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
+		local viewHackAng = net.ReadAngle()
+		-- Store muzzle/VR viewmodel info
+		g_VR[ply:SteamID()].muzzlePos = viewHackPos
+		g_VR[ply:SteamID()].muzzleAng = viewHackAng
 		local frame = netReadFrame()
 		g_VR[ply:SteamID()].latestFrame = frame
 		if not viewHackPos:IsZero() and util.IsInWorld(viewHackPos) then
