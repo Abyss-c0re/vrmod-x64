@@ -454,48 +454,46 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 	local heldRight = vrmod.utils.IsValidWep(ply:GetActiveWeapon())
 	g_VR.steeringGrip = g_VR.steeringGrip or {}
 	local anyGrip = false
-	for handName, state in pairs({
+	for handName, gripPressed in pairs({
 		left = leftGrip,
 		right = rightGrip
 	}) do
 		if handName == "left" and heldLeft then continue end
 		if handName == "right" and heldRight then continue end
-		if not state then
-			neutralOffsets[handName] = nil
-			if g_VR.steeringGrip[handName] then
-				g_VR.steeringGrip[handName].offset = nil
-				g_VR.steeringGrip[handName].angOffset = nil
-			end
-
-			continue
-		end
-
 		local handPose = handName == "left" and leftHand or rightHand
 		if not handPose then continue end
 		g_VR.steeringGrip[handName] = g_VR.steeringGrip[handName] or {}
-		-- Initialize offset if not already grabbed
-		if not g_VR.steeringGrip[handName].offset then
+		local gripData = g_VR.steeringGrip[handName]
+		-- Track previous button state
+		local prevPressed = gripData.prevPressed or false
+		gripData.prevPressed = gripPressed
+		-- Release instantly if grip released
+		if not gripPressed then
+			gripData.offset = nil
+			gripData.angOffset = nil
+			neutralOffsets[handName] = nil
+			continue
+		end
+
+		-- Only try to attach on rising edge (false -> true)
+		if gripPressed and not prevPressed then
 			local dist
 			local maxDist = MAX_WHEEL_GRAB_DIST
-			-- Increase max grab distance for Airboat steering
 			if g_VR.vehicle.bone_name == "Airboat.Steer" then maxDist = maxDist * 1.5 end
-			-- Fallback for motorcycles that aren’t airboats
 			if g_VR.vehicle.type == "motorcycle" and g_VR.vehicle.bone_name ~= "Airboat.Steer" then
 				local gripPos = veh:GetPos() + veh:GetUp() * 1.15
 				dist = handPose.pos:Distance(gripPos)
-				if dist > 30 then return end
+				if dist <= 35 then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, gripPos, veh:GetAngles()) end
 			else
 				dist = handPose.pos:Distance(bonePos)
-				if dist > maxDist then return end
+				if dist <= maxDist then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
 			end
-
-			g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
 		end
 
-		-- Apply grip every frame
-		if g_VR.steeringGrip[handName].offset then
+		-- Apply pose only if currently attached
+		if gripData.offset then
 			anyGrip = true
-			local attachedPos, attachedAng = LocalToWorld(g_VR.steeringGrip[handName].offset, g_VR.steeringGrip[handName].angOffset or Angle(0, 0, 0), bonePos, boneAng)
+			local attachedPos, attachedAng = LocalToWorld(gripData.offset, gripData.angOffset or Angle(0, 0, 0), bonePos, boneAng)
 			if handName == "left" then
 				if g_VR.vehicle.type ~= "airplane" then vrmod.SetLeftHandPose(attachedPos, attachedAng) end
 			else
