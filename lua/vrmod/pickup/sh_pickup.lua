@@ -418,11 +418,7 @@ if SERVER then
 			return
 		end
 
-		if not IsValid(ent) or not CanPickupEntity(ent, ply, convarValues) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then
-			vrmod.logger.Debug("Cannot pick up entity: valid=" .. tostring(IsValid(ent)) .. ", canPickup=" .. tostring(CanPickupEntity(ent, ply, convarValues)) .. ", hookResult=" .. tostring(hook.Call("VRMod_Pickup", nil, ply, ent)))
-			return
-		end
-
+		if not IsValid(ent) or not CanPickupEntity(ent, ply, convarValues) or hook.Call("VRMod_Pickup", nil, ply, ent) == false then return end
 		if ent:IsNPC() then
 			vrmod.logger.Debug("Spawning pickup ragdoll for NPC: " .. tostring(ent))
 			ent = vrmod.utils.SpawnPickupRagdoll(ply, ent)
