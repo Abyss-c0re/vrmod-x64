@@ -2,7 +2,6 @@ if CLIENT then
 	g_VR = g_VR or {}
 	g_VR.characterYaw = 0
 	local convars = vrmod.GetConvars()
-	local lastModel = nil
 	-- Constants
 	local DEFAULT_EYE_HEIGHT = 66.8
 	local DEFAULT_HEAD_TO_HMD_DIST = 6.3
