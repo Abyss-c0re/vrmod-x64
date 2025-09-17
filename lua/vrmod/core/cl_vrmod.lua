@@ -296,7 +296,8 @@ if CLIENT then
 
 	-- 2) Convar overrides for performance
 	local function OverridePerformanceConvars()
-		for _, c in ipairs{"mat_queue_mode", "gmod_mcore_test", "cl_threaded_bone_setup", "cl_threaded_client_leaf_system", "r_threaded_particles"} do
+		local convars = {"mat_queue_mode", "gmod_mcore_test", "cl_threaded_bone_setup", "cl_threaded_client_leaf_system", "r_threaded_particles", "r_threaded_renderables", "r_threaded_post_processing", "r_queued_post_processing", "r_queued_decals"}
+		for _, c in ipairs(convars) do
 			overrideConvar(c, "1")
 		end
 	end
