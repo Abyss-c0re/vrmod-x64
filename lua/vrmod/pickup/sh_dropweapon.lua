@@ -110,7 +110,7 @@ end
 if CLIENT then
     local dropenable = CreateClientConVar("vrmod_weapondrop_enable", 1, true, FCVAR_ARCHIVE, "", 0, 1)
     hook.Add("VRMod_Input", "Weapon_Drop", function(action, state)
-        if not dropenable:GetBool() then return end
+        if not dropenable:GetBool() or g_VR.antiDrop then return end
         if action == "boolean_right_pickup" and not state then
             net.Start("DropWeapon")
             net.WriteBool(true)

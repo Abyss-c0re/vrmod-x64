@@ -20,6 +20,7 @@ local cv_steer_bike_smooth = CreateConVar("vrmod_sens_steer_motorcycle_smooth", 
 local cv_steer_bike_rot = CreateConVar("vrmod_rot_range_motorcycle", "360", FCVAR_ARCHIVE, "VRMod motorcycle rotation range")
 -- Initialize global VR table
 g_VR = g_VR or {}
+g_VR.antiDrop = false
 -- Vehicle-related variables
 g_VR.vehicle = g_VR.vehicle or {
 	current = nil,
@@ -65,6 +66,7 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 	timer.Create("vrmod_enter_vehicle_timer", 0.1, 1, function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
+		g_VR.antiDrop = true
 		local vehicle, boneId, vType, glide, name = vrmod.utils.GetSteeringInfo(ply)
 		g_VR.vehicle.inside = true
 		g_VR.vehicle.current = vehicle
@@ -89,6 +91,7 @@ hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function()
 	g_VR.vehicle.driving = false
 	g_VR.vehicle.bone_name = name
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
+	timer.Simple(1, function() g_VR.antiDrop = false end)
 end)
 
 hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
