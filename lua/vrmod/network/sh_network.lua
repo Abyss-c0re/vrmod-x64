@@ -503,8 +503,6 @@ if SERVER then
 
 	hook.Add("PlayerEnteredVehicle", "vrutil_hook_playerenteredvehicle", function(ply, veh)
 		if g_VR[ply:SteamID()] ~= nil then
-			ply:SelectWeapon("weapon_vrmod_empty")
-			ply:SetActiveWeapon(ply:GetWeapon("weapon_vrmod_empty"))
 			net.Start("vrutil_net_entervehicle", true)
 			net.Send(ply)
 			ply:SetAllowWeaponsInVehicle(1)
@@ -513,8 +511,6 @@ if SERVER then
 
 	hook.Add("PlayerLeaveVehicle", "vrutil_hook_playerleavevehicle", function(ply, veh)
 		if g_VR[ply:SteamID()] ~= nil then
-			ply:SelectWeapon("weapon_vrmod_empty")
-			ply:SetActiveWeapon(ply:GetWeapon("weapon_vrmod_empty"))
 			net.Start("vrutil_net_exitvehicle", true)
 			net.Send(ply)
 		end
