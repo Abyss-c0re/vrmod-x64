@@ -422,91 +422,89 @@ end)
 hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 	local ply = LocalPlayer()
 	if not IsValid(ply) or not g_VR.active or not g_VR.vehicle.driving then return end
-	-- Special case: tanks (center stick-like grip)
-	if g_VR.vehicle.type == "tank" then
-		local glideVeh = g_VR.vehicle.current
-		local attachPos = glideVeh:GetPos() + glideVeh:GetUp() * -20
-		local attachAng = glideVeh:GetAngles()
+	local vehicle = g_VR.vehicle
+	local veh, vtype = vehicle.current, vehicle.type
+	-- Tank special case
+	if vtype == "tank" then
+		local attachPos = veh:GetPos() + veh:GetUp() * -20
+		local attachAng = veh:GetAngles()
 		vrmod.SetLeftHandPose(attachPos, attachAng)
 		vrmod.SetRightHandPose(attachPos, attachAng)
 		return
 	end
 
-	local veh = g_VR.vehicle.current
-	if not IsValid(veh) or not g_VR.vehicle.wheel_bone then
+	if not IsValid(veh) or not vehicle.wheel_bone then
 		g_VR.wheelGripped = false
 		neutralOffsets = {}
 		return
 	end
 
-	local leftHand = g_VR.tracking.pose_lefthand
-	local rightHand = g_VR.tracking.pose_righthand
-	if not leftHand and not rightHand then
-		g_VR.wheelGripped = false
-		neutralOffsets = {}
-		return
-	end
-
-	local bonePos, boneAng = vrmod.utils.GetVehicleBonePosition(veh, g_VR.vehicle.wheel_bone)
+	-- Must update each frame to avoid jitter
+	local bonePos, boneAng = vrmod.utils.GetVehicleBonePosition(veh, vehicle.wheel_bone)
 	if not bonePos then
 		g_VR.wheelGripped = false
 		neutralOffsets = {}
 		return
 	end
 
+	local leftHand, rightHand = g_VR.tracking.pose_lefthand, g_VR.tracking.pose_righthand
+	if not leftHand and not rightHand then
+		g_VR.wheelGripped = false
+		neutralOffsets = {}
+		return
+	end
+
+	-- Held checks
 	local heldLeft = g_VR.heldEntityLeft
 	local heldRight = vrmod.utils.IsValidWep(ply:GetActiveWeapon())
-	g_VR.steeringGrip = g_VR.steeringGrip or {}
+	-- Grip state
+	local steeringGrip = g_VR.steeringGrip or {}
+	g_VR.steeringGrip = steeringGrip
 	local anyGrip = false
-	for handName, gripPressed in pairs({
-		left = leftGrip,
-		right = rightGrip
-	}) do
-		if handName == "left" and heldLeft then continue end
-		if handName == "right" and heldRight then continue end
-		local handPose = handName == "left" and leftHand or rightHand
-		if not handPose then continue end
-		g_VR.steeringGrip[handName] = g_VR.steeringGrip[handName] or {}
-		local gripData = g_VR.steeringGrip[handName]
-		-- Track previous button state
+	local WorldToLocal, LocalToWorld = WorldToLocal, LocalToWorld
+	local angle_zero = angle_zero
+	local function processHand(handName, handPose, gripPressed, isHeld)
+		if isHeld or not handPose then return end
+		local gripData = steeringGrip[handName] or {}
+		steeringGrip[handName] = gripData
 		local prevPressed = gripData.prevPressed or false
 		gripData.prevPressed = gripPressed
-		-- Release instantly if grip released
+		-- Release instantly
 		if not gripPressed then
-			gripData.offset = nil
-			gripData.angOffset = nil
+			gripData.offset, gripData.angOffset = nil, nil
 			neutralOffsets[handName] = nil
-			continue
+			return
 		end
 
-		-- Only try to attach on rising edge (false -> true)
+		-- Rising edge: compute offsets once
 		if gripPressed and not prevPressed then
-			local dist
 			local maxDist = MAX_WHEEL_GRAB_DIST
-			if g_VR.vehicle.bone_name == "Airboat.Steer" then maxDist = maxDist * 1.5 end
-			if g_VR.vehicle.type == "motorcycle" and g_VR.vehicle.bone_name ~= "Airboat.Steer" and g_VR.vehicle.current.VehicleType ~= Glide.VEHICLE_TYPE.BOAT then
-				local gripPos = veh:GetPos() + veh:GetUp() * 1.15
-				dist = handPose.pos:Distance(gripPos)
-				if dist <= 30 then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
-			elseif g_VR.vehicle.type == "motorcycle" and g_VR.vehicle.current.VehicleType == Glide.VEHICLE_TYPE.BOAT then
-				gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
+			if vehicle.bone_name == "Airboat.Steer" then maxDist = maxDist * 1.5 end
+			if vtype == "motorcycle" then
+				if veh.VehicleType ~= Glide.VEHICLE_TYPE.BOAT then
+					local gripPos = veh:GetPos() + veh:GetUp() * 1.15
+					if handPose.pos:DistToSqr(gripPos) <= 900 then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
+				else
+					gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
+				end
 			else
-				dist = handPose.pos:Distance(bonePos)
-				if dist <= maxDist then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
+				if handPose.pos:DistToSqr(bonePos) <= maxDist * maxDist then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
 			end
 		end
 
-		-- Apply pose only if currently attached
+		-- Apply if attached
 		if gripData.offset then
 			anyGrip = true
-			local attachedPos, attachedAng = LocalToWorld(gripData.offset, gripData.angOffset or Angle(0, 0, 0), bonePos, boneAng)
+			local attachedPos, attachedAng = LocalToWorld(gripData.offset, gripData.angOffset or angle_zero, bonePos, boneAng)
 			if handName == "left" then
-				if g_VR.vehicle.type ~= "airplane" then vrmod.SetLeftHandPose(attachedPos, attachedAng) end
+				if vtype ~= "airplane" then vrmod.SetLeftHandPose(attachedPos, attachedAng) end
 			else
 				vrmod.SetRightHandPose(attachedPos, attachedAng)
 			end
 		end
 	end
 
+	processHand("left", leftHand, leftGrip, heldLeft)
+	processHand("right", rightHand, rightGrip, heldRight)
 	g_VR.wheelGripped = anyGrip
 end)
