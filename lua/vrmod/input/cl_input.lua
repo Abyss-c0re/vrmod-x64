@@ -18,6 +18,7 @@ local cv_steer_car_rot = CreateConVar("vrmod_rot_range_car", "900", FCVAR_ARCHIV
 local cv_steer_bike = CreateConVar("vrmod_sens_steer_motorcycle", "0.30", FCVAR_ARCHIVE, "VRMod motorcycle steering sensitivity")
 local cv_steer_bike_smooth = CreateConVar("vrmod_sens_steer_motorcycle_smooth", "0.15", FCVAR_ARCHIVE, "VRMod motorcycle steering smoothing factor")
 local cv_steer_bike_rot = CreateConVar("vrmod_rot_range_motorcycle", "360", FCVAR_ARCHIVE, "VRMod motorcycle rotation range")
+local _, convarValues = vrmod.GetConvars()
 -- Initialize global VR table
 g_VR = g_VR or {}
 g_VR.antiDrop = false
@@ -49,7 +50,7 @@ local lastInputState = {
 	roll = 0
 }
 
-local ANALOG_SEND_RATE = 0.095
+local ANALOG_SEND_RATE = 1 / convarValues.vrmod_net_tickrate
 local ANALOG_EPSILON = 0.05
 local MAX_WHEEL_GRAB_DIST = 13
 local MAX_ANGLE = 90
@@ -239,7 +240,7 @@ end)
 
 hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 	if not g_VR.active or not g_VR.tracking or not g_VR.vehicle.driving then return end
-	--if CurTime() < nextSendTime then return end
+	if CurTime() < nextSendTime then return end
 	local planeGrip = g_VR.vehicle.type == "aircraft" and rightGrip
 	-- === Aircraft pitch/yaw/roll relative control ===
 	if planeGrip then
@@ -322,7 +323,7 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 			net.SendToServer()
 		end
 
-		--nextSendTime = CurTime() + ANALOG_SEND_RATE
+		nextSendTime = CurTime() + ANALOG_SEND_RATE
 	end
 end)
 
