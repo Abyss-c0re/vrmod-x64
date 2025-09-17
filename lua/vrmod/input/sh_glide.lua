@@ -31,21 +31,29 @@ if SERVER then
             local pitch = net.ReadFloat()
             local yaw = net.ReadFloat()
             local roll = net.ReadFloat()
-            -- Lerp current vehicle input towards new client input
-            local lerpFactor = 0.2 -- tweak for smoothing
+            -- Lerp factor for smoothing
+            local lerpFactor = 0.2
+            -- Helper function: lerp unless new value is 0
+            local function LerpOrReset(current, new)
+                if new == 0 then return 0 end
+                return Lerp(lerpFactor, current, new)
+            end
+
+            -- Fetch current vehicle inputs
             local currentThrottle = vehicle:GetInputFloat(seatIndex, vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER and "throttle" or "accelerate") or 0
             local currentBrake = vehicle:GetInputFloat(seatIndex, "brake") or 0
             local currentSteer = vehicle:GetInputFloat(seatIndex, "steer") or 0
             local currentPitch = vehicle:GetInputFloat(seatIndex, "pitch") or 0
             local currentYaw = vehicle:GetInputFloat(seatIndex, "yaw") or 0
             local currentRoll = vehicle:GetInputFloat(seatIndex, "roll") or 0
-            local newThrottle = Lerp(lerpFactor, currentThrottle, throttle)
-            local newBrake = Lerp(lerpFactor, currentBrake, brake)
-            local newSteer = Lerp(lerpFactor, currentSteer, steer)
-            local newPitch = Lerp(lerpFactor, currentPitch, pitch)
-            local newYaw = Lerp(lerpFactor, currentYaw, yaw)
-            local newRoll = Lerp(lerpFactor, currentRoll, roll)
-            -- Apply smoothed values to vehicle
+            -- Smooth or reset inputs
+            local newThrottle = LerpOrReset(currentThrottle, throttle)
+            local newBrake = LerpOrReset(currentBrake, brake)
+            local newSteer = LerpOrReset(currentSteer, steer)
+            local newPitch = LerpOrReset(currentPitch, pitch)
+            local newYaw = LerpOrReset(currentYaw, yaw)
+            local newRoll = LerpOrReset(currentRoll, roll)
+            -- Apply to vehicle
             vehicle:SetInputFloat(seatIndex, "brake", newBrake)
             vehicle:SetInputFloat(seatIndex, "steer", newSteer)
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
