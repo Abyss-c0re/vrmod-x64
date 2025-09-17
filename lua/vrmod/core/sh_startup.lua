@@ -1,3 +1,37 @@
+-- Shared VRMod Vehicle Aim Fix with debug prints
+local _vrVehicleAimPatched = false
+local function PatchVRVehicleAim()
+    if _vrVehicleAimPatched then return end
+    _vrVehicleAimPatched = true
+    local plyMeta = FindMetaTable("Player")
+    if not plyMeta then return end
+    local HAND_CORRECTION = Angle(2, 6, 0) -- adjust after testing
+    local _GetAimVector = plyMeta.GetAimVector
+    function plyMeta:GetAimVector()
+        if not self:InVehicle() then return _GetAimVector(self) end
+        -- Shared VR data access
+        if g_VR then
+            if SERVER then
+                -- Server: VR state is per-player table
+                local vrData = g_VR[self:SteamID()]
+                if vrData and vrData.muzzleAng then return vrData.muzzleAng:Forward() end
+            else
+                -- Client: VR viewmodel muzzle
+                if g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang then return g_VR.viewModelMuzzle.Ang:Forward() end
+            end
+        end
+
+        -- Fallback to right hand pose
+        if vrmod and vrmod.GetRightHandPose then
+            local hand = g_VR and g_VR.tracking and g_VR.tracking.pose_righthand
+            if hand and hand.Pos and hand.Ang then return (hand.Ang + HAND_CORRECTION):Forward() end
+        end
+        -- Fallback to default
+        return _GetAimVector(self)
+    end
+end
+
+PatchVRVehicleAim()
 if CLIENT then
     local convars = vrmod.GetConvars()
     vrmod.AddCallbackedConvar("vrmod_configversion", nil, "5")
@@ -196,37 +230,4 @@ elseif SERVER then
         end
         return true, data
     end)
-
-    -- Shared VRMod Vehicle Aim Fix with debug prints
-    local _vrVehicleAimPatched = false
-    local function PatchVRVehicleAim()
-        if _vrVehicleAimPatched then return end
-        _vrVehicleAimPatched = true
-        local plyMeta = FindMetaTable("Player")
-        if not plyMeta then return end
-        local HAND_CORRECTION = Angle(2, 6, 0) -- adjust after testing
-        local _GetAimVector = plyMeta.GetAimVector
-        function plyMeta:GetAimVector()
-            -- Only override for VR players in vehicles
-            if self:InVehicle() then
-                local vrData = g_VR and g_VR[self:SteamID()]
-                -- Prefer muzzle if available
-                if vrData and vrData.muzzlePos and vrData.muzzleAng then return vrData.muzzleAng:Forward() end
-                -- Fallback to hand pose
-                if vrmod and vrmod.GetRightHandPose then
-                    local hand = g_VR.tracking.pose_righthand
-                    local handPos, handAng = hand.Pos, hand.Ang
-                    --= vrmod.GetRightHandPose(self)
-                    if handPos and handAng then
-                        local dir = (handAng + HAND_CORRECTION):Forward()
-                        return dir
-                    end
-                end
-            end
-            -- Fallback to normal GetAimVector
-            return _GetAimVector(self)
-        end
-    end
-
-    PatchVRVehicleAim()
 end
