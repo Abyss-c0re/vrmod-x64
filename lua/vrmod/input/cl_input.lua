@@ -483,7 +483,7 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 			if g_VR.vehicle.type == "motorcycle" and g_VR.vehicle.bone_name ~= "Airboat.Steer" and g_VR.vehicle.current.VehicleType ~= Glide.VEHICLE_TYPE.BOAT then
 				local gripPos = veh:GetPos() + veh:GetUp() * 1.15
 				dist = handPose.pos:Distance(gripPos)
-				if dist <= 35 then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, gripPos, veh:GetAngles()) end
+				if dist <= 30 then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
 			elseif g_VR.vehicle.type == "motorcycle" and g_VR.vehicle.current.VehicleType == Glide.VEHICLE_TYPE.BOAT then
 				gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
 			else
