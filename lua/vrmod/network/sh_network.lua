@@ -52,11 +52,25 @@ local function buildClientFrame(relative)
 		characterYaw = characterYaw,
 		hmdPos = g_VR.tracking.hmd.pos,
 		hmdAng = g_VR.tracking.hmd.ang,
-		lefthandPos = g_VR.tracking.pose_lefthand.pos,
-		lefthandAng = g_VR.tracking.pose_lefthand.ang,
-		righthandPos = g_VR.tracking.pose_righthand.pos,
-		righthandAng = g_VR.tracking.pose_righthand.ang,
 	}
+
+	local netFrame = g_VR.net and g_VR.net[lp:SteamID()] and g_VR.net[lp:SteamID()].lerpedFrame
+	-- Handle hands: use netFrame if gripping, otherwise tracking
+	if g_VR.wheelGrippedLeft and netFrame then
+		frame.lefthandPos = netFrame.lefthandPos
+		frame.lefthandAng = netFrame.lefthandAng
+	else
+		frame.lefthandPos = g_VR.tracking.pose_lefthand.pos
+		frame.lefthandAng = g_VR.tracking.pose_lefthand.ang
+	end
+
+	if g_VR.wheelGrippedRight and netFrame then
+		frame.righthandPos = netFrame.righthandPos
+		frame.righthandAng = netFrame.righthandAng
+	else
+		frame.righthandPos = g_VR.tracking.pose_righthand.pos
+		frame.righthandAng = g_VR.tracking.pose_righthand.ang
+	end
 
 	-- Assign fingers using loop
 	for i = 1, 5 do

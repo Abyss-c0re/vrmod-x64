@@ -22,6 +22,9 @@ local _, convarValues = vrmod.GetConvars()
 -- Initialize global VR table
 g_VR = g_VR or {}
 g_VR.antiDrop = false
+g_VR.wheelGripped = false
+g_VR.wheelGrippedLeft = false
+g_VR.wheelGrippedRight = false
 -- Vehicle-related variables
 g_VR.vehicle = g_VR.vehicle or {
 	current = nil,
@@ -369,8 +372,8 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 
 	local steerInput = 0
 	local totalWeight = 0
-	local leftGrip = g_VR.wheelGrippedLeft or g_VR.wheelGripped or false
-	local rightGrip = g_VR.wheelGrippedRight or g_VR.wheelGripped or false
+	local leftGrip = g_VR.wheelGrippedLeft or false
+	local rightGrip = g_VR.wheelGrippedRight or false
 	local deadzone = 0.05 -- Deadzone threshold in meters
 	for handName, state in pairs({
 		left = leftGrip,
@@ -430,11 +433,15 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		local attachAng = veh:GetAngles()
 		vrmod.SetLeftHandPose(attachPos, attachAng)
 		vrmod.SetRightHandPose(attachPos, attachAng)
+		g_VR.wheelGrippedLeft = false
+		g_VR.wheelGrippedRight = false
 		return
 	end
 
 	if not IsValid(veh) or not vehicle.wheel_bone then
 		g_VR.wheelGripped = false
+		g_VR.wheelGrippedLeft = false
+		g_VR.wheelGrippedRight = false
 		neutralOffsets = {}
 		return
 	end
@@ -443,6 +450,8 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 	local bonePos, boneAng = vrmod.utils.GetVehicleBonePosition(veh, vehicle.wheel_bone)
 	if not bonePos then
 		g_VR.wheelGripped = false
+		g_VR.wheelGrippedLeft = false
+		g_VR.wheelGrippedRight = false
 		neutralOffsets = {}
 		return
 	end
@@ -450,6 +459,8 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 	local leftHand, rightHand = g_VR.tracking.pose_lefthand, g_VR.tracking.pose_righthand
 	if not leftHand and not rightHand then
 		g_VR.wheelGripped = false
+		g_VR.wheelGrippedLeft = false
+		g_VR.wheelGrippedRight = false
 		neutralOffsets = {}
 		return
 	end
@@ -461,6 +472,8 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 	local steeringGrip = g_VR.steeringGrip or {}
 	g_VR.steeringGrip = steeringGrip
 	local anyGrip = false
+	g_VR.wheelGrippedLeft = false
+	g_VR.wheelGrippedRight = false
 	local WorldToLocal, LocalToWorld = WorldToLocal, LocalToWorld
 	local angle_zero = angle_zero
 	local function processHand(handName, handPose, gripPressed, isHeld)
@@ -497,8 +510,10 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 			anyGrip = true
 			local attachedPos, attachedAng = LocalToWorld(gripData.offset, gripData.angOffset or angle_zero, bonePos, boneAng)
 			if handName == "left" then
+				g_VR.wheelGrippedLeft = true
 				if vtype ~= "airplane" then vrmod.SetLeftHandPose(attachedPos, attachedAng) end
 			else
+				g_VR.wheelGrippedRight = true
 				vrmod.SetRightHandPose(attachedPos, attachedAng)
 			end
 		end
