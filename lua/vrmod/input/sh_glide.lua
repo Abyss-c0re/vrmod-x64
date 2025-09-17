@@ -24,25 +24,40 @@ if SERVER then
         if not IsValid(vehicle) or not validVehicleTypes[vehicle.VehicleType] then return end
         local action = net.ReadString()
         if action == "analog" then
+            -- Read client inputs
             local throttle = net.ReadFloat()
             local brake = net.ReadFloat()
             local steer = net.ReadFloat()
             local pitch = net.ReadFloat()
             local yaw = net.ReadFloat()
             local roll = net.ReadFloat()
-            vehicle:SetInputFloat(seatIndex, "brake", brake)
-            vehicle:SetInputFloat(seatIndex, "steer", steer)
-            -- Debug for accel/steer/brake
-            vrmod.logger.Debug("Server received - Throttle: " .. throttle .. ", Brake: " .. brake .. ", Steer: " .. steer)
+            -- Lerp current vehicle input towards new client input
+            local lerpFactor = 0.2 -- tweak for smoothing
+            local currentThrottle = vehicle:GetInputFloat(seatIndex, vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER and "throttle" or "accelerate") or 0
+            local currentBrake = vehicle:GetInputFloat(seatIndex, "brake") or 0
+            local currentSteer = vehicle:GetInputFloat(seatIndex, "steer") or 0
+            local currentPitch = vehicle:GetInputFloat(seatIndex, "pitch") or 0
+            local currentYaw = vehicle:GetInputFloat(seatIndex, "yaw") or 0
+            local currentRoll = vehicle:GetInputFloat(seatIndex, "roll") or 0
+            local newThrottle = Lerp(lerpFactor, currentThrottle, throttle)
+            local newBrake = Lerp(lerpFactor, currentBrake, brake)
+            local newSteer = Lerp(lerpFactor, currentSteer, steer)
+            local newPitch = Lerp(lerpFactor, currentPitch, pitch)
+            local newYaw = Lerp(lerpFactor, currentYaw, yaw)
+            local newRoll = Lerp(lerpFactor, currentRoll, roll)
+            -- Apply smoothed values to vehicle
+            vehicle:SetInputFloat(seatIndex, "brake", newBrake)
+            vehicle:SetInputFloat(seatIndex, "steer", newSteer)
             if vehicle.VehicleType == Glide.VEHICLE_TYPE.PLANE or vehicle.VehicleType == Glide.VEHICLE_TYPE.HELICOPTER then
-                vrmod.logger.Debug("Server received - Pitch: " .. pitch .. ", Yaw: " .. yaw .. ", Roll: " .. roll)
-                vehicle:SetInputFloat(seatIndex, "throttle", math.Clamp(throttle, -1, 1))
-                vehicle:SetInputFloat(seatIndex, "pitch", math.Clamp(pitch, -1, 1))
-                vehicle:SetInputFloat(seatIndex, "yaw", math.Clamp(yaw, -1, 1))
-                vehicle:SetInputFloat(seatIndex, "roll", math.Clamp(roll, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "throttle", math.Clamp(newThrottle, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "pitch", math.Clamp(newPitch, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "yaw", math.Clamp(newYaw, -1, 1))
+                vehicle:SetInputFloat(seatIndex, "roll", math.Clamp(newRoll, -1, 1))
             else
-                vehicle:SetInputFloat(seatIndex, "accelerate", throttle)
+                vehicle:SetInputFloat(seatIndex, "accelerate", newThrottle)
             end
+
+            vrmod.logger.Debug(string.format("Server applied - Throttle: %.2f, Brake: %.2f, Steer: %.2f, Pitch: %.2f, Yaw: %.2f, Roll: %.2f", newThrottle, newBrake, newSteer, newPitch, newYaw, newRoll))
             return
         end
 

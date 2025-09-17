@@ -239,7 +239,7 @@ end)
 
 hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 	if not g_VR.active or not g_VR.tracking or not g_VR.vehicle.driving then return end
-	if CurTime() < nextSendTime then return end
+	--if CurTime() < nextSendTime then return end
 	local planeGrip = g_VR.vehicle.type == "aircraft" and rightGrip
 	-- === Aircraft pitch/yaw/roll relative control ===
 	if planeGrip then
@@ -322,7 +322,7 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 			net.SendToServer()
 		end
 
-		nextSendTime = CurTime() + ANALOG_SEND_RATE
+		--nextSendTime = CurTime() + ANALOG_SEND_RATE
 	end
 end)
 
