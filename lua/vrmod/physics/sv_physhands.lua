@@ -75,24 +75,29 @@ local function SpawnVRHands(ply)
             if not IsValid(hand) then
                 hand = ents.Create("base_anim")
                 if not IsValid(hand) then return end
-                hand:SetModel("models/props_junk/PopCan01a.mdl")
                 hand:SetPos(ply:GetPos())
                 hand:Spawn()
                 hand:SetPersistent(true)
                 hand:SetNoDraw(true)
+                hand:DrawShadow(false)
                 hand:SetNWBool("isVRHand", true)
-                hands[side] = {
-                    ent = hand
-                }
-            end
-
-            hand:PhysicsInitSphere(vrmod.DEFAULT_RADIUS, "metal_bouncy")
-            hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
-            hand:Activate()
-            local phys = hand:GetPhysicsObject()
-            if IsValid(phys) then
-                phys:SetMass(20)
-                hands[side].phys = phys
+                -- no model, just physics sphere
+                local radius = vrmod.DEFAULT_RADIUS or 4
+                hand:PhysicsInitSphere(radius, "metal_bouncy")
+                hand:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
+                hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
+                hand:Activate()
+                local phys = hand:GetPhysicsObject()
+                if IsValid(phys) then
+                    phys:SetMass(20)
+                    hands[side] = {
+                        ent = hand,
+                        phys = phys
+                    }
+                else
+                    hand:Remove()
+                    return
+                end
             end
         end)
     end
