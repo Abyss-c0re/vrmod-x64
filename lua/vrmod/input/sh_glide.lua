@@ -10,6 +10,7 @@ local validVehicleTypes = {
 }
 
 if SERVER then
+    local lastInputTime = {}
     local cvar = GetConVar("glide_ragdoll_enable")
     if cvar then
         cvar:SetInt(0)
@@ -22,6 +23,7 @@ if SERVER then
         local vehicle = ply:GetNWEntity("GlideVehicle")
         local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
         if not IsValid(vehicle) or not validVehicleTypes[vehicle.VehicleType] then return end
+        lastInputTime[ply] = CurTime()
         local action = net.ReadString()
         if action == "analog" then
             -- Read client inputs
@@ -113,6 +115,33 @@ if SERVER then
             vehicle:SetInputBool(seatIndex, "detach_trailer", pressed)
         end
     end)
+    hook.Add("Think", "GlideVRInputTimeout", function()
+    local now = CurTime()
+    for ply, t in pairs(lastInputTime) do
+        if not IsValid(ply) then
+            lastInputTime[ply] = nil
+            continue
+        end
+         -- Skip players not in VR
+        if not vrmod.IsPlayerInVR(ply) then
+            continue
+        end
+        if now - t > 1 then
+            local vehicle = ply:GetNWEntity("GlideVehicle")
+            local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
+            if IsValid(vehicle) then
+                vehicle:SetInputFloat(seatIndex, "throttle", 0)
+                vehicle:SetInputFloat(seatIndex, "accelerate", 0)
+                vehicle:SetInputFloat(seatIndex, "brake", 0)
+                vehicle:SetInputFloat(seatIndex, "steer", 0)
+                vehicle:SetInputFloat(seatIndex, "pitch", 0)
+                vehicle:SetInputFloat(seatIndex, "yaw", 0)
+                vehicle:SetInputFloat(seatIndex, "roll", 0)
+            end
+            lastInputTime[ply] = nil
+        end
+    end
+end)
 else -- CLIENT
     local originalMouseFlyMode = nil
     local originalRagdollEnable = nil
