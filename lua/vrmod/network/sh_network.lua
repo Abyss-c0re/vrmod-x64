@@ -2,7 +2,6 @@ g_VR = g_VR or {}
 local _, convarValues = vrmod.GetConvars()
 vrmod.AddCallbackedConvar("vrmod_net_tickrate", nil, tostring(math.ceil(1 / engine.TickInterval())), FCVAR_REPLICATED, nil, nil, nil, tonumber, nil)
 -- HELPERS
-local prevFrame = nil
 local function netReadFrame()
 	local frame = {
 		--ts = net.ReadFloat(),
@@ -37,7 +36,6 @@ local function netReadFrame()
 	return frame
 end
 
--- Persistent previous frame cache
 local function buildClientFrame(relative)
 	local lp = LocalPlayer()
 	if not IsValid(lp) then return nil end
@@ -50,81 +48,45 @@ local function buildClientFrame(relative)
 		characterYaw = g_VR.characterYaw
 	end
 
-	-- Build target values (raw tracking only, no netFrame unless used elsewhere)
-	local targetFrame = {
+	local frame = {
 		characterYaw = characterYaw,
 		hmdPos = g_VR.tracking.hmd.pos,
 		hmdAng = g_VR.tracking.hmd.ang,
-		lefthandPos = g_VR.tracking.pose_lefthand.pos,
-		lefthandAng = g_VR.tracking.pose_lefthand.ang,
-		righthandPos = g_VR.tracking.pose_righthand.pos,
-		righthandAng = g_VR.tracking.pose_righthand.ang,
 	}
 
+	local netFrame = g_VR.net and g_VR.net[lp:SteamID()] and g_VR.net[lp:SteamID()].lerpedFrame
+	-- Handle hands: use netFrame if gripping, otherwise tracking
+	if g_VR.wheelGrippedLeft and netFrame then
+		frame.lefthandPos = netFrame.lefthandPos
+		frame.lefthandAng = netFrame.lefthandAng
+	else
+		frame.lefthandPos = g_VR.tracking.pose_lefthand.pos
+		frame.lefthandAng = g_VR.tracking.pose_lefthand.ang
+	end
+
+	if g_VR.wheelGrippedRight and netFrame then
+		frame.righthandPos = netFrame.righthandPos
+		frame.righthandAng = netFrame.righthandAng
+	else
+		frame.righthandPos = g_VR.tracking.pose_righthand.pos
+		frame.righthandAng = g_VR.tracking.pose_righthand.ang
+	end
+
+	-- Assign fingers using loop
 	for i = 1, 5 do
-		targetFrame["finger" .. i] = g_VR.input.skeleton_lefthand.fingerCurls[i]
-		targetFrame["finger" .. i + 5] = g_VR.input.skeleton_righthand.fingerCurls[i]
+		frame["finger" .. i] = g_VR.input.skeleton_lefthand.fingerCurls[i]
+		frame["finger" .. i + 5] = g_VR.input.skeleton_righthand.fingerCurls[i]
 	end
 
 	if g_VR.sixPoints then
-		targetFrame.waistPos = g_VR.tracking.pose_waist.pos
-		targetFrame.waistAng = g_VR.tracking.pose_waist.ang
-		targetFrame.leftfootPos = g_VR.tracking.pose_leftfoot.pos
-		targetFrame.leftfootAng = g_VR.tracking.pose_leftfoot.ang
-		targetFrame.rightfootPos = g_VR.tracking.pose_rightfoot.pos
-		targetFrame.rightfootAng = g_VR.tracking.pose_rightfoot.ang
+		frame.waistPos = g_VR.tracking.pose_waist.pos
+		frame.waistAng = g_VR.tracking.pose_waist.ang
+		frame.leftfootPos = g_VR.tracking.pose_leftfoot.pos
+		frame.leftfootAng = g_VR.tracking.pose_leftfoot.ang
+		frame.rightfootPos = g_VR.tracking.pose_rightfoot.pos
+		frame.rightfootAng = g_VR.tracking.pose_rightfoot.ang
 	end
 
-	-- First frame: no lerp possible
-	if not prevFrame then
-		prevFrame = table.Copy(targetFrame)
-		if relative then
-			return vrmod.utils.ConvertToRelativeFrame(prevFrame)
-		else
-			return prevFrame
-		end
-	end
-
-	-- Interpolation fraction
-	local frac = FrameTime() * 15 -- tune smoothing responsiveness
-	-- Build interpolated frame
-	local frame = {}
-	frame.characterYaw = Lerp(frac, prevFrame.characterYaw, targetFrame.characterYaw)
-	frame.hmdPos = LerpVector(frac, prevFrame.hmdPos, targetFrame.hmdPos)
-	frame.hmdAng = LerpAngle(frac, prevFrame.hmdAng, targetFrame.hmdAng)
-	-- Left hand: freeze if gripping, otherwise lerp to tracking
-	if g_VR.wheelGrippedLeft then
-		frame.lefthandPos = prevFrame.lefthandPos
-		frame.lefthandAng = prevFrame.lefthandAng
-	else
-		frame.lefthandPos = LerpVector(frac, prevFrame.lefthandPos, targetFrame.lefthandPos)
-		frame.lefthandAng = LerpAngle(frac, prevFrame.lefthandAng, targetFrame.lefthandAng)
-	end
-
-	-- Right hand: freeze if gripping, otherwise lerp to tracking
-	if g_VR.wheelGrippedRight then
-		frame.righthandPos = prevFrame.righthandPos
-		frame.righthandAng = prevFrame.righthandAng
-	else
-		frame.righthandPos = LerpVector(frac, prevFrame.righthandPos, targetFrame.righthandPos)
-		frame.righthandAng = LerpAngle(frac, prevFrame.righthandAng, targetFrame.righthandAng)
-	end
-
-	for i = 1, 10 do
-		frame["finger" .. i] = Lerp(frac, prevFrame["finger" .. i], targetFrame["finger" .. i])
-	end
-
-	if g_VR.sixPoints then
-		frame.waistPos = LerpVector(frac, prevFrame.waistPos, targetFrame.waistPos)
-		frame.waistAng = LerpAngle(frac, prevFrame.waistAng, targetFrame.waistAng)
-		frame.leftfootPos = LerpVector(frac, prevFrame.leftfootPos, targetFrame.leftfootPos)
-		frame.leftfootAng = LerpAngle(frac, prevFrame.leftfootAng, targetFrame.leftfootAng)
-		frame.rightfootPos = LerpVector(frac, prevFrame.rightfootPos, targetFrame.rightfootPos)
-		frame.rightfootAng = LerpAngle(frac, prevFrame.rightfootAng, targetFrame.rightfootAng)
-	end
-
-	-- Cache this frame
-	prevFrame = frame
 	if relative then return vrmod.utils.ConvertToRelativeFrame(frame) end
 	return frame
 end
