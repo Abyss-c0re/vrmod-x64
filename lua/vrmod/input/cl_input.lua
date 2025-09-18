@@ -74,6 +74,9 @@ local function VRMod_CleanupVehicleExit()
 	g_VR.vehicle.glide = false
 	g_VR.vehicle.driving = false
 	g_VR.vehicle.bone_name = nil
+	g_VR.wheelGripped = false
+	g_VR.wheelGrippedLeft = false
+	g_VR.wheelGrippedRight = false
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
 	timer.Simple(1, function() g_VR.antiDrop = false end)
 	timer.Remove("vrmod_vehicle_watchdog")
