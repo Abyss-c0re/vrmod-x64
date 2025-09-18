@@ -65,6 +65,20 @@ local UPDATE_RATE = 1
 local aircraftNeutralAng = nil
 local leftGrip, rightGrip = false, false
 --local leftHand, rightHand
+-- Shared cleanup function for exiting vehicle
+local function VRMod_CleanupVehicleExit()
+	g_VR.vehicle.inside = false
+	g_VR.vehicle.current = nil
+	g_VR.vehicle.type = nil
+	g_VR.vehicle.wheel_bone = nil
+	g_VR.vehicle.glide = false
+	g_VR.vehicle.driving = false
+	g_VR.vehicle.bone_name = nil
+	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
+	timer.Simple(1, function() g_VR.antiDrop = false end)
+	timer.Remove("vrmod_vehicle_watchdog")
+end
+
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 	-- Cancel/restart a single timer tied to this hook
 	timer.Create("vrmod_enter_vehicle_timer", 0.1, 1, function()
@@ -80,24 +94,15 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 		g_VR.vehicle.bone_name = name
 		vrmod.logger.Info("Steer grip type selected: " .. tostring(vType))
 		if glide and ply:GlideGetSeatIndex() == 1 or not glide then g_VR.vehicle.driving = true end
+		-- Safety watchdog: check every second if the vehicle is still valid and player still inside
+		timer.Create("vrmod_vehicle_watchdog", 1, 0, function() if not IsValid(ply) or not ply:InVehicle() or not IsValid(g_VR.vehicle.current) then VRMod_CleanupVehicleExit() end end)
 	end)
 
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
 end)
 
 -- Reset vehicle data and switch action set when exiting vehicle
-hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function()
-	g_VR.vehicle.inside = false
-	g_VR.vehicle.current = nil
-	g_VR.vehicle.type = nil
-	g_VR.vehicle.wheel_bone = nil
-	g_VR.vehicle.glide = false
-	g_VR.vehicle.driving = false
-	g_VR.vehicle.bone_name = name
-	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
-	timer.Simple(1, function() g_VR.antiDrop = false end)
-end)
-
+hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function() VRMod_CleanupVehicleExit() end)
 hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	if hook.Call("VRMod_AllowDefaultAction", nil, action) == false then return end
 	vrmod.logger.Debug("Input changed: %s = %s", action, pressed)
