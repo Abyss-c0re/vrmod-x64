@@ -43,21 +43,40 @@ function vrmod.utils.GetSteeringInfo(ply)
     local glideVeh = vrmod.utils.GetGlideVehicle(vehicle)
     local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
     local sitSeq = glideVeh and glideVeh.GetPlayerSitSequence and glideVeh:GetPlayerSitSequence(seatIndex)
+    -- Define bone search priorities
     local bonePriority = {
-        {
-            names = {"handlebars", "handles", "Airboat.Steer", "handle"},
+        motorcycle = {
+            names = {"handlebars", "handles", "Airboat.Steer", "handle", "steer", "steerw_bone"},
             type = "motorcycle"
         },
-        {
-            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel", "car.steer_wheel", "steer"},
+        car = {
+            names = {"steering_wheel", "steering", "Rig_Buggy.Steer_Wheel", "car.steer_wheel", "steer", "steerw_bone"},
             type = "car"
         }
     }
 
-    local boneId, boneType, boneName
+    -- Decide search order based on Glide type
+    local searchOrder
+    if IsValid(glideVeh) then
+        local vType = glideVeh.VehicleType
+        if vType == Glide.VEHICLE_TYPE.MOTORCYCLE or sitSeq == "drive_airboat" then
+            searchOrder = {bonePriority.motorcycle, bonePriority.car}
+        elseif vType == Glide.VEHICLE_TYPE.CAR then
+            searchOrder = {bonePriority.car, bonePriority.motorcycle}
+        else
+            -- For other Glide types, just try both
+            searchOrder = {bonePriority.motorcycle, bonePriority.car}
+        end
+    else
+        -- No Glide, default to car-first
+        searchOrder = {bonePriority.car, bonePriority.motorcycle}
+    end
+
+    -- Search bones
     local candidates = {IsValid(glideVeh) and glideVeh or vehicle}
+    local boneId, boneType, boneName
     for _, candidate in ipairs(candidates) do
-        for _, entry in ipairs(bonePriority) do
+        for _, entry in ipairs(searchOrder) do
             for _, name in ipairs(entry.names) do
                 local id = candidate:LookupBone(name)
                 if id then
@@ -77,13 +96,13 @@ function vrmod.utils.GetSteeringInfo(ply)
         if boneId then break end
     end
 
-    -- Glide vehicle type takes precedence
+    -- Glide type still takes precedence in naming
     if IsValid(glideVeh) then
         local vType = glideVeh.VehicleType
         if vType == Glide.VEHICLE_TYPE.MOTORCYCLE or sitSeq == "drive_airboat" then
             return glideVeh, boneId, "motorcycle", true, boneName
         elseif vType == Glide.VEHICLE_TYPE.BOAT then
-            return glideVeh, boneId, boneType, true, boneName
+            return glideVeh, boneId, boneType or "boat", true, boneName
         elseif vType == Glide.VEHICLE_TYPE.CAR then
             return glideVeh, boneId, "car", true, boneName
         elseif vType == Glide.VEHICLE_TYPE.PLANE or vType == Glide.VEHICLE_TYPE.HELICOPTER then
