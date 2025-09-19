@@ -51,13 +51,9 @@ if SERVER then
             -- Base world reference
             local refPos, refAng = ply:GetPos(), ply:InVehicle() and ply:GetVehicle():GetAngles() or Angle()
             -- Base world conversions
-            local rawHMDPos, rawHMDAng = LocalToWorld(lf.hmdPos or Vector(), lf.hmdAng or Angle(), refPos, refAng)
-            local rawLeftPos, rawLeftAng = LocalToWorld(lf.lefthandPos or Vector(), lf.lefthandAng or Angle(), refPos, refAng)
-            local rawRightPos, rawRightAng = LocalToWorld(lf.righthandPos or Vector(), lf.righthandAng or Angle(), refPos, refAng)
-            -- Store updated positions
-            lfw.hmdPos, lfw.hmdAng = rawHMDPos, rawHMDAng
-            lfw.lefthandPos, lfw.lefthandAng = rawLeftPos, rawLeftAng
-            lfw.righthandPos, lfw.righthandAng = rawRightPos, rawRightAng
+            lfw.hmdPos, lfw.hmdAng = LocalToWorld(lf.hmdPos or Vector(), lf.hmdAng or Angle(), refPos, refAng)
+            lfw.lefthandPos, lfw.lefthandAng = LocalToWorld(lf.lefthandPos or Vector(), lf.lefthandAng or Angle(), refPos, refAng)
+            lfw.righthandPos, lfw.righthandAng = LocalToWorld(lf.righthandPos or Vector(), lf.righthandAng or Angle(), refPos, refAng)
             -- Velocity cache
             local sid = ply:SteamID()
             local cache = vrmod.HandVelocityCache[sid]
@@ -66,7 +62,7 @@ if SERVER then
                 vrmod.HandVelocityCache[sid] = cache
             end
 
-            -- Ensure all required fields exist (patch old caches)
+            -- Ensure required fields exist
             cache.leftLastPos = cache.leftLastPos or lfw.lefthandPos
             cache.rightLastPos = cache.rightLastPos or lfw.righthandPos
             cache.hmdLastPos = cache.hmdLastPos or lfw.hmdPos
@@ -126,6 +122,19 @@ if SERVER then
             cache.rightLastAng = lfw.righthandAng
             cache.hmdLastAng = lfw.hmdAng
             cache.lastTs = lfw.ts
+            ------------------------------------------------------------------
+            -- Overwrite poses with prediction
+            ------------------------------------------------------------------
+            local predictionHorizon = cache.avgDt -- ~1 frame ahead
+            local function PredictPose(pos, ang, vel, angVel, dt)
+                local predictedPos = pos + vel * dt
+                local predictedAng = Angle(ang.p + angVel.p * dt, ang.y + angVel.y * dt, ang.r + angVel.r * dt)
+                return predictedPos, predictedAng
+            end
+
+            lfw.hmdPos, lfw.hmdAng = PredictPose(lfw.hmdPos, lfw.hmdAng, cache.hmdVel, cache.hmdAngVel, predictionHorizon)
+            lfw.lefthandPos, lfw.lefthandAng = PredictPose(lfw.lefthandPos, lfw.lefthandAng, cache.leftVel, cache.leftAngVel, predictionHorizon)
+            lfw.righthandPos, lfw.righthandAng = PredictPose(lfw.righthandPos, lfw.righthandAng, cache.rightVel, cache.rightAngVel, predictionHorizon)
         end
     end
 
