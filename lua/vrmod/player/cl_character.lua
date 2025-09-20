@@ -150,8 +150,8 @@ if CLIENT then
 		local boneinfo = charinfo.boneinfo
 		local bones = charinfo.bones
 		local frame = net.lerpedFrame
-		local inVehicle = g_VR.vehicle.inside
-		local plyAng = inVehicle and g_VR.vehicle.current:GetAngles() or Angle(0, frame.characterYaw, 0)
+		local inVehicle = ply:InVehicle()
+		local plyAng = inVehicle and ply:GetVehicle():GetAngles() or Angle(0, frame.characterYaw, 0)
 		if inVehicle then _, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng) end
 		-- Ensure cache is initialized
 		g_VR.cache = g_VR.cache or {}
