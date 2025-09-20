@@ -296,9 +296,18 @@ if CLIENT then
 
 	-- 2) Convar overrides for performance
 	local function OverridePerformanceConvars()
-		local convars = {"mat_queue_mode", "gmod_mcore_test", "cl_threaded_bone_setup", "cl_threaded_client_leaf_system", "r_threaded_particles", "r_threaded_renderables", "r_threaded_post_processing", "r_queued_post_processing", "r_queued_decals"}
+		local convars = {"mat_queue_mode", "gmod_mcore_test", "cl_threaded_bone_setup", "cl_threaded_client_leaf_system", "r_threaded_particles", "r_threaded_renderables", "r_threaded_post_processing", "r_queued_post_processing", "r_queued_decals", "r_queued_ropes", "r_threaded_shadow_clip", "cl_threaded_init", "snd_mix_async",}
 		for _, c in ipairs(convars) do
 			overrideConvar(c, "1")
+		end
+
+		for _, c in ipairs(convars) do
+			overrideConvar(c, "1")
+		end
+
+		local convars0 = {"r_shadowrendertotexture", "r_shadowrendertotexture", "r_3dsky", "mat_motion_blur_enabled"}
+		for _, c in ipairs(convars0) do
+			overrideConvar(c, "0")
 		end
 	end
 
