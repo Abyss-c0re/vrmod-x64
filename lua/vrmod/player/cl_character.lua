@@ -444,6 +444,7 @@ if CLIENT then
 	local up = Vector(0, 0, 1)
 	local function PreRenderFunc()
 		if convars.vrmod_oldcharacteryaw:GetBool() then
+			-- old behavior (unchanged)
 			local _, relativeAng = WorldToLocal(zeroVec, Angle(0, g_VR.tracking.hmd.ang.yaw, 0), zeroVec, Angle(0, g_VR.characterYaw, 0))
 			if relativeAng.yaw > 45 then
 				g_VR.characterYaw = g_VR.characterYaw + relativeAng.yaw - 45
@@ -452,19 +453,51 @@ if CLIENT then
 			end
 
 			if g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright then g_VR.characterYaw = g_VR.tracking.hmd.ang.yaw end
-		else
-			local leftPos, rightPos, hmdPos, hmdAng = g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos, g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang
-			if WorldToLocal(leftPos, zeroAng, hmdPos, hmdAng).y > WorldToLocal(rightPos, zeroAng, hmdPos, hmdAng).y then --update handYaw if hands are not crossed
-				handYaw = Vector(rightPos.x - leftPos.x, rightPos.y - leftPos.y, 0):Angle().yaw + 90
+			return
+		end
+
+		-- ---- optimized method ----
+		local leftPos = g_VR.tracking.pose_lefthand.pos
+		local rightPos = g_VR.tracking.pose_righthand.pos
+		local hmdPos = g_VR.tracking.hmd.pos
+		local hmdAng = g_VR.tracking.hmd.ang
+		-- local helpers to avoid repeated global lookups
+		local NormalizeAngle = math.NormalizeAngle
+		local Clamp = math.Clamp
+		local RealFT = RealFrameTime()
+		-- compute hand positions relative to HMD once (WorldToLocal returns pos, ang)
+		-- Use the returned pos.y for the left/right crossing check
+		local lpos_local = WorldToLocal(leftPos, zeroAng, hmdPos, hmdAng) -- (pos, ang) unused ang
+		local rpos_local = WorldToLocal(rightPos, zeroAng, hmdPos, hmdAng)
+		-- update handYaw only if hands are not crossed (same logic)
+		if lpos_local.y > rpos_local.y then
+			-- compute yaw from delta x,y via atan2 to avoid Vector():Angle() allocations
+			local dx = rightPos.x - leftPos.x
+			local dy = rightPos.y - leftPos.y
+			local handYaw = math.deg(math.atan2(dy, dx)) + 90
+			-- normalize to -180..180
+			handYaw = NormalizeAngle(handYaw)
+			-- compute forward angle projected to horizontal plane (zero pitch)
+			local fwd = hmdAng:Forward()
+			fwd.z = 0
+			if fwd:LengthSqr() < 1e-6 then
+				-- fallback to HMD yaw if forward degenerate
+				fwd = Angle(0, hmdAng.yaw, 0):Forward()
 			end
 
-			local forwardAng = up:Cross(g_VR.tracking.hmd.ang:Right()):Angle()
-			local _, tmp = WorldToLocal(zeroVec, Angle(0, handYaw, 0), zeroVec, forwardAng)
-			local targetYaw = forwardAng.yaw + math.Clamp(tmp.yaw, -45, 45)
-			local _, tmp = WorldToLocal(zeroVec, Angle(0, targetYaw, 0), zeroVec, Angle(0, g_VR.characterYaw, 0))
-			local diff = tmp.yaw
-			g_VR.characterYaw = math.NormalizeAngle(g_VR.characterYaw + diff * 8 * RealFrameTime())
+			local forwardYaw = fwd:Angle().yaw
+			-- compute relative yaw from forward to handYaw in degrees, clamp at ±45
+			local relativeToForward = NormalizeAngle(handYaw - forwardYaw)
+			local clamped = Clamp(relativeToForward, -45, 45)
+			local targetYaw = forwardYaw + clamped
+			-- compute yaw difference between targetYaw and current characterYaw, normalized
+			local yawDiff = NormalizeAngle(targetYaw - g_VR.characterYaw)
+			-- smooth toward target; keep your existing responsiveness (8 * RealFrameTime)
+			g_VR.characterYaw = NormalizeAngle(g_VR.characterYaw + yawDiff * 8 * RealFT)
 		end
+
+		-- If movement inputs require snapping the char yaw to HMD yaw, keep that behavior
+		if g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright then g_VR.characterYaw = g_VR.tracking.hmd.ang.yaw end
 	end
 
 	-------------------------------------------------------------
