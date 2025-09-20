@@ -130,8 +130,8 @@ if CLIENT then
         local threshold = cv_meleeVelThreshold:GetFloat() * 50
         if leftVel:Length() < threshold and rightVel:Length() < threshold then return end
         -- Try melee for both hands
-        TryMelee(PrecomputedMelee.left, "left")
-        TryMelee(PrecomputedMelee.right, "right")
+        if not g_VR.cooldownLeft  then TryMelee(PrecomputedMelee.left, "left") end
+        if not g_VR.cooldownRight then TryMelee(PrecomputedMelee.right, "right") end
     end)
 end
 
