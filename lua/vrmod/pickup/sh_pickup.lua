@@ -191,12 +191,127 @@ local function FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
 	return ent
 end
 
+-- Helper to check if prop should be ignored
+local function IsIgnoredProp(ent)
+	if not IsValid(ent) then return true end
+	local class = ent:GetClass() or ""
+	if class == "prop_ragdoll" then return true end
+	if IsImportantPickup(ent) then return true end
+	if string.StartWith(class, "avrmag_") then return true end
+	return false
+end
+
 if CLIENT then
+	if g_VR then
+		g_VR.cooldownLeft = false
+		g_VR.cooldownRight = false
+	end
+
 	CreateClientConVar("vrmod_pickup_halos", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 	local pickupTargetEntLeft = nil
 	local pickupTargetEntRight = nil
 	local haloTargetsLeft = {}
 	local haloTargetsRight = {}
+	-- Clientside prop clones
+	local clientProps = {} -- [serverEnt] = clone
+	local handAssignments = {
+		Left = nil,
+		Right = nil
+	}
+
+	local handOffsets = {
+		Left = nil,
+		Right = nil
+	}
+
+	-- Create or return existing clone
+	local function GetOrCreateClone(ent)
+		if not IsValid(ent) or IsIgnoredProp(ent) then return nil end
+		if clientProps[ent] and IsValid(clientProps[ent]) then return clientProps[ent] end
+		local clone = ClientsideModel(ent:GetModel(), RENDERGROUP_OPAQUE)
+		clone:SetPos(ent:GetPos())
+		clone:SetAngles(ent:GetAngles())
+		clone:SetRenderMode(RENDERMODE_NORMAL)
+		clone:SetColor(Color(255, 255, 255, 255))
+		clone:SetMoveType(MOVETYPE_NONE)
+		clone:SetSolid(SOLID_NONE)
+		clone:DrawShadow(false)
+		clone:SetupBones()
+		clientProps[ent] = clone
+		return clone
+	end
+
+	-- Start a grab for a hand
+	local function StartGrab(ent, hand, handPos)
+		if not IsValid(ent) or not handPos or IsIgnoredProp(ent) then return end
+		handAssignments[hand] = ent
+		handOffsets[hand] = ent:WorldToLocal(handPos)
+	end
+
+	-- Update client clone to follow hand
+	local function UpdateClientProp(ent, hand, handPos)
+		if not IsValid(ent) or not handPos or IsIgnoredProp(ent) then return end
+		-- initialize grab if not started
+		if not handOffsets[hand] then StartGrab(ent, hand, handPos) end
+		local clone = GetOrCreateClone(ent)
+		if not clone then return end
+		local localOffset = handOffsets[hand] or Vector(0, 0, 0)
+		local targetPos = clone:LocalToWorld(localOffset)
+		-- forward offset relative to prop
+		local forwardOffset = ent:GetForward() * 2 -- tweak as needed
+		clone:SetPos(clone:GetPos() + handPos - targetPos + forwardOffset)
+		clone:SetAngles(ent:GetAngles())
+		clone:InvalidateBoneCache()
+		clone:SetupBones()
+		clone:DrawModel()
+		-- hide server prop while held
+		ent:SetRenderMode(RENDERMODE_TRANSALPHA)
+		ent:SetColor(Color(255, 255, 255, 0))
+	end
+
+	-- End grab for a hand
+	local function EndGrab(ent, hand)
+		if not IsValid(ent) or IsIgnoredProp(ent) then return end
+		handAssignments[hand] = nil
+		handOffsets[hand] = nil
+		local stillHeld = false
+		for _, hEnt in pairs(handAssignments) do
+			if hEnt == ent then
+				stillHeld = true
+				break
+			end
+		end
+
+		if not stillHeld then
+			if clientProps[ent] and IsValid(clientProps[ent]) then clientProps[ent]:Remove() end
+			clientProps[ent] = nil
+			ent:SetRenderMode(RENDERMODE_NORMAL)
+			ent:SetColor(Color(255, 255, 255, 255))
+		end
+	end
+
+	-- Update normal props per hand each frame
+	hook.Add("VRMod_PreRender", "vrmod_clientside_clone_follow", function()
+		if not g_VR or not g_VR.tracking then return end
+		local lh, rh = g_VR.heldEntityLeft, g_VR.heldEntityRight
+		if IsValid(lh) then UpdateClientProp(lh, "Left", g_VR.tracking.pose_lefthand.pos) end
+		if IsValid(rh) then UpdateClientProp(rh, "Right", g_VR.tracking.pose_righthand.pos) end
+	end)
+
+	-- Cleanup clones only for normal props on drop
+	hook.Add("VRMod_Drop", "vrmod_cleanup_clone_props", function(ply, ent)
+		if not IsValid(ent) or IsIgnoredProp(ent) then return end
+		EndGrab(ent, "Left")
+		EndGrab(ent, "Right")
+		for _, hand in ipairs({"Left", "Right"}) do
+			if g_VR then
+				local key = hand == "Left" and "cooldownLeft" or "cooldownRight"
+				g_VR[key] = true
+				timer.Simple(0.5, function() if g_VR then g_VR[key] = false end end)
+			end
+		end
+	end)
+
 	hook.Add("Tick", "vrmod_find_pickup_target", function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) or not ply:Alive() then return end
@@ -555,13 +670,9 @@ if SERVER then
 
 				-- Dynamic ShadowParams
 				local velMagnitude = handVel and handVel:Length() or 0
-				local angVelMagnitude = handAngVel and math.max(math.abs(handAngVel.p), math.abs(handAngVel.y), math.abs(handAngVel.r)) or 0
 				pickupController.ShadowParams.pos = targetPos
 				pickupController.ShadowParams.angle = targetAng
-				--pickupController.ShadowParams.secondstoarrive = math.Clamp(dt + 0.001 - velMagnitude * 0.0001, 0.0005, 0.01)
 				pickupController.ShadowParams.dampfactor = math.Clamp(0.35 - velMagnitude * 0.01, 0.15, 0.5)
-				--pickupController.ShadowParams.maxspeed = 99999 + velMagnitude * 10
-				--pickupController.ShadowParams.maxangular = 99999 + angVelMagnitude * 10
 				vrmod.logger.Debug(string.format("ShadowControl -> pos: %s, angle: %s, dtArrive: %.4f, damp: %.4f, maxSpeed: %.1f, maxAngular: %.1f", tostring(targetPos), tostring(targetAng), pickupController.ShadowParams.secondstoarrive, pickupController.ShadowParams.dampfactor, pickupController.ShadowParams.maxspeed, pickupController.ShadowParams.maxangular))
 				-- Apply ShadowControl
 				phys:ComputeShadowControl(pickupController.ShadowParams)
