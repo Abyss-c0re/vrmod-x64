@@ -43,9 +43,12 @@ local function buildClientFrame(relative)
 	local vehicle = g_VR.vehicle.current
 	local characterYaw
 	if g_VR.vehicle.inside and IsValid(vehicle) then
-		characterYaw = vehicle:GetAngles().yaw
+		local rawYaw = vehicle:GetAngles().yaw
+		rawYaw = (rawYaw + 180) % 360 - 180
+		local MAX_YAW = 90
+		characterYaw = math.Clamp(rawYaw, -MAX_YAW, MAX_YAW)
 	else
-		characterYaw = g_VR.characterYaw
+		characterYaw = g_VR.characterYaw or 0
 	end
 
 	local frame = {
