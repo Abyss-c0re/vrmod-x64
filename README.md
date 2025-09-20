@@ -34,7 +34,8 @@ This build focuses on **optimization** by merging essential features from semi-o
 - Melee system overhauled: trace-based with velocity-scaled damage + bonus for weapon impact  
 - Functional numpad input in VR
 - Glide support
-- Motion driving with wheel gripping (engine based vehicles + Glide)
+- Motion driving with wheel gripping (engine based vehicles + Glide) Don't forget to bind pickups for grip buttons
+- Shooting while driving. (ArcVR works for all vehicles, standard SWEPs work only if collisions allow it, like jalopy or glide motorbikes and some roofless cars) Need to bind "weaponmenu", "reload", "turret" for primary and  "alt_turret" for secondary fire in vehicle tab
 - Motion-controlled physgun: rotation and movement based on hand motion  
 - Gravity gun now supports prop rotation, just like HL2 VR  
 - UI now works correctly while in vehicles (given the mouse click is set in bindings for vehicle)
