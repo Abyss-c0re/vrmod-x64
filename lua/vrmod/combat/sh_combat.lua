@@ -62,6 +62,7 @@ if CLIENT then
 
         local tr = vrmod.utils.TraceBoxOrSphere(traceData)
         if tr.Hit then
+            if IsValid(tr.Entity) and tr.Entity == g_VR.vehicle.current then return end
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
             -- Play swing sound only for right-hand weapon
             if hand == "right" and useWeapon then
@@ -130,7 +131,7 @@ if CLIENT then
         local threshold = cv_meleeVelThreshold:GetFloat() * 50
         if leftVel:Length() < threshold and rightVel:Length() < threshold then return end
         -- Try melee for both hands
-        if not g_VR.cooldownLeft  then TryMelee(PrecomputedMelee.left, "left") end
+        if not g_VR.cooldownLeft then TryMelee(PrecomputedMelee.left, "left") end
         if not g_VR.cooldownRight then TryMelee(PrecomputedMelee.right, "right") end
     end)
 end
