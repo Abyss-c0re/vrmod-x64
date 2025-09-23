@@ -112,6 +112,7 @@ if CLIENT then
 	g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
 	----------------------------------------------------------------------------------------------------------------------------------------------------
 	local prevFrameNumber = 0
+	local lastFrames = {}
 	local characterInfo = {}
 	local activePlayers = {}
 	local updatedPlayers = {}
@@ -146,10 +147,11 @@ if CLIENT then
 	local function UpdateIK(ply)
 		local steamid = ply:SteamID()
 		local net = g_VR.net[steamid]
+		local frame = net.lerpedFrame
+		if lastFrames[steamid] and vrmod.utils.FramesAreEqual(frame, lastFrames[steamid]) then return end
 		local charinfo = characterInfo[steamid]
 		local boneinfo = charinfo.boneinfo
 		local bones = charinfo.bones
-		local frame = net.lerpedFrame
 		local inVehicle = ply:InVehicle()
 		local plyAng = inVehicle and ply:GetVehicle():GetAngles() or Angle(0, frame.characterYaw, 0)
 		if inVehicle then _, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng) end
@@ -307,6 +309,8 @@ if CLIENT then
 				boneData.ang = wang
 			end
 		end
+
+		lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
 	end
 
 	local function CharacterInit(ply)
@@ -440,7 +444,6 @@ if CLIENT then
 	end
 
 	-------------------------------------------------------------
-	local handYaw = 0
 	local up = Vector(0, 0, 1)
 	local function PreRenderFunc()
 		if convars.vrmod_oldcharacteryaw:GetBool() then

@@ -83,7 +83,7 @@ end
 function vrmod.utils.FramesAreEqual(f1, f2)
     if not f1 or not f2 then return false end
     local function equalVec(a, b)
-        return vrmod.utils.VecAlmostEqual(a, b, 0.0001)
+        return vrmod.utils.VecAlmostEqual(a, b, 0.05)
     end
 
     local function equalAng(a, b)

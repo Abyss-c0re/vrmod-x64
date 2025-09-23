@@ -4,12 +4,12 @@ vrmod.utils = vrmod.utils or {}
 
 function vrmod.utils.VecAlmostEqual(v1, v2, threshold)
     if not v1 or not v2 then return false end
-    return v1:DistToSqr(v2) < (threshold or 0.001) ^ 2
+    return v1:DistToSqr(v2) < (threshold or 0.05) ^ 2
 end
 
 function vrmod.utils.AngAlmostEqual(a1, a2, threshold)
     if not a1 or not a2 then return false end
-    threshold = threshold or 0.1 -- degrees
+    threshold = threshold or 0.5 -- degrees
     return math.abs(math.AngleDifference(a1.p, a2.p)) < threshold and math.abs(math.AngleDifference(a1.y, a2.y)) < threshold and math.abs(math.AngleDifference(a1.r, a2.r)) < threshold
 end
 
