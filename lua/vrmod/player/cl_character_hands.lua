@@ -116,7 +116,7 @@ if CLIENT then
 				h = 2048,
 				type = "3D",
 				fov = g_VR.view.fov,
-				aspect = -g_VR.view.aspectratio,
+				aspect = -g_VR.aspectratio,
 				origin = camPos,
 				angles = camAng
 			})

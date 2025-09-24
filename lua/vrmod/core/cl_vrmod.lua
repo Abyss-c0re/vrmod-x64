@@ -18,6 +18,7 @@ if CLIENT then
 	g_VR.changedInputs = {}
 	g_VR.errorText = ""
 	g_VR.moduleVersion = 0
+	g_VR.aspectratio = 0
 	local hfovLeft, hfovRight
 	local aspectLeft, aspectRight
 	local leftCalc, rightCalc
@@ -299,6 +300,7 @@ if CLIENT then
 		viewRight.y = 0
 		viewRight.w = rtHalfW
 		viewRight.h = rtH
+		if g_VR.aspectratio == 0 then g_VR.aspectratio = aspectLeft end
 		-- render eyes
 		hook.Call("VRMod_PreRender", nil, "left")
 		render.RenderView(viewLeft)

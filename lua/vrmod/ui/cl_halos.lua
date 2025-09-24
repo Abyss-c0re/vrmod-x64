@@ -59,7 +59,7 @@ hook.Add("VRMod_Start", "halos", function(ply)
 					render.SetStencilEnable(false)
 					render.PopRenderTarget()
 					local w = 10 * math.tan(math.rad(g_VR.view.fov / 2))
-					local h = w * 1 / g_VR.view.aspectratio
+					local h = w * 1 / g_VR.aspectratio
 					local pos = EyePos() + EyeAngles():Forward() * 10 + EyeAngles():Right() * -w + EyeAngles():Up() * h
 					local _, ang = LocalToWorld(Vector(0, 0, 0), localAng, Vector(0, 0, 0), EyeAngles())
 					local mtx = Matrix()
