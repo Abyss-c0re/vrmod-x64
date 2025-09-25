@@ -347,28 +347,19 @@ if CLIENT then
 	local function OverridePerformanceConvars()
 		local convarOverrides = {
 			cl_threaded_bone_setup = "1",
-			cl_threaded_client_leaf_system = "1",
-			cl_threaded_init = "1",
 			gmod_mcore_test = "1",
 			mat_queue_mode = "1",
 			mat_disable_bloom = "1",
+			mat_disable_fancy_blending = "1",
 			mat_disable_lightwarp = "1",
-			mat_hdr_level = "0",
+			mat_disable_ps_patch = "1",
 			mat_motion_blur_enabled = "0",
 			mat_reduceparticles = "1",
 			r_lod = "2",
 			r_shadowrendertotexture = "0",
 			r_3dsky = "0",
-			r_cubemap = "0",
-			r_cubemapupdate = "0",
 			r_threaded_particles = "1",
-			r_threaded_renderables = "1",
-			r_threaded_post_processing = "1",
-			r_queued_post_processing = "1",
-			r_queued_decals = "1",
 			r_queued_ropes = "1",
-			r_threaded_shadow_clip = "1",
-			snd_mix_async = "1",
 		}
 
 		for cvar, val in pairs(convarOverrides) do
