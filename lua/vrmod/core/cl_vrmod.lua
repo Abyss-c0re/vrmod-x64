@@ -18,7 +18,6 @@ if CLIENT then
 	g_VR.changedInputs = {}
 	g_VR.errorText = ""
 	g_VR.moduleVersion = 0
-	g_VR.aspectratio = 0
 	local hfovLeft, hfovRight
 	local aspectLeft, aspectRight
 	local leftCalc, rightCalc
@@ -57,33 +56,6 @@ if CLIENT then
 	else
 		vrmod.logger.Err("No compatible module file found.")
 	end
-
-	-- persistent cached tables (avoid realloc every frame)
-	local viewLeft = {
-		type = "3D",
-		angles = nil,
-		fov = 0,
-		aspectratio = 0,
-		x = 0,
-		y = 0,
-		w = 0,
-		h = 0,
-		drawmonitors = true,
-		drawviewmodel = false
-	}
-
-	local viewRight = {
-		type = "3D",
-		angles = nil,
-		fov = 0,
-		aspectratio = 0,
-		x = 0,
-		y = 0,
-		w = 0,
-		h = 0,
-		drawmonitors = true,
-		drawviewmodel = false
-	}
 
 	-- 0) Helper functions
 	local function overrideConvar(name, value)
@@ -260,14 +232,14 @@ if CLIENT then
 		local fwd = ang:Forward()
 		local right = ang:Right()
 		local up = ang:Up()
-		-- only recompute offsets when config changes
+		-- only recompute offsets when needed
 		if not eyeOffset or not forwardOffset or not verticalOffset then
 			eyeOffset = ipd * g_VR.scale
 			forwardOffset = fwd * -(eyez * g_VR.scale)
 			verticalOffset = up * -2.1
 		end
 
-		-- compute per-eye positions
+		-- compute eye positions
 		g_VR.eyePosLeft = g_VR.view.origin + forwardOffset + right * -eyeOffset * eyeScale + verticalOffset
 		g_VR.eyePosRight = g_VR.view.origin + forwardOffset + right * eyeOffset * eyeScale + verticalOffset
 		render.PushRenderTarget(g_VR.rt)
@@ -278,36 +250,31 @@ if CLIENT then
 		end
 
 		render.Clear(0, 0, 0, 255, true, true)
-		-- common vars
-		local baseAngles = g_VR.view.angles
+		-- cache common values
+		local ply = LocalPlayer()
 		local rtHalfW = g_VR.rtWidth / 2
 		local rtH = g_VR.rtHeight
-		-- update cached left view
-		viewLeft.origin = g_VR.eyePosLeft
-		viewLeft.angles = baseAngles
-		viewLeft.fov = hfovLeft
-		viewLeft.aspectratio = aspectLeft
-		viewLeft.x = 0
-		viewLeft.y = 0
-		viewLeft.w = rtHalfW
-		viewLeft.h = rtH
-		-- update cached right view
-		viewRight.origin = g_VR.eyePosRight
-		viewRight.angles = baseAngles
-		viewRight.fov = hfovRight
-		viewRight.aspectratio = aspectRight
-		viewRight.x = rtHalfW
-		viewRight.y = 0
-		viewRight.w = rtHalfW
-		viewRight.h = rtH
-		if g_VR.aspectratio == 0 then g_VR.aspectratio = aspectLeft end
-		-- render eyes
+		-- left eye
+		g_VR.view.origin = g_VR.eyePosLeft
+		g_VR.view.fov = hfovLeft
+		g_VR.view.aspectratio = aspectLeft
+		g_VR.view.x = 0
+		g_VR.view.y = 0
+		g_VR.view.w = rtHalfW
+		g_VR.view.h = rtH
 		hook.Call("VRMod_PreRender", nil, "left")
-		render.RenderView(viewLeft)
+		render.RenderView(g_VR.view)
+		-- right eye
+		g_VR.view.origin = g_VR.eyePosRight
+		g_VR.view.fov = hfovRight
+		g_VR.view.aspectratio = aspectRight
+		g_VR.view.x = rtHalfW
+		g_VR.view.y = 0
+		g_VR.view.w = rtHalfW
+		g_VR.view.h = rtH
 		hook.Call("VRMod_PreRender", nil, "right")
-		render.RenderView(viewRight)
-		-- death screen
-		local ply = LocalPlayer()
+		render.RenderView(g_VR.view)
+		-- death animation
 		if ply and not ply:Alive() then
 			vrmod.utils.DrawDeathAnimation(g_VR.rtWidth, g_VR.rtHeight)
 			vrmod.logger.Debug("Player is dead, drawing death animation.")
@@ -316,7 +283,7 @@ if CLIENT then
 		end
 
 		render.PopRenderTarget()
-		-- leave desktop logic untouched
+		-- desktop view remains untouched
 		if g_VR.desktopView > 1 then
 			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
