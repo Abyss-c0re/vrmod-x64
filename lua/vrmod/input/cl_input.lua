@@ -55,7 +55,7 @@ local lastInputState = {
 
 local ANALOG_SEND_RATE = 1 / convarValues.vrmod_net_tickrate
 local ANALOG_EPSILON = 0.05
-local MAX_WHEEL_GRAB_DIST = 13
+local MAX_WHEEL_GRAB_DIST = 15
 local MAX_ANGLE = 90
 local nextSendTime = 0
 local neutralOffsets = {}
