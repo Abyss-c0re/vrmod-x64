@@ -345,18 +345,34 @@ if CLIENT then
 
 	-- 2) Convar overrides for performance
 	local function OverridePerformanceConvars()
-		local convars = {"mat_queue_mode", "gmod_mcore_test", "cl_threaded_bone_setup", "cl_threaded_client_leaf_system", "r_threaded_particles", "r_threaded_renderables", "r_threaded_post_processing", "r_queued_post_processing", "r_queued_decals", "r_queued_ropes", "r_threaded_shadow_clip", "cl_threaded_init", "snd_mix_async", "r_lod", "r_cheapwaterend", "r_cheaplighting"}
-		for _, c in ipairs(convars) do
-			overrideConvar(c, "1")
-		end
+		local convarOverrides = {
+			cl_threaded_bone_setup = "1",
+			cl_threaded_client_leaf_system = "1",
+			cl_threaded_init = "1",
+			gmod_mcore_test = "1",
+			mat_queue_mode = "1",
+			mat_disable_bloom = "1",
+			mat_disable_lightwarp = "1",
+			mat_hdr_level = "0",
+			mat_motion_blur_enabled = "0",
+			mat_reduceparticles = "1",
+			r_lod = "2",
+			r_shadowrendertotexture = "0",
+			r_3dsky = "0",
+			r_cubemap = "0",
+			r_cubemapupdate = "0",
+			r_threaded_particles = "1",
+			r_threaded_renderables = "1",
+			r_threaded_post_processing = "1",
+			r_queued_post_processing = "1",
+			r_queued_decals = "1",
+			r_queued_ropes = "1",
+			r_threaded_shadow_clip = "1",
+			snd_mix_async = "1",
+		}
 
-		for _, c in ipairs(convars) do
-			overrideConvar(c, "1")
-		end
-
-		local convars0 = {"r_shadowrendertotexture", "r_3dsky", "mat_motion_blur_enabled", "mat_reduceparticles", "r_cubemap", "r_cubemapupdate", "mat_hdr_level", "r_lightingfeatures",}
-		for _, c in ipairs(convars0) do
-			overrideConvar(c, "0")
+		for cvar, val in pairs(convarOverrides) do
+			overrideConvar(cvar, val)
 		end
 	end
 
