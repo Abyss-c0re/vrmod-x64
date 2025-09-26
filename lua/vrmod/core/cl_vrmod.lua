@@ -324,7 +324,7 @@ if CLIENT then
 			mat_reduceparticles = "1",
 			r_lod = "2",
 			r_shadowrendertotexture = "0",
-			r_3dsky = "0",
+			r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
 			r_threaded_particles = "1",
 			r_queued_ropes = "1",
 		}

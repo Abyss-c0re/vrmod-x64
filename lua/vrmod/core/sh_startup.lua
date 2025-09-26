@@ -68,6 +68,7 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_yaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_roll", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
+    vrmod.AddCallbackedConvar("vrmod_skybox", nil, "0", nil, nil, nil, nil, tobool, function(val) RunConsoleCommand("r_3dsky", val and "1" or "0") end)
     ----------------------------------------------------------------------------
     concommand.Add("vrmod_start", function(ply, cmd, args)
         if vgui.CursorVisible() then print("vrmod: attempting startup when game is unpaused") end

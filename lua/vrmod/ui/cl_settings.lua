@@ -285,8 +285,11 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
-		y = AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
-		y = AddCB("Auto offset (disable if having distortion)", "vrmod_renderoffset", y)
+		AddCB("Enable engine postprocessing", "vrmod_postprocess", y)
+		y = y + 20
+		AddCB("Auto offset (disable if having distortion)", "vrmod_renderoffset", y)
+		y = y + 20
+		AddCB("3D Skybox (disable for more FPS)", "vrmod_skybox", y)
 		do
 			local s = vgui.Create("DNumSlider", t)
 			s:SetPos(20, y + 10)
@@ -457,6 +460,7 @@ function VRUtilOpenMenu()
 		reset:SetText("Reset")
 		reset.DoClick = function()
 			RunConsoleCommand("vrmod_postprocess", "0")
+			RunConsoleCommand("vrmod_skybox", "0")
 			RunConsoleCommand("vrmod_renderoffset", "1")
 			RunConsoleCommand("vrmod_viewscale", "1.0")
 			RunConsoleCommand("vrmod_fovscale_x", "1.0")
