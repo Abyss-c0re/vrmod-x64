@@ -256,13 +256,20 @@ if CLIENT then
 		local clone = GetOrCreateClone(ent)
 		if not clone then return end
 		local localOffset = handOffsets[hand] or Vector(0, 0, 0)
-		local targetPos = clone:LocalToWorld(localOffset)
+		local targetPos = ent:LocalToWorld(localOffset)
 		-- forward offset relative to prop
 		local forwardOffset = ent:GetForward() * 2 -- tweak as needed
-		clone:SetPos(clone:GetPos() + handPos - targetPos + forwardOffset)
-		clone:SetAngles(ent:GetAngles())
-		clone:InvalidateBoneCache()
-		clone:SetupBones()
+		local desiredPos = ent:GetPos() + handPos - targetPos + forwardOffset
+		-- only snap if the clone is far enough away
+		local distance = clone:GetPos():DistToSqr(desiredPos)
+		local tolerance = 0.15 
+		if distance > tolerance then
+			clone:SetPos(desiredPos)
+			clone:SetAngles(ent:GetAngles())
+			clone:InvalidateBoneCache()
+			clone:SetupBones()
+		end
+
 		clone:DrawModel()
 		-- hide server prop while held
 		ent:SetRenderMode(RENDERMODE_TRANSALPHA)

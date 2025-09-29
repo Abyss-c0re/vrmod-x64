@@ -10,7 +10,6 @@ if SERVER then
 end
 
 if SERVER then return end
-
 local tpBeamMatrices, tpBeamEnt, tpBeamHitPos = {}, nil, nil
 local zeroVec, zeroAng = Vector(), Angle()
 local upVec = Vector(0, 0, 1)
