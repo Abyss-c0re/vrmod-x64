@@ -1,6 +1,6 @@
+local _, convarValues = vrmod.GetConvars()
 local cv_allowtp = CreateConVar("vrmod_allow_teleport", "1", FCVAR_REPLICATED, "Enable teleportation in VRMod", 0, 1)
 local cv_usetp = CreateClientConVar("vrmod_allow_teleport_client", 0, true, FCVAR_ARCHIVE)
-local cl_analogmoveonly = CreateClientConVar("vrmod_test_analogmoveonly", 0, false, FCVAR_ARCHIVE)
 local cv_tp_hand = CreateClientConVar("vrmod_teleport_use_left", 0, true, FCVAR_ARCHIVE)
 local cv_maxTpDist = CreateConVar("vrmod_teleport_maxdist", 50, FCVAR_ARCHIVE + FCVAR_NOTIFY + FCVAR_REPLICATED, "Maximum teleport distance for VRMod")
 if SERVER then
@@ -9,7 +9,13 @@ if SERVER then
 	return
 end
 
+if SERVER then return end
+
 local tpBeamMatrices, tpBeamEnt, tpBeamHitPos = {}, nil, nil
+local zeroVec, zeroAng = Vector(), Angle()
+local upVec = Vector(0, 0, 1)
+-- Vehicle origin tracking
+local originVehicleLocalPos, originVehicleLocalAng = Vector(), Angle()
 for i = 1, 17 do
 	tpBeamMatrices[i] = Matrix()
 end
@@ -96,18 +102,6 @@ hook.Add("VRMod_Input", "teleport", function(action, pressed)
 	end
 end)
 
---******************************************************************************************************************************
-if SERVER then return end
--- Convars
-local _, convarValues = vrmod.AddCallbackedConvar("vrmod_controlleroriented", "controllerOriented", "0", nil, nil, nil, nil, tobool)
-vrmod.AddCallbackedConvar("vrmod_smoothturn", "smoothTurn", "1", nil, nil, nil, nil, tobool)
-vrmod.AddCallbackedConvar("vrmod_smoothturnrate", "smoothTurnRate", "180", nil, nil, nil, nil, tonumber)
-vrmod.AddCallbackedConvar("vrmod_crouchthreshold", "crouchThreshold", "40", nil, nil, nil, nil, tonumber)
--- Helpers
-local zeroVec, zeroAng = Vector(), Angle()
-local upVec = Vector(0, 0, 1)
--- Vehicle origin tracking
-local originVehicleLocalPos, originVehicleLocalAng = Vector(), Angle()
 function VRUtilresetVehicleView()
 	if not g_VR.threePoints and not LocalPlayer():InVehicle() then return end
 	originVehicleLocalPos = nil
@@ -225,12 +219,9 @@ local function start()
 		local va = g_VR.currentvmi and g_VR.currentvmi.wrongMuzzleAng and g_VR.tracking.pose_righthand.ang or g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang or g_VR.tracking.hmd.ang
 		cmd:SetViewAngles(va:Forward():Angle())
 		if mt == MOVETYPE_NOCLIP then
-			if cl_analogmoveonly:GetBool() then ply:ConCommand("vrmod_test_analogmoveonly 1") end
 			cmd:SetForwardMove(math.abs(g_VR.input.vector2_walkdirection.y) > 0.5 and g_VR.input.vector2_walkdirection.y or 0)
 			cmd:SetSideMove(math.abs(g_VR.input.vector2_walkdirection.x) > 0.5 and g_VR.input.vector2_walkdirection.x or 0)
 			return
-		else
-			if cl_analogmoveonly:GetBool() then ply:ConCommand("vrmod_test_analogmoveonly 0") end
 		end
 
 		local jv = LocalToWorld(Vector(g_VR.input.vector2_walkdirection.y * math.abs(g_VR.input.vector2_walkdirection.y), -g_VR.input.vector2_walkdirection.x * math.abs(g_VR.input.vector2_walkdirection.x), 0) * ply:GetMaxSpeed() * 0.9, zeroAng, zeroVec, Angle(0, convarValues.controllerOriented and g_VR.tracking.pose_lefthand.ang.yaw or g_VR.tracking.hmd.ang.yaw, 0))

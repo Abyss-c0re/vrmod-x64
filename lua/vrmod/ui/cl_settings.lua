@@ -84,16 +84,6 @@ function VRUtilOpenMenu()
 	controlsPanel:Dock(TOP)
 	controlsPanel:DockMargin(10, 10, 10, 0)
 	controlsPanel:SetExpanded(true)
-	-- Controller oriented locomotion
-	local controllerLocomotion = vgui.Create("DCheckBoxLabel", controlsPanel)
-	controlsPanel:AddItem(controllerLocomotion)
-	controllerLocomotion:SetDark(true)
-	controllerLocomotion:SetText("Controller oriented locomotion")
-	controllerLocomotion:SetChecked(convars.vrmod_controlleroriented:GetBool())
-	function controllerLocomotion:OnChange(val)
-		convars.vrmod_controlleroriented:SetBool(val)
-	end
-
 	-- Smooth turning
 	local smoothTurning = vgui.Create("DCheckBoxLabel", controlsPanel)
 	controlsPanel:AddItem(smoothTurning)
