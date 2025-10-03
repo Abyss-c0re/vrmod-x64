@@ -126,79 +126,96 @@ function vrmod.utils.PatchGlideCamera()
     if not Camera._OrigCreateMove then Camera._OrigCreateMove = Camera.CreateMove end
     -- Override CalcView
     function Camera:CalcView()
+        if not self.isActive then return end
         local vehicle = self.vehicle
         if not IsValid(vehicle) then return end
         local user = self.user
-        if vrmod and vrmod.IsPlayerInVR and vrmod.IsPlayerInVR(user) then
-            -- VR mode: Use g_VR.view for camera position and orientation
-            local hmdPos, hmdAng = g_VR.view.origin, g_VR.view.angles
+        -- VR guard: ensure vrmod and g_VR.view exist
+        if vrmod and vrmod.IsPlayerInVR and vrmod.IsPlayerInVR(user) and g_VR and g_VR.view then
+            local hmdPos = g_VR.view.origin or user:EyePos()
+            local hmdAng = g_VR.view.angles or user:EyeAngles()
+            local pivot, offset
+            local angles = hmdAng
             if self.isInFirstPerson then
-                -- First-person: Align camera with HMD pose relative to vehicle
                 local localEyePos = vehicle:WorldToLocal(hmdPos)
                 local localPos = vehicle:GetFirstPersonOffset(self.seatIndex, localEyePos)
-                self.origin = vehicle:LocalToWorld(localPos)
-                self.angles = hmdAng
+                pivot = vehicle:LocalToWorld(localPos)
+                offset = Vector()
             else
-                -- Third-person: Position camera behind vehicle, adjusted by HMD orientation
-                local fraction = self.traceFraction
-                -- Fallback values if Config is nil
-                local cameraDistance = Config and Config.cameraDistance or 100
-                local cameraHeight = Config and Config.cameraHeight or 50
-                local offset = self.shakeOffset + vehicle.CameraOffset * Vector(cameraDistance, 1, cameraHeight) * fraction
-                local startPos = vehicle:LocalToWorld(vehicle.CameraCenterOffset + vehicle.CameraTrailerOffset * self.trailerFraction)
-                -- Use HMD angles instead of mouse-based angles
-                self.angles = hmdAng + vehicle.CameraAngleOffset
-                local endPos = startPos + self.angles:Forward() * offset[1] * (1 + self.trailerFraction * vehicle.CameraTrailerDistanceMultiplier) + self.angles:Right() * offset[2] + self.angles:Up() * offset[3]
-                local dir = endPos - startPos
-                dir:Normalize()
-                -- Check for wall collisions
-                local tr = util.TraceLine({
-                    start = startPos,
-                    endpos = endPos + dir * 10,
-                    mask = 16395 -- MASK_SOLID_BRUSHONLY
-                })
-
-                if tr.Hit then
-                    endPos = tr.HitPos - dir * 10
-                    if tr.Fraction < fraction then self.traceFraction = tr.Fraction end
+                angles = hmdAng + (vehicle.CameraAngleOffset or Angle(0, 0, 0))
+                pivot = vehicle:LocalToWorld((vehicle.CameraCenterOffset or Vector()) + (vehicle.CameraTrailerOffset or Vector()) * (self.trailerDistanceFraction or 0))
+                local cfgCamDist = Config and Config.cameraDistance or 100
+                local cfgCamHeight = Config and Config.cameraHeight or 50
+                local baseOffset = (vehicle.CameraOffset or Vector(-100, 0, 50)) * Vector(cfgCamDist * (1 + (self.trailerDistanceFraction or 0) * (vehicle.CameraTrailerDistanceMultiplier or 0)), 1, cfgCamHeight)
+                local endPos = pivot + angles:Forward() * baseOffset[1] + angles:Right() * baseOffset[2] + angles:Up() * baseOffset[3]
+                local offsetDir = endPos - pivot
+                local offsetLen = offsetDir:Length()
+                if offsetLen > 0 then
+                    offsetDir:Normalize()
+                else
+                    offsetDir = angles:Forward() -- arbitrary fallback
+                    offsetLen = 1
                 end
 
-                self.origin = endPos
+                -- Local trace table; do NOT rely on global traceData/traceResult
+                local tr = util.TraceLine({
+                    start = pivot,
+                    endpos = endPos + offsetDir * 10,
+                    mask = 16395, -- MASK_SOLID_BRUSHONLY
+                    filter = {vehicle}
+                })
+
+                local fraction = self.distanceFraction or 1
+                if tr.Hit then
+                    fraction = tr.Fraction or fraction
+                    if fraction < (self.distanceFraction or 1) then self.distanceFraction = fraction end
+                end
+
+                offset = (self.shakeOffset or Vector()) + baseOffset * fraction
             end
 
-            -- Update aim position and entity using HMD angles
-            local tr = util.TraceLine({
-                start = user:GetShootPos(), -- Start from weapon shoot position
-                endpos = user:GetShootPos() + hmdAng:Forward() * 50000,
+            self.position = pivot + angles:Forward() * offset[1] + angles:Right() * offset[2] + angles:Up() * offset[3]
+            -- Aim trace from player's eyes using HMD forward
+            local trAim = util.TraceLine({
+                start = user:EyePos(),
+                endpos = user:EyePos() + hmdAng:Forward() * 50000,
                 filter = {user, vehicle}
             })
 
-            self.lastAimEntity = tr.Entity
-            self.lastAimPos = tr.HitPos
-            self.viewAngles = hmdAng
-            -- Sync player's EyeAngles with HMD for weapon aiming
-            user:SetEyeAngles(hmdAng)
+            self.lastAimPos = trAim.HitPos
+            self.lastAimEntity = trAim.Entity
+            local aimDir = trAim.HitPos - user:EyePos()
+            self.lastAimPosDistanceFromEyes = aimDir:Length()
+            if self.lastAimPosDistanceFromEyes > 0 then
+                aimDir:Normalize()
+                self.lastAimPosAnglesFromEyes = aimDir:Angle()
+            else
+                self.lastAimPosAnglesFromEyes = hmdAng
+            end
+
+            -- Keep player's eye angles synced to HMD for weapon aim
+            if user.SetEyeAngles then user:SetEyeAngles(hmdAng) end
             return {
-                origin = self.origin,
-                angles = self.angles + self.punchAngle,
+                origin = self.position,
+                angles = angles + (self.punchAngle or Angle(0, 0, 0)),
                 fov = self.fov,
                 drawviewer = not self.isInFirstPerson
             }
-        else
-            -- Non-VR mode: Call original CalcView
-            return self:_OrigCalcView()
         end
+        -- Non-VR or fallback: call original
+        return self:_OrigCalcView()
     end
 
-    -- Override CreateMove
     function Camera:CreateMove(cmd)
-        if vrmod and vrmod.IsPlayerInVR and vrmod.IsPlayerInVR(self.user) then
-            -- VR mode: Set command angles to HMD angles for weapon firing
-            cmd:SetViewAngles(g_VR.view.angles)
+        if self.isActive and vrmod and vrmod.IsPlayerInVR and vrmod.IsPlayerInVR(self.user) then
+            -- Prefer the cached eye-relative aim angles; fall back to HMD or stored angles if missing.
+            local setAng = self.lastAimPosAnglesFromEyes or g_VR and g_VR.view and g_VR.view.angles or self.angles or Angle(0, 0, 0)
+            cmd:SetViewAngles(setAng)
+            cmd:SetUpMove(math.Clamp(self.lastAimPosDistanceFromEyes or 0, 0, 10000))
             return
         end
 
-        -- Non-VR mode: Call original CreateMove
+        -- Non-VR
         self:_OrigCreateMove(cmd)
     end
 end
