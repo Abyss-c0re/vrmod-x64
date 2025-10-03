@@ -129,12 +129,17 @@ local function RemoveVRHands(ply)
 end
 
 hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
+    
     local hands = vrHands[ply]
-    if not hands or not hands.right or not hands.left then
+    if (not hands or not hands.right or not hands.left) and not ply:InVehicle() then
         RemoveVRHands(ply)
         SpawnVRHands(ply)
         return
+    elseif ply:InVehicle() then 
+         RemoveVRHands(ply)
+         return
     end
+
 
     local function UpdateHand(side, getPos, getAng)
         local hand = hands[side]
