@@ -217,7 +217,7 @@ if CLIENT then
 
 		-- Detect Glide vehicle and apply small lift/forward
 		if g_VR.vehicle.glide then
-			g_VR.view.origin = finalPos + Vector(0, 0, 6) + finalAng:Forward() * 8
+			g_VR.view.origin = finalPos + Vector(0, 0, 6) + finalAng:Forward() * 6
 		else
 			g_VR.view.origin = finalPos
 		end
