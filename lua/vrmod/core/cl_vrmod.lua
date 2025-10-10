@@ -210,6 +210,7 @@ if CLIENT then
 		local finalPos, finalAng = hmd.pos, hmd.ang
 		-- If we are viewing through an entity (not player), apply offset
 		if viewEnt ~= ply then
+			print("aaa")
 			local vePos = viewEnt:GetPos()
 			local veAng = viewEnt:GetAngles()
 			finalPos, finalAng = LocalToWorld(rawPos, rawAng, vePos, veAng)
@@ -217,7 +218,15 @@ if CLIENT then
 
 		-- Detect Glide vehicle and apply small lift/forward
 		if g_VR.vehicle.glide then
-			g_VR.view.origin = finalPos + Vector(0, 0, 6) + finalAng:Forward() * 6
+			local forward = g_VR.view.angles:Forward() -- view/vehicle facing direction
+			local up = g_VR.view.angles:Up()
+			if g_VR.vehicle.type == "motorcycle" then
+				-- Move 6 units forward instead of just down
+				g_VR.view.origin = finalPos + forward * 10 + up * 2
+			else
+				-- Move slightly forward and up
+				g_VR.view.origin = finalPos + forward * 6 + up * 6
+			end
 		else
 			g_VR.view.origin = finalPos
 		end
