@@ -210,7 +210,6 @@ if CLIENT then
 		local finalPos, finalAng = hmd.pos, hmd.ang
 		-- If we are viewing through an entity (not player), apply offset
 		if viewEnt ~= ply then
-			print("aaa")
 			local vePos = viewEnt:GetPos()
 			local veAng = viewEnt:GetAngles()
 			finalPos, finalAng = LocalToWorld(rawPos, rawAng, vePos, veAng)
@@ -222,7 +221,7 @@ if CLIENT then
 			local up = g_VR.view.angles:Up()
 			if g_VR.vehicle.type == "motorcycle" then
 				-- Move 6 units forward instead of just down
-				g_VR.view.origin = finalPos + forward * 10 + up * 2
+				g_VR.view.origin = finalPos + forward * 8 + up * 3
 			else
 				-- Move slightly forward and up
 				g_VR.view.origin = finalPos + forward * 6 + up * 6

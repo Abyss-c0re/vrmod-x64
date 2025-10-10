@@ -68,7 +68,7 @@ local function SpawnVRHands(ply)
     if not vrHands[ply] then vrHands[ply] = {} end
     local hands = vrHands[ply]
     for _, side in ipairs({"right", "left"}) do
-        timer.Simple(0.3, function()
+        timer.Simple(0, function()
             if not IsValid(ply) or not ply:Alive() then return end
             local handData = hands[side]
             local hand = handData and IsValid(handData.ent) and handData.ent or nil
@@ -133,7 +133,7 @@ hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
     local hands = vrHands[ply]
     if (not hands or not hands.right or not hands.left) and not ply:InVehicle() then
         RemoveVRHands(ply)
-        SpawnVRHands(ply)
+        timer.Simple(1, function() SpawnVRHands(ply) end)
         return
     elseif ply:InVehicle() then 
          RemoveVRHands(ply)
