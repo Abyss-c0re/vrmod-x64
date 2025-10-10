@@ -68,7 +68,7 @@ local function SpawnVRHands(ply)
     if not vrHands[ply] then vrHands[ply] = {} end
     local hands = vrHands[ply]
     for _, side in ipairs({"right", "left"}) do
-        timer.Simple(0, function()
+        timer.Simple(0.3, function()
             if not IsValid(ply) or not ply:Alive() then return end
             local handData = hands[side]
             local hand = handData and IsValid(handData.ent) and handData.ent or nil
