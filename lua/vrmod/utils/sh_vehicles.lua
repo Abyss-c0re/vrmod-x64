@@ -18,13 +18,6 @@ local function GetApproximateBoneId(vehicle, targetNames)
     return nil
 end
 
-function vrmod.utils.GetGlideVehicle(vehicle)
-    if not IsValid(vehicle) then return nil end
-    local parent = vehicle:GetParent()
-    if not IsValid(parent) or not parent.IsGlideVehicle then return nil end
-    return parent
-end
-
 function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
     if not IsValid(vehicle) or not boneId then return nil, nil end
     if g_VR.vehicle.glide then return vehicle:GetBonePosition(boneId) end
@@ -38,9 +31,19 @@ end
 
 function vrmod.utils.GetSteeringInfo(ply)
     if not IsValid(ply) or not ply:InVehicle() then return nil, nil, nil, nil end
-    local vehicle = ply:GetVehicle()
+    local glideVeh, vehicle
+    if ply.GlideGetVehicle then
+        glideVeh = ply:GlideGetVehicle()
+        if IsValid(glideVeh) then
+            vehicle = glideVeh
+        else
+            vehicle = ply:GetVehicle()
+        end
+    else
+        vehicle = ply:GetVehicle()
+    end
+
     if not IsValid(vehicle) then return nil, nil, nil, nil end
-    local glideVeh = vrmod.utils.GetGlideVehicle(vehicle)
     local seatIndex = ply.GlideGetSeatIndex and ply:GlideGetSeatIndex() or 1
     local sitSeq = glideVeh and glideVeh.GetPlayerSitSequence and glideVeh:GetPlayerSitSequence(seatIndex)
     -- Define bone search priorities
