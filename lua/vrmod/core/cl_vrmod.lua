@@ -227,8 +227,8 @@ if CLIENT then
 				g_VR.view.origin = finalPos + forward * 6 + up * 6
 			end
 
-			g_VR.tracking.pose_lefthand.pos = g_VR.tracking.pose_lefthand.pos + forward * 3.5
-			g_VR.tracking.pose_righthand.pos = g_VR.tracking.pose_righthand.pos + forward * 3.5
+			g_VR.tracking.pose_lefthand.pos = g_VR.tracking.pose_lefthand.pos + forward * 5
+			g_VR.tracking.pose_righthand.pos = g_VR.tracking.pose_righthand.pos + forward * 5
 		else
 			g_VR.view.origin = finalPos
 		end
