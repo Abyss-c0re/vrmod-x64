@@ -224,11 +224,11 @@ if CLIENT then
 		Right = nil
 	}
 
-	-- Create or return existing clone
 	local function GetOrCreateClone(ent)
 		if not IsValid(ent) or IsIgnoredProp(ent) then return nil end
 		if clientProps[ent] and IsValid(clientProps[ent]) then return clientProps[ent] end
 		local clone = ClientsideModel(ent:GetModel(), RENDERGROUP_OPAQUE)
+		if not IsValid(clone) then return nil end
 		clone:SetPos(ent:GetPos())
 		clone:SetAngles(ent:GetAngles())
 		clone:SetRenderMode(RENDERMODE_NORMAL)
@@ -241,28 +241,24 @@ if CLIENT then
 		return clone
 	end
 
-	-- Start a grab for a hand
 	local function StartGrab(ent, hand, handPos)
 		if not IsValid(ent) or not handPos or IsIgnoredProp(ent) then return end
 		handAssignments[hand] = ent
 		handOffsets[hand] = ent:WorldToLocal(handPos)
 	end
 
-	-- Update client clone to follow hand
 	local function UpdateClientProp(ent, hand, handPos)
 		if not IsValid(ent) or not handPos or IsIgnoredProp(ent) then return end
 		-- initialize grab if not started
 		if not handOffsets[hand] then StartGrab(ent, hand, handPos) end
 		local clone = GetOrCreateClone(ent)
-		if not clone then return end
+		if not IsValid(clone) then return end
 		local localOffset = handOffsets[hand] or Vector(0, 0, 0)
 		local targetPos = ent:LocalToWorld(localOffset)
-		-- forward offset relative to prop
 		local forwardOffset = ent:GetForward() * 2 -- tweak as needed
 		local desiredPos = ent:GetPos() + handPos - targetPos + forwardOffset
-		-- only snap if the clone is far enough away
 		local distance = clone:GetPos():DistToSqr(desiredPos)
-		local tolerance = 0.15 
+		local tolerance = 0.15
 		if distance > tolerance then
 			clone:SetPos(desiredPos)
 			clone:SetAngles(ent:GetAngles())
@@ -276,7 +272,6 @@ if CLIENT then
 		ent:SetColor(Color(255, 255, 255, 0))
 	end
 
-	-- End grab for a hand
 	local function EndGrab(ent, hand)
 		if not IsValid(ent) or IsIgnoredProp(ent) then return end
 		handAssignments[hand] = nil
@@ -296,6 +291,16 @@ if CLIENT then
 			ent:SetColor(Color(255, 255, 255, 255))
 		end
 	end
+
+	-- Cleanup invalid clones automatically
+	hook.Add("Think", "vrmod_cleanup_invalid_clones", function()
+		for ent, clone in pairs(clientProps) do
+			if not IsValid(ent) or not IsValid(clone) then
+				if IsValid(clone) then clone:Remove() end
+				clientProps[ent] = nil
+			end
+		end
+	end)
 
 	-- Update normal props per hand each frame
 	hook.Add("VRMod_PreRender", "vrmod_clientside_clone_follow", function()
