@@ -13,7 +13,7 @@ local function ApplySphere(hand, handData, radius)
     hand:PhysicsInitSphere(radius, "metal_bouncy")
     local phys = hand:GetPhysicsObject()
     if IsValid(phys) then
-        phys:SetMass(20)
+        phys:SetMass(1)
         handData.phys = phys
     end
 end
@@ -25,7 +25,7 @@ local function ApplyBox(hand, handData, mins, maxs, angles)
     --hand:SetAngles(angles)
     local phys = hand:GetPhysicsObject()
     if IsValid(phys) then
-        phys:SetMass(20)
+        phys:SetMass(1)
         handData.phys = phys
     end
 end
@@ -82,7 +82,7 @@ local function SpawnVRHands(ply)
                 hand:DrawShadow(false)
                 hand:SetNWBool("isVRHand", true)
                 -- no model, just physics sphere
-                local radius = vrmod.DEFAULT_RADIUS or 4
+                local radius = 2
                 hand:PhysicsInitSphere(radius, "metal_bouncy")
                 hand:SetCollisionBounds(Vector(-radius, -radius, -radius), Vector(radius, radius, radius))
                 hand:SetCollisionGroup(COLLISION_GROUP_WEAPON)
@@ -129,17 +129,15 @@ local function RemoveVRHands(ply)
 end
 
 hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
-    
     local hands = vrHands[ply]
     if (not hands or not hands.right or not hands.left) and not ply:InVehicle() then
         RemoveVRHands(ply)
         timer.Simple(1, function() SpawnVRHands(ply) end)
         return
-    elseif ply:InVehicle() then 
-         RemoveVRHands(ply)
-         return
+    elseif ply:InVehicle() then
+        RemoveVRHands(ply)
+        return
     end
-
 
     local function UpdateHand(side, getPos, getAng)
         local hand = hands[side]
@@ -151,16 +149,16 @@ hook.Add("PlayerTick", "VRHand_PhysicsSync", function(ply)
         local phys = hand.phys
         phys:Wake()
         phys:ComputeShadowControl({
-            secondstoarrive = engine.TickInterval(),
+            econdstoarrive = engine.TickInterval(),
             pos = offsetPos,
             angle = ang,
-            maxangular = 3000,
-            maxangulardamp = 3000,
-            maxspeed = 3000,
-            maxspeeddamp = 300,
+            maxangular = 5000,
+            maxangulardamp = 5000,
+            maxspeed = 2000000,
+            maxspeeddamp = 20000,
             dampfactor = 0.3,
-            teleportdistance = 100,
-            deltatime = 0
+            teleportdistance = 2000,
+            deltatime = 0,
         })
     end
 
