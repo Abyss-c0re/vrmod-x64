@@ -16,11 +16,40 @@ local blacklistedClasses = {
 local blacklistedPatterns = {"beam", "button", "dynamic", "func_", "c_base", "laser", "info_", "sprite", "env_", "fire", "trail", "light", "spotlight", "streetlight", "traffic", "texture", "shadow", "keypad"}
 local pickupableCache = {}
 local invalidPickupCache = {}
+if SERVER then util.AddNetworkString("vrmod_pickuplists_reload") end
 local function DebugEnabled()
     local cv = GetConVar("vrmod_debug_pickup")
     return cv and cv:GetBool() or false
 end
 
+vrmod.pickupLists = vrmod.pickupLists or {
+    whitelist = {},
+    blacklist = {}
+}
+
+local listPath = "vrmod/pickup_lists.json"
+local function LoadPickupLists()
+    if CLIENT then
+        if not file.Exists("vrmod/pickup_lists.json", "DATA") then return end
+        local data = util.JSONToTable(file.Read("vrmod/pickup_lists.json", "DATA") or "")
+        if istable(data) then
+            vrmod.pickupLists.whitelist = data.whitelist or {}
+            vrmod.pickupLists.blacklist = data.blacklist or {}
+        end
+
+        pickupableCache = {}
+        print("[VRMod] Pickup lists hot-reloaded (client)")
+    end
+end
+
+local function SavePickupLists()
+    file.Write(listPath, util.TableToJSON(vrmod.pickupLists, true))
+end
+
+vrmod.LoadPickupLists = LoadPickupLists
+vrmod.SavePickupLists = SavePickupLists
+if CLIENT then net.Receive("vrmod_pickuplists_reload", function() vrmod.LoadPickupLists() end) end
+hook.Add("Initialize", "VRMod_LoadPickupLists", LoadPickupLists)
 --=======================================================================
 -- Validation and Eligibility
 --=======================================================================
@@ -42,6 +71,11 @@ function vrmod.utils.IsNonPickupable(ent)
     local class = ent:GetClass():lower()
     local model = (ent:GetModel() or ""):lower()
     local key = class .. "|" .. model
+    if vrmod.pickupLists then
+        if vrmod.pickupLists.whitelist[key] then return false end
+        if vrmod.pickupLists.blacklist[key] then return true end
+    end
+
     if pickupableCache[key] ~= nil then
         vrmod.logger.Debug("IsNonPickupable: Cache hit for " .. key .. " -> " .. tostring(pickupableCache[key]))
         return pickupableCache[key]
@@ -161,6 +195,14 @@ end
 function vrmod.utils.CanPickupEntity(v, ply, cv)
     if not IsValid(v) or v == ply or ply:InVehicle() then return false end
     if cv.vrmod_pickup_npcs == 1 then if v:IsNPC() or v:IsNextBot() then return true end end
+    local class = v:GetClass():lower()
+    local model = (v:GetModel() or ""):lower()
+    local key = class .. "|" .. model
+    if vrmod.pickupLists then
+        if vrmod.pickupLists.whitelist[key] then return true end
+        if vrmod.pickupLists.blacklist[key] then return false end
+    end
+
     -- Only do physics mass check server-side
     if SERVER then
         local phys = v:GetPhysicsObject()
