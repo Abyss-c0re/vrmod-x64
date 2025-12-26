@@ -203,12 +203,16 @@ function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRa
     -- Ensure a sane default
     if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
     local ent
-    local hand = bLeftHand and "left" or "right"
-    -- Sphere search first (tiny radius)
-    local tr = vrmod.utils.TraceHand(ply, hand, true)
-    if tr and tr.Entity and IsValid(tr.Entity) then
-        local e = tr.Entity
-        if e ~= ply and vrmod.utils.IsValidPickupTarget(e, ply, bLeftHand) and vrmod.utils.CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then ent = e end
+    local offsetPos = handPos + handAng:Forward() * vrmod.DEFAULT_OFFSET
+    local ent, _ = vrmod.utils.SphereCollidesWithProp(offsetPos, 5, ply)
+    if not IsValid(ent) then
+        local hand = bLeftHand and "left" or "right"
+        -- Sphere search first (tiny radius)
+        local tr = vrmod.utils.TraceHand(ply, hand, true)
+        if tr and tr.Entity and IsValid(tr.Entity) then
+            local e = tr.Entity
+            if e ~= ply and vrmod.utils.IsValidPickupTarget(e, ply, bLeftHand) and vrmod.utils.CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then ent = e end
+        end
     end
 
     if not IsValid(ent) then return nil end
@@ -297,7 +301,7 @@ function vrmod.utils.ReleasePickupEntry(index, info, handVel)
             vrmod.utils.SendPickupNetMessage(info.ply, ent, nil)
         end
     elseif IsValid(ent) then
-        if GetConVar("vrmod_pickup_legacy"):GetBool() then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end
+        if GetConVar("vrmod_pickup_no_phys"):GetBool() then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end
         -- Normal entity drop path
         local phys = IsValid(info.phys) and info.phys or IsValid(ent) and ent:GetPhysicsObject() or nil
         if IsValid(phys) and IsValid(pickupController) then
@@ -313,7 +317,7 @@ function vrmod.utils.ReleasePickupEntry(index, info, handVel)
     end
 
     -- unpatch owner collision for non-ragdoll
-    if IsValid(ent) and ent:GetClass() ~= "prop_ragdoll" and not GetConVar("vrmod_pickup_legacy"):GetBool() then vrmod.utils.UnpatchOwnerCollision(ent) end
+    if IsValid(ent) and ent:GetClass() ~= "prop_ragdoll" and not GetConVar("vrmod_pickup_no_phys"):GetBool() then vrmod.utils.UnpatchOwnerCollision(ent) end
     -- call hook
     hook.Call("VRMod_Drop", nil, info.ply, ent)
     -- finalize removal from lists and controller cleanup
@@ -380,7 +384,7 @@ function vrmod.utils.InitPickupController()
     vrmod.logger.Debug("InitPickupController: Creating new pickup motion controller")
     pickupController = ents.Create("vrmod_pickup")
     pickupController.ShadowParams = {
-        secondstoarrive = FrameTime(),
+        secondstoarrive = engine.TickInterval(),
         maxangular = 5000,
         maxangulardamp = 5000,
         maxspeed = 2000000,
@@ -569,7 +573,6 @@ if SERVER then
         local dist = toEntity:Length()
         local entityRadius = 0
         if mins and maxs then entityRadius = (maxs - mins):Length() * 0.2 end
-        print(entityRadius)
         local safeDistance = entityRadius or DEFAULT_OFFSET
         if dist < safeDistance then
             if dist == 0 then
