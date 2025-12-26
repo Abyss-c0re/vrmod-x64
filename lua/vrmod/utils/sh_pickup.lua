@@ -153,7 +153,7 @@ function vrmod.utils.IsIgnoredProp(ent)
     if not IsValid(ent) then return true end
     local class = ent:GetClass() or ""
     if class == "prop_ragdoll" then return true end
-    if IsImportantPickup(ent) then return true end
+    if vrmod.utils.IsImportantPickup(ent) then return true end
     if string.StartWith(class, "avrmag_") then return true end
     return false
 end
@@ -200,16 +200,17 @@ function vrmod.utils.ValidatePickup(ply, bLeftHand, ent)
 end
 
 function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
-    -- Ensure a sane default
     if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
     local ent
     local offsetPos = handPos + handAng:Forward() * vrmod.DEFAULT_OFFSET
-    local ent, _ = vrmod.utils.SphereCollidesWithProp(offsetPos, 5, ply)
+    -- Sphere search first
+    local sphereEnt, _ = vrmod.utils.SphereCollidesWithProp(offsetPos, 5, ply)
+    if IsValid(sphereEnt) and sphereEnt ~= ply and vrmod.utils.IsValidPickupTarget(sphereEnt, ply, bLeftHand) and vrmod.utils.CanPickupEntity(sphereEnt, ply, convarValues or vrmod.GetConvars()) then ent = sphereEnt end
+    -- Fallback to trace if sphere failed validation
     if not IsValid(ent) then
         local hand = bLeftHand and "left" or "right"
-        -- Sphere search first (tiny radius)
         local tr = vrmod.utils.TraceHand(ply, hand, true)
-        if tr and tr.Entity and IsValid(tr.Entity) then
+        if tr and IsValid(tr.Entity) then
             local e = tr.Entity
             if e ~= ply and vrmod.utils.IsValidPickupTarget(e, ply, bLeftHand) and vrmod.utils.CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then ent = e end
         end
