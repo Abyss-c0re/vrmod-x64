@@ -9,7 +9,7 @@ vrmod.DEFAULT_REACH = 5.5
 vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
 vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
 vrmod.DEFAULT_ANGLES = Angle(0, 0, 0)
-vrmod.DEFAULT_OFFSET = 4
+vrmod.DEFAULT_OFFSET = 3
 vrmod.MODEL_OVERRIDES = {
     weapon_physgun = "models/weapons/w_physics.mdl",
     weapon_physcannon = "models/weapons/w_physics.mdl",
@@ -757,4 +757,22 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         end
     end
     return lefthandPos, lefthandAng, righthandPos, righthandAng
+end
+
+function vrmod.utils.SphereCollidesWithProp(pos, radius, filter)
+    local hullSize = Vector(radius, radius, radius)
+
+    local tr = util.TraceHull({
+        start  = pos,
+        endpos = pos,
+        mins   = -hullSize,
+        maxs   = hullSize,
+        mask   = MASK_SOLID,
+        filter = filter
+    })
+
+    if not tr.Hit or not IsValid(tr.Entity) then return false end
+    if tr.Entity:IsWorld() then return false end
+
+    return tr.Entity, tr.HitNormal
 end
