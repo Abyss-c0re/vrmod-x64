@@ -297,6 +297,7 @@ function vrmod.utils.ReleasePickupEntry(index, info, handVel)
             vrmod.utils.SendPickupNetMessage(info.ply, ent, nil)
         end
     elseif IsValid(ent) then
+        if GetConVar("vrmod_pickup_legacy"):GetBool() then ent:SetCollisionGroup(COLLISION_GROUP_NONE) end
         -- Normal entity drop path
         local phys = IsValid(info.phys) and info.phys or IsValid(ent) and ent:GetPhysicsObject() or nil
         if IsValid(phys) and IsValid(pickupController) then
@@ -312,7 +313,7 @@ function vrmod.utils.ReleasePickupEntry(index, info, handVel)
     end
 
     -- unpatch owner collision for non-ragdoll
-    if IsValid(ent) and ent:GetClass() ~= "prop_ragdoll" then vrmod.utils.UnpatchOwnerCollision(ent) end
+    if IsValid(ent) and ent:GetClass() ~= "prop_ragdoll" and not GetConVar("vrmod_pickup_legacy"):GetBool() then vrmod.utils.UnpatchOwnerCollision(ent) end
     -- call hook
     hook.Call("VRMod_Drop", nil, info.ply, ent)
     -- finalize removal from lists and controller cleanup
@@ -378,13 +379,15 @@ function vrmod.utils.InitPickupController()
     if IsValid(pickupController) then return pickupController end
     vrmod.logger.Debug("InitPickupController: Creating new pickup motion controller")
     pickupController = ents.Create("vrmod_pickup")
-    local sVel = 600 -- baseline velocity constraint
     pickupController.ShadowParams = {
         secondstoarrive = FrameTime(),
-        maxangular = sVel,
-        maxangulardamp = 600,
-        maxspeed = sVel,
-        maxspeeddamp = 500,
+        maxangular = 5000,
+        maxangulardamp = 5000,
+        maxspeed = 2000000,
+        maxspeeddamp = 20000,
+        dampfactor = 0.3,
+        teleportdistance = 2000,
+        deltatime = 0,
     }
 
     function pickupController:PhysicsSimulate(phys, dt)
@@ -393,15 +396,13 @@ function vrmod.utils.InitPickupController()
         if not info then return end
         local ply = info.ply
         if not IsValid(ply) then return end
-        local handPos, handAng, handVel
+        local handPos, handAng
         if info.left then
             handPos = vrmod.GetLeftHandPos(ply)
             handAng = vrmod.GetLeftHandAng(ply)
-            handVel = vrmod.GetLeftHandVelocity(ply)
         else
             handPos = vrmod.GetRightHandPos(ply)
             handAng = vrmod.GetRightHandAng(ply)
-            handVel = vrmod.GetRightHandVelocity(ply)
         end
 
         if not handPos or not handAng then return end
@@ -419,12 +420,8 @@ function vrmod.utils.InitPickupController()
         end
 
         if not targetPos then return end
-        local mass = phys:GetMass()
-        local velMagnitude = handVel and handVel:Length() or 0
-        local df = math.Clamp(velMagnitude * mass ^ 0.5 * 0.0005, 0.15, 0.4)
         self.ShadowParams.pos = targetPos
         self.ShadowParams.angle = targetAng
-        self.ShadowParams.dampfactor = df
         phys:ComputeShadowControl(self.ShadowParams)
     end
 

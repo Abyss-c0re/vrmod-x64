@@ -10,6 +10,7 @@ vrmod.AddCallbackedConvar("vrmod_pickup_range", nil, 3.5, FCVAR_REPLICATED + FCV
 vrmod.AddCallbackedConvar("vrmod_pickup_weight", nil, 150, FCVAR_REPLICATED + FCVAR_ARCHIVE, "", 0, 10000, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_npcs", nil, 1, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 vrmod.AddCallbackedConvar("vrmod_pickup_limit", nil, "1", FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
+vrmod.AddCallbackedConvar("vrmod_pickup_legacy", nil, 0, FCVAR_REPLICATED + FCVAR_NOTIFY + FCVAR_ARCHIVE, "", 0, 3, tonumber)
 if CLIENT then
 	if g_VR then
 		g_VR.cooldownLeft = false
@@ -171,7 +172,11 @@ if SERVER then
 			ent.vrmod_physOffsets = vrmod.utils.BuildRagdollOffsets(ent, handPos, handAng)
 			ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
 		else
-			vrmod.utils.PatchOwnerCollision(ent, ply)
+			if not GetConVar("vrmod_pickup_legacy"):GetBool() then
+				vrmod.utils.PatchOwnerCollision(ent, ply)
+			else
+				ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
+			end
 		end
 
 		local controller = vrmod.utils.InitPickupController()
