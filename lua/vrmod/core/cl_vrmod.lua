@@ -9,7 +9,6 @@ if CLIENT then
 	g_VR.viewModelMuzzle = nil
 	g_VR.viewModelPos = Vector(0, 0, 0)
 	g_VR.viewModelAng = Angle(0, 0, 0)
-	g_VR.usingWorldModels = false
 	g_VR.active = false
 	g_VR.threePoints = false --hmd + 2 controllers
 	g_VR.sixPoints = false --hmd + 2 controllers + 3 trackers
@@ -496,43 +495,37 @@ if CLIENT then
 	end
 
 	local function SetupModelAndPlayerHooks()
-		g_VR.usingWorldModels = convars.vrmod_useworldmodels:GetBool()
-		if not g_VR.usingWorldModels then
-			overrideConvar("viewmodel_fov", GetConVar("fov_desired"):GetString())
-			hook.Add("CalcViewModelView", "vrutil_hook_calcviewmodelview", function(_, vm, _, _, _, _) return g_VR.viewModelPos, g_VR.viewModelAng end)
-			local blockViewModelDraw = true
-			g_VR.allowPlayerDraw = false
-			local hideplayer = convars.vrmod_floatinghands:GetBool()
-			hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel", function(bSky, _)
-				if bSky or not LocalPlayer():Alive() then return end
-				if IsValid(g_VR.viewModel) then
-					blockViewModelDraw = false
-					g_VR.viewModel:DrawModel()
-					blockViewModelDraw = true
-				end
+		overrideConvar("viewmodel_fov", GetConVar("fov_desired"):GetString())
+		hook.Add("CalcViewModelView", "vrutil_hook_calcviewmodelview", function(_, vm, _, _, _, _) return g_VR.viewModelPos, g_VR.viewModelAng end)
+		local blockViewModelDraw = true
+		g_VR.allowPlayerDraw = false
+		local hideplayer = convars.vrmod_floatinghands:GetBool()
+		hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel", function(bSky, _)
+			if bSky or not LocalPlayer():Alive() then return end
+			if IsValid(g_VR.viewModel) then
+				blockViewModelDraw = false
+				g_VR.viewModel:DrawModel()
+				blockViewModelDraw = true
+			end
 
-				if not hideplayer then
-					g_VR.allowPlayerDraw = true
-					cam.Start3D()
-					cam.End3D()
-					local prev = render.GetBlend()
-					render.SetBlend(1)
-					LocalPlayer():DrawModel()
-					render.SetBlend(prev)
-					cam.Start3D()
-					cam.End3D()
-					g_VR.allowPlayerDraw = false
-				end
+			if not hideplayer then
+				g_VR.allowPlayerDraw = true
+				cam.Start3D()
+				cam.End3D()
+				local prev = render.GetBlend()
+				render.SetBlend(1)
+				LocalPlayer():DrawModel()
+				render.SetBlend(prev)
+				cam.Start3D()
+				cam.End3D()
+				g_VR.allowPlayerDraw = false
+			end
 
-				VRUtilRenderMenuSystem()
-			end)
+			VRUtilRenderMenuSystem()
+		end)
 
-			hook.Add("PreDrawPlayerHands", "vrutil_hook_predrawplayerhands", function() return true end)
-			hook.Add("PreDrawViewModel", "vrutil_hook_predrawviewmodel", function() return blockViewModelDraw end)
-		else
-			g_VR.allowPlayerDraw = true
-		end
-
+		hook.Add("PreDrawPlayerHands", "vrutil_hook_predrawplayerhands", function() return true end)
+		hook.Add("PreDrawViewModel", "vrutil_hook_predrawviewmodel", function() return blockViewModelDraw end)
 		hook.Add("ShouldDrawLocalPlayer", "vrutil_hook_shoulddrawlocalplayer", function() return g_VR.allowPlayerDraw end)
 	end
 

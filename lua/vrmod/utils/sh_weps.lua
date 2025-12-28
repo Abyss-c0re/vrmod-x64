@@ -56,12 +56,9 @@ end
 function vrmod.utils.UpdateViewModel()
     local vm = g_VR.viewModel
     if IsValid(vm) then
-        if not g_VR.usingWorldModels then
-            vm:SetPos(g_VR.viewModelPos)
-            vm:SetAngles(g_VR.viewModelAng)
-            vm:SetupBones()
-        end
-
+        vm:SetPos(g_VR.viewModelPos)
+        vm:SetAngles(g_VR.viewModelAng)
+        vm:SetupBones()
         g_VR.viewModelMuzzle = vm:GetAttachment(1)
     end
 end

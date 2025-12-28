@@ -49,7 +49,6 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_heightmenu", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3")
-    vrmod.AddCallbackedConvar("vrmod_useworldmodels", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_laserpointer", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_znear", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_renderoffset", nil, "1")

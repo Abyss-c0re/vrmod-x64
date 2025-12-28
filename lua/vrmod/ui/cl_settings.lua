@@ -196,7 +196,6 @@ function VRUtilOpenMenu()
 
 	-- Core settings
 	form:CheckBox("Use floating hands", "vrmod_floatinghands")
-	form:CheckBox("Use weapon world models", "vrmod_useworldmodels")
 	local laser_pointer = form:CheckBox("Add laser pointer to tools/weapons")
 	laser_pointer:SetChecked(GetConVar("vrmod_laserpointer"):GetBool())
 	function laser_pointer:OnChange(val)

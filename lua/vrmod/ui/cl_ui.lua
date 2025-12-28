@@ -191,13 +191,6 @@ if CLIENT then
 		render.PushRenderTarget(menus[uid].rt)
 		render.Clear(0, 0, 0, 0)
 		render.PopRenderTarget()
-		if GetConVar("vrmod_useworldmodels"):GetBool() then
-			hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawmenus", function(bDrawingDepth, bDrawingSkybox)
-				if bDrawingSkybox then return end
-				VRUtilRenderMenuSystem()
-			end)
-		end
-
 		menusExist = true
 	end
 

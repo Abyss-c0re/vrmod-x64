@@ -293,68 +293,51 @@ if CLIENT then
 			return
 		end
 
-		if GetConVar("vrmod_useworldmodels"):GetBool() then
-			vrmod.SetRightHandOpenFingerAngles(g_VR.zeroHandAngles)
-			vrmod.SetRightHandClosedFingerAngles(g_VR.zeroHandAngles)
-			timer.Create("vrutil_waitforwm", 0, 0, function()
-				if IsValid(LocalPlayer():GetActiveWeapon()) and LocalPlayer():GetActiveWeapon():GetClass() == class then
-					timer.Remove("vrutil_waitforwm")
-					g_VR.viewModel = LocalPlayer():GetActiveWeapon()
-					-- Hide view model to avoid rendering conflicts
-					local viewModel = LocalPlayer():GetViewModel()
-					if IsValid(viewModel) then viewModel:SetNoDraw(true) end
-					-- Ensure magazine world model is visible if applicable
-					local weapon = LocalPlayer():GetActiveWeapon()
-					if IsValid(weapon) and isMag then weapon:SetNoDraw(false) end
-				end
-			end)
-		else
-			-- Explicitly disable world model rendering for both weapons and magazines
-			local wep = LocalPlayer():GetActiveWeapon()
-			if IsValid(wep) then
-				wep:SetNoDraw(true) -- Prevent world model from rendering
-			end
-
-			-- Ensure view model is used and visible
-			local viewModel = LocalPlayer():GetViewModel()
-			if IsValid(viewModel) then
-				viewModel:SetNoDraw(false)
-				g_VR.viewModel = viewModel
-			end
-
-			if wep.ViewModelFOV then
-				if not swepOriginalFovs[class] then swepOriginalFovs[class] = wep.ViewModelFOV end
-				wep.ViewModelFOV = GetConVar("fov_desired"):GetFloat()
-			end
-
-			-- Create offsets for view model if they don't exist
-			local vmi = g_VR.viewModelInfo[class] or {}
-			local model = isMag and vm or vmi.modelOverride ~= nil and vmi.modelOverride or vm -- Use view model for magazines
-			if vmi.offsetPos == nil or vmi.offsetAng == nil then
-				vmi.offsetPos, vmi.offsetAng = Vector(0, 0, 0), Angle(0, 0, 0)
-				local cm = ClientsideModel(model)
-				if IsValid(cm) then
-					cm:SetupBones()
-					local bone = cm:LookupBone("ValveBiped.Bip01_R_Hand")
-					if bone then
-						local boneMat = cm:GetBoneMatrix(bone)
-						local bonePos, boneAng = boneMat:GetTranslation(), boneMat:GetAngles()
-						boneAng:RotateAroundAxis(boneAng:Forward(), 180)
-						vmi.offsetPos, vmi.offsetAng = WorldToLocal(Vector(0, 0, 0), Angle(0, 0, 0), bonePos, boneAng)
-						vmi.offsetPos = vmi.offsetPos + g_VR.viewModelInfo.autoOffsetAddPos
-					end
-
-					cm:Remove()
-				end
-			end
-
-			-- Create finger poses for magazines or weapons
-			vmi.closedHandAngles = vrmod.GetRightHandFingerAnglesFromModel(model)
-			vrmod.SetRightHandClosedFingerAngles(vmi.closedHandAngles)
-			vrmod.SetRightHandOpenFingerAngles(vmi.closedHandAngles)
-			g_VR.viewModelInfo[class] = vmi
-			g_VR.currentvmi = vmi
+		-- Explicitly disable world model rendering for both weapons and magazines
+		local wep = LocalPlayer():GetActiveWeapon()
+		if IsValid(wep) then
+			wep:SetNoDraw(true) -- Prevent world model from rendering
 		end
+
+		-- Ensure view model is used and visible
+		local viewModel = LocalPlayer():GetViewModel()
+		if IsValid(viewModel) then
+			viewModel:SetNoDraw(false)
+			g_VR.viewModel = viewModel
+		end
+
+		if wep.ViewModelFOV then
+			if not swepOriginalFovs[class] then swepOriginalFovs[class] = wep.ViewModelFOV end
+			wep.ViewModelFOV = GetConVar("fov_desired"):GetFloat()
+		end
+
+		-- Create offsets for view model if they don't exist
+		local vmi = g_VR.viewModelInfo[class] or {}
+		local model = isMag and vm or vmi.modelOverride ~= nil and vmi.modelOverride or vm -- Use view model for magazines
+		if vmi.offsetPos == nil or vmi.offsetAng == nil then
+			vmi.offsetPos, vmi.offsetAng = Vector(0, 0, 0), Angle(0, 0, 0)
+			local cm = ClientsideModel(model)
+			if IsValid(cm) then
+				cm:SetupBones()
+				local bone = cm:LookupBone("ValveBiped.Bip01_R_Hand")
+				if bone then
+					local boneMat = cm:GetBoneMatrix(bone)
+					local bonePos, boneAng = boneMat:GetTranslation(), boneMat:GetAngles()
+					boneAng:RotateAroundAxis(boneAng:Forward(), 180)
+					vmi.offsetPos, vmi.offsetAng = WorldToLocal(Vector(0, 0, 0), Angle(0, 0, 0), bonePos, boneAng)
+					vmi.offsetPos = vmi.offsetPos + g_VR.viewModelInfo.autoOffsetAddPos
+				end
+
+				cm:Remove()
+			end
+		end
+
+		-- Create finger poses for magazines or weapons
+		vmi.closedHandAngles = vrmod.GetRightHandFingerAnglesFromModel(model)
+		vrmod.SetRightHandClosedFingerAngles(vmi.closedHandAngles)
+		vrmod.SetRightHandOpenFingerAngles(vmi.closedHandAngles)
+		g_VR.viewModelInfo[class] = vmi
+		g_VR.currentvmi = vmi
 	end)
 
 	hook.Add("CreateMove", "vrutil_hook_joincreatemove", function(cmd)
