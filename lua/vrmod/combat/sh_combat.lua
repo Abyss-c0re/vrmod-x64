@@ -194,7 +194,7 @@ if SERVER then
         local relativeSpeed = math.max(0, swingSpeed)
         local speedScale = cv_meleeSpeedScale:GetFloat()
         local damageMultiplier = 1.0
-        local damageType = bit.bor(DMG_CLUB, DMG_BLAST)
+        local damageType = DMG_CLUB
         if impactType == "blunt" then
             damageMultiplier = 1.25
         elseif impactType == "stunstick" then
@@ -258,7 +258,7 @@ if SERVER then
         if not customDamageType and customImpactType then
             if customImpactType == "blunt" then
                 customDamageMultiplier = customDamageMultiplier or 1.25
-                customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
+                customDamageType = DMG_CLUB
             elseif customImpactType == "stunstick" then
                 customDamageMultiplier = customDamageMultiplier or 1.1
                 customDamageType = bit.bor(DMG_CLUB, DMG_SHOCK)
@@ -279,7 +279,7 @@ if SERVER then
                 customDamageType = bit.bor(DMG_BLAST, DMG_CLUB)
             else
                 customDamageMultiplier = customDamageMultiplier or 1.0
-                customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
+                customDamageType = DMG_CLUB
             end
         end
 
@@ -316,4 +316,5 @@ if SERVER then
         vrmod.logger.Debug(string.format("%s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
         print(string.format("[Melee] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
     end)
+
 end
