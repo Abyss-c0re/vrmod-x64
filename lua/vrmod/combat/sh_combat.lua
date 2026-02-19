@@ -194,7 +194,7 @@ if SERVER then
         local relativeSpeed = math.max(0, swingSpeed)
         local speedScale = cv_meleeSpeedScale:GetFloat()
         local damageMultiplier = 1.0
-        local damageType = DMG_REMOVENORAGDOLL
+        local damageType = DMG_CLUB
         if impactType == "blunt" then
             damageMultiplier = 1.25
         elseif impactType == "stunstick" then
@@ -214,7 +214,7 @@ if SERVER then
             damageType = bit.bor(DMG_ENERGYBEAM, DMG_SHOCK)
         elseif impactType == "explosive" then
             damageMultiplier = 2.5
-            damageType = DMG_CLUB
+            damageType = bit.bor(DMG_BLAST, DMG_CLUB)
         end
 
         local speedFactor = math.min(5.0, 1.0 + relativeSpeed * speedScale)
@@ -316,5 +316,6 @@ if SERVER then
         vrmod.logger.Debug(string.format("%s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
         print(string.format("[Melee] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
     end)
+
 
 end
