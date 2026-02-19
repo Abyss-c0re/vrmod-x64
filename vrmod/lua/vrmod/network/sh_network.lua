@@ -1,0 +1,518 @@
+g_VR = g_VR or {}
+local _, convarValues = vrmod.GetConvars()
+vrmod.AddCallbackedConvar("vrmod_net_tickrate", nil, tostring(math.ceil(1 / engine.TickInterval())), FCVAR_REPLICATED, nil, nil, nil, tonumber, nil)
+-- HELPERS
+local function netReadFrame()
+	local frame = {
+		--ts = net.ReadFloat(),
+		ts = net.ReadDouble(),
+		characterYaw = net.ReadUInt(7) * 2.85714,
+		finger1 = net.ReadUInt(7) / 100,
+		finger2 = net.ReadUInt(7) / 100,
+		finger3 = net.ReadUInt(7) / 100,
+		finger4 = net.ReadUInt(7) / 100,
+		finger5 = net.ReadUInt(7) / 100,
+		finger6 = net.ReadUInt(7) / 100,
+		finger7 = net.ReadUInt(7) / 100,
+		finger8 = net.ReadUInt(7) / 100,
+		finger9 = net.ReadUInt(7) / 100,
+		finger10 = net.ReadUInt(7) / 100,
+		hmdPos = net.ReadVector(),
+		hmdAng = net.ReadAngle(),
+		lefthandPos = net.ReadVector(),
+		lefthandAng = net.ReadAngle(),
+		righthandPos = net.ReadVector(),
+		righthandAng = net.ReadAngle(),
+	}
+
+	if net.ReadBool() then
+		frame.waistPos = net.ReadVector()
+		frame.waistAng = net.ReadAngle()
+		frame.leftfootPos = net.ReadVector()
+		frame.leftfootAng = net.ReadAngle()
+		frame.rightfootPos = net.ReadVector()
+		frame.rightfootAng = net.ReadAngle()
+	end
+	return frame
+end
+
+local function buildClientFrame(relative)
+	local lp = LocalPlayer()
+	if not IsValid(lp) then return nil end
+	-- Determine character yaw with Glide support
+	local vehicle = g_VR.vehicle.current
+	local characterYaw
+	if g_VR.vehicle.inside and IsValid(vehicle) then
+		local rawYaw = vehicle:GetAngles().yaw
+		rawYaw = (rawYaw + 180) % 360 - 180
+		local MAX_YAW = 90
+		characterYaw = math.Clamp(rawYaw, -MAX_YAW, MAX_YAW)
+	else
+		characterYaw = g_VR.characterYaw or 0
+	end
+
+	local frame = {
+		characterYaw = characterYaw,
+		hmdPos = g_VR.tracking.hmd.pos,
+		hmdAng = g_VR.tracking.hmd.ang,
+	}
+
+	local netFrame = g_VR.net and g_VR.net[lp:SteamID()] and g_VR.net[lp:SteamID()].lerpedFrame
+	-- Handle hands: use netFrame if gripping, otherwise tracking
+	if g_VR.wheelGrippedLeft and netFrame then
+		frame.lefthandPos = netFrame.lefthandPos
+		frame.lefthandAng = netFrame.lefthandAng
+	else
+		frame.lefthandPos = g_VR.tracking.pose_lefthand.pos
+		frame.lefthandAng = g_VR.tracking.pose_lefthand.ang
+	end
+
+	if g_VR.wheelGrippedRight and netFrame then
+		frame.righthandPos = netFrame.righthandPos
+		frame.righthandAng = netFrame.righthandAng
+	else
+		frame.righthandPos = g_VR.tracking.pose_righthand.pos
+		frame.righthandAng = g_VR.tracking.pose_righthand.ang
+	end
+
+	-- Assign fingers using loop
+	for i = 1, 5 do
+		frame["finger" .. i] = g_VR.input.skeleton_lefthand.fingerCurls[i]
+		frame["finger" .. i + 5] = g_VR.input.skeleton_righthand.fingerCurls[i]
+	end
+
+	if g_VR.sixPoints then
+		frame.waistPos = g_VR.tracking.pose_waist.pos
+		frame.waistAng = g_VR.tracking.pose_waist.ang
+		frame.leftfootPos = g_VR.tracking.pose_leftfoot.pos
+		frame.leftfootAng = g_VR.tracking.pose_leftfoot.ang
+		frame.rightfootPos = g_VR.tracking.pose_rightfoot.pos
+		frame.rightfootAng = g_VR.tracking.pose_rightfoot.ang
+	end
+
+	if relative then return vrmod.utils.ConvertToRelativeFrame(frame) end
+	return frame
+end
+
+local function netWriteFrame(frame)
+	--net.WriteFloat(SysTime())
+	net.WriteDouble(SysTime())
+	local tmp = frame.characterYaw + math.ceil(math.abs(frame.characterYaw) / 360) * 360 --normalize and convert characterYaw to 0-360
+	tmp = tmp - math.floor(tmp / 360) * 360
+	net.WriteUInt(tmp * 0.35, 7) --crush from 0-360 to 0-127
+	net.WriteUInt(frame.finger1 * 100, 7)
+	net.WriteUInt(frame.finger2 * 100, 7)
+	net.WriteUInt(frame.finger3 * 100, 7)
+	net.WriteUInt(frame.finger4 * 100, 7)
+	net.WriteUInt(frame.finger5 * 100, 7)
+	net.WriteUInt(frame.finger6 * 100, 7)
+	net.WriteUInt(frame.finger7 * 100, 7)
+	net.WriteUInt(frame.finger8 * 100, 7)
+	net.WriteUInt(frame.finger9 * 100, 7)
+	net.WriteUInt(frame.finger10 * 100, 7)
+	net.WriteVector(frame.hmdPos)
+	net.WriteAngle(frame.hmdAng)
+	net.WriteVector(frame.lefthandPos)
+	net.WriteAngle(frame.lefthandAng)
+	net.WriteVector(frame.righthandPos)
+	net.WriteAngle(frame.righthandAng)
+	net.WriteBool(frame.waistPos ~= nil)
+	if frame.waistPos then
+		net.WriteVector(frame.waistPos)
+		net.WriteAngle(frame.waistAng)
+		net.WriteVector(frame.leftfootPos)
+		net.WriteAngle(frame.leftfootAng)
+		net.WriteVector(frame.rightfootPos)
+		net.WriteAngle(frame.rightfootAng)
+	end
+end
+
+if CLIENT then
+	vrmod.AddCallbackedConvar("vrmod_net_delay", nil, "0.1", nil, nil, nil, nil, tonumber, nil)
+	vrmod.AddCallbackedConvar("vrmod_net_delaymax", nil, "0.2", nil, nil, nil, nil, tonumber, nil)
+	vrmod.AddCallbackedConvar("vrmod_net_storedframes", nil, "15", nil, nil, nil, nil, tonumber, nil)
+	local lastSentFrame
+	local function SendFrame(frame)
+		net.Start("vrutil_net_tick", true)
+		net.WriteVector(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos or Vector(0, 0, 0))
+		net.WriteAngle(g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang or Angle(0, 0, 0))
+		netWriteFrame(frame)
+		net.SendToServer()
+		lastSentFrame = vrmod.utils.CopyFrame(frame)
+	end
+
+	function VRUtilNetworkInit() --called by localplayer when they enter vr
+		-- transmit loop
+		timer.Create("vrmod_transmit", 1 / convarValues.vrmod_net_tickrate, 0, function()
+			if g_VR.threePoints and g_VR.active then
+				local frame = buildClientFrame(true)
+				if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
+					SendFrame(frame)
+				else
+					vrmod.logger.Debug("Skipping identical frame")
+					if not lastSentFrame then SendFrame(frame) end
+				end
+			end
+		end)
+
+		net.Start("vrutil_net_join", true)
+		--send some stuff here that doesnt need to be in every frame
+		net.WriteBool(GetConVar("vrmod_althead"):GetBool())
+		net.WriteBool(GetConVar("vrmod_floatinghands"):GetBool())
+		net.SendToServer()
+	end
+
+	local function LerpOtherVRPlayers()
+		local lp = LocalPlayer()
+		for steamid, v in pairs(g_VR.net) do
+			local ply = player.GetBySteamID(steamid)
+			-- skip invalid or local player
+			if not IsValid(ply) or ply == lp then continue end
+			-- skip if no frame available
+			if not v.lastFrame then
+				vrmod.logger.Debug("Skipping player " .. tostring(steamid) .. " (no frame)")
+				continue
+			end
+
+			local latestFrame = v.lastFrame
+			local lerpedFrame = {}
+			-- shallow copy numeric/vector/angle fields
+			for k2, v2 in pairs(latestFrame) do
+				if k2 == "characterYaw" then
+					lerpedFrame[k2] = v2
+				elseif isnumber(v2) or isvector(v2) or isangle(v2) then
+					lerpedFrame[k2] = v2
+				end
+			end
+
+			-- transform to world space
+			local plyPos, plyAng = ply:GetPos(), Angle()
+			if ply:InVehicle() then
+				plyAng = ply:GetVehicle():GetAngles()
+				local _, forwardAng = LocalToWorld(Vector(), Angle(0, 90, 0), Vector(), plyAng)
+				lerpedFrame.characterYaw = forwardAng.yaw
+			end
+
+			for _, part in ipairs({"hmd", "lefthand", "righthand", "waist", "leftfoot", "rightfoot"}) do
+				if lerpedFrame[part .. "Pos"] then lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"] = LocalToWorld(lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"], plyPos, plyAng) end
+			end
+
+			-- assign the lerped frame directly
+			v.lerpedFrame = lerpedFrame
+		end
+	end
+
+	-- Update self
+	function VRUtilNetUpdateLocalPly(relative)
+		local tab = g_VR.net[LocalPlayer():SteamID()]
+		if g_VR.threePoints and tab then
+			tab.lerpedFrame = buildClientFrame(relative)
+			return tab.lerpedFrame
+		end
+	end
+
+	-- Cleanup on exit
+	function VRUtilNetworkCleanup()
+		timer.Remove("vrmod_transmit")
+		net.Start("vrutil_net_exit")
+		net.SendToServer()
+	end
+
+	-- Receive remote tick frames
+	net.Receive("vrutil_net_tick", function(len)
+		local ply = net.ReadEntity()
+		if not IsValid(ply) or ply == LocalPlayer() then return end
+		local steamid = ply:SteamID()
+		local tab = g_VR.net[steamid]
+		if not tab then return end
+		local frame = netReadFrame()
+		-- first frame
+		if not tab.lastFrame then
+			tab.lastFrame = frame
+			tab.playbackTime = frame.ts
+			return
+		end
+
+		-- skip if same as last frame
+		if vrmod.utils.FramesAreEqual(frame, tab.lastFrame) then return end
+		-- accept new frame
+		tab.lastFrame = frame
+		tab.playbackTime = frame.ts
+	end)
+
+	-- When another player joins
+	net.Receive("vrutil_net_join", function(len)
+		local ply = net.ReadEntity()
+		if not IsValid(ply) then return end
+		g_VR.net[ply:SteamID()] = {
+			characterAltHead = net.ReadBool(),
+			dontHideBullets = net.ReadBool(),
+			lastFrame = nil,
+			playbackTime = 0,
+		}
+
+		hook.Add("PreRender", "vrutil_hook_netlerp", LerpOtherVRPlayers)
+		hook.Run("VRMod_Start", ply)
+	end)
+
+	local swepOriginalFovs = {}
+	net.Receive("vrutil_net_exit", function(len)
+		local steamid = net.ReadString()
+		if game.SinglePlayer() then steamid = LocalPlayer():SteamID() end
+		local ply = player.GetBySteamID(steamid)
+		g_VR.net[steamid] = nil
+		if table.Count(g_VR.net) == 0 then hook.Remove("PreRender", "vrutil_hook_netlerp") end
+		if ply == LocalPlayer() then
+			for k, v in pairs(swepOriginalFovs) do
+				local wep = ply:GetWeapon(k)
+				if IsValid(wep) then wep.ViewModelFOV = v end
+			end
+
+			swepOriginalFovs = {}
+		end
+
+		hook.Run("VRMod_Exit", ply, steamid)
+	end)
+
+	net.Receive("vrutil_net_switchweapon", function(len)
+		local class = net.ReadString()
+		local vm = net.ReadString()
+		local isMag = string.StartWith(class, "avrmag_") -- Check if the entity is a magazine
+		-- Handle case where no valid weapon or magazine is selected
+		if class == "" or vm == "" then
+			g_VR.viewModel = nil
+			g_VR.openHandAngles = g_VR.defaultOpenHandAngles
+			g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
+			g_VR.currentvmi = nil
+			g_VR.viewModelMuzzle = nil
+			-- Ensure world model is hidden
+			local weapon = LocalPlayer():GetActiveWeapon()
+			if IsValid(weapon) then weapon:SetNoDraw(true) end
+			local viewModel = LocalPlayer():GetViewModel()
+			if IsValid(viewModel) then viewModel:SetNoDraw(false) end
+			return
+		end
+
+		-- Explicitly disable world model rendering for both weapons and magazines
+		local wep = LocalPlayer():GetActiveWeapon()
+		if IsValid(wep) then
+			wep:SetNoDraw(true) -- Prevent world model from rendering
+		end
+
+		-- Ensure view model is used and visible
+		local viewModel = LocalPlayer():GetViewModel()
+		if IsValid(viewModel) then
+			viewModel:SetNoDraw(false)
+			g_VR.viewModel = viewModel
+		end
+
+		if wep.ViewModelFOV then
+			if not swepOriginalFovs[class] then swepOriginalFovs[class] = wep.ViewModelFOV end
+			wep.ViewModelFOV = GetConVar("fov_desired"):GetFloat()
+		end
+
+		-- Create offsets for view model if they don't exist
+		local vmi = g_VR.viewModelInfo[class] or {}
+		local model = isMag and vm or vmi.modelOverride ~= nil and vmi.modelOverride or vm -- Use view model for magazines
+		if vmi.offsetPos == nil or vmi.offsetAng == nil then
+			vmi.offsetPos, vmi.offsetAng = Vector(0, 0, 0), Angle(0, 0, 0)
+			local cm = ClientsideModel(model)
+			if IsValid(cm) then
+				cm:SetupBones()
+				local bone = cm:LookupBone("ValveBiped.Bip01_R_Hand")
+				if bone then
+					local boneMat = cm:GetBoneMatrix(bone)
+					local bonePos, boneAng = boneMat:GetTranslation(), boneMat:GetAngles()
+					boneAng:RotateAroundAxis(boneAng:Forward(), 180)
+					vmi.offsetPos, vmi.offsetAng = WorldToLocal(Vector(0, 0, 0), Angle(0, 0, 0), bonePos, boneAng)
+					vmi.offsetPos = vmi.offsetPos + g_VR.viewModelInfo.autoOffsetAddPos
+				end
+
+				cm:Remove()
+			end
+		end
+
+		-- Create finger poses for magazines or weapons
+		vmi.closedHandAngles = vrmod.GetRightHandFingerAnglesFromModel(model)
+		vrmod.SetRightHandClosedFingerAngles(vmi.closedHandAngles)
+		vrmod.SetRightHandOpenFingerAngles(vmi.closedHandAngles)
+		g_VR.viewModelInfo[class] = vmi
+		g_VR.currentvmi = vmi
+	end)
+
+	hook.Add("CreateMove", "vrutil_hook_joincreatemove", function(cmd)
+		hook.Remove("CreateMove", "vrutil_hook_joincreatemove")
+		timer.Simple(2, function()
+			net.Start("vrutil_net_requestvrplayers", true)
+			net.SendToServer()
+		end)
+
+		timer.Simple(2, function()
+			if SysTime() < 120 then GetConVar("vrmod_autostart"):SetBool(false) end
+			if GetConVar("vrmod_autostart"):GetBool() then
+				timer.Create("vrutil_timer_tryautostart", 1, 0, function()
+					local pm = LocalPlayer():GetModel()
+					if pm ~= nil and pm ~= "models/player.mdl" and pm ~= "" then
+						VRUtilClientStart()
+						timer.Remove("vrutil_timer_tryautostart")
+					end
+				end)
+			end
+		end)
+	end)
+
+	net.Receive("vrutil_net_entervehicle", function(len) hook.Call("VRMod_EnterVehicle", nil) end)
+	net.Receive("vrutil_net_exitvehicle", function(len) hook.Call("VRMod_ExitVehicle", nil) end)
+end
+
+if SERVER then
+	util.AddNetworkString("vrutil_net_join")
+	util.AddNetworkString("vrutil_net_exit")
+	util.AddNetworkString("vrutil_net_switchweapon")
+	util.AddNetworkString("vrutil_net_tick")
+	util.AddNetworkString("vrutil_net_requestvrplayers")
+	util.AddNetworkString("vrutil_net_entervehicle")
+	util.AddNetworkString("vrutil_net_exitvehicle")
+	vrmod.NetReceiveLimited("vrutil_net_tick", convarValues.vrmod_net_tickrate + 5, 1200, function(len, ply)
+		vrmod.logger.Debug("received net_tick, len: " .. len)
+		if g_VR[ply:SteamID()] == nil then return end
+		local viewHackPos = net.ReadVector()
+		local viewHackAng = net.ReadAngle()
+		-- Store muzzle/VR viewmodel info
+		g_VR[ply:SteamID()].muzzlePos = viewHackPos
+		g_VR[ply:SteamID()].muzzleAng = viewHackAng
+		local frame = netReadFrame()
+		g_VR[ply:SteamID()].latestFrame = frame
+		if not viewHackPos:IsZero() and util.IsInWorld(viewHackPos) then
+			ply.viewOffset = viewHackPos - ply:EyePos() + ply.viewOffset
+			ply:SetCurrentViewOffset(ply.viewOffset)
+			ply:SetViewOffset(Vector(0, 0, ply.viewOffset.z))
+		else
+			ply:SetCurrentViewOffset(ply.originalViewOffset)
+			ply:SetViewOffset(ply.originalViewOffset)
+		end
+
+		--relay frame to everyone except sender
+		net.Start("vrutil_net_tick", true)
+		net.WriteEntity(ply)
+		netWriteFrame(frame)
+		--net.Broadcast()
+		net.SendOmit(ply)
+	end)
+
+	vrmod.NetReceiveLimited("vrutil_net_join", 5, 2, function(len, ply)
+		if g_VR[ply:SteamID()] ~= nil then return end
+		ply:DrawShadow(false)
+		ply.originalViewOffset = ply:GetViewOffset()
+		ply.viewOffset = Vector(0, 0, 0)
+		--add gt entry
+		g_VR[ply:SteamID()] = {
+			--store join values so we can re-send joins to players that connect later
+			characterAltHead = net.ReadBool(),
+			dontHideBullets = net.ReadBool(),
+		}
+
+		ply:Give("weapon_vrmod_empty")
+		ply:SelectWeapon("weapon_vrmod_empty")
+		--relay join message to everyone except players that aren't fully loaded in yet
+		local omittedPlayers = {}
+		for k, v in ipairs(player.GetAll()) do
+			if not v.hasRequestedVRPlayers then omittedPlayers[#omittedPlayers + 1] = v end
+		end
+
+		net.Start("vrutil_net_join")
+		net.WriteEntity(ply)
+		net.WriteBool(g_VR[ply:SteamID()].characterAltHead)
+		net.WriteBool(g_VR[ply:SteamID()].dontHideBullets)
+		net.SendOmit(omittedPlayers)
+		hook.Run("VRMod_Start", ply)
+	end)
+
+	local function net_exit(steamid)
+		if g_VR[steamid] ~= nil then
+			g_VR[steamid] = nil
+			local ply = player.GetBySteamID(steamid)
+			if ply.originalViewOffset then
+				ply:SetCurrentViewOffset(ply.originalViewOffset)
+				ply:SetViewOffset(ply.originalViewOffset)
+			end
+
+			net.Start("vrutil_net_exit")
+			net.WriteString(steamid)
+			net.Broadcast()
+			hook.Run("VRMod_Exit", ply)
+		end
+	end
+
+	vrmod.NetReceiveLimited("vrutil_net_exit", 5, 0, function(len, ply) net_exit(ply:SteamID()) end)
+	hook.Add("PlayerDisconnected", "vrutil_hook_playerdisconnected", function(ply) net_exit(ply:SteamID()) end)
+	vrmod.NetReceiveLimited("vrutil_net_requestvrplayers", 5, 0, function(len, ply)
+		ply.hasRequestedVRPlayers = true
+		for k, v in pairs(g_VR) do
+			if type(k) == "string" and k:match("^STEAM_[0-5]:[01]:%d+$") then
+				local vrPly = player.GetBySteamID(k)
+				if IsValid(vrPly) then
+					net.Start("vrutil_net_join", true)
+					net.WriteEntity(vrPly)
+					net.WriteBool(v.characterAltHead)
+					net.WriteBool(v.dontHideBullets)
+					net.Send(ply)
+				else
+					vrmod.logger.Err("Invalid SteamID \"" .. k .. "\" found in player table")
+				end
+			end
+		end
+	end)
+
+	hook.Add("PlayerDeath", "vrutil_hook_playerdeath", function(ply, inflictor, attacker)
+		if g_VR[ply:SteamID()] ~= nil then
+			net.Start("vrutil_net_exit")
+			net.WriteString(ply:SteamID())
+			net.Broadcast()
+		end
+	end)
+
+	hook.Add("PlayerSpawn", "vrutil_hook_playerspawn", function(ply)
+		if g_VR[ply:SteamID()] ~= nil then
+			ply:Give("weapon_vrmod_empty")
+			net.Start("vrutil_net_join", true)
+			net.WriteEntity(ply)
+			net.WriteBool(g_VR[ply:SteamID()].characterAltHead)
+			net.WriteBool(g_VR[ply:SteamID()].dontHideBullets)
+			net.Broadcast()
+		end
+	end)
+
+	hook.Add("PlayerSwitchWeapon", "vrutil_hook_playerswitchweapon", function(ply, old, new)
+		if g_VR[ply:SteamID()] ~= nil then
+			net.Start("vrutil_net_switchweapon", true)
+			local class, vm = vrmod.utils.WepInfo(new)
+			if class and vm then
+				timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(vm) end)
+				net.WriteString(class)
+				net.WriteString(vm)
+			else
+				net.WriteString("")
+				net.WriteString("")
+			end
+
+			net.Send(ply)
+			timer.Simple(0, function() end)
+		end
+	end)
+
+	hook.Add("PlayerEnteredVehicle", "vrutil_hook_playerenteredvehicle", function(ply, veh)
+		if g_VR[ply:SteamID()] ~= nil then
+			net.Start("vrutil_net_entervehicle", true)
+			net.Send(ply)
+			ply:SetAllowWeaponsInVehicle(1)
+		end
+	end)
+
+	hook.Add("PlayerLeaveVehicle", "vrutil_hook_playerleavevehicle", function(ply, veh)
+		if g_VR[ply:SteamID()] ~= nil then
+			net.Start("vrutil_net_exitvehicle", true)
+			net.Send(ply)
+		end
+	end)
+end

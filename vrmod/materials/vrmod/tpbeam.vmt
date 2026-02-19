@@ -1,0 +1,17 @@
+"UnlitGeneric"
+{
+	"$basetexture"		"vrmod/tpbeam"
+	//"$vertexcolor"		1
+	"$translucent"		1
+	"$model" 1
+
+	"Proxies"
+	{
+		"TextureScroll"
+		{
+			"texturescrollvar" "$baseTextureTransform"
+			"texturescrollrate" 3
+			"texturescrollangle" 270
+		}
+	}
+}
