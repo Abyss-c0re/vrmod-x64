@@ -215,6 +215,29 @@ function VRUtilOpenMenu()
 	form:CheckBox("Replace climbing mechanics (when available)", "vrmod_climbing")
 	form:CheckBox("Replace door use mechanics (when available)", "vrmod_doors")
 	form:Button("Reset settings to default", "vrmod_reset")
+
+-- ??????????????? Character Animations (moved from spawn menu) ???????????????
+form:ControlHelp("\n--- Character Animations ---")
+local animCheckbox = form:CheckBox("Disable Animations")
+animCheckbox:SetChecked(not GetConVar("vrmod_characterik"):GetBool())
+function animCheckbox:OnChange(val)
+    RunConsoleCommand("vrmod_characterik", val and "0" or "1")
+end
+form:ControlHelp("When checked, the player model stays in place without animations.")
+form:CheckBox("Enable Arm Stretcher", "vrmod_armstretcher")
+form:ControlHelp("Stretches arm bones to reach targets beyond the model's natural arm length.")
+form:NumSlider("Eye Height", "vrmod_charactereyeheight", 30, 100, 1)
+form:ControlHelp("Character eye height in source units. Default 66.8.")
+form:NumSlider("Head to HMD Distance", "vrmod_characterheadtohmddist", 0, 20, 1)
+form:ControlHelp("Distance from HMD to head bone. Default 6.3.")
+local charRestoreBtn = form:Button("Restore Character Defaults")
+function charRestoreBtn:DoClick()
+    RunConsoleCommand("vrmod_characterik", "1")
+    RunConsoleCommand("vrmod_armstretcher", "0")
+    RunConsoleCommand("vrmod_charactereyeheight", "66.8")
+    RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
+    chat.AddText(Color(100, 255, 100), "[VR Character] ", Color(255, 255, 255), "Settings reset to defaults!")
+end
 	-- ─────────────── Rendering Tab ───────────────
 	do
 		local t = vgui.Create("DScrollPanel", sheet)

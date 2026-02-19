@@ -1,68 +1,21 @@
-## **GarrysMod VRMod x64 – Extended**
+Lavender's VRmod X64 Pull. <br/>
+So, I did a few key things <br/>
 
-![VRmodX64-JayPegged](https://github.com/user-attachments/assets/d08e80cd-b8e6-4348-b56d-70e2e79fa8a6)
+1. cl_character now uses the same IK as base VRmod. This means characters using the proportion trick will now work correctly. <br/>
+This also includes being able to change the eye height and the HMD to Head distance of player models. <br/>
 
+2. Arm Extension has been added, which will extend the players arm beyond the physical limit of the playermodel. <br/>
+This will allow the hands to always match the players hand position, at the cost of looking strange on certain playermodels. <br/>
 
-### ⚠️ Optimization Issues
+3. Animations can be disabled. <br/>
+This exists for future FBT implimentation, as games with FBT let you disable the animations (mostly). This does not make the player body move with the arms when disabled.<br/>
+It's imperfect, and not very useful for most players, however this is gonna be a nice QOL feature for FBT, and does have some use for players without it. <br/>
 
-VRMod and its components—such as hand physics, melee attacks, and item interaction—are maintained by different authors. This often results in compatibility issues, broken features, or abandoned modules.
+4. Melee attacks will no longer start fires. <br/>
+VRmod used to do DMG_BLAST for blunt damage. This was done so that the func_breakable_surf glass on cs_office could be broken, which Abyss-Core needed. <br/>
+This fix makes it do DMG_CLUB for all surfaces except glass func_breakable_surf, which still gets DMG_BLAST. Satisfing everyone. <br/>
 
-This build focuses on **optimization** by merging essential features from semi-official forks and third-party addons, with an emphasis on performance, cross-platform stability, and code de-duplication.
+This also includes a 1 line change to cl_ui to fix the laser for the mirror menu not appearing. <br/>
+This just changes "menuFocusDist then return end" to "menuFocusDist then continue end" <br/>
 
----
-
-### ✅ Key Features
-
-- Refactored codebase for improved stability and cross-platform compatibility  
-- Fixed rendering issues on Linux (native x64 builds)  
-- Fully supported on Windows (both x64 and Legacy branches)  
-- Improved UI with new rendering settings  
-- Cursor stability fixed in spawn menu and popups  
-- Better performance and reduced latency across systems  
-- Integrated hand collision physics for props (no more unintended prop sounds)
-- Added clientside wall collisions for hands and SWEPs   
-- Rewritten pickup system:  
-    - Manual item pickup  
-    - Multiplayer-friendly design  
-    - Adds halos for visual clarity
-    - Serverside weight limit   
-    - Clientside precalculation to reduce server load  
-    - Supports picking up NPCs  
-- Interactive world buttons
-- Keypad tool support 
-- Support for dropping and picking up non-VR weapons  
-- Melee system overhauled: trace-based with velocity-scaled damage + bonus for weapon impact  
-- Functional numpad input in VR
-- Glide support
-- Motion driving with wheel gripping (engine based vehicles + Glide) Don't forget to bind pickups for grip buttons
-- Shooting while driving. (ArcVR works for all vehicles, standard SWEPs work only if collisions allow it, like jalopy or glide motorbikes and some roofless cars) Need to bind "weaponmenu", "reload", "turret" for primary and  "alt_turret" for secondary fire in vehicle tab
-- Motion-controlled physgun: rotation and movement based on hand motion  
-- Gravity gun now supports prop rotation, just like HL2 VR  
-- UI now works correctly while in vehicles (given the mouse click is set in bindings for vehicle)
-- Likely more small fixes and improvements under the hood
-
-
-### 📦 Installation
-
-**Requirements:**
-
-- Ensure your system supports **GMod x64**.
-- On native Linux, run the following script first:[GModCEFCodecFix](https://github.com/solsticegamestudios/GModCEFCodecFix)
-- For trully native experience, use [Steam-Play-None](https://github.com/Scrumplex/Steam-Play-None)
-- Please note that only ALVR is now supported.
-
-**Installation:**
-
-1. Download the latest precompiled modules: [Releases Page](https://github.com/Abyss-c0re/vrmod-module-master/releases)
-2. Subscribe to the Workshop addon:
-   [Steam Workshop – VRMod](https://steamcommunity.com/sharedfiles/filedetails/?id=3442302711)
-
-   **OR**
-
-   Clone or download this repository manually:
-
-   - Rename the folder to `vrmod` (do **not** use dashes `-`)
-   - Place it in:
-     `./GarrysMod/garrysmod/addons/vrmod`
-
----
+These changes were tested on Win 11, no clue on how it is on Linux.  <br/>
