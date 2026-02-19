@@ -20,34 +20,34 @@ if CLIENT then
 	------------------------------------------------------------------------
 	-- SPAWN MENU
 	------------------------------------------------------------------------
-	local function CreateCharacterPanel(panel)
-		panel:ClearControls()
-		panel:SetName("VR Character IK")
-		panel:Help("Controls for VR character body IK, arm stretching, and model calibration.")
-		panel:ControlHelp("\n--- IK System ---")
-		panel:CheckBox("Enable Character IK", "vrmod_characterik")
-		panel:Help("Toggles inverse kinematics. When disabled, arms/legs use default animations.")
-		panel:CheckBox("Enable Arm Stretcher", "vrmod_armstretcher")
-		panel:Help("Stretches arm bones to reach targets beyond the model's natural arm length.")
-		panel:ControlHelp("\n--- Model Calibration ---")
-		panel:NumSlider("Eye Height", "vrmod_charactereyeheight", 30, 100, 1)
-		panel:Help("Character eye height in source units. Default 66.8. Affects crouching and body position.")
-		panel:NumSlider("Head to HMD Distance", "vrmod_characterheadtohmddist", 0, 20, 1)
-		panel:Help("Distance from HMD to head bone. Default 6.3.")
-		panel:ControlHelp("\n")
-		local restoreBtn = panel:Button("Restore Defaults")
-		restoreBtn.DoClick = function()
-			RunConsoleCommand("vrmod_characterik", "1")
-			RunConsoleCommand("vrmod_armstretcher", "0")
-			RunConsoleCommand("vrmod_charactereyeheight", "66.8")
-			RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
-			chat.AddText(Color(100, 255, 100), "[VR Character] ", Color(255, 255, 255), "Settings reset to defaults!")
-		end
-	end
-
-	hook.Add("PopulateToolMenu", "VRModCharacterIK_Menu", function()
-		spawnmenu.AddToolMenuOption("Utilities", "VRMod", "VRModCharacterIK_Options", "Character IK", "", "", CreateCharacterPanel)
-	end)
+function CreateCharacterPanel(panel)
+    panel:ClearControls()
+    panel:SetName("VR Character Animations")
+    panel:Help("Controls for VR character animations, arm stretching, and model calibration.")
+    panel:ControlHelp("\n--- Animation System ---")
+    local animCheckbox = panel:CheckBox("Disable Animations")
+    animCheckbox:SetChecked(not GetConVar("vrmod_characterik"):GetBool())
+    function animCheckbox:OnChange(val)
+        RunConsoleCommand("vrmod_characterik", val and "0" or "1")
+    end
+    panel:Help("When checked, the player model stays in place without animations.")
+    panel:CheckBox("Enable Arm Stretcher", "vrmod_armstretcher")
+    panel:Help("Stretches arm bones to reach targets beyond the model's natural arm length.")
+    panel:ControlHelp("\n--- Model Calibration ---")
+    panel:NumSlider("Eye Height", "vrmod_charactereyeheight", 30, 100, 1)
+    panel:Help("Character eye height in source units. Default 66.8. Affects crouching and body position.")
+    panel:NumSlider("Head to HMD Distance", "vrmod_characterheadtohmddist", 0, 20, 1)
+    panel:Help("Distance from HMD to head bone. Default 6.3.")
+    panel:ControlHelp("\n")
+    local restoreBtn = panel:Button("Restore Defaults")
+    restoreBtn.DoClick = function()
+        RunConsoleCommand("vrmod_characterik", "1")
+        RunConsoleCommand("vrmod_armstretcher", "0")
+        RunConsoleCommand("vrmod_charactereyeheight", "66.8")
+        RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
+        chat.AddText(Color(100, 255, 100), "[VR Character] ", Color(255, 255, 255), "Settings reset to defaults!")
+    end
+end
 
 	------------------------------------------------------------------------
 	-- VR MIRROR: Separate panel that appears when heightmenu is open
@@ -86,7 +86,7 @@ if CLIENT then
 							RunConsoleCommand("vrmod_charactereyeheight", tostring(h))
 						end
 					end },
-				{ x = 120, y = 45,  w = 75, h = 35, text = convarValues.characterIK and "IK: ON" or "IK: OFF", font = "Trebuchet18", text_x = 37, text_y = 8,
+				{ x = 120, y = 45,  w = 75, h = 35, text = convarValues.characterIK and "Anim: ON" or "Anim: OFF", font = "Trebuchet18", text_x = 37, text_y = 8,
 					fn = function() RunConsoleCommand("vrmod_characterik", convarValues.characterIK and "0" or "1") end },
 				{ x = 0,   y = 90,  w = 95, h = 35, text = convarValues.armStretcher and "Stretch: ON" or "Stretch: OFF", font = "Trebuchet18", text_x = 47, text_y = 8,
 					fn = function() RunConsoleCommand("vrmod_armstretcher", convarValues.armStretcher and "0" or "1") end },
@@ -118,7 +118,7 @@ if CLIENT then
 			VRUtilMenuRenderStart("charik")
 			-- Labels
 			draw.DrawText(string.format("Eye: %.1f  HMD: %.1f", eyeH, hmdD), "Trebuchet18", 3, 135, color_white, TEXT_ALIGN_LEFT)
-			draw.DrawText("Character IK", "Trebuchet18", 3, 155, Color(150, 200, 255), TEXT_ALIGN_LEFT)
+			draw.DrawText("Character Animations", "Trebuchet18", 3, 155, Color(150, 200, 255), TEXT_ALIGN_LEFT)
 			-- Buttons
 			for _, btn in ipairs(buttons) do
 				surface.SetDrawColor(0, 0, 0, 220)
@@ -244,8 +244,6 @@ if CLIENT then
 	end
 
 	local function UpdateIK(ply)
-		if not convarValues.characterIK then return end
-
 		local steamid = ply:SteamID()
 		local net = g_VR.net[steamid]
 		local charinfo = characterInfo[steamid]
@@ -653,6 +651,14 @@ if CLIENT then
 	------------------------------------------------------------------------
 	local function CalcMainActivityFunc(ply, vel)
 		if not activePlayers[ply:SteamID()] or ply:InVehicle() then return end
+		-- When animations are disabled, force idle standing pose
+		if not convarValues.characterIK then
+			ply:SetPlaybackRate(0)
+			ply:SetPoseParameter("move_yaw", 0)
+			ply:SetPoseParameter("move_x", 0)
+			ply:SetPoseParameter("move_y", 0)
+			return ACT_HL2MP_IDLE, -1
+		end
 		local act = ACT_HL2MP_IDLE
 		if ply.m_bJumping then
 			act = ACT_HL2MP_JUMP_PASSIVE
@@ -666,6 +672,8 @@ if CLIENT then
 
 	local function DoAnimationEventFunc(ply, evt, data)
 		if not activePlayers[ply:SteamID()] or ply:InVehicle() then return end
+		-- Block all animation events when animations are disabled
+		if not convarValues.characterIK then return ACT_INVALID end
 		if evt ~= PLAYERANIMEVENT_JUMP then return ACT_INVALID end
 	end
 

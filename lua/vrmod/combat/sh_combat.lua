@@ -8,6 +8,7 @@ local cv_meleeVelThreshold = CreateConVar("vrmod_melee_velthreshold", "1.5", FCV
 local cv_meleeDamage = CreateConVar("vrmod_melee_damage", "3", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeDelay = CreateConVar("vrmod_melee_delay", "0.45", FCVAR_REPLICATED + FCVAR_ARCHIVE)
 local cv_meleeSpeedScale = CreateConVar("vrmod_melee_speedscale", "0.05", FCVAR_REPLICATED + FCVAR_ARCHIVE, "Multiplier for relative speed in melee damage calculation")
+
 -- Updated impactSounds with verified sound paths
 local impactSounds = {
     fist = {"physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav", "physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_soft1.wav"},
@@ -24,6 +25,7 @@ local impactSounds = {
 if CLIENT then
     local NextMeleeTime = 0
     local PrecomputedMelee = {}
+
     local function SendMeleeAttack(src, dir, radius, reach, mins, maxs, angles, impactType, hand)
         net.Start("VRMod_MeleeAttack")
         net.WriteVector(src)
@@ -41,14 +43,18 @@ if CLIENT then
     local function TryMelee(params, hand)
         local ply = LocalPlayer()
         if NextMeleeTime > CurTime() then return end
+
         -- Determine if we're using a weapon and valid
         local useWeapon = params.useWeapon and IsValid(params.weapon) and vrmod.utils.IsValidWep(params.weapon)
         local isMelee = params.isMelee
+
         -- Compute hit source position, adjust if weapon or melee
         local src = params.pos
         if hand == "right" and (useWeapon or isMelee) then src = vrmod.utils.AdjustCollisionsBox(src, params.ang, isMelee) end
+
         -- Compute direction
         local dir = params.dir
+
         -- Trace setup
         local traceData = {
             start = src,
@@ -64,6 +70,7 @@ if CLIENT then
         if tr.Hit then
             if IsValid(tr.Entity) and tr.Entity == g_VR.vehicle.current then return end
             NextMeleeTime = CurTime() + cv_meleeDelay:GetFloat()
+
             -- Play swing sound only for right-hand weapon
             if hand == "right" and useWeapon then
                 local swingSound
@@ -82,6 +89,7 @@ if CLIENT then
 
             -- Determine impact type AFTER everything else
             local impactType = hand == "right" and useWeapon and "blunt" or "fist"
+
             -- **Finally** send the melee attack
             SendMeleeAttack(tr.HitPos, dir, params.radius, params.reach, params.mins, params.maxs, params.ang, impactType, hand)
         end
@@ -91,6 +99,7 @@ if CLIENT then
         if not cl_vrmod_melee:GetBool() then return end
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() or not vrmod.IsPlayerInVR(ply) then return end
+
         -- Precompute left hand (always fist)
         local leftAng = vrmod.GetLeftHandAng(ply)
         local leftPos = vrmod.GetLeftHandPos(ply) + leftAng:Forward() * 5
@@ -130,6 +139,7 @@ if CLIENT then
         local rightVel = vrmod.GetRightHandVelocityRelative() or Vector(0, 0, 0)
         local threshold = cv_meleeVelThreshold:GetFloat() * 50
         if leftVel:Length() < threshold and rightVel:Length() < threshold then return end
+
         -- Try melee for both hands
         if not g_VR.cooldownLeft then TryMelee(PrecomputedMelee.left, "left") end
         if not g_VR.cooldownRight then TryMelee(PrecomputedMelee.right, "right") end
@@ -139,9 +149,11 @@ end
 -- SERVERSIDE --------------------------
 if SERVER then
     util.AddNetworkString("VRMod_MeleeAttack")
+
     net.Receive("VRMod_MeleeAttack", function(_, ply)
         if not sv_vrmod_melee:GetBool() then return end
         if not IsValid(ply) or not ply:Alive() then return end
+
         local src = net.ReadVector()
         local dir = net.ReadVector()
         local radius = net.ReadFloat()
@@ -151,14 +163,15 @@ if SERVER then
         local angles = net.ReadAngle()
         local impactType = net.ReadString()
         local hand = net.ReadString()
+
         local swingSpeed
         if hand == "left" then
             swingSpeed = vrmod.GetLeftHandVelocityRelative(ply)
         else
             swingSpeed = vrmod.GetRightHandVelocityRelative(ply)
         end
-
         if swingSpeed then swingSpeed = swingSpeed:Length() end
+
         local traceData = {
             start = src,
             endpos = src + dir * reach,
@@ -171,6 +184,7 @@ if SERVER then
 
         local tr = vrmod.utils.TraceBoxOrSphere(traceData)
         if not tr.Hit then return end
+
         local decalName = "Impact.Concrete"
         local matType = tr.MatType
         if matType == MAT_METAL then
@@ -195,6 +209,7 @@ if SERVER then
         local speedScale = cv_meleeSpeedScale:GetFloat()
         local damageMultiplier = 1.0
         local damageType = DMG_CLUB
+
         if impactType == "blunt" then
             damageMultiplier = 1.25
         elseif impactType == "stunstick" then
@@ -227,6 +242,7 @@ if SERVER then
         local customReach = reach
         local customRadius = radius
         local customImpactType = impactType
+
         local hitData = {
             Attacker = ply,
             HitEntity = tr.Entity,
@@ -285,6 +301,19 @@ if SERVER then
 
         -- Always recalculate damage if not explicitly set
         customDamage = base * speedFactor * (customDamageMultiplier or 1.0)
+
+        -- func_breakable_surf (the glass panes used in cs_office) only shatters when it
+        -- receives DMG_BLAST. The brush has NODRAW on 5 of 6 faces, so a melee trace
+        -- will usually NOT hit the glass face — matType won't be MAT_GLASS. Instead,
+        -- check the entity class directly so DMG_BLAST is always included when punching
+        -- any face of a breakable surface. Also cover plain MAT_GLASS hits as a fallback
+        -- for other glass-textured entities (props, world brushes, etc.).
+        if IsValid(tr.Entity) and tr.Entity:GetClass() == "func_breakable_surf" then
+            customDamageType = bit.bor(customDamageType, DMG_BLAST)
+        elseif matType == MAT_GLASS then
+            customDamageType = bit.bor(customDamageType, DMG_BLAST)
+        end
+
         local dmgInfo = DamageInfo()
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
@@ -292,8 +321,10 @@ if SERVER then
         dmgInfo:SetDamageType(customDamageType)
         dmgInfo:SetDamagePosition(tr.HitPos)
         tr.Entity:TakeDamageInfo(dmgInfo)
+
         local phys = tr.Entity:GetPhysicsObject()
         if IsValid(phys) then phys:ApplyForceCenter(dir * customDamage * 10) end
+
         local snd
         if customSound then
             snd = customSound
@@ -303,19 +334,13 @@ if SERVER then
                 list = impactSounds.fist
                 vrmod.logger.Warn("[Melee] Invalid impactType '" .. tostring(customImpactType) .. "', falling back to 'fist'")
             end
-
             snd = list[math.random(#list)]
         end
 
         sound.Play(snd, tr.HitPos, 75, 100, 1)
         util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2)
         if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
-        local attackerName = ply:Nick() or "Unknown"
-        local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
-        local targetVelDot = targetVel:Dot(dir)
-        vrmod.logger.Debug(string.format("%s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
-        print(string.format("[Melee] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
+
+        vrmod.logger.Debug(string.format("%s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", ply:Nick() or "Unknown", IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World", customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVel:Dot(dir), relativeSpeed, speedFactor, snd or "none"))
     end)
-
-
 end
