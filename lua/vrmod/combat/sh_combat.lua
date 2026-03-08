@@ -190,11 +190,14 @@ if SERVER then
         end
 
         local base = cv_meleeDamage:GetFloat()
+        -- Fetch the active weapon once; reused for both damage and hit sound overrides
+        local activeWep = hand == "right" and ply:GetActiveWeapon() or nil
+        if IsValid(activeWep) then if activeWep.Primary and isnumber(activeWep.Primary.Damage) and activeWep.Primary.Damage > 0 then base = activeWep.Primary.Damage end end
         local targetVel = tr.Entity.GetVelocity and tr.Entity:GetVelocity() or Vector(0, 0, 0)
         local relativeSpeed = math.max(0, swingSpeed)
         local speedScale = cv_meleeSpeedScale:GetFloat()
         local damageMultiplier = 1.0
-        local damageType = bit.bor(DMG_CLUB, DMG_BLAST)
+        local damageType = DMG_CLUB
         if impactType == "blunt" then
             damageMultiplier = 1.25
         elseif impactType == "stunstick" then
@@ -227,6 +230,7 @@ if SERVER then
         local customReach = reach
         local customRadius = radius
         local customImpactType = impactType
+        local damageExplicitlySet = false
         local hitData = {
             Attacker = ply,
             HitEntity = tr.Entity,
@@ -247,7 +251,11 @@ if SERVER then
             if hand == "left" then return end
             if soundPath then customSound = soundPath end
             if newDecal then customDecal = newDecal end
-            if newDamage then customDamage = newDamage end
+            if newDamage then
+                customDamage = newDamage
+                damageExplicitlySet = true
+            end
+
             if newDamageMultiplier then customDamageMultiplier = newDamageMultiplier end
             if newDamageType then customDamageType = newDamageType end
             if newReach then customReach = newReach end
@@ -258,7 +266,7 @@ if SERVER then
         if not customDamageType and customImpactType then
             if customImpactType == "blunt" then
                 customDamageMultiplier = customDamageMultiplier or 1.25
-                customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
+                customDamageType = DMG_CLUB
             elseif customImpactType == "stunstick" then
                 customDamageMultiplier = customDamageMultiplier or 1.1
                 customDamageType = bit.bor(DMG_CLUB, DMG_SHOCK)
@@ -279,12 +287,18 @@ if SERVER then
                 customDamageType = bit.bor(DMG_BLAST, DMG_CLUB)
             else
                 customDamageMultiplier = customDamageMultiplier or 1.0
-                customDamageType = bit.bor(DMG_CLUB, DMG_BLAST)
+                customDamageType = DMG_CLUB
             end
         end
 
-        -- Always recalculate damage if not explicitly set
-        customDamage = base * speedFactor * (customDamageMultiplier or 1.0)
+        -- Recalculate damage only if not explicitly overridden by the VRMod_MeleeHit hook
+        if not damageExplicitlySet then customDamage = base * speedFactor * (customDamageMultiplier or 1.0) end
+        if IsValid(tr.Entity) and tr.Entity:GetClass() == "func_breakable_surf" then
+            customDamageType = bit.bor(customDamageType, DMG_BLAST)
+        elseif matType == MAT_GLASS then
+            customDamageType = bit.bor(customDamageType, DMG_BLAST)
+        end
+
         local dmgInfo = DamageInfo()
         dmgInfo:SetAttacker(ply)
         dmgInfo:SetInflictor(ply)
@@ -294,9 +308,52 @@ if SERVER then
         tr.Entity:TakeDamageInfo(dmgInfo)
         local phys = tr.Entity:GetPhysicsObject()
         if IsValid(phys) then phys:ApplyForceCenter(dir * customDamage * 10) end
+        -- Resolve hit sound from the weapon's SWEP definition if available.
+        -- SWEPs store hit sounds in various table fields (already Sound()-resolved at definition time).
+        -- Fall back to a hard-coded map for base HL2/HL1 weapons that use script names.
+        local knownWeaponHitSounds = {
+            weapon_crowbar = {
+                world = {"Weapon_Crowbar.Melee_Hit"},
+                flesh = {"Weapon_Crowbar.Melee_HitNPC"}
+            },
+            arcticvr_hl2_crowbar = {
+                world = {"Weapon_Crowbar.Melee_Hit"},
+                flesh = {"Weapon_Crowbar.Melee_HitNPC"}
+            },
+        }
+
+        local wepHitSound = nil
+        if IsValid(activeWep) then
+            local wepClass = activeWep:GetClass()
+            local wepDef = weapons.GetStored(wepClass)
+            local isFlesh = IsValid(tr.Entity) and (tr.Entity:IsPlayer() or tr.Entity:IsNPC() or tr.Entity:IsNextBot())
+            if wepDef then
+                -- Most melee SWEPs (like the HL1 crowbar above) use these table fields
+                local pool = isFlesh and (wepDef.PrimaryHitBodSounds or wepDef.PrimaryHitFleshSounds) or wepDef.PrimaryHitSounds or wepDef.HitSounds
+                if istable(pool) and #pool > 0 then
+                    wepHitSound = pool[math.random(#pool)]
+                else
+                    -- Scalar string fallbacks
+                    local raw = isFlesh and (wepDef.HitFleshSound or wepDef.HitBodySound) or wepDef.HitSound
+                    if isstring(raw) and raw ~= "" then wepHitSound = Sound(raw) end
+                end
+            end
+
+            -- Hard-coded known weapons (HL2 base, etc.)
+            if not wepHitSound then
+                local known = knownWeaponHitSounds[wepClass]
+                if known then
+                    local pool = isFlesh and known.flesh or known.world
+                    if pool then wepHitSound = Sound(pool[math.random(#pool)]) end
+                end
+            end
+        end
+
         local snd
         if customSound then
             snd = customSound
+        elseif wepHitSound then
+            snd = wepHitSound
         else
             local list = impactSounds[customImpactType]
             if not list then
@@ -310,10 +367,6 @@ if SERVER then
         sound.Play(snd, tr.HitPos, 75, 100, 1)
         util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2)
         if IsValid(tr.Entity) and tr.Entity ~= game.GetWorld() then util.Decal(customDecal, tr.HitPos + tr.HitNormal * 2, tr.HitPos - tr.HitNormal * 2, tr.Entity) end
-        local attackerName = ply:Nick() or "Unknown"
-        local targetName = IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World"
-        local targetVelDot = targetVel:Dot(dir)
-        vrmod.logger.Debug(string.format("%s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", attackerName, targetName, customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVelDot, relativeSpeed, speedFactor, snd or "none"))
-        print(string.format("[Melee] %s smashed %s for %.1f damage", attackerName, targetName, customDamage))
+        vrmod.logger.Debug(string.format("%s smashed %s for %.1f damage (impact: %s, multiplier: %.2f, type: %d, reach: %.2f, radius: %.2f, mins: %s, maxs: %s, angles: %s, swingSpeed: %.1f, targetVelDot: %.1f, relativeSpeed: %.1f, speedFactor: %.2f, sound: %s)!", ply:Nick() or "Unknown", IsValid(tr.Entity) and (tr.Entity:GetName() ~= "" and tr.Entity:GetName() or tr.Entity:GetClass()) or "World", customDamage, customImpactType, customDamageMultiplier, customDamageType, customReach, customRadius, tostring(mins or Vector(0, 0, 0)), tostring(maxs or Vector(0, 0, 0)), tostring(angles or Angle(0, 0, 0)), swingSpeed, targetVel:Dot(dir), relativeSpeed, speedFactor, snd or "none"))
     end)
 end
