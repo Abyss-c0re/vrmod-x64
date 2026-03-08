@@ -1,9 +1,7 @@
 local blacklist_path = "vrmod/vrmod_drop_blacklist.txt"
 -- Shared blacklist check
 local function InBlackList(weaponClass)
-    if weaponClass == "weapon_vrmod_empty" then
-        return true
-    end
+    if weaponClass == "weapon_vrmod_empty" then return true end
     if not file.Exists(blacklist_path, "DATA") then return false end
     local content = file.Read(blacklist_path, "DATA") or ""
     for line in string.gmatch(content, "[^\r\n]+") do
@@ -56,6 +54,17 @@ if SERVER then
             ply:RemoveAmmo(ammoToGive, ammoType)
         end
 
+        -- ── ArcticVR ammo stasis ─────────────────────────────────────────────
+        local avrSnapshot = nil
+        if dropAsWeapon and wep.ArcticVR then
+            avrSnapshot = {
+                LoadedRounds = wep.LoadedRounds or 0,
+                Chambered = wep.Chambered or 0,
+                Magazine = wep.Magazine, -- may be nil (no mag inserted)
+            }
+        end
+
+        -- ─────────────────────────────────────────────────────────────────────
         ply:Give("weapon_vrmod_empty")
         ply:SelectWeapon("weapon_vrmod_empty")
         local boneID = ply:LookupBone("ValveBiped.Bip01_R_Hand")
@@ -70,6 +79,14 @@ if SERVER then
             phys:SetMass(99)
             phys:SetVelocity(ply:GetVelocity() + rhandvel)
             phys:AddAngleVelocity(-phys:GetAngleVelocity() + phys:WorldToLocalVector(rhandangvel))
+        end
+
+        -- Stamp the ArcVR snapshot onto the spawned world entity.
+        -- World weapon entities are plain Lua tables so arbitrary fields are fine.
+        if avrSnapshot then
+            dropEnt.AVR_LoadedRounds = avrSnapshot.LoadedRounds
+            dropEnt.AVR_Chambered = avrSnapshot.Chambered
+            dropEnt.AVR_Magazine = avrSnapshot.Magazine
         end
 
         if dropAsWeapon then ply:StripWeapon(wep:GetClass()) end

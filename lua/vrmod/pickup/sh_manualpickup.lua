@@ -52,6 +52,18 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	if not IsValid(ply) or not ply:IsPlayer() then return end
 	if not IsValid(ent) or not ent:IsWeapon() then return end
 	if not ply.PickupWeapon then return end
+	-- ── ArcticVR ammo stasis ─────────────────────────────────────────────────
+	-- Snapshot the ArcVR state stamped by sh_dropweapon.lua BEFORE anything
+	local avrState = nil
+	if SERVER and ent.AVR_LoadedRounds ~= nil then
+		avrState = {
+			LoadedRounds = ent.AVR_LoadedRounds,
+			Chambered = ent.AVR_Chambered or 0,
+			Magazine = ent.AVR_Magazine, -- may be nil
+		}
+	end
+
+	-- ─────────────────────────────────────────────────────────────────────────
 	local wepClass = ent:GetClass()
 	-- Temporarily disable pickup protection
 	hook.Call("VRMod_Drop", nil, ply, ent)
@@ -59,7 +71,7 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	local replacement = vrmod.utils.ReplaceWeapon(ply, ent)
 	if replacement then wepClass = replacement end
 	if ply:HasWeapon(wepClass) then
-		-- Give ammo based on dropped weapon's clip
+		-- Give ammo based on dropped weapon's clip (vanilla fallback for non-ArcVR weapons)
 		local ammoType = ent:GetPrimaryAmmoType()
 		local clip = ent:Clip1()
 		if ammoType >= 0 and clip > 0 then ply:GiveAmmo(clip, ammoType, true) end
@@ -67,8 +79,22 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	else
 		ply:Give(wepClass, true)
 		timer.Simple(0, function() if IsValid(ply) then ply:SelectWeapon(wepClass) end end)
-	ent:Remove()
 	end
+
+	ent:Remove()
+	-- ── ArcticVR ammo stasis restore ─────────────────────────────────────────
+	-- Apply the snapshot to the freshly given weapon and re-broadcast ammo state
+	-- to the new owner. 
+	if SERVER and avrState then
+		local newWep = ply:GetWeapon(wepClass)
+		if IsValid(newWep) and newWep.ArcticVR then
+			newWep.LoadedRounds = avrState.LoadedRounds
+			newWep.Chambered = avrState.Chambered
+			newWep.Magazine = avrState.Magazine
+			timer.Simple(0, function() if IsValid(newWep) then newWep:SendWeapon(true, true) end end)
+		end
+	end
+	-- ─────────────────────────────────────────────────────────────────────────
 end)
 
 -- Disable touch-based item pickup
