@@ -8,7 +8,6 @@ end
 local latestModuleVersion = 23
 g_VR = g_VR or {}
 vrmod = vrmod or {}
-
 local convars = vrmod.GetConvars()
 if CLIENT then
     g_VR.net = g_VR.net or {}
@@ -442,18 +441,56 @@ if CLIENT then
         g_VR.originAngle = ang
     end
 
-    function vrmod.AddInGameMenuItem(name, slot, slotpos, func)
-        local index = #g_VR.menuItems + 1
-        for i = 1, #g_VR.menuItems do
-            if g_VR.menuItems[i].name == name then index = i end
+    -- AddInGameMenuItem with optional forceSlot argument
+    -- forceSlot: boolean, only internal users can set to true
+    function vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot)
+        g_VR.menuItems = g_VR.menuItems or {}
+        g_VR.menuBackup = g_VR.menuBackup or {}
+        local occupied = {}
+        for _, item in ipairs(g_VR.menuItems) do
+            occupied[item.slot] = occupied[item.slot] or {}
+            occupied[item.slot][item.slotPos] = true
         end
 
-        g_VR.menuItems[index] = {
+        -- If not forcing slot, find the first free slot starting from (0,0)
+        if not forceSlot then
+            local found = false
+            for s = 0, 10 do -- max slots
+                occupied[s] = occupied[s] or {}
+                for p = 0, 10 do -- max positions per slot
+                    if not occupied[s][p] then
+                        slot = s
+                        slotpos = p
+                        found = true
+                        break
+                    end
+                end
+
+                if found then break end
+            end
+        end
+
+        occupied[slot] = occupied[slot] or {}
+        occupied[slot][slotpos] = true
+        -- Avoid duplicate exact items
+        for _, item in ipairs(g_VR.menuItems) do
+            if item.name == name and item.func == func then return end
+        end
+
+        -- Insert the item into the menu
+        table.insert(g_VR.menuItems, {
             name = name,
             slot = slot,
             slotPos = slotpos,
             func = func
-        }
+        })
+
+        -- Update backup with the **actual assigned slot/slotPos**
+        g_VR.menuBackup[name] = g_VR.menuBackup[name] or {}
+        g_VR.menuBackup[name].slot = slot
+        g_VR.menuBackup[name].slotPos = slotpos
+        g_VR.menuBackup[name].func = func
+        g_VR.menuBackup[name].internal = forceSlot == true
     end
 
     function vrmod.RemoveInGameMenuItem(name)

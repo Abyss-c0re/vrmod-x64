@@ -1,4 +1,5 @@
 if SERVER then return end
+g_VR.menuBackup = g_VR.menuBackup or {}
 local open = false
 function g_VR.MenuOpen()
 	if hook.Call("VRMod_OpenQuickMenu") == false then return end
@@ -76,3 +77,17 @@ end
 function g_VR.MenuClose()
 	VRUtilMenuClose("miscmenu")
 end
+
+hook.Add("Think", "RestoreVRMenuItems", function()
+	for name, data in pairs(g_VR.menuBackup) do
+		local exists = false
+		for _, item in ipairs(g_VR.menuItems) do
+			if item.name == name then
+				exists = true
+				break
+			end
+		end
+
+		if not exists then vrmod.AddInGameMenuItem(name, data.slot, data.slotPos, data.func, data.internal) end
+	end
+end)
