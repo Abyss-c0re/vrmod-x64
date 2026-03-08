@@ -127,7 +127,7 @@ if CLIENT then
 					end
 				end
 
-				if not cursorX or not cursorY or not v or not v.width or not v.height or not dist or not menuFocusDist then return end
+				if not cursorX or not cursorY or not v or not v.width or not v.height or not dist or not menuFocusDist then continue end
 				if cursorX > 0 and cursorY > 0 and cursorX < v.width and cursorY < v.height and dist < menuFocusDist then
 					g_VR.menuFocus = k
 					menuFocusDist = dist
