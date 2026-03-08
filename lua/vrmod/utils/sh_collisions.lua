@@ -461,6 +461,19 @@ function vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
     return adjustedPos
 end
 
+local function IsClimbingGripActive()
+    local hooks = hook.GetTable()
+    if not hooks["VRMod_Input"] then return false end
+    local fn = hooks["VRMod_Input"]["vrmod_brush_climbing_inputcache"]
+    if not fn then return false end
+    for i = 1, 10 do
+        local name, value = debug.getupvalue(fn, i)
+        if not name then break end
+        if name == "liveInput" and istable(value) then if value["boolean_left_pickup"] or value["boolean_right_pickup"] then return true end end
+    end
+    return false
+end
+
 function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
     local ply = LocalPlayer()
     if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or ply:GetMoveType() == MOVETYPE_NOCLIP or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
@@ -468,7 +481,12 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
         return
     end
 
-    -- Use your accessor functions — they return world-space vectors
+    -- Disable collisions if player is gripping a wall (climbing)
+    if IsClimbingGripActive() then
+        vrmod._collisionNearby = false
+        return
+    end
+
     local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
     local leftNearby = SphereCollidesWithWorld(leftPos, 30)
     local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
@@ -761,18 +779,16 @@ end
 
 function vrmod.utils.SphereCollidesWithProp(pos, radius, filter)
     local hullSize = Vector(radius, radius, radius)
-
     local tr = util.TraceHull({
-        start  = pos,
+        start = pos,
         endpos = pos,
-        mins   = -hullSize,
-        maxs   = hullSize,
-        mask   = MASK_SOLID,
+        mins = -hullSize,
+        maxs = hullSize,
+        mask = MASK_SOLID,
         filter = filter
     })
 
     if not tr.Hit or not IsValid(tr.Entity) then return false end
     if tr.Entity:IsWorld() then return false end
-
     return tr.Entity, tr.HitNormal
 end
