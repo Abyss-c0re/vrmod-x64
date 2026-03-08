@@ -90,6 +90,14 @@ g_VR.action_manifest = [[
 			"name": "/actions/main/in/boolean_secondaryfire",
 			"type": "boolean"
 		},
+      {
+			"name": "/actions/main/in/boolean_left_primaryfire",
+			"type": "boolean"
+		},
+      {
+			"name": "/actions/main/in/boolean_left_secondaryfire",
+			"type": "boolean"
+		},
 		{
 			"name": "/actions/main/in/boolean_changeweapon",
 			"type": "boolean"
