@@ -58,13 +58,15 @@ function g_VR.MenuOpen()
 		prevHoveredItem = hoveredItem
 		if not changes then return end
 		VRUtilMenuRenderStart("miscmenu")
-		--buttons
+		-- buttons
 		local buttonWidth, buttonHeight = 82, 53
 		local gap = (512 - buttonWidth * 6) / 5
 		for i = 1, #items do
 			local x, y = items[i].slot, items[i].actualSlotPos
 			draw.RoundedBox(8, x * (buttonWidth + gap), 230 + y * (buttonHeight + gap), buttonWidth, buttonHeight, Color(0, 0, 0, hoveredItem == i and 200 or 128))
-			local explosion = string.Explode(" ", g_VR.menuItems[items[i].index].name, false)
+			local item = g_VR.menuItems[items[i].index]
+			local label = hoveredItem == i and item.hint or item.name -- Use hint if hovered
+			local explosion = string.Explode(" ", label, false)
 			for j = 1, #explosion do
 				draw.SimpleText(explosion[j], "HudSelectionText", buttonWidth / 2 + x * (buttonWidth + gap), 230 + buttonHeight / 2 + y * (buttonHeight + gap) - (#explosion * 6 - 6 - (j - 1) * 12), Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 			end
