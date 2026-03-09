@@ -42,21 +42,6 @@ function vrmod.utils.ToggleHook(hookName, identifier, state)
 end
 
 -- Blocking access to actions inside VRModInput hook
--- Usage: -- Block primary fire only when menuFocus is true
--- vrmod.utils.BlockInputActions(
---     "VRMod_Input",
---     "hook_name",
---     { ["boolean_primaryfire"] = true },
---     function(action, pressed)
---         return g_VR.menuFocus
---     end
--- )
--- -- Handle input normally
--- HandleInput() -- 3rd-party hook won’t see primary fire if menuFocus is true
--- -- Later, restore full functionality
--- vrmod.utils.UnblockInputActions("VRMod_Input", "hook_name")
--- HandleInput() -- 3rd-party hook now sees all actions
--- Public API: block specific actions under a condition
 function vrmod.utils.BlockInputActions(hookName, identifier, actions, condition)
     filterHook(hookName, identifier, actions, condition)
 end
@@ -64,4 +49,28 @@ end
 -- Public API: unblock previously filtered hook (restores original)
 function vrmod.utils.UnblockInputActions(hookName, identifier)
     unblockHook(hookName, identifier)
+end
+
+if CLIENT then
+    hook.Add("Think", "vrmod_climbing_hook_blocker_weapon", function()
+        local cv = GetConVar("vrmod_brushclimb_enable")
+        if not cv or not cv:GetBool() then return end
+        local climbingHookID = "vrmod_brush_climbing_inputcache"
+        local hooks = hook.GetTable()["VRMod_Input"]
+        if not hooks or not hooks[climbingHookID] then return end
+        local originalHook = hooks[climbingHookID]
+        local rightHandActions = {
+            ["boolean_right_pickup"] = true,
+            ["boolean_primaryfire"] = true,
+            ["boolean_secondaryfire"] = true
+        }
+
+        hook.Add("VRMod_Input", climbingHookID, function(action, pressed)
+            local ply = LocalPlayer()
+            if rightHandActions[action] and not vrmod.UsingEmptyHands(ply) then
+                return -- block right-hand climbing actions while holding a weapon
+            end
+            return originalHook(action, pressed)
+        end)
+    end)
 end

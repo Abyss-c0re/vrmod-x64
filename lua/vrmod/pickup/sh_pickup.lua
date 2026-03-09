@@ -79,6 +79,44 @@ if CLIENT then
 		if #haloTargetsRight > 0 then halo.Add(haloTargetsRight, Color(0, 255, 255), 1, 1, 1, true, true) end
 	end)
 
+	hook.Add("Think", "vrmod_climbing_hook_blocker", function()
+		-- Only proceed if the convar exists and is enabled
+		local cv = GetConVar("vrmod_brushclimb_enable")
+		if not cv or not cv:GetBool() then return end
+		local climbingHookID = "vrmod_brush_climbing_inputcache"
+		-- Grab the original hook table
+		local hooks = hook.GetTable()["VRMod_Input"]
+		if not hooks or not hooks[climbingHookID] then return end
+		-- Save the original hook
+		local originalHook = hooks[climbingHookID]
+		-- Actions to block per hand + extra triggers
+		local actionsToBlock = {
+			["boolean_left_pickup"] = true,
+			["boolean_reload"] = true,
+			["boolean_left_primaryfire"] = true,
+			["boolean_left_secondaryfire"] = true,
+			["boolean_right_pickup"] = true,
+			["boolean_primaryfire"] = true,
+			["boolean_secondaryfire"] = true
+		}
+
+		-- Block logic per hand
+		local function shouldBlockAction(action)
+			if not g_VR then return false end
+			if action == "boolean_left_pickup" or action == "boolean_reload" or action == "boolean_left_primaryfire" or action == "boolean_left_secondaryfire" then return IsValid(pickupTargetEntLeft) end
+			if action == "boolean_right_pickup" or action == "boolean_primaryfire" or action == "boolean_secondaryfire" then return IsValid(pickupTargetEntRight) end
+			return false
+		end
+
+		-- Replace the climbing hook with filtered wrapper
+		hook.Add("VRMod_Input", climbingHookID, function(action, pressed)
+			if actionsToBlock[action] and shouldBlockAction(action) then
+				return -- block action
+			end
+			return originalHook(action, pressed)
+		end)
+	end)
+
 	function vrmod.Pickup(bLeftHand, bDrop)
 		local handStr = bLeftHand and "Left" or "Right"
 		if bDrop then
