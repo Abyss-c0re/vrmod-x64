@@ -36,26 +36,32 @@ if CLIENT then
     function vrmod.GetStartupError()
         local error = nil
         local moduleFile = nil
-        if g_VR.moduleVersion == 0 then
-            if system.IsLinux() then
-                moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
-            else
-                moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
-            end
+        local requiredVersion, latestVersion
+        if system.IsLinux() then
+            requiredVersion = 23
+            latestVersion = 23
+            moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
+        else
+            requiredVersion = 21
+            latestVersion = 21
+            moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
+        end
 
+        g_VR.moduleVersion = g_VR.moduleVersion or 0
+        if g_VR.moduleVersion == 0 then
             if not file.Exists(moduleFile, "GAME") then
-                error = "Module not installed. Read the workshop description for instructions.\n"
+                error = "Module not installed.\nPlease follow the workshop instructions to install the module."
             else
-                error = "Failed to load module\n"
+                error = "Failed to load module.\nModule file exists but could not be loaded. Check antivirus or permissions."
             end
-        elseif g_VR.moduleVersion < requiredModuleVersion then
-            error = "Module update required.\nRun the module installer to update.\nIf you don't have the installer anymore you can re-download it from the workshop description.\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredModuleVersion
+        elseif g_VR.moduleVersion < requiredVersion then
+            error = "Module update required.\nRun the installer or re-download from the workshop.\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
+        elseif g_VR.moduleVersion > latestVersion then
+            print("[VRMOD] Warning: Module version is newer than tested. Installed: v" .. g_VR.moduleVersion .. " | Required: v" .. requiredVersion .. " | Addon version: " .. vrmod.GetVersion() .. " | Most features should work, but some bugs may exist.")
         elseif g_VR.active then
-            error = "Already running"
-        elseif g_VR.moduleVersion > latestModuleVersion then
-            error = "Unknown module version\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredModuleVersion .. "\n\nMake sure the addon is up to date.\nAddon version: " .. vrmod.GetVersion()
+            error = "VR already running."
         elseif VRMOD_IsHMDPresent and not VRMOD_IsHMDPresent() then
-            error = "VR headset not detected\n"
+            error = "VR headset not detected."
         end
         return error
     end
