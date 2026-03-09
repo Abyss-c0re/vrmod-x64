@@ -550,8 +550,7 @@ if CLIENT then
     end
 
     -- AddInGameMenuItem with optional forceSlot argument
-    -- forceSlot: boolean, only internal users can set to true
-    function vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot)
+    function vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot, hint)
         g_VR.menuItems = g_VR.menuItems or {}
         g_VR.menuBackup = g_VR.menuBackup or {}
         local occupied = {}
@@ -560,12 +559,11 @@ if CLIENT then
             occupied[item.slot][item.slotPos] = true
         end
 
-        -- If not forcing slot, find the first free slot starting from (0,0)
         if not forceSlot then
             local found = false
-            for s = 0, 10 do -- max slots
+            for s = 0, 10 do
                 occupied[s] = occupied[s] or {}
-                for p = 0, 10 do -- max positions per slot
+                for p = 0, 10 do
                     if not occupied[s][p] then
                         slot = s
                         slotpos = p
@@ -585,20 +583,20 @@ if CLIENT then
             if item.name == name and item.func == func then return end
         end
 
-        -- Insert the item into the menu
         table.insert(g_VR.menuItems, {
             name = name,
             slot = slot,
             slotPos = slotpos,
-            func = func
+            func = func,
+            hint = hint -- new optional field
         })
 
-        -- Update backup with the **actual assigned slot/slotPos**
         g_VR.menuBackup[name] = g_VR.menuBackup[name] or {}
         g_VR.menuBackup[name].slot = slot
         g_VR.menuBackup[name].slotPos = slotpos
         g_VR.menuBackup[name].func = func
         g_VR.menuBackup[name].internal = forceSlot == true
+        g_VR.menuBackup[name].hint = hint
     end
 
     function vrmod.RemoveInGameMenuItem(name)

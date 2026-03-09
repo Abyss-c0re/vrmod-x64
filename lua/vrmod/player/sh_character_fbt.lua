@@ -387,13 +387,27 @@ function vrmod_fbt.CalculateBonePositions(ply)
 	end
 end
 
--- Performs FBT calibration for local player
+-- Track active calibration session
+vrmod_fbt.activeCalibration = vrmod_fbt.activeCalibration or {}
 function vrmod_fbt.Calibrate()
 	local ply = LocalPlayer()
-	ply.RenderOverride = function() end
+	-- Cleanup previous calibration if it exists
+	if vrmod_fbt.activeCalibration.model then
+		vrmod.logger.Info("Resetting previous FBT calibration...")
+		vrmod_fbt.activeCalibration.model:Remove()
+		ply.RenderOverride = nil
+		hook.Remove("PostDrawTranslucentRenderables", "fbt_showtrackers")
+		hook.Remove("VRMod_Input", "fbt_cal_input")
+		vrmod_fbt.activeCalibration = {}
+	end
+
+	-- Create new calibration session
 	local calibrationModel = ClientsideModel(ply.vrmod_pm or ply:GetModel())
+	vrmod_fbt.activeCalibration.model = calibrationModel
+	ply.RenderOverride = function() end
 	calibrationModel:SetPos(Vector(g_VR.tracking.hmd.pos.x, g_VR.tracking.hmd.pos.y, ply:GetPos().z))
 	calibrationModel:SetAngles(Angle(0, g_VR.tracking.hmd.ang.yaw, 0))
+	-- Show tracker boxes
 	hook.Add("PostDrawTranslucentRenderables", "fbt_showtrackers", function(depth, sky)
 		if depth or sky or not g_VR.tracking.pose_waist or not g_VR.tracking.pose_leftfoot or not g_VR.tracking.pose_rightfoot then return end
 		render.SetColorMaterial()
@@ -402,6 +416,7 @@ function vrmod_fbt.Calibrate()
 		render.DrawBox(g_VR.tracking.pose_rightfoot.pos, g_VR.tracking.pose_rightfoot.ang, Vector(-1, -1, -1), Vector(1, 1, 1))
 	end)
 
+	-- Input hook for finalizing calibration
 	hook.Add("VRMod_Input", "fbt_cal_input", function(action, pressed)
 		if action ~= "boolean_reload" or not pressed then return end
 		if vrmod_fbt.Init(ply) == false then return end
@@ -409,47 +424,23 @@ function vrmod_fbt.Calibrate()
 		calibrationModel:SetupBones()
 		net.Start("vrmod_fbt_cal")
 		net.WriteBool(false)
-		local pos, ang = WorldToLocal(calibrationModel:GetBoneMatrix(boneids.head):GetTranslation(), calibrationModel:GetAngles(), g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang)
-		net.WriteVector(pos)
-		net.WriteAngle(ang)
-		pos, ang = WorldToLocal(calibrationModel:GetBoneMatrix(boneids.pelvis):GetTranslation(), calibrationModel:GetAngles(), g_VR.tracking.pose_waist.pos, g_VR.tracking.pose_waist.ang)
-		net.WriteVector(pos)
-		net.WriteAngle(ang)
-		pos, ang = WorldToLocal(calibrationModel:GetBoneMatrix(boneids.leftFoot):GetTranslation(), calibrationModel:GetAngles(), g_VR.tracking.pose_leftfoot.pos, g_VR.tracking.pose_leftfoot.ang)
-		net.WriteVector(pos)
-		net.WriteAngle(ang)
-		pos, ang = WorldToLocal(calibrationModel:GetBoneMatrix(boneids.rightFoot):GetTranslation(), calibrationModel:GetAngles(), g_VR.tracking.pose_rightfoot.pos, g_VR.tracking.pose_rightfoot.ang)
-		net.WriteVector(pos)
-		net.WriteAngle(ang)
+		local function sendBone(bone, tracker)
+			local pos, ang = WorldToLocal(calibrationModel:GetBoneMatrix(bone):GetTranslation(), calibrationModel:GetAngles(), tracker.pos, tracker.ang)
+			net.WriteVector(pos)
+			net.WriteAngle(ang)
+		end
+
+		sendBone(boneids.head, g_VR.tracking.hmd)
+		sendBone(boneids.pelvis, g_VR.tracking.pose_waist)
+		sendBone(boneids.leftFoot, g_VR.tracking.pose_leftfoot)
+		sendBone(boneids.rightFoot, g_VR.tracking.pose_rightfoot)
 		net.SendToServer()
+		-- Cleanup calibration session
 		calibrationModel:Remove()
 		ply.RenderOverride = nil
 		hook.Remove("PostDrawTranslucentRenderables", "fbt_showtrackers")
 		hook.Remove("VRMod_Input", "fbt_cal_input")
-		-- Setup toggle hooks
-		hook.Add("VRMod_Input", "fbt_walk_toggle", function(action, pressed)
-			if action ~= "boolean_walk" or ply:InVehicle() then return end
-			if not vrmod_fbt.convarValues.characterIK then -- Respect disable animations
-				return
-			end
-
-			net.Start("vrmod_fbt_toggle")
-			net.WriteBool(not pressed)
-			net.SendToServer()
-		end)
-
-		hook.Add("VRMod_EnterVehicle", "fbt_enter_vehicle", function()
-			net.Start("vrmod_fbt_toggle")
-			net.WriteBool(false)
-			net.SendToServer()
-		end)
-
-		hook.Add("VRMod_ExitVehicle", "fbt_exit_vehicle", function()
-			net.Start("vrmod_fbt_toggle")
-			net.WriteBool(true)
-			net.SendToServer()
-		end)
-
+		vrmod_fbt.activeCalibration = {}
 		vrmod.logger.Info("FBT calibration completed")
 	end)
 end
@@ -518,7 +509,7 @@ hook.Add("VRMod_OpenQuickMenu", "fbt_quickmenu", function()
 	if active then
 		vrmod.AddInGameMenuItem("Disable Full-body Tracking", 5, 0, function() vrmod_fbt.Stop(LocalPlayer()) end)
 	else
-		vrmod.AddInGameMenuItem("Calibrate Full-body Tracking", 5, 0, vrmod_fbt.Calibrate)
+		vrmod.AddInGameMenuItem("Calibrate Full-body Tracking", 5, 0, vrmod_fbt.Calibrate, false, "press reload when done")
 	end
 end)
 
