@@ -260,6 +260,7 @@ if CLIENT then
 	local characterInfo = {}
 	local activePlayers = {}
 	local updatedPlayers = {}
+	g_VR.fbtActive = g_VR.fbtActive or {} -- Per-player FBT active flag, set by sh_character_fbt.lua
 	local function RecursiveBoneTable2(ent, parentbone, infotab, ordertab, notfirst)
 		local bones = notfirst and ent:GetChildBones(parentbone) or {parentbone}
 		for k, v in pairs(bones) do
@@ -602,6 +603,10 @@ if CLIENT then
 	local function BoneCallbackFunc(ply, numbones)
 		local steamid = ply:SteamID()
 		if not activePlayers[steamid] or not g_VR.net[steamid].lerpedFrame or ply:InVehicle() and ply:GetVehicle():GetClass() ~= "prop_vehicle_prisoner_pod" then return end
+		if g_VR.fbtActive[steamid] then -- FBT handles all bones
+			return
+		end
+
 		if ply:GetBoneMatrix(characterInfo[steamid].bones.b_rightHand) then ply:SetBonePosition(characterInfo[steamid].bones.b_rightHand, g_VR.net[steamid].lerpedFrame.righthandPos, g_VR.net[steamid].lerpedFrame.righthandAng + RIGHT_HAND_OFFSET) end
 		if not g_VR.net[steamid].characterAltHead then
 			local _, targetAng = LocalToWorld(zeroVec, Angle(-80, 0, 90), zeroVec, g_VR.net[steamid].lerpedFrame.hmdAng)
@@ -667,6 +672,10 @@ if CLIENT then
 		end
 
 		ply:SetupBones()
+		if g_VR.fbtActive[steamid] then -- FBT handles all bone positioning
+			return
+		end
+
 		if prevFrameNumber ~= FrameNumber() then
 			prevFrameNumber = FrameNumber()
 			updatedPlayers = {}
