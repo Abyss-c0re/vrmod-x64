@@ -44,17 +44,11 @@ if SERVER then
 end
 
 -- CLIENT-SIDE CODE BELOW
-local VR_FBT = {} -- Module table for organization
-VR_FBT.characterInfo = {}
-VR_FBT.convarValues = select(2, vrmod.GetConvars()) -- Cache convars
-VR_FBT.zeroVec = Vector()
-VR_FBT.zeroAng = Angle()
--- Logger shortcuts
-local logger = vrmod.logger or {
-	Info = print,
-	Err = ErrorNoHalt
-}
-
+local vrmod_fbt = {} -- Module table for organization
+vrmod_fbt.characterInfo = {}
+vrmod_fbt.convarValues = select(2, vrmod.GetConvars()) -- Cache convars
+vrmod_fbt.zeroVec = Vector()
+vrmod_fbt.zeroAng = Angle()
 -- Bone name constants for clarity
 local BONE_NAMES = {
 	leftClavicle = "ValveBiped.Bip01_L_Clavicle",
@@ -86,10 +80,10 @@ local BONE_NAMES = {
 
 local FINGER_BONE_NAMES = {"ValveBiped.Bip01_L_Finger0", "ValveBiped.Bip01_L_Finger01", "ValveBiped.Bip01_L_Finger02", "ValveBiped.Bip01_L_Finger1", "ValveBiped.Bip01_L_Finger11", "ValveBiped.Bip01_L_Finger12", "ValveBiped.Bip01_L_Finger2", "ValveBiped.Bip01_L_Finger21", "ValveBiped.Bip01_L_Finger22", "ValveBiped.Bip01_L_Finger3", "ValveBiped.Bip01_L_Finger31", "ValveBiped.Bip01_L_Finger32", "ValveBiped.Bip01_L_Finger4", "ValveBiped.Bip01_L_Finger41", "ValveBiped.Bip01_L_Finger42", "ValveBiped.Bip01_R_Finger0", "ValveBiped.Bip01_R_Finger01", "ValveBiped.Bip01_R_Finger02", "ValveBiped.Bip01_R_Finger1", "ValveBiped.Bip01_R_Finger11", "ValveBiped.Bip01_R_Finger12", "ValveBiped.Bip01_R_Finger2", "ValveBiped.Bip01_R_Finger21", "ValveBiped.Bip01_R_Finger22", "ValveBiped.Bip01_R_Finger3", "ValveBiped.Bip01_R_Finger31", "ValveBiped.Bip01_R_Finger32", "ValveBiped.Bip01_R_Finger4", "ValveBiped.Bip01_R_Finger41", "ValveBiped.Bip01_R_Finger42",}
 -- Initializes character info for a player model
-function VR_FBT.Init(ply)
+function vrmod_fbt.Init(ply)
 	local steamid = ply:SteamID()
-	local info = VR_FBT.characterInfo[steamid] or {}
-	VR_FBT.characterInfo[steamid] = info
+	local info = vrmod_fbt.characterInfo[steamid] or {}
+	vrmod_fbt.characterInfo[steamid] = info
 	local pmname = ply.vrmod_pm or ply:GetModel()
 	if info.modelName == pmname then return true end
 	local tmpPlayerModel = ClientsideModel(pmname)
@@ -115,8 +109,8 @@ function VR_FBT.Init(ply)
 		if v == -1 and not table.HasValue({"leftWrist", "rightWrist", "leftUlna", "rightUlna"}, k) then
 			g_VR.errorText = ply == LocalPlayer() and "Missing bone: " .. k or g_VR.errorText
 			tmpPlayerModel:Remove()
-			VR_FBT.characterInfo[steamid] = nil
-			logger.Err("FBT Init failed for %s - missing bone: %s", steamid, k)
+			vrmod_fbt.characterInfo[steamid] = nil
+			vrmod.logger.Err("FBT Init failed for %s - missing bone: %s", steamid, k)
 			return false
 		end
 	end
@@ -137,9 +131,9 @@ function VR_FBT.Init(ply)
 			parent = parent,
 			relativePos = relativePos,
 			relativeAng = relativeAng,
-			offsetAng = VR_FBT.zeroAng,
-			pos = VR_FBT.zeroVec,
-			ang = VR_FBT.zeroAng,
+			offsetAng = vrmod_fbt.zeroAng,
+			pos = vrmod_fbt.zeroVec,
+			ang = vrmod_fbt.zeroAng,
 			targetMatrix = mtx
 		}
 	end
@@ -151,18 +145,18 @@ function VR_FBT.Init(ply)
 	info.upperArmLen = (tmpPlayerModel:GetBoneMatrix(boneids.leftForearm):GetTranslation() - tmpPlayerModel:GetBoneMatrix(boneids.leftUpperArm):GetTranslation()):Length()
 	info.lowerArmLen = (tmpPlayerModel:GetBoneMatrix(boneids.leftHand):GetTranslation() - tmpPlayerModel:GetBoneMatrix(boneids.leftForearm):GetTranslation()):Length()
 	-- Default angles
-	_, info.defaultToNeutralClavicleAng = WorldToLocal(VR_FBT.zeroVec, Angle(0, 90, 90), VR_FBT.zeroVec, tmpPlayerModel:GetBoneMatrix(boneids.leftClavicle):GetAngles())
+	_, info.defaultToNeutralClavicleAng = WorldToLocal(vrmod_fbt.zeroVec, Angle(0, 90, 90), vrmod_fbt.zeroVec, tmpPlayerModel:GetBoneMatrix(boneids.leftClavicle):GetAngles())
 	info.defaultLeftFootAngles = tmpPlayerModel:GetBoneMatrix(boneids.leftFoot):GetAngles()
 	info.defaultRightFootAngles = tmpPlayerModel:GetBoneMatrix(boneids.rightFoot):GetAngles()
 	-- Build spine bend lookup tables
-	VR_FBT.BuildSpineBendTables(info, boneids, boneinfo, tmpPlayerModel)
+	vrmod_fbt.BuildSpineBendTables(info, boneids, boneinfo, tmpPlayerModel)
 	tmpPlayerModel:Remove()
-	logger.Info("FBT Init succeeded for %s (model: %s)", steamid, pmname)
+	vrmod.logger.Info("FBT Init succeeded for %s (model: %s)", steamid, pmname)
 	return true
 end
 
 -- Helper to build spine bend lookup tables
-function VR_FBT.BuildSpineBendTables(info, boneids, boneinfo)
+function vrmod_fbt.BuildSpineBendTables(info, boneids, boneinfo)
 	local degToBendRightAmount = {}
 	info.degToBendRightAmount = degToBendRightAmount
 	local degToBendForwardAmount = {}
@@ -212,7 +206,7 @@ function VR_FBT.BuildSpineBendTables(info, boneids, boneinfo)
 end
 
 -- Helper to get spine bend amount from lookup table
-function VR_FBT.GetSpineBend(tab, val)
+function vrmod_fbt.GetSpineBend(tab, val)
 	local index = math.floor(val + 91)
 	local prev = tab[index] or 0
 	local next = tab[index + 1] or prev
@@ -220,7 +214,7 @@ function VR_FBT.GetSpineBend(tab, val)
 end
 
 -- Calculates IK for a leg
-function VR_FBT.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, thighId, calfId, footId, targetPos, targetAng, defaultFootAngles, wpos, wang)
+function vrmod_fbt.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, thighId, calfId, footId, targetPos, targetAng, defaultFootAngles, wpos, wang)
 	local targetVec = (targetPos - wpos):GetNormalized()
 	local targetVecLen = (targetPos - wpos):Length()
 	local newAng = targetVec:Angle()
@@ -229,7 +223,7 @@ function VR_FBT.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, thig
 	mtx:SetForward(targetVec)
 	mtx:SetUp(targetVec:Cross(targetAng:Right()))
 	mtx:SetRight(targetVec:Cross(mtx:GetUp()))
-	local _, targetAngRelative = WorldToLocal(VR_FBT.zeroVec, mtx:GetAngles(), VR_FBT.zeroVec, newAng)
+	local _, targetAngRelative = WorldToLocal(vrmod_fbt.zeroVec, mtx:GetAngles(), vrmod_fbt.zeroVec, newAng)
 	newAng:RotateAroundAxis(targetVec, targetAngRelative.roll + 90)
 	-- Contraction
 	local a1 = math.deg(math.acos((upperLegLen * upperLegLen + targetVecLen * targetVecLen - lowerLegLen * lowerLegLen) / (2 * upperLegLen * targetVecLen)))
@@ -241,20 +235,20 @@ function VR_FBT.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, thig
 	if a23 == a23 then calfAng:RotateAroundAxis(calfAng:Up(), 180 - a23) end
 	boneinfo[calfId].overrideAng = calfAng
 	-- Foot
-	_, boneinfo[footId].overrideAng = LocalToWorld(VR_FBT.zeroVec, defaultFootAngles, VR_FBT.zeroVec, targetAng)
+	_, boneinfo[footId].overrideAng = LocalToWorld(vrmod_fbt.zeroVec, defaultFootAngles, vrmod_fbt.zeroVec, targetAng)
 end
 
 -- Calculates IK for an arm
-function VR_FBT.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, upperArmId, forearmId, handId, wristId, ulnaId, targetPos, targetAng, upperBodyAng, convarValues, isLeft)
+function vrmod_fbt.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, upperArmId, forearmId, handId, wristId, ulnaId, targetPos, targetAng, upperBodyAng, convarValues, isLeft)
 	local wpos = boneinfo[upperArmId].pos
-	local targetPosRelative = WorldToLocal(targetPos, VR_FBT.zeroAng, wpos, upperBodyAng)
+	local targetPosRelative = WorldToLocal(targetPos, vrmod_fbt.zeroAng, wpos, upperBodyAng)
 	local targetPosRelativeAng = targetPosRelative:Angle()
-	local _, newUpperArmAng = LocalToWorld(VR_FBT.zeroVec, targetPosRelativeAng, VR_FBT.zeroVec, upperBodyAng)
+	local _, newUpperArmAng = LocalToWorld(vrmod_fbt.zeroVec, targetPosRelativeAng, vrmod_fbt.zeroVec, upperBodyAng)
 	-- Arm roll
 	local rollSign = isLeft and 1 or -1
 	local rollOffset = isLeft and -90 + 30 + math.max((targetPosRelative.z + 20) * 1.5, 0) or 90 - 30 - math.max((targetPosRelative.z + 20) * 1.5, 0)
-	local _, tmp1 = LocalToWorld(VR_FBT.zeroVec, Angle(targetPosRelativeAng.pitch, 0, rollOffset), VR_FBT.zeroVec, upperBodyAng)
-	local _, tmp2 = WorldToLocal(VR_FBT.zeroVec, tmp1, VR_FBT.zeroVec, newUpperArmAng)
+	local _, tmp1 = LocalToWorld(vrmod_fbt.zeroVec, Angle(targetPosRelativeAng.pitch, 0, rollOffset), vrmod_fbt.zeroVec, upperBodyAng)
+	local _, tmp2 = WorldToLocal(vrmod_fbt.zeroVec, tmp1, vrmod_fbt.zeroVec, newUpperArmAng)
 	newUpperArmAng:RotateAroundAxis(newUpperArmAng:Forward(), rollSign < 0 and 180 + tmp2.roll or tmp2.roll)
 	-- Contraction with stretching
 	local targetVecLen = (targetPos - wpos):Length()
@@ -283,7 +277,7 @@ function VR_FBT.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, uppe
 	boneinfo[forearmId].overrideScale = armStretchScale ~= 1 and Vector(armStretchScale, 1, 1) or nil
 	-- Wrist
 	local handAngAdj = Angle(targetAng.pitch, targetAng.yaw, targetAng.roll - 90)
-	local _, handAngRelativeToForearm = WorldToLocal(VR_FBT.zeroVec, handAngAdj, VR_FBT.zeroVec, newForearmAng)
+	local _, handAngRelativeToForearm = WorldToLocal(vrmod_fbt.zeroVec, handAngAdj, vrmod_fbt.zeroVec, newForearmAng)
 	local newWristAng = Angle(newForearmAng.pitch, newForearmAng.yaw, newForearmAng.roll)
 	newWristAng:RotateAroundAxis(newWristAng:Forward(), handAngRelativeToForearm.roll)
 	if wristId ~= -1 then boneinfo[wristId].overrideAng = newWristAng end
@@ -292,20 +286,20 @@ function VR_FBT.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, uppe
 end
 
 -- Calculates clavicle adjustment
-function VR_FBT.CalculateClavicle(boneinfo, boneId, defaultToNeutralClavicleAng, clavicleLen, targetPos, wpos, wang, isLeft)
-	local _, neutralClavicleAng = LocalToWorld(VR_FBT.zeroVec, defaultToNeutralClavicleAng, wpos, wang)
+function vrmod_fbt.CalculateClavicle(boneinfo, boneId, defaultToNeutralClavicleAng, clavicleLen, targetPos, wpos, wang, isLeft)
+	local _, neutralClavicleAng = LocalToWorld(vrmod_fbt.zeroVec, defaultToNeutralClavicleAng, wpos, wang)
 	local neutralShoulderPos = wpos + neutralClavicleAng:Forward() * clavicleLen
 	local targetShoulderPos = neutralShoulderPos + (targetPos - neutralShoulderPos) * 0.15
-	local targetShoulderPosRelative = WorldToLocal(targetShoulderPos, VR_FBT.zeroAng, wpos, neutralClavicleAng)
-	local _, newClavicleAng = LocalToWorld(VR_FBT.zeroVec, targetShoulderPosRelative:Angle(), VR_FBT.zeroVec, neutralClavicleAng)
+	local targetShoulderPosRelative = WorldToLocal(targetShoulderPos, vrmod_fbt.zeroAng, wpos, neutralClavicleAng)
+	local _, newClavicleAng = LocalToWorld(vrmod_fbt.zeroVec, targetShoulderPosRelative:Angle(), vrmod_fbt.zeroVec, neutralClavicleAng)
 	boneinfo[boneId].overrideAng = newClavicleAng
 	return neutralClavicleAng
 end
 
 -- Main bone position calculation function
-function VR_FBT.CalculateBonePositions(ply)
+function vrmod_fbt.CalculateBonePositions(ply)
 	local steamid = ply:SteamID()
-	local info = VR_FBT.characterInfo[steamid]
+	local info = vrmod_fbt.characterInfo[steamid]
 	local frame = g_VR.net[steamid].lerpedFrame
 	if info.frameNumber == FrameNumber() or not frame then return end
 	info.frameNumber = FrameNumber()
@@ -331,11 +325,11 @@ function VR_FBT.CalculateBonePositions(ply)
 	local leftFootTargetPos, leftFootTargetAng = LocalToWorld(info.leftFootCalibrationPos, info.leftFootCalibrationAng, frame.leftfootPos, frame.leftfootAng)
 	local rightFootTargetPos, rightFootTargetAng = LocalToWorld(info.rightFootCalibrationPos, info.rightFootCalibrationAng, frame.rightfootPos, frame.rightfootAng)
 	-- Override pelvis
-	boneinfo[boneids.pelvis].overridePos, boneinfo[boneids.pelvis].overrideAng = LocalToWorld(VR_FBT.zeroVec, Angle(0, 90, 90), pelvisTargetPos, pelvisTargetAng)
+	boneinfo[boneids.pelvis].overridePos, boneinfo[boneids.pelvis].overrideAng = LocalToWorld(vrmod_fbt.zeroVec, Angle(0, 90, 90), pelvisTargetPos, pelvisTargetAng)
 	-- Spine rotation
 	local headVecRelative = WorldToLocal(headTargetPos, headTargetAng, pelvisTargetPos, pelvisTargetAng):GetNormalized()
-	local bendForwardAmount = VR_FBT.GetSpineBend(degToBendForwardAmount, 90 - math.deg(math.acos(headVecRelative:Dot(Vector(1, 0, 0)))))
-	local bendRightAmount = VR_FBT.GetSpineBend(degToBendRightAmount, 90 - math.deg(math.acos(headVecRelative:Dot(Vector(0, -1, 0)))))
+	local bendForwardAmount = vrmod_fbt.GetSpineBend(degToBendForwardAmount, 90 - math.deg(math.acos(headVecRelative:Dot(Vector(1, 0, 0)))))
+	local bendRightAmount = vrmod_fbt.GetSpineBend(degToBendRightAmount, 90 - math.deg(math.acos(headVecRelative:Dot(Vector(0, -1, 0)))))
 	boneinfo[boneids.spine].offsetAng = Angle(-bendForwardAmount, bendRightAmount, 0)
 	boneinfo[boneids.spine1].offsetAng = Angle(bendRightAmount, bendForwardAmount, 0)
 	boneinfo[boneids.spine2].offsetAng = Angle(bendRightAmount, bendForwardAmount, 0)
@@ -345,7 +339,7 @@ function VR_FBT.CalculateBonePositions(ply)
 	boneinfo[boneids.leftHand].overrideAng = leftHandTargetAng
 	boneinfo[boneids.rightHand].overrideAng = rightHandTargetAng + Angle(0, 0, 180)
 	-- Override head angles
-	_, boneinfo[boneids.head].overrideAng = LocalToWorld(VR_FBT.zeroVec, Angle(-80, 0, 90), VR_FBT.zeroVec, headTargetAng)
+	_, boneinfo[boneids.head].overrideAng = LocalToWorld(vrmod_fbt.zeroVec, Angle(-80, 0, 90), vrmod_fbt.zeroVec, headTargetAng)
 	-- Finger offsets
 	for k, v in ipairs(fingerboneids) do
 		if boneinfo[v] then boneinfo[v].offsetAng = LerpAngle(frame["finger" .. math.floor((k - 1) / 3 + 1)], g_VR.openHandAngles[k], g_VR.closedHandAngles[k]) end
@@ -357,25 +351,25 @@ function VR_FBT.CalculateBonePositions(ply)
 		local parentInfo = boneinfo[bi.parent] or bi
 		local wpos, wang = LocalToWorld(bi.relativePos, bi.relativeAng + bi.offsetAng, parentInfo.pos, parentInfo.ang)
 		-- Left leg IK
-		if i == boneids.leftThigh then VR_FBT.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, boneids.leftThigh, boneids.leftCalf, boneids.leftFoot, leftFootTargetPos, leftFootTargetAng, defaultLeftFootAngles, wpos, wang) end
+		if i == boneids.leftThigh then vrmod_fbt.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, boneids.leftThigh, boneids.leftCalf, boneids.leftFoot, leftFootTargetPos, leftFootTargetAng, defaultLeftFootAngles, wpos, wang) end
 		-- Right leg IK
-		if i == boneids.rightThigh then VR_FBT.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, boneids.rightThigh, boneids.rightCalf, boneids.rightFoot, rightFootTargetPos, rightFootTargetAng, defaultRightFootAngles, wpos, wang) end
+		if i == boneids.rightThigh then vrmod_fbt.CalculateLegIK(boneinfo, boneids, upperLegLen, lowerLegLen, boneids.rightThigh, boneids.rightCalf, boneids.rightFoot, rightFootTargetPos, rightFootTargetAng, defaultRightFootAngles, wpos, wang) end
 		-- Left clavicle
 		if i == boneids.leftClavicle then
-			local neutralClavicleAng = VR_FBT.CalculateClavicle(boneinfo, boneids.leftClavicle, defaultToNeutralClavicleAng, clavicleLen, leftHandTargetPos, wpos, wang, true)
-			if boneids.leftClavicle < boneids.rightClavicle then _, upperBodyAng = LocalToWorld(VR_FBT.zeroVec, Angle(-90, 0, -90), VR_FBT.zeroVec, neutralClavicleAng) end
+			local neutralClavicleAng = vrmod_fbt.CalculateClavicle(boneinfo, boneids.leftClavicle, defaultToNeutralClavicleAng, clavicleLen, leftHandTargetPos, wpos, wang, true)
+			if boneids.leftClavicle < boneids.rightClavicle then _, upperBodyAng = LocalToWorld(vrmod_fbt.zeroVec, Angle(-90, 0, -90), vrmod_fbt.zeroVec, neutralClavicleAng) end
 		end
 
 		-- Right clavicle
 		if i == boneids.rightClavicle then
-			local neutralClavicleAng = VR_FBT.CalculateClavicle(boneinfo, boneids.rightClavicle, defaultToNeutralClavicleAng, clavicleLen, rightHandTargetPos, wpos, wang, false)
-			if boneids.rightClavicle < boneids.leftClavicle then _, upperBodyAng = LocalToWorld(VR_FBT.zeroVec, Angle(90, 0, -90), VR_FBT.zeroVec, neutralClavicleAng) end
+			local neutralClavicleAng = vrmod_fbt.CalculateClavicle(boneinfo, boneids.rightClavicle, defaultToNeutralClavicleAng, clavicleLen, rightHandTargetPos, wpos, wang, false)
+			if boneids.rightClavicle < boneids.leftClavicle then _, upperBodyAng = LocalToWorld(vrmod_fbt.zeroVec, Angle(90, 0, -90), vrmod_fbt.zeroVec, neutralClavicleAng) end
 		end
 
 		-- Left arm IK
-		if i == boneids.leftUpperArm then VR_FBT.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, boneids.leftUpperArm, boneids.leftForearm, boneids.leftHand, boneids.leftWrist, boneids.leftUlna, leftHandTargetPos, leftHandTargetAng, upperBodyAng, VR_FBT.convarValues, true) end
+		if i == boneids.leftUpperArm then vrmod_fbt.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, boneids.leftUpperArm, boneids.leftForearm, boneids.leftHand, boneids.leftWrist, boneids.leftUlna, leftHandTargetPos, leftHandTargetAng, upperBodyAng, vrmod_fbt.convarValues, true) end
 		-- Right arm IK
-		if i == boneids.rightUpperArm then VR_FBT.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, boneids.rightUpperArm, boneids.rightForearm, boneids.rightHand, boneids.rightWrist, boneids.rightUlna, rightHandTargetPos, rightHandTargetAng + Angle(0, 0, 180), upperBodyAng, VR_FBT.convarValues, false) end
+		if i == boneids.rightUpperArm then vrmod_fbt.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, boneids.rightUpperArm, boneids.rightForearm, boneids.rightHand, boneids.rightWrist, boneids.rightUlna, rightHandTargetPos, rightHandTargetAng + Angle(0, 0, 180), upperBodyAng, vrmod_fbt.convarValues, false) end
 		-- Apply overrides and build matrix
 		wpos = bi.overridePos or wpos
 		wang = bi.overrideAng or wang
@@ -394,7 +388,7 @@ function VR_FBT.CalculateBonePositions(ply)
 end
 
 -- Performs FBT calibration for local player
-function VR_FBT.Calibrate()
+function vrmod_fbt.Calibrate()
 	local ply = LocalPlayer()
 	ply.RenderOverride = function() end
 	local calibrationModel = ClientsideModel(ply.vrmod_pm or ply:GetModel())
@@ -410,8 +404,8 @@ function VR_FBT.Calibrate()
 
 	hook.Add("VRMod_Input", "fbt_cal_input", function(action, pressed)
 		if action ~= "boolean_reload" or not pressed then return end
-		if VR_FBT.Init(ply) == false then return end
-		local boneids = VR_FBT.characterInfo[ply:SteamID()].boneids
+		if vrmod_fbt.Init(ply) == false then return end
+		local boneids = vrmod_fbt.characterInfo[ply:SteamID()].boneids
 		calibrationModel:SetupBones()
 		net.Start("vrmod_fbt_cal")
 		net.WriteBool(false)
@@ -435,7 +429,7 @@ function VR_FBT.Calibrate()
 		-- Setup toggle hooks
 		hook.Add("VRMod_Input", "fbt_walk_toggle", function(action, pressed)
 			if action ~= "boolean_walk" or ply:InVehicle() then return end
-			if not VR_FBT.convarValues.characterIK then -- Respect disable animations
+			if not vrmod_fbt.convarValues.characterIK then -- Respect disable animations
 				return
 			end
 
@@ -456,17 +450,17 @@ function VR_FBT.Calibrate()
 			net.SendToServer()
 		end)
 
-		logger.Info("FBT calibration completed")
+		vrmod.logger.Info("FBT calibration completed")
 	end)
 end
 
 -- Starts FBT for a player
-function VR_FBT.Start(ply)
+function vrmod_fbt.Start(ply)
 	local steamid = ply:SteamID()
-	if not g_VR.net[steamid] or VR_FBT.Init(ply) == false then return end
-	local info = VR_FBT.characterInfo[steamid]
+	if not g_VR.net[steamid] or vrmod_fbt.Init(ply) == false then return end
+	local info = vrmod_fbt.characterInfo[steamid]
 	if not info.headCalibrationPos then
-		logger.Info("FBT Start: no calibration data, requesting from server...")
+		vrmod.logger.Info("FBT Start: no calibration data, requesting from server...")
 		net.Start("vrmod_fbt_cal")
 		net.WriteBool(true)
 		net.WriteEntity(ply)
@@ -478,7 +472,7 @@ function VR_FBT.Start(ply)
 	g_VR.fbtActive[steamid] = true
 	if info.fbtBoneCallback then ply:RemoveCallback("BuildBonePositions", info.fbtBoneCallback) end
 	info.fbtBoneCallback = ply:AddCallback("BuildBonePositions", function(ent, numbones)
-		VR_FBT.CalculateBonePositions(ply)
+		vrmod_fbt.CalculateBonePositions(ply)
 		local boneinfo = info.boneinfo
 		for i = 0, info.boneCount - 1 do
 			if ply:GetBoneMatrix(i) then ply:SetBoneMatrix(i, boneinfo[i].targetMatrix) end
@@ -489,18 +483,18 @@ function VR_FBT.Start(ply)
 		hook.Add("PrePlayerDraw", "fbt_hide_head", function(player)
 			if player ~= ply then return end
 			local eyePos = EyePos()
-			ply:ManipulateBoneScale(info.boneids.head, (eyePos == g_VR.eyePosLeft or eyePos == g_VR.eyePosRight) and ply:GetViewEntity() == ply and VR_FBT.zeroVec or Vector(1, 1, 1))
+			ply:ManipulateBoneScale(info.boneids.head, (eyePos == g_VR.eyePosLeft or eyePos == g_VR.eyePosRight) and ply:GetViewEntity() == ply and vrmod_fbt.zeroVec or Vector(1, 1, 1))
 		end)
 	end
 
-	logger.Info("FBT started for %s", steamid)
+	vrmod.logger.Info("FBT started for %s", steamid)
 end
 
 -- Stops FBT for a player
-function VR_FBT.Stop(ply)
+function vrmod_fbt.Stop(ply)
 	local steamid = ply:SteamID()
 	if not g_VR.fbtActive or not g_VR.fbtActive[steamid] then return end
-	local info = VR_FBT.characterInfo[steamid]
+	local info = vrmod_fbt.characterInfo[steamid]
 	if info and info.fbtBoneCallback then
 		ply:RemoveCallback("BuildBonePositions", info.fbtBoneCallback)
 		info.fbtBoneCallback = nil
@@ -512,41 +506,48 @@ function VR_FBT.Stop(ply)
 	end
 
 	g_VR.fbtActive[steamid] = nil
-	logger.Info("FBT stopped for %s", steamid)
+	vrmod.logger.Info("FBT stopped for %s", steamid)
 end
 
--- Quick menu integration
 hook.Add("VRMod_OpenQuickMenu", "fbt_quickmenu", function()
 	vrmod.RemoveInGameMenuItem("Calibrate Full-body Tracking")
-	if g_VR.sixPoints then vrmod.AddInGameMenuItem("Calibrate Full-body Tracking", 5, 0, VR_FBT.Calibrate) end
+	vrmod.RemoveInGameMenuItem("Disable Full-body Tracking")
+	if not g_VR.sixPoints then return end
+	local steamid = LocalPlayer():SteamID()
+	local active = g_VR.fbtActive and g_VR.fbtActive[steamid] or false
+	if active then
+		vrmod.AddInGameMenuItem("Disable Full-body Tracking", 5, 0, function() vrmod_fbt.Stop(LocalPlayer()) end)
+	else
+		vrmod.AddInGameMenuItem("Calibrate Full-body Tracking", 5, 0, vrmod_fbt.Calibrate)
+	end
 end)
 
 -- Net receivers
 net.Receive("vrmod_fbt_cal", function()
 	local ply = net.ReadEntity()
 	local steamid = ply:SteamID()
-	local info = VR_FBT.characterInfo[steamid] or {}
-	VR_FBT.characterInfo[steamid] = info
+	local info = vrmod_fbt.characterInfo[steamid] or {}
+	vrmod_fbt.characterInfo[steamid] = info
 	info.headCalibrationPos, info.headCalibrationAng = net.ReadVector(), net.ReadAngle()
 	info.waistCalibrationPos, info.waistCalibrationAng = net.ReadVector(), net.ReadAngle()
 	info.leftFootCalibrationPos, info.leftFootCalibrationAng = net.ReadVector(), net.ReadAngle()
 	info.rightFootCalibrationPos, info.rightFootCalibrationAng = net.ReadVector(), net.ReadAngle()
-	VR_FBT.Start(ply)
+	vrmod_fbt.Start(ply)
 end)
 
 net.Receive("vrmod_fbt_toggle", function()
 	local ply = net.ReadEntity()
 	if not IsValid(ply) then return end
 	if net.ReadBool() then
-		VR_FBT.Start(ply)
+		vrmod_fbt.Start(ply)
 	else
-		VR_FBT.Stop(ply)
+		vrmod_fbt.Stop(ply)
 	end
 end)
 
 -- VR exit cleanup
 hook.Add("VRMod_Exit", "fbt_cleanup", function(ply, steamid)
-	VR_FBT.Stop(ply)
+	vrmod_fbt.Stop(ply)
 	if ply == LocalPlayer() then
 		hook.Remove("VRMod_Input", "fbt_walk_toggle")
 		hook.Remove("VRMod_EnterVehicle", "fbt_enter_vehicle")
@@ -554,4 +555,4 @@ hook.Add("VRMod_Exit", "fbt_cleanup", function(ply, steamid)
 	end
 end)
 
-logger.Info("Full-body tracking module loaded")
+vrmod.logger.Info("Full-body tracking module loaded")
