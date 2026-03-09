@@ -497,9 +497,12 @@ if CLIENT then
         for i = 1, #g_VR.menuItems do
             if g_VR.menuItems[i].name == name then
                 table.remove(g_VR.menuItems, i)
-                return
+                break
             end
         end
+
+        -- also remove from backup so it won't be restored
+        if g_VR.menuBackup then g_VR.menuBackup[name] = nil end
     end
 
     function vrmod.GetLeftEyePos()
