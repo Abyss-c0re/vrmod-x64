@@ -57,12 +57,9 @@ This build focuses on **optimization** by merging essential features from semi-o
 2. Subscribe to the Workshop addon:
    [Steam Workshop – VRMod](https://steamcommunity.com/sharedfiles/filedetails/?id=3442302711)
 
-   **OR**
+**OR**
 
    Clone or download this repository manually:
-
    - Rename the folder to `vrmod` (do **not** use dashes `-`)
    - Place it in:
      `./GarrysMod/garrysmod/addons/vrmod`
-
----
