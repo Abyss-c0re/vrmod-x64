@@ -20,6 +20,19 @@ if CLIENT then
         return g_VR.net[sid]
     end
 
+    -- smoothing helper
+    local function SmoothValue(oldVal, newVal, factor)
+        if not oldVal then return newVal end
+        if not factor or factor <= 0 then return newVal end
+        if oldVal.Lerp then
+            -- Vector or Angle
+            return LerpVector(factor, oldVal, newVal)
+        else
+            -- Fallback for numbers
+            return Lerp(factor, oldVal, newVal)
+        end
+    end
+
     function vrmod.GetStartupError()
         local error = nil
         local moduleFile = nil
@@ -174,17 +187,112 @@ if CLIENT then
         return Vector(), Angle(), Vector()
     end
 
-    -- smoothing helper
-    local function SmoothValue(oldVal, newVal, factor)
-        if not oldVal then return newVal end
-        if not factor or factor <= 0 then return newVal end
-        if oldVal.Lerp then
-            -- Vector or Angle
-            return LerpVector(factor, oldVal, newVal)
-        else
-            -- Fallback for numbers
-            return Lerp(factor, oldVal, newVal)
-        end
+    -- Waist (often called "hip" in other VR contexts)
+    function vrmod.GetWaistPos(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_waist then return Vector() end
+        return g_VR.tracking.pose_waist.pos or Vector()
+    end
+
+    function vrmod.GetWaistAng(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_waist then return Angle() end
+        return g_VR.tracking.pose_waist.ang or Angle()
+    end
+
+    function vrmod.GetWaistPose(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_waist then return Vector(), Angle() end
+        return g_VR.tracking.pose_waist.pos or Vector(), g_VR.tracking.pose_waist.ang or Angle()
+    end
+
+    -- If velocities are provided on the waist pose (many FBT setups include them)
+    function vrmod.GetWaistVelocity()
+        return g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_waist and g_VR.tracking.pose_waist.vel or Vector()
+    end
+
+    function vrmod.GetWaistAngularVelocity()
+        return g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_waist and g_VR.tracking.pose_waist.angvel or Angle()
+    end
+
+    -- Optional relative (to HMD)
+    function vrmod.GetWaistVelocityRelative()
+        if not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_waist or not g_VR.tracking.hmd then return Vector() end
+        return (g_VR.tracking.pose_waist.vel or Vector()) - (g_VR.tracking.hmd.vel or Vector())
+    end
+
+    -- Left Foot
+    function vrmod.GetLeftFootPos(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_leftfoot then return Vector() end
+        return g_VR.tracking.pose_leftfoot.pos or Vector()
+    end
+
+    function vrmod.GetLeftFootAng(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_leftfoot then return Angle() end
+        return g_VR.tracking.pose_leftfoot.ang or Angle()
+    end
+
+    function vrmod.GetLeftFootPose(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_leftfoot then return Vector(), Angle() end
+        return g_VR.tracking.pose_leftfoot.pos or Vector(), g_VR.tracking.pose_leftfoot.ang or Angle()
+    end
+
+    function vrmod.GetLeftFootVelocity()
+        return g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_leftfoot.vel or Vector()
+    end
+
+    function vrmod.GetLeftFootAngularVelocity()
+        return g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_leftfoot.angvel or Angle()
+    end
+
+    function vrmod.GetLeftFootVelocityRelative()
+        if not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_leftfoot or not g_VR.tracking.hmd then return Vector() end
+        return (g_VR.tracking.pose_leftfoot.vel or Vector()) - (g_VR.tracking.hmd.vel or Vector())
+    end
+
+    function vrmod.GetLeftFootVelocities()
+        if g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_leftfoot then return g_VR.tracking.pose_leftfoot.vel or Vector(), g_VR.tracking.pose_leftfoot.angvel or Angle(), vrmod.GetLeftFootVelocityRelative() end
+        return Vector(), Angle(), Vector()
+    end
+
+    -- Right Foot (symmetric to left)
+    function vrmod.GetRightFootPos(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_rightfoot then return Vector() end
+        return g_VR.tracking.pose_rightfoot.pos or Vector()
+    end
+
+    function vrmod.GetRightFootAng(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_rightfoot then return Angle() end
+        return g_VR.tracking.pose_rightfoot.ang or Angle()
+    end
+
+    function vrmod.GetRightFootPose(ply)
+        local t = getPlayerVRData(ply)
+        if not t or not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_rightfoot then return Vector(), Angle() end
+        return g_VR.tracking.pose_rightfoot.pos or Vector(), g_VR.tracking.pose_rightfoot.ang or Angle()
+    end
+
+    function vrmod.GetRightFootVelocity()
+        return g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_rightfoot and g_VR.tracking.pose_rightfoot.vel or Vector()
+    end
+
+    function vrmod.GetRightFootAngularVelocity()
+        return g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_rightfoot and g_VR.tracking.pose_rightfoot.angvel or Angle()
+    end
+
+    function vrmod.GetRightFootVelocityRelative()
+        if not g_VR.sixPoints or not g_VR.tracking or not g_VR.tracking.pose_rightfoot or not g_VR.tracking.hmd then return Vector() end
+        return (g_VR.tracking.pose_rightfoot.vel or Vector()) - (g_VR.tracking.hmd.vel or Vector())
+    end
+
+    function vrmod.GetRightFootVelocities()
+        if g_VR.sixPoints and g_VR.tracking and g_VR.tracking.pose_rightfoot then return g_VR.tracking.pose_rightfoot.vel or Vector(), g_VR.tracking.pose_rightfoot.angvel or Angle(), vrmod.GetRightFootVelocityRelative() end
+        return Vector(), Angle(), Vector()
     end
 
     function vrmod.SetLeftHandPose(pos, ang, smoothing)
