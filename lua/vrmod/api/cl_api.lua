@@ -58,8 +58,6 @@ if CLIENT then
             error = "Module update required.\nRun the installer or re-download from the workshop.\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
         elseif g_VR.moduleVersion > latestVersion then
             print("[VRMOD] Warning: Module version is newer than tested. Installed: v" .. g_VR.moduleVersion .. " | Required: v" .. requiredVersion .. " | Addon version: " .. vrmod.GetVersion() .. " | Most features should work, but some bugs may exist.")
-        elseif g_VR.active then
-            error = "VR already running."
         elseif VRMOD_IsHMDPresent and not VRMOD_IsHMDPresent() then
             error = "VR headset not detected."
         end
