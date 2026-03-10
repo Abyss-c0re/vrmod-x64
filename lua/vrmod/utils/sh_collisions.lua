@@ -4,8 +4,8 @@ vrmod.utils = vrmod.utils or {}
 local cl_effectmodel = CreateClientConVar("vrmod_melee_fist_collisionmodel", "models/props_junk/PopCan01a.mdl", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
 --GLOBALS
 vrmod.SMOOTHING_FACTOR = 0.98
-vrmod.DEFAULT_RADIUS = 2.75
-vrmod.DEFAULT_REACH = 5.5
+vrmod.DEFAULT_RADIUS = 1.69
+vrmod.DEFAULT_REACH = 5.0
 vrmod.DEFAULT_MINS = Vector(-0.75, -0.75, -1.25)
 vrmod.DEFAULT_MAXS = Vector(0.75, 0.75, 11)
 vrmod.DEFAULT_ANGLES = Angle(0, 0, 0)
@@ -461,17 +461,43 @@ function vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
     return adjustedPos
 end
 
-local function IsClimbingGripActive()
-    local hooks = hook.GetTable()
-    if not hooks["VRMod_Input"] then return false end
-    local fn = hooks["VRMod_Input"]["vrmod_brush_climbing_inputcache"]
-    if not fn then return false end
-    for i = 1, 10 do
-        local name, value = debug.getupvalue(fn, i)
-        if not name then break end
-        if name == "liveInput" and istable(value) then if value["boolean_left_pickup"] or value["boolean_right_pickup"] then return true end end
+local climbHook
+local liveInputIndex
+local cachedLeft = false
+local cachedRight = false
+local function UpdateClimbCache()
+    local hooks = hook.GetTable()["VRMod_Input"]
+    if not hooks then return end
+    local fn = hooks["vrmod_brush_climbing_inputcache"]
+    if not fn then
+        climbHook = nil
+        return
     end
-    return false
+
+    -- If hook changed or first time
+    if fn ~= climbHook then
+        climbHook = fn
+        liveInputIndex = nil
+        for i = 1, 20 do
+            local name, val = debug.getupvalue(fn, i)
+            if not name then break end
+            if name == "liveInput" and istable(val) then
+                liveInputIndex = i
+                break
+            end
+        end
+    end
+
+    if liveInputIndex then
+        local _, input = debug.getupvalue(climbHook, liveInputIndex)
+        cachedLeft = input.boolean_left_pickup or false
+        cachedRight = input.boolean_right_pickup or false
+    end
+end
+
+hook.Add("Think", "vrmod_climb_cache_update", function() UpdateClimbCache() end)
+local function GetClimbingGripState()
+    return cachedLeft, cachedRight
 end
 
 function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
@@ -481,19 +507,16 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
         return
     end
 
-    -- Disable collisions if player is gripping a wall (climbing)
-    if IsClimbingGripActive() then
-        vrmod._collisionNearby = false
-        return
-    end
-
+    local leftGrip, rightGrip = GetClimbingGripState()
     local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
-    local leftNearby = SphereCollidesWithWorld(leftPos, 30)
-    local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
+    local leftNearby = not leftGrip and SphereCollidesWithWorld(leftPos, 30)
+    local rightNearby = not rightGrip and SphereCollidesWithWorld(rightPos, bigRadius)
     vrmod._collisionNearby = leftNearby or rightNearby
 end
 
 function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, reach)
+    local leftGrip, rightGrip = GetClimbingGripState()
+    local gripping = hand == "left" and leftGrip or hand == "right" and rightGrip
     local shapeMins = mins or Vector(-radius, -radius, -radius)
     local shapeMaxs = maxs or Vector(radius, radius, radius)
     ang = ang or Angle(0, 0, 0) -- Fallback to zero angle
@@ -511,7 +534,7 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
     end
 
     local pushOutPos = pos
-    if isClipped then
+    if isClipped and not gripping then
         if lastNonClippedPos[hand] then
             pushOutPos = lastNonClippedPos[hand]
         else
@@ -727,7 +750,7 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                 local plyPos = g_VR.tracking.hmd.pos or Vector()
                 if shape.pushOutPos and type(shape.pushOutPos) == "Vector" and IsValid(ply) then
                     local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
-                    if distanceSqr > 500 then
+                    if distanceSqr > 360 then
                         lastNonClippedPos[hand] = nil
                         lastNonClippedNormal[hand] = nil
                         cachedPushOutPos[hand] = nil
@@ -735,7 +758,7 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                     else
                         local penetrationVec = pos - shape.pushOutPos
                         local penetrationDepth = penetrationVec:Dot(normal)
-                        local correctionFactor = 2
+                        local correctionFactor = 1.15
                         if absX > absY and absX > absZ and absX > 0.45 then
                             corrected.x = useLastNonClipped and lastNonClippedPos[hand].x or shape.pushOutPos.x + normal.x * penetrationDepth * correctionFactor
                         elseif absY > absX and absY > absZ and absY > 0.45 then
