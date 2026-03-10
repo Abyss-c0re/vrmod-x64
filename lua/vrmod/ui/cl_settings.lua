@@ -15,7 +15,7 @@ function VRUtilOpenMenu()
 		tmp:SetWrap(true)
 		tmp:SetSize(250, 100)
 		tmp:SetAutoStretchVertical(true)
-		tmp:SetFont("vrmod_Trebuchet24")
+		tmp:SetFont("Trebuchet24") 
 		function tmp:PerformLayout()
 			tmp:Center()
 		end

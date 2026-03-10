@@ -17,7 +17,7 @@ local slotNames = {
 }
 
 -- Fonts
-local defFont = "vrmod_Trebuchet24"
+local defFont = "Trebuchet24"
 surface.CreateFont("vrmod_font_normal", {
 	font = defFont,
 	size = 20,
