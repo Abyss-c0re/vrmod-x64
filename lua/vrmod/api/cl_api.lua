@@ -9,6 +9,11 @@ local latestModuleVersion = 23
 g_VR = g_VR or {}
 vrmod = vrmod or {}
 local convars = vrmod.GetConvars()
+local EmptyHandsWeapons = {
+    ["weapon_vrmod_empty"] = true,
+    ["vr_spooderman"] = true,
+}
+
 if CLIENT then
     g_VR.net = g_VR.net or {}
     g_VR.viewModelInfo = g_VR.viewModelInfo or {}
@@ -74,7 +79,8 @@ if CLIENT then
 
     function vrmod.UsingEmptyHands(ply)
         local wep = ply and ply:GetActiveWeapon() or LocalPlayer():GetActiveWeapon()
-        return IsValid(wep) and wep:GetClass() == "weapon_vrmod_empty" or false
+        if not IsValid(wep) then return false end
+        return EmptyHandsWeapons[wep:GetClass()] or false
     end
 
     function vrmod.GetHeldEntity(ply, hand)

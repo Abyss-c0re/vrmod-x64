@@ -1,5 +1,10 @@
 g_VR = g_VR or {}
 vrmod = vrmod or {}
+local EmptyHandsWeapons = {
+    ["weapon_vrmod_empty"] = true,
+    ["vr_spooderman"] = true,
+    -- add more here if needed
+}
 if SERVER then
     vrmod.HandVelocityCache = vrmod.HandVelocityCache or {}
     function vrmod.NetReceiveLimited(msgName, maxCountPerSec, maxLen, callback)
@@ -23,9 +28,9 @@ if SERVER then
     end
 
     function vrmod.UsingEmptyHands(ply)
-        if not IsValid(ply) then return end
-        local wep = ply:GetActiveWeapon()
-        return IsValid(wep) and wep:GetClass() == "weapon_vrmod_empty" or false
+        local wep = ply and ply:GetActiveWeapon() or LocalPlayer():GetActiveWeapon()
+        if not IsValid(wep) then return false end
+        return EmptyHandsWeapons[wep:GetClass()] or false
     end
 
     function vrmod.GetHeldEntity(ply, hand)
