@@ -65,7 +65,14 @@ function g_VR.MenuOpen()
 			local x, y = items[i].slot, items[i].actualSlotPos
 			draw.RoundedBox(8, x * (buttonWidth + gap), 230 + y * (buttonHeight + gap), buttonWidth, buttonHeight, Color(0, 0, 0, hoveredItem == i and 200 or 128))
 			local item = g_VR.menuItems[items[i].index]
-			local label = hoveredItem == i and item.hint or item.name -- Use hint if hovered
+			local label
+			if hoveredItem == i and item.hint then
+				label = item.hint
+			else
+				label = item.name
+			end
+
+			label = tostring(label or "")
 			local explosion = string.Explode(" ", label, false)
 			for j = 1, #explosion do
 				draw.SimpleText(explosion[j], "HudSelectionText", buttonWidth / 2 + x * (buttonWidth + gap), 230 + buttonHeight / 2 + y * (buttonHeight + gap) - (#explosion * 6 - 6 - (j - 1) * 12), Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
@@ -80,16 +87,46 @@ function g_VR.MenuClose()
 	VRUtilMenuClose("miscmenu")
 end
 
-hook.Add("Think", "RestoreVRMenuItems", function()
-	for name, data in pairs(g_VR.menuBackup) do
+local function AddMenuItemInternal(name, slot, slotpos, func, forceSlot, hint)
+	g_VR.menuItems = g_VR.menuItems or {}
+	-- Avoid duplicates
+	for _, item in ipairs(g_VR.menuItems) do
+		if item.name == name and item.func == func then return end
+	end
+
+	table.insert(g_VR.menuItems, {
+		name = name,
+		slot = slot,
+		slotPos = slotpos,
+		func = func, -- always string or nil
+		internal = forceSlot == true,
+		hint = hint, -- track forced slot
+	})
+end
+
+-- Restore missing items safely
+local restoreCooldown = 1 -- seconds
+local lastRestore = 0
+hook.Add("Think", "SafeRestoreVRMenuItems", function()
+	if CurTime() - lastRestore < restoreCooldown then return end
+	lastRestore = CurTime()
+	for id, data in pairs(g_VR.menuBackup) do
 		local exists = false
 		for _, item in ipairs(g_VR.menuItems) do
-			if item.name == name then
+			if item.name == data.name and item.func == data.func then
 				exists = true
 				break
 			end
 		end
 
-		if not exists then vrmod.AddInGameMenuItem(name, data.slot, data.slotPos, data.func, data.internal) end
+		if not exists then
+			-- revive both forced slot and hint safely
+			AddMenuItemInternal(data.name, data.slot, data.slotPos, data.func, data.internal, data.hint)
+		end
 	end
+end)
+
+hook.Add("VRMod_Exit", "PurgeMenuBackup", function()
+	g_VR = g_VR or {}
+	g_VR.menuBackup = {}
 end)

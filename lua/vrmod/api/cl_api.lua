@@ -562,17 +562,22 @@ if CLIENT then
         g_VR.originAngle = ang
     end
 
-    -- AddInGameMenuItem with optional forceSlot argument
+    local function GetMenuItemID(name, func)
+        return name .. "_" .. tostring(func)
+    end
+
+    -- Add or restore a menu item
     function vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot, hint)
         g_VR.menuItems = g_VR.menuItems or {}
         g_VR.menuBackup = g_VR.menuBackup or {}
-        local occupied = {}
-        for _, item in ipairs(g_VR.menuItems) do
-            occupied[item.slot] = occupied[item.slot] or {}
-            occupied[item.slot][item.slotPos] = true
-        end
-
+        -- Determine slot if not forced
         if not forceSlot then
+            local occupied = {}
+            for _, item in ipairs(g_VR.menuItems) do
+                occupied[item.slot] = occupied[item.slot] or {}
+                occupied[item.slot][item.slotPos] = true
+            end
+
             local found = false
             for s = 0, 10 do
                 occupied[s] = occupied[s] or {}
@@ -589,9 +594,7 @@ if CLIENT then
             end
         end
 
-        occupied[slot] = occupied[slot] or {}
-        occupied[slot][slotpos] = true
-        -- Avoid duplicate exact items
+        -- Avoid exact duplicates
         for _, item in ipairs(g_VR.menuItems) do
             if item.name == name and item.func == func then return end
         end
@@ -601,27 +604,31 @@ if CLIENT then
             slot = slot,
             slotPos = slotpos,
             func = func,
-            hint = hint -- new optional field
+            hint = hint
         })
 
-        g_VR.menuBackup[name] = g_VR.menuBackup[name] or {}
-        g_VR.menuBackup[name].slot = slot
-        g_VR.menuBackup[name].slotPos = slotpos
-        g_VR.menuBackup[name].func = func
-        g_VR.menuBackup[name].internal = forceSlot == true
-        g_VR.menuBackup[name].hint = hint
+        -- Store in backup with unique ID
+        local id = GetMenuItemID(name, func)
+        g_VR.menuBackup[id] = {
+            name = name,
+            slot = slot,
+            slotPos = slotpos,
+            func = func,
+            internal = forceSlot == true,
+            hint = hint
+        }
     end
 
-    function vrmod.RemoveInGameMenuItem(name)
-        for i = 1, #g_VR.menuItems do
-            if g_VR.menuItems[i].name == name then
-                table.remove(g_VR.menuItems, i)
-                break
-            end
+    -- Remove menu item, optionally permanently
+    function vrmod.RemoveInGameMenuItem(name, func, permanent)
+        for i = #g_VR.menuItems, 1, -1 do
+            if g_VR.menuItems[i].name == name and (not func or g_VR.menuItems[i].func == func) then table.remove(g_VR.menuItems, i) end
         end
 
-        -- also remove from backup so it won't be restored
-        if g_VR.menuBackup then g_VR.menuBackup[name] = nil end
+        if permanent then
+            local id = GetMenuItemID(name, func)
+            g_VR.menuBackup[id] = nil
+        end
     end
 
     function vrmod.GetLeftEyePos()

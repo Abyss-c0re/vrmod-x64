@@ -461,43 +461,10 @@ function vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
     return adjustedPos
 end
 
-local climbHook
-local liveInputIndex
-local cachedLeft = false
-local cachedRight = false
-local function UpdateClimbCache()
-    local hooks = hook.GetTable()["VRMod_Input"]
-    if not hooks then return end
-    local fn = hooks["vrmod_brush_climbing_inputcache"]
-    if not fn then
-        climbHook = nil
-        return
-    end
-
-    -- If hook changed or first time
-    if fn ~= climbHook then
-        climbHook = fn
-        liveInputIndex = nil
-        for i = 1, 20 do
-            local name, val = debug.getupvalue(fn, i)
-            if not name then break end
-            if name == "liveInput" and istable(val) then
-                liveInputIndex = i
-                break
-            end
-        end
-    end
-
-    if liveInputIndex then
-        local _, input = debug.getupvalue(climbHook, liveInputIndex)
-        cachedLeft = input.boolean_left_pickup or false
-        cachedRight = input.boolean_right_pickup or false
-    end
-end
-
-hook.Add("Think", "vrmod_climb_cache_update", function() UpdateClimbCache() end)
-local function GetClimbingGripState()
-    return cachedLeft, cachedRight
+function vrmod.utils.GetClimbingGripState()
+    local climb = vrmod and vrmod.climbing
+    if not climb or not climb.IsHoldingLeft or not climb.IsHoldingRight then return false, false end
+    return climb.IsHoldingLeft(), climb.IsHoldingRight()
 end
 
 function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
@@ -507,7 +474,7 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
         return
     end
 
-    local leftGrip, rightGrip = GetClimbingGripState()
+    local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
     local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
     local leftNearby = not leftGrip and SphereCollidesWithWorld(leftPos, 30)
     local rightNearby = not rightGrip and SphereCollidesWithWorld(rightPos, bigRadius)
@@ -515,7 +482,7 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
 end
 
 function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, reach)
-    local leftGrip, rightGrip = GetClimbingGripState()
+    local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
     local gripping = hand == "left" and leftGrip or hand == "right" and rightGrip
     local shapeMins = mins or Vector(-radius, -radius, -radius)
     local shapeMaxs = maxs or Vector(radius, radius, radius)
