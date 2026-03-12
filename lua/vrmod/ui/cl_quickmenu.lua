@@ -80,16 +80,24 @@ function g_VR.MenuClose()
 	VRUtilMenuClose("miscmenu")
 end
 
-hook.Add("Think", "RestoreVRMenuItems", function()
-	for name, data in pairs(g_VR.menuBackup) do
+-- Restore missing items safely
+local restoreCooldown = 1 -- seconds
+local lastRestore = 0
+hook.Add("Think", "SafeRestoreVRMenuItems", function()
+	if CurTime() - lastRestore < restoreCooldown then return end
+	lastRestore = CurTime()
+	for id, data in pairs(g_VR.menuBackup) do
 		local exists = false
 		for _, item in ipairs(g_VR.menuItems) do
-			if item.name == name then
+			if item.name == data.name and item.func == data.func then
 				exists = true
 				break
 			end
 		end
 
-		if not exists then vrmod.AddInGameMenuItem(name, data.slot, data.slotPos, data.func, data.internal) end
+		if not exists then
+			-- Restore to original slot
+			vrmod.AddInGameMenuItem(data.name, data.slot, data.slotPos, data.func, true, data.hint)
+		end
 	end
 end)
