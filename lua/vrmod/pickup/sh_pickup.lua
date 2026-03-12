@@ -79,44 +79,6 @@ if CLIENT then
 		if #haloTargetsRight > 0 then halo.Add(haloTargetsRight, Color(0, 255, 255), 1, 1, 1, true, true) end
 	end)
 
-	hook.Add("Think", "vrmod_climbing_hook_blocker", function()
-		-- Only proceed if the convar exists and is enabled
-		local cv = GetConVar("vrmod_brushclimb_enable")
-		if not cv or not cv:GetBool() then return end
-		local climbingHookID = "vrmod_brush_climbing_inputcache"
-		-- Grab the original hook table
-		local hooks = hook.GetTable()["VRMod_Input"]
-		if not hooks or not hooks[climbingHookID] then return end
-		-- Save the original hook
-		local originalHook = hooks[climbingHookID]
-		-- Actions to block per hand + extra triggers
-		local actionsToBlock = {
-			["boolean_left_pickup"] = true,
-			["boolean_reload"] = true,
-			["boolean_left_primaryfire"] = true,
-			["boolean_left_secondaryfire"] = true,
-			["boolean_right_pickup"] = true,
-			["boolean_primaryfire"] = true,
-			["boolean_secondaryfire"] = true
-		}
-
-		-- Block logic per hand
-		local function shouldBlockAction(action)
-			if not g_VR then return false end
-			if action == "boolean_left_pickup" or action == "boolean_reload" or action == "boolean_left_primaryfire" or action == "boolean_left_secondaryfire" then return IsValid(pickupTargetEntLeft) end
-			if action == "boolean_right_pickup" or action == "boolean_primaryfire" or action == "boolean_secondaryfire" then return IsValid(pickupTargetEntRight) end
-			return false
-		end
-
-		-- Replace the climbing hook with filtered wrapper
-		hook.Add("VRMod_Input", climbingHookID, function(action, pressed)
-			if actionsToBlock[action] and shouldBlockAction(action) then
-				return -- block action
-			end
-			return originalHook(action, pressed)
-		end)
-	end)
-
 	function vrmod.Pickup(bLeftHand, bDrop)
 		local handStr = bLeftHand and "Left" or "Right"
 		if bDrop then
@@ -197,6 +159,49 @@ if SERVER then
 			return
 		end
 
+		-- Per-hand ragdoll bone cleanup: remove only THIS hand's bones from the
+		-- controller and bone map, so the other hand's bones remain active.
+		local ent = info.ent
+		if IsValid(ent) and ent:GetClass() == "prop_ragdoll" and info.ragdoll_bone_phys then
+			local controller = vrmod.utils.GetPickupController and vrmod.utils.GetPickupController() or nil
+			for _, bonePhys in ipairs(info.ragdoll_bone_phys) do
+				if IsValid(bonePhys) then
+					-- Remove from motion controller
+					if IsValid(controller) and bonePhys ~= info.phys then
+						controller:RemoveFromMotionController(bonePhys)
+					end
+					-- Restore normal mass/damping for released bones
+					local origMasses = ent.vrmod_original_masses
+					if origMasses then
+						-- Find the phys index to restore original mass
+						for i = 0, ent:GetPhysicsObjectCount() - 1 do
+							if ent:GetPhysicsObjectNum(i) == bonePhys then
+								if origMasses[i] then
+									bonePhys:SetMass(origMasses[i])
+								end
+								bonePhys:SetDamping(0.5, 0.5)
+								break
+							end
+						end
+					end
+				end
+			end
+			-- Clean up bone hand map entries for this hand
+			if ent.vrmod_bone_hand_map then
+				for physIdx, mappedInfo in pairs(ent.vrmod_bone_hand_map) do
+					if mappedInfo == info then
+						ent.vrmod_bone_hand_map[physIdx] = nil
+					end
+				end
+				-- If no bones left in map, clean up the map itself
+				if not next(ent.vrmod_bone_hand_map) then
+					ent.vrmod_bone_hand_map = nil
+				end
+			end
+			info.ragdoll_bone_phys = nil
+			vrmod.logger.Debug("vrmod.Drop: cleaned up ragdoll bone physics for " .. (bLeft and "left" or "right") .. " hand")
+		end
+
 		vrmod.logger.Debug("vrmod.Drop: found pickup entry, releasing...")
 		vrmod.utils.ReleasePickupEntry(index, info, handVel)
 	end
@@ -208,18 +213,81 @@ if SERVER then
 		if not handPos or not handAng then return end
 		if ent:GetClass() == "prop_ragdoll" then
 			ent.vrmod_physOffsets = vrmod.utils.BuildRagdollOffsets(ent, handPos, handAng)
-			ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
-		else
-			if not GetConVar("vrmod_pickup_no_phys"):GetBool() then
-				vrmod.utils.PatchOwnerCollision(ent, ply)
-			else
-				ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
-			end
 		end
+		-- Use PASSABLE_DOOR for both ragdolls and props so held entities
+		-- never collide with the player or VR hands while being carried
+		ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
 
 		local controller = vrmod.utils.InitPickupController()
 		local info = vrmod.utils.CreatePickupInfo(ply, bLeftHand, ent, handPos, handAng)
 		vrmod.utils.AttachPhysicsToController(info, controller)
+
+		-- Ragdoll two-hand grab system:
+		-- Each hand controls up to 4 nearest bones. A per-bone map on the entity
+		-- (ent.vrmod_bone_hand_map) tells PhysicsSimulate which hand's info to use
+		-- for each bone, enabling simultaneous two-hand ragdoll manipulation.
+		if ent:GetClass() == "prop_ragdoll" and IsValid(controller) then
+			-- Initialize per-bone hand map if not present
+			ent.vrmod_bone_hand_map = ent.vrmod_bone_hand_map or {}
+
+			-- Build a set of bone physics indices already claimed by the OTHER hand
+			local claimedByOtherHand = {}
+			for physIdx, otherInfo in pairs(ent.vrmod_bone_hand_map) do
+				if otherInfo and otherInfo ~= info and otherInfo.left ~= bLeftHand then
+					claimedByOtherHand[physIdx] = true
+				end
+			end
+
+			-- Build per-hand offsets so each hand's bones track relative to THAT hand
+			local handOffsets = {}
+			for i = 0, ent:GetPhysicsObjectCount() - 1 do
+				local bonePhys = ent:GetPhysicsObjectNum(i)
+				if IsValid(bonePhys) then
+					local physPos, physAng = bonePhys:GetPos(), bonePhys:GetAngles()
+					local lpos, lang = WorldToLocal(physPos, physAng, handPos, handAng)
+					handOffsets[i] = { localPos = lpos, localAng = lang }
+				end
+			end
+			info.vrmod_physOffsets = handOffsets
+
+			-- Collect unclaimed bone physics with distance to this hand
+			local boneDistances = {}
+			for i = 0, ent:GetPhysicsObjectCount() - 1 do
+				local bonePhys = ent:GetPhysicsObjectNum(i)
+				if IsValid(bonePhys) and not claimedByOtherHand[i] then
+					local dist = bonePhys:GetPos():DistToSqr(handPos)
+					boneDistances[#boneDistances + 1] = { phys = bonePhys, dist = dist, idx = i, isRoot = (bonePhys == info.phys) }
+				end
+			end
+
+			-- Sort by distance to hand (nearest first)
+			table.sort(boneDistances, function(a, b) return a.dist < b.dist end)
+
+			-- Attach up to 4 nearest unclaimed bones to this hand
+			local maxBones = 4
+			local bonePhysList = {}
+			local attached = 0
+			for _, entry in ipairs(boneDistances) do
+				if attached >= maxBones then break end
+				local bonePhys = entry.phys
+				-- Add non-root bones to the controller (root already added by AttachPhysicsToController)
+				if not entry.isRoot then
+					controller:AddToMotionController(bonePhys)
+				end
+				bonePhys:Wake()
+				-- Light mass + zero damping = shadow controller can snap bones instantly
+				bonePhys:SetMass(8)
+				bonePhys:SetDamping(0, 0)
+				bonePhysList[#bonePhysList + 1] = bonePhys
+				-- Map this bone to this hand's info for PhysicsSimulate
+				ent.vrmod_bone_hand_map[entry.idx] = info
+				attached = attached + 1
+			end
+			-- Store refs on the info (not entity) for per-hand cleanup on drop
+			info.ragdoll_bone_phys = bonePhysList
+			vrmod.logger.Debug("Pickup: Attached " .. #bonePhysList .. " nearest ragdoll bone physics (of " .. #boneDistances .. " unclaimed) to " .. (bLeftHand and "left" or "right") .. " hand controller for " .. tostring(ent))
+		end
+
 		vrmod.utils.SendPickupNetMessage(ply, ent, bLeftHand)
 	end
 

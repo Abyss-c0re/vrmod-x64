@@ -464,6 +464,13 @@ if SERVER then
 		end
 	end)
 
+	-- Suppress Draconic's turn-in-place animation for VR players by keeping TurnCD
+	-- pinned ahead of CurTime(), so the ct > ply.TurnCD gate never opens.
+	hook.Add("PlayerTick", "vrmod_fix_drc_turn", function(ply, cmd)
+		if not (g_VR[ply:SteamID()] and g_VR[ply:SteamID()].latestFrame) then return end
+		ply.TurnCD = CurTime() + 1
+	end)
+
 	hook.Add("PlayerDeath", "vrutil_hook_playerdeath", function(ply, inflictor, attacker)
 		if g_VR[ply:SteamID()] ~= nil then
 			net.Start("vrutil_net_exit")
