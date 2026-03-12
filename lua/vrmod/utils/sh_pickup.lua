@@ -70,8 +70,7 @@ function vrmod.utils.IsNonPickupable(ent)
 
     local class = ent:GetClass():lower()
     local model = (ent:GetModel() or ""):lower()
-    local key   = class .. "|" .. model
-
+    local key = class .. "|" .. model
     if vrmod.pickupLists then
         if vrmod.pickupLists.whitelist[key] then return false end
         if vrmod.pickupLists.blacklist[key] then return true end
@@ -93,25 +92,24 @@ function vrmod.utils.IsNonPickupable(ent)
     for _, pattern in ipairs(blacklistedPatterns) do
         pattern = pattern:lower()
         if class:find(pattern, 1, true) or model:find(pattern, 1, true) then
-            vrmod.logger.Debug("IsNonPickupable: Matches blacklist pattern '" .. pattern .. "' -> " .. class)
+            vrmod.logger.Debug("IsNonPickupable: Class or model matches blacklist pattern '" .. pattern .. "' -> " .. class .. ", " .. model)
             pickupableCache[key] = true
             return true
         end
     end
 
-    -- Weapon / prop / important item overrides
+    -- Weapon or important item overrides
     if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or vrmod.utils.IsImportantPickup(ent) then
-        vrmod.logger.Debug("IsNonPickupable: Weapon, prop, or important pickup -> " .. class)
+        vrmod.logger.Debug("IsNonPickupable: Entity is a weapon, prop, or important pickup -> " .. class)
         pickupableCache[key] = false
         return false
     end
 
-    -- NPC check: read convar live (do NOT cache — convar can change at runtime)
-    if ent:IsNPC() or ent:IsNextBot() then
-        local cv = GetConVar("vrmod_pickup_npcs")
-        local allowed = cv and cv:GetInt() >= 1 or false
-        vrmod.logger.Debug("IsNonPickupable: NPC entity, pickup allowed=" .. tostring(allowed) .. " -> " .. class)
-        return not allowed
+    local npcPickupAllowed = (convarValues and convarValues.vrmod_pickup_npcs or 0) >= 1
+    if npcPickupAllowed and (ent:IsNPC() or ent:IsNextBot()) then
+        vrmod.logger.Debug("IsNonPickupable: NPC pickup allowed, entity is NPC/NextBot -> " .. class)
+        pickupableCache[key] = false
+        return false
     end
 
     -- Physics check
@@ -243,137 +241,42 @@ function vrmod.utils.ValidatePickup(ply, bLeftHand, ent)
     return true
 end
 
--- ============================================================
--- PATCH FILE for lua/vrmod/utils/sh_pickup.lua
--- Two changes needed:
---   1) IsNonPickupable  — read convar live, don't cache NPC result
---   2) FindPickupTarget — replace with sphere-based closest-entity logic
--- ============================================================
-
-
--- ────────────────────────────────────────────────────────────
--- CHANGE 1: Replace IsNonPickupable
--- Find the old function and replace it with this:
--- ────────────────────────────────────────────────────────────
-
-function vrmod.utils.IsNonPickupable(ent)
-    if not IsValid(ent) then
-        vrmod.logger.Debug("IsNonPickupable: Entity is invalid")
-        return true
-    end
-
-    local class = ent:GetClass():lower()
-    local model = (ent:GetModel() or ""):lower()
-    local key   = class .. "|" .. model
-
-    if vrmod.pickupLists then
-        if vrmod.pickupLists.whitelist[key] then return false end
-        if vrmod.pickupLists.blacklist[key] then return true end
-    end
-
-    if pickupableCache[key] ~= nil then
-        vrmod.logger.Debug("IsNonPickupable: Cache hit for " .. key .. " -> " .. tostring(pickupableCache[key]))
-        return pickupableCache[key]
-    end
-
-    -- Class blacklist (exact match)
-    if blacklistedClasses[class] then
-        vrmod.logger.Debug("IsNonPickupable: Class is blacklisted -> " .. class)
-        pickupableCache[key] = true
-        return true
-    end
-
-    -- Pattern blacklists
-    for _, pattern in ipairs(blacklistedPatterns) do
-        pattern = pattern:lower()
-        if class:find(pattern, 1, true) or model:find(pattern, 1, true) then
-            vrmod.logger.Debug("IsNonPickupable: Matches blacklist pattern '" .. pattern .. "' -> " .. class)
-            pickupableCache[key] = true
-            return true
-        end
-    end
-
-    -- Weapon / prop / important item overrides
-    if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or vrmod.utils.IsImportantPickup(ent) then
-        vrmod.logger.Debug("IsNonPickupable: Weapon, prop, or important pickup -> " .. class)
-        pickupableCache[key] = false
-        return false
-    end
-
-    -- NPC check: read convar live (do NOT cache — convar can change at runtime)
-    if ent:IsNPC() or ent:IsNextBot() then
-        local cv = GetConVar("vrmod_pickup_npcs")
-        local allowed = cv and cv:GetInt() >= 1 or false
-        vrmod.logger.Debug("IsNonPickupable: NPC entity, pickup allowed=" .. tostring(allowed) .. " -> " .. class)
-        return not allowed
-    end
-
-    -- Physics check
-    if ent:GetMoveType() ~= MOVETYPE_VPHYSICS then
-        vrmod.logger.Debug("IsNonPickupable: Non-physics entity -> " .. class .. " | MoveType: " .. tostring(ent:GetMoveType()))
-        pickupableCache[key] = true
-        return true
-    end
-
-    pickupableCache[key] = false
-    return false
-end
-
-
--- ────────────────────────────────────────────────────────────
--- CHANGE 2: Replace FindPickupTarget
--- Find the old function and replace it with this:
--- ────────────────────────────────────────────────────────────
-
 function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRange)
     if type(pickupRange) ~= "number" or pickupRange <= 0 then pickupRange = 1.2 end
-    local convars = vrmod.GetConvars()
-
-    -- Radius scales with pickupRange (default 3.5 → 35 Source units)
-    local radius = pickupRange * 10
-
-    local candidates = ents.FindInSphere(handPos, radius)
-
-    -- Priority tiers: 2 = weapon/important, 1 = NPC/NextBot, 0 = everything else
-    -- Within the same tier, closest to the hand wins.
-    local function GetPriority(ent)
-        if vrmod.utils.IsWeaponEntity(ent) or vrmod.utils.IsImportantPickup(ent) then return 2 end
-        if ent:IsNPC() or ent:IsNextBot() then return 1 end
-        return 0
-    end
-
-    local best         = nil
-    local bestPriority = -1
-    local bestDistSqr  = math.huge
-
-    for _, ent in ipairs(candidates) do
-        if IsValid(ent) and ent ~= ply
-            and vrmod.utils.IsValidPickupTarget(ent, ply, bLeftHand)
-            and vrmod.utils.CanPickupEntity(ent, ply, convars)
-        then
-            local priority = GetPriority(ent)
-            local distSqr  = handPos:DistToSqr(ent:GetPos())
-
-            if priority > bestPriority or (priority == bestPriority and distSqr < bestDistSqr) then
-                best         = ent
-                bestPriority = priority
-                bestDistSqr  = distSqr
-            end
+    local ent
+    local offsetPos = handPos + handAng:Forward() * vrmod.DEFAULT_OFFSET
+    -- Sphere search first
+    local sphereEnt, _ = vrmod.utils.SphereCollidesWithProp(offsetPos, 5, ply)
+    if IsValid(sphereEnt) and sphereEnt ~= ply and vrmod.utils.IsValidPickupTarget(sphereEnt, ply, bLeftHand) and vrmod.utils.CanPickupEntity(sphereEnt, ply, convarValues or vrmod.GetConvars()) then ent = sphereEnt end
+    -- Fallback to trace if sphere failed validation
+    if not IsValid(ent) then
+        local hand = bLeftHand and "left" or "right"
+        local tr = vrmod.utils.TraceHand(ply, hand, true)
+        if tr and IsValid(tr.Entity) then
+            local e = tr.Entity
+            if e ~= ply and vrmod.utils.IsValidPickupTarget(e, ply, bLeftHand) and vrmod.utils.CanPickupEntity(e, ply, convarValues or vrmod.GetConvars()) then ent = e end
         end
     end
 
-    if not IsValid(best) then return nil end
-
-    -- Weapon-specific rules (unchanged)
-    if vrmod.utils.IsWeaponEntity(best) then
-        local aw = ply:GetActiveWeapon()
-        if IsValid(aw) and aw:GetClass() == best:GetClass() then return nil end
-        if not bLeftHand and vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then return nil end
+    if not IsValid(ent) then return nil end
+    -- Range check with boost
+    local boost = 1.0
+    if vrmod.utils.IsImportantPickup(ent) then
+        boost = 5.0
+    else
+        if ent:IsNPC() then boost = 3.0 end
     end
 
-    return best
+    local maxDist = pickupRange * 10 * boost
+    if (ent:GetPos() - handPos):LengthSqr() > maxDist ^ 2 then return nil end
+    -- Weapon-specific rules
+    if vrmod.utils.IsWeaponEntity(ent) then
+        local aw = ply:GetActiveWeapon()
+        if IsValid(aw) and aw:GetClass() == ent:GetClass() then return nil end
+        if not bLeftHand and vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then return nil end
+    end
+    return ent
 end
-
 
 -- Find a pickup entry by steamid and hand boolean. Returns index and info or nil.
 function vrmod.utils.FindPickupBySteamIDAndHand(steamid, bLeft)
@@ -519,10 +422,6 @@ end
 --=======================================================================
 -- Pickup Controller Initialization
 --=======================================================================
-function vrmod.utils.GetPickupController()
-    return pickupController
-end
-
 function vrmod.utils.InitPickupController()
     if IsValid(pickupController) then return pickupController end
     vrmod.logger.Debug("InitPickupController: Creating new pickup motion controller")
@@ -540,17 +439,7 @@ function vrmod.utils.InitPickupController()
 
     function pickupController:PhysicsSimulate(phys, dt)
         local ent = phys:GetEntity()
-        -- For ragdolls with two-hand grab, look up which hand controls this bone
-        local info
-        if ent:GetClass() == "prop_ragdoll" and ent.vrmod_bone_hand_map then
-            for i = 0, ent:GetPhysicsObjectCount() - 1 do
-                if ent:GetPhysicsObjectNum(i) == phys then
-                    info = ent.vrmod_bone_hand_map[i]
-                    break
-                end
-            end
-        end
-        info = info or ent.vrmod_pickup_info
+        local info = ent.vrmod_pickup_info
         if not info then return end
         local ply = info.ply
         if not IsValid(ply) then return end
@@ -565,16 +454,12 @@ function vrmod.utils.InitPickupController()
 
         if not handPos or not handAng then return end
         local targetPos, targetAng
-        if ent:GetClass() == "prop_ragdoll" then
-            -- Use per-hand offsets if available, fallback to entity-level offsets
-            local offsets = info.vrmod_physOffsets or ent.vrmod_physOffsets
-            if offsets then
-                for i = 0, ent:GetPhysicsObjectCount() - 1 do
-                    if ent:GetPhysicsObjectNum(i) == phys then
-                        local offset = offsets[i]
-                        if offset then targetPos, targetAng = LocalToWorld(offset.localPos, offset.localAng, handPos, handAng) end
-                        break
-                    end
+        if ent:GetClass() == "prop_ragdoll" and ent.vrmod_physOffsets then
+            for i = 0, ent:GetPhysicsObjectCount() - 1 do
+                if ent:GetPhysicsObjectNum(i) == phys then
+                    local offset = ent.vrmod_physOffsets[i]
+                    if offset then targetPos, targetAng = LocalToWorld(offset.localPos, offset.localAng, handPos, handAng) end
+                    break
                 end
             end
         else
@@ -599,11 +484,6 @@ function vrmod.utils.CreatePickupInfo(ply, bLeftHand, ent, handPos, handAng)
     local index = pickupCount + 1
     for k, v in ipairs(pickupList) do
         if v.ent == ent then
-            -- For ragdolls, allow two entries (one per hand) for two-hand grab support.
-            -- Only replace if same hand is re-grabbing; different hand creates a new entry.
-            if ent:GetClass() == "prop_ragdoll" and v.left ~= bLeftHand then
-                break
-            end
             index = k
             g_VR[v.steamid].heldItems[v.left and 1 or 2] = nil
             break
@@ -725,7 +605,7 @@ if SERVER then
             local tolerance = entitySize * 0.5
             local distSqr = handPos:DistToSqr(ent:GetPos())
             if distSqr < tolerance * tolerance then
-                -- Too close ? do not snap; keep entity where it is
+                -- Too close → do not snap; keep entity where it is
                 return false
             end
         end
@@ -775,7 +655,7 @@ if SERVER then
         if IsValid(phys) then
             phys:Wake()
             phys:SetPos(finalPos)
-            -- keep entity orientation stable   preserve current angles instead of forcing handAng
+            -- keep entity orientation stable — preserve current angles instead of forcing handAng
             phys:SetAngles(ent:GetAngles())
             phys:SetVelocity(Vector(0, 0, 0))
             phys:SetAngleVelocity(Vector(0, 0, 0))

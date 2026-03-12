@@ -52,20 +52,15 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	if not IsValid(ply) or not ply:IsPlayer() then return end
 	if not IsValid(ent) or not ent:IsWeapon() then return end
 	if not ply.PickupWeapon then return end
--- ── ArcticVR ammo stasis ─────────────────────────────────────────────────
+	-- ── ArcticVR ammo stasis ─────────────────────────────────────────────────
 	-- Snapshot the ArcVR state stamped by sh_dropweapon.lua BEFORE anything
-	-- below has a chance to remove the world entity (ReplaceWeapon does this).
 	local avrState = nil
-	if SERVER and ent.ArcticVR and ent.LoadedRounds ~= nil then
+	if SERVER and ent.AVR_LoadedRounds ~= nil then
 		avrState = {
-			LoadedRounds = ent.LoadedRounds,
-			Chambered    = ent.Chambered or 0,
-			Magazine     = ent.Magazine,      -- may be nil
+			LoadedRounds = ent.AVR_LoadedRounds,
+			Chambered = ent.AVR_Chambered or 0,
+			Magazine = ent.AVR_Magazine, -- may be nil
 		}
-		-- Clear these to prevent ArcVR from spawning a floating magazine on Remove()
-		ent.LoadedRounds = 0
-		ent.Chambered = 0
-		ent.Magazine = nil
 	end
 
 	-- ─────────────────────────────────────────────────────────────────────────

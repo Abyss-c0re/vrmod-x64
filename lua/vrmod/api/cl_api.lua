@@ -19,12 +19,9 @@ if CLIENT then
     g_VR.viewModelInfo = g_VR.viewModelInfo or {}
     g_VR.locomotionOptions = g_VR.locomotionOptions or {}
     g_VR.menuItems = g_VR.menuItems or {}
--- Helper to get player VR data
+    -- Helper to get player VR data
     local function getPlayerVRData(ply)
-        if not IsValid(ply) then ply = LocalPlayer() end
-        if not IsValid(ply) or not ply:IsPlayer() then return nil end
-        local sid = ply:SteamID()
-        if not sid then return nil end
+        local sid = ply and ply:SteamID() or LocalPlayer():SteamID()
         return g_VR.net[sid]
     end
 
