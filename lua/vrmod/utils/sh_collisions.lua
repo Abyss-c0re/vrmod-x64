@@ -462,8 +462,9 @@ function vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
 end
 
 function vrmod.utils.GetClimbingGripState()
-    if not vrmod or not vrmod.climbing then return false, false end
-    return vrmod.climbing.IsHoldingLeft(), vrmod.climbing.IsHoldingRight()
+    local climb = vrmod and vrmod.climbing
+    if not climb or not climb.IsHoldingLeft or not climb.IsHoldingRight then return false, false end
+    return climb.IsHoldingLeft(), climb.IsHoldingRight()
 end
 
 function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
