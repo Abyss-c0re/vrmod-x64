@@ -3,6 +3,7 @@ vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 local trackedRagdolls = trackedRagdolls or {}
 local lastDamageTime = {}
+local npcRagdolls = {}
 -- NPC2RAG
 -- Returns either a single mass (if physIndex provided) or a table of masses indexed by phys-index.
 function vrmod.utils.GetBoneMass(ent, physIndex)
@@ -168,8 +169,37 @@ function vrmod.utils.ForwardRagdollDamage(ent, dmginfo)
     end
 end
 
+-- ============================================================
+-- PATCH for lua/vrmod/utils/sh_npc2rag.lua
+-- Fix 1: Add reverse NPC→ragdoll map at the top of the file
+-- Fix 2: SpawnPickupRagdoll — return existing ragdoll if one already exists for this NPC
+-- Fix 3: CallOnRemove — defer respawn logic one frame to kill the lag spike
+-- ============================================================
+
+
+-- ────────────────────────────────────────────────────────────
+-- CHANGE 1: Add reverse map next to the existing locals at the top
+-- (right after:  local lastDamageTime = {} )
+-- ────────────────────────────────────────────────────────────
+
+-- Maps npc → its live ragdoll, so we never spawn a second one for the same NPC
+local npcRagdolls = {}
+
+
+-- ────────────────────────────────────────────────────────────
+-- CHANGE 2: Replace SpawnPickupRagdoll entirely
+-- ────────────────────────────────────────────────────────────
+
 function vrmod.utils.SpawnPickupRagdoll(ply, npc)
     if not IsValid(npc) then return end
+
+    -- If a live ragdoll already exists for this NPC, reuse it instead of making a second one
+    local existing = npcRagdolls[npc]
+    if IsValid(existing) then
+        vrmod.logger.Debug("SpawnPickupRagdoll: reusing existing ragdoll for " .. tostring(npc))
+        return existing
+    end
+
     local rag = ents.Create("prop_ragdoll")
     if not IsValid(rag) then return end
     rag:SetModel(npc:GetModel())
@@ -178,6 +208,9 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
     rag:SetNWBool("is_npc_ragdoll", true)
     rag:Spawn()
     rag:Activate()
+    for i = 0, npc:GetNumBodyGroups() - 1 do
+        rag:SetBodygroup(i, npc:GetBodygroup(i))
+    end
     if IsValid(ply) then
         rag:SetOwner(ply)
         cleanup.Add(ply, "props", rag)
@@ -189,7 +222,8 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
 
     -- Register tracking + AI disable
     trackedRagdolls[rag] = npc
-    rag.original_npc = npc
+    npcRagdolls[npc]     = rag   -- reverse map
+    rag.original_npc     = npc
     rag.dropped_manually = false
     npc:SetNoDraw(true)
     npc:SetNotSolid(true)
@@ -201,6 +235,7 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
     if npc.SetNPCState then npc:SetNPCState(NPC_STATE_NONE) end
     npc:SetSaveValue("m_bInSchedule", false)
     if npc.GetActiveWeapon and IsValid(npc:GetActiveWeapon()) then npc:GetActiveWeapon():Remove() end
+
     rag:AddCallback("PhysicsCollide", function(self, data)
         if rag.picked then return end
         local impactVel = data.OurOldVelocity.z
@@ -214,7 +249,6 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
             dmginfo:SetAttacker(game.GetWorld())
             dmginfo:SetInflictor(game.GetWorld())
             dmginfo:SetDamageForce(Vector(0, 0, -speed * 100))
-            -- Temporary high damping, no freeze
             vrmod.utils.TempSetDamping(rag, 25, 0.5, 0.01)
             rag.noDamage = false
             vrmod.utils.ForwardRagdollDamage(rag, dmginfo)
@@ -224,22 +258,32 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
     -- Handle cleanup & respawn logic
     rag:CallOnRemove("vrmod_cleanup_npc_" .. rag:EntIndex(), function()
         trackedRagdolls[rag] = nil
+        npcRagdolls[npc]     = nil  -- clear reverse map
+
         if not IsValid(npc) then return end
         npc:RemoveEFlags(EFL_NO_THINK_FUNCTION)
+
         if rag.dropped_manually then
-            npc:SetPos(rag:GetPos())
-            npc:SetAngles(rag:GetAngles())
-            npc:SetNoDraw(false)
-            npc:SetNotSolid(false)
-            npc:SetMoveType(MOVETYPE_STEP)
-            npc:SetCollisionGroup(COLLISION_GROUP_NONE)
-            npc:ClearSchedule()
-            npc:SetSaveValue("m_bInSchedule", false)
-            if npc.SetNPCState then npc:SetNPCState(NPC_STATE_ALERT) end
-            npc:DropToFloor()
-            if npc.BehaveStart then pcall(npc.BehaveStart, npc) end
-            npc:SetSchedule(SCHED_IDLE_STAND)
-            npc:NextThink(CurTime())
+            -- Capture ragdoll pos/ang before it's gone, then defer the heavy revival
+            -- work one frame so it doesn't run synchronously inside the removal path
+            local spawnPos = IsValid(rag) and rag:GetPos() or npc:GetPos()
+            local spawnAng = IsValid(rag) and rag:GetAngles() or npc:GetAngles()
+            timer.Simple(0, function()
+                if not IsValid(npc) then return end
+                npc:SetPos(spawnPos)
+                npc:SetAngles(spawnAng)
+                npc:SetNoDraw(false)
+                npc:SetNotSolid(false)
+                npc:SetMoveType(MOVETYPE_STEP)
+                npc:SetCollisionGroup(COLLISION_GROUP_NONE)
+                npc:ClearSchedule()
+                npc:SetSaveValue("m_bInSchedule", false)
+                if npc.SetNPCState then npc:SetNPCState(NPC_STATE_ALERT) end
+                npc:DropToFloor()
+                if npc.BehaveStart then pcall(npc.BehaveStart, npc) end
+                npc:SetSchedule(SCHED_IDLE_STAND)
+                npc:NextThink(CurTime())
+            end)
         else
             npc:Remove()
         end
@@ -251,13 +295,13 @@ function vrmod.utils.SpawnPickupRagdoll(ply, npc)
             hook.Remove("Think", "VRMod_MonitorRagdollGibbing_" .. rag:EntIndex())
             return
         end
-
         if vrmod.utils.IsRagdollGibbed(rag) then
             vrmod.logger.Info("Ragdoll gibbed during runtime, removing")
             rag:Remove()
             hook.Remove("Think", "VRMod_MonitorRagdollGibbing_" .. rag:EntIndex())
         end
     end)
+
     return rag
 end
 

@@ -81,12 +81,11 @@ if SERVER then
             phys:AddAngleVelocity(-phys:GetAngleVelocity() + phys:WorldToLocalVector(rhandangvel))
         end
 
-        -- Stamp the ArcVR snapshot onto the spawned world entity.
-        -- World weapon entities are plain Lua tables so arbitrary fields are fine.
+-- Stamp the ArcVR snapshot onto the spawned world entity.
         if avrSnapshot then
-            dropEnt.AVR_LoadedRounds = avrSnapshot.LoadedRounds
-            dropEnt.AVR_Chambered = avrSnapshot.Chambered
-            dropEnt.AVR_Magazine = avrSnapshot.Magazine
+            dropEnt.LoadedRounds = avrSnapshot.LoadedRounds
+            dropEnt.Chambered    = avrSnapshot.Chambered
+            dropEnt.Magazine     = avrSnapshot.Magazine
         end
 
         if dropAsWeapon then ply:StripWeapon(wep:GetClass()) end
