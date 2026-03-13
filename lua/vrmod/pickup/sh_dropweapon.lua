@@ -42,6 +42,7 @@ if SERVER then
             dropEnt = ents.Create("prop_physics")
         end
 
+        if not IsValid(dropEnt) then return end
         -- Restore some ammo into dropped weapon if applicable
         local ammoType = wep:GetPrimaryAmmoType()
         local ammoCount = ply:GetAmmoCount(ammoType)
@@ -54,17 +55,17 @@ if SERVER then
             ply:RemoveAmmo(ammoToGive, ammoType)
         end
 
-        -- ── ArcticVR ammo stasis ─────────────────────────────────────────────
-        local avrSnapshot = nil
+        -- ── ArcticVR snapshot ─────────────────────────
+        local avrSnapshot
         if dropAsWeapon and wep.ArcticVR then
             avrSnapshot = {
                 LoadedRounds = wep.LoadedRounds or 0,
                 Chambered = wep.Chambered or 0,
-                Magazine = wep.Magazine, -- may be nil (no mag inserted)
+                Magazine = wep.Magazine
             }
         end
 
-        -- ─────────────────────────────────────────────────────────────────────
+        -- ─────────────────────────────────────────────
         ply:Give("weapon_vrmod_empty")
         ply:SelectWeapon("weapon_vrmod_empty")
         local boneID = ply:LookupBone("ValveBiped.Bip01_R_Hand")
@@ -73,20 +74,26 @@ if SERVER then
         dropEnt:SetPos(guninhandpos + boneAng:Forward() * 10 + boneAng:Right() * 4)
         dropEnt:SetAngles(guninhandang)
         dropEnt:Spawn()
+        -- ── Apply ArcticVR state AFTER spawn ─────────
+        if avrSnapshot then
+            dropEnt.ArcticVR = true
+            dropEnt.avrSnapshot = avrSnapshot
+            dropEnt.LoadedRounds = avrSnapshot.LoadedRounds
+            dropEnt.Chambered = avrSnapshot.Chambered
+            dropEnt.Magazine = avrSnapshot.Magazine
+            if IsValid(dropEnt.Magazine) then dropEnt.Magazine.Weapon = dropEnt end
+            -- prevent duplicate mags
+            wep.Magazine = nil
+            timer.Simple(0, function() if IsValid(dropEnt) and dropEnt.SendWeapon then dropEnt:SendWeapon(true, true) end end)
+        end
+
+        -- ─────────────────────────────────────────────
         local phys = dropEnt:GetPhysicsObject()
         if IsValid(phys) then
             phys:Wake()
             phys:SetMass(99)
             phys:SetVelocity(ply:GetVelocity() + rhandvel)
             phys:AddAngleVelocity(-phys:GetAngleVelocity() + phys:WorldToLocalVector(rhandangvel))
-        end
-
-        -- Stamp the ArcVR snapshot onto the spawned world entity.
-        -- World weapon entities are plain Lua tables so arbitrary fields are fine.
-        if avrSnapshot then
-            dropEnt.AVR_LoadedRounds = avrSnapshot.LoadedRounds
-            dropEnt.AVR_Chambered = avrSnapshot.Chambered
-            dropEnt.AVR_Magazine = avrSnapshot.Magazine
         end
 
         if dropAsWeapon then ply:StripWeapon(wep:GetClass()) end

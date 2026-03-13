@@ -52,17 +52,6 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	if not IsValid(ply) or not ply:IsPlayer() then return end
 	if not IsValid(ent) or not ent:IsWeapon() then return end
 	if not ply.PickupWeapon then return end
-	-- ── ArcticVR ammo stasis ─────────────────────────────────────────────────
-	-- Snapshot the ArcVR state stamped by sh_dropweapon.lua BEFORE anything
-	local avrState = nil
-	if SERVER and ent.AVR_LoadedRounds ~= nil then
-		avrState = {
-			LoadedRounds = ent.AVR_LoadedRounds,
-			Chambered = ent.AVR_Chambered or 0,
-			Magazine = ent.AVR_Magazine, -- may be nil
-		}
-	end
-
 	-- ─────────────────────────────────────────────────────────────────────────
 	local wepClass = ent:GetClass()
 	-- Temporarily disable pickup protection
@@ -81,19 +70,20 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 		timer.Simple(0, function() if IsValid(ply) then ply:SelectWeapon(wepClass) end end)
 	end
 
-	ent:Remove()
-	-- ── ArcticVR ammo stasis restore ─────────────────────────────────────────
-	-- Apply the snapshot to the freshly given weapon and re-broadcast ammo state
-	-- to the new owner. 
-	if SERVER and avrState then
-		local newWep = ply:GetWeapon(wepClass)
-		if IsValid(newWep) and newWep.ArcticVR then
-			newWep.LoadedRounds = avrState.LoadedRounds
-			newWep.Chambered = avrState.Chambered
-			newWep.Magazine = avrState.Magazine
-			timer.Simple(0, function() if IsValid(newWep) then newWep:SendWeapon(true, true) end end)
-		end
+	if SERVER and ent.ArcticVR and ent.avrSnapshot then
+		timer.Simple(0, function()
+			local newWep = ply:GetWeapon(wepClass)
+			if not IsValid(newWep) or not newWep.ArcticVR then return end
+			local snap = ent.avrSnapshot
+			newWep.LoadedRounds = snap.LoadedRounds
+			newWep.Chambered = snap.Chambered
+			newWep.Magazine = snap.Magazine
+			if IsValid(newWep.Magazine) then newWep.Magazine.Weapon = newWep end
+			newWep:SendWeapon(true, true)
+		end)
 	end
+
+	ent:Remove()
 	-- ─────────────────────────────────────────────────────────────────────────
 end)
 
