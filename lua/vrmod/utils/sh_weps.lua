@@ -3,6 +3,17 @@ vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 vrmod.suppressViewModelUpdates = false
 -- WEP UTILS
+function vrmod.utils.CreateWorldModelVM(class, vmi)
+    if not IsValid(g_VR.worldModelVM) then
+        g_VR.worldModelVM = ClientsideModel(vmi.modelOverride or LocalPlayer():GetActiveWeapon():GetModel())
+        g_VR.worldModelVM:SetNoDraw(false)
+        g_VR.worldModelVM:SetParent(LocalPlayer():GetViewModel()) -- temporary parent
+        g_VR.worldModelVM:DrawShadow(false)
+    end
+
+    g_VR.viewModel = g_VR.worldModelVM
+end
+
 function vrmod.utils.IsValidWep(wep, get)
     if not IsValid(wep) then return false end
     local class = wep:GetClass()
@@ -55,10 +66,22 @@ end
 
 function vrmod.utils.UpdateViewModel()
     local vm = g_VR.viewModel
-    if IsValid(vm) then
+    local vmi = g_VR.currentvmi
+    if not IsValid(vm) then return end
+    if vmi and vmi.useWorldModel then
+        -- Move the world model manually to hand position
+        local handPos, handAng = vrmod.GetRightHandPose()
+        local pos = handPos + handAng:Forward() * vmi.offsetPos.x + handAng:Right() * vmi.offsetPos.y + handAng:Up() * vmi.offsetPos.z
+        local ang = handAng + vmi.offsetAng
+        vm:SetPos(pos)
+        vm:SetAngles(ang)
+        vm:SetupBones()
+    else
+        -- Normal viewmodel behavior
         vm:SetPos(g_VR.viewModelPos)
         vm:SetAngles(g_VR.viewModelAng)
         vm:SetupBones()
-        g_VR.viewModelMuzzle = vm:GetAttachment(1)
     end
+
+    g_VR.viewModelMuzzle = vm:GetAttachment(1)
 end

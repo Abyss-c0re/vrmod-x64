@@ -13,6 +13,7 @@ if CLIENT then
 			offsetPos = Vector(-31.5, 13.4, 14.5),
 			offsetAng = Angle(0, 0, 0),
 			noLaser = true
+
 		},
 		weapon_physcannon = {
 			offsetPos = Vector(-31.5, 13.4, 10.5),
@@ -170,49 +171,39 @@ if CLIENT then
 		listview:AddColumn("Offset Angle")
 		listview:AddColumn("Wrong Muzzle Ang")
 		listview:AddColumn("No Laser")
+		listview:AddColumn("Use World Model")
 		local function UpdateListView()
 			if not g_VR.viewModelInfo then return end
 			listview:Clear()
 			for class, data in pairs(g_VR.viewModelInfo) do
-				listview:AddLine(class, tostring(data.offsetPos), tostring(data.offsetAng), tostring(data.wrongMuzzleAng or false), tostring(data.noLaser or false))
+				listview:AddLine(class, tostring(data.offsetPos), tostring(data.offsetAng), tostring(data.wrongMuzzleAng or false), tostring(data.noLaser or false), tostring(data.useWorldModel or false))
+				-- Make sure column 6 is filled
 			end
 		end
 
 		UpdateListView()
 		local bottomPanel = vgui.Create("DPanel", frame)
 		bottomPanel:Dock(BOTTOM)
-		bottomPanel:SetTall(50)
+		bottomPanel:SetTall(150)
 		local leftPanel = vgui.Create("DPanel", bottomPanel)
-		leftPanel:SetWide(frame:GetWide() / 2 - 10)
+		leftPanel:SetWide(frame:GetWide() / 2 - 15)
 		leftPanel:Dock(LEFT)
 		leftPanel:DockMargin(10, 5, 5, 5)
 		local rightPanel = vgui.Create("DPanel", bottomPanel)
-		rightPanel:SetWide(frame:GetWide() / 2 - 10)
+		rightPanel:SetWide(frame:GetWide() / 2 - 15)
 		rightPanel:Dock(RIGHT)
 		rightPanel:DockMargin(5, 5, 10, 5)
+		-- Fixed AddButton: always dock TOP and stack properly
 		local function AddButton(parent, txt, func)
 			local btn = vgui.Create("DButton", parent)
 			btn:SetText(txt)
-			btn:SetSize(120, 30)
-			-- Detect parent's docking and dock button accordingly
-			local dock = parent:GetDock()
-			if dock == LEFT then
-				btn:Dock(LEFT)
-				btn:DockMargin(0, 0, 10, 0)
-			elseif dock == RIGHT then
-				btn:Dock(RIGHT)
-				btn:DockMargin(10, 0, 0, 0)
-			else
-				-- fallback to left dock if unknown
-				btn:Dock(LEFT)
-				btn:DockMargin(0, 0, 10, 0)
-			end
-
+			btn:Dock(TOP)
+			btn:SetHeight(30)
+			btn:DockMargin(5, 5, 5, 0)
 			btn.DoClick = func
 			return btn
 		end
 
-		-- Helper: update just one weapon line in listview by class
 		local function UpdateListLine(class)
 			local lines = listview:GetLines()
 			for i, line in ipairs(lines) do
@@ -223,6 +214,7 @@ if CLIENT then
 						line:SetColumnText(3, tostring(data.offsetAng))
 						line:SetColumnText(4, tostring(data.wrongMuzzleAng or false))
 						line:SetColumnText(5, tostring(data.noLaser or false))
+						line:SetColumnText(6, tostring(data.useWorldModel or false))
 					end
 
 					break
@@ -230,16 +222,17 @@ if CLIENT then
 			end
 		end
 
-		-- Left-side buttons apply changes directly to current weapon config
+		-- Left panel buttons
 		AddButton(leftPanel, "Add new", function()
 			local wep = LocalPlayer():GetActiveWeapon()
 			if IsValid(wep) then
-				g_VR.viewModelInfo[wep:GetClass()] = {
+				local class = wep:GetClass()
+				g_VR.viewModelInfo[class] = g_VR.viewModelInfo[class] or {
 					offsetPos = Vector(),
 					offsetAng = Angle()
 				}
 
-				UpdateListView()
+				UpdateListLine(class)
 			end
 		end)
 
@@ -265,7 +258,18 @@ if CLIENT then
 			UpdateListLine(class)
 		end)
 
-		-- Right-side buttons (reverded orer)
+		AddButton(leftPanel, "Use World Model", function()
+			local wep = LocalPlayer():GetActiveWeapon()
+			if not IsValid(wep) then return end
+			local class = wep:GetClass()
+			local data = g_VR.viewModelInfo[class]
+			if not data then return end
+			data.useWorldModel = not data.useWorldModel
+			vrmod.SetViewModelUseWorldModel(class, data.useWorldModel)
+			UpdateListLine(class)
+		end)
+
+		-- Right panel buttons
 		AddButton(rightPanel, "Reset Config", function()
 			local confirm = vgui.Create("DFrame")
 			confirm:SetSize(350, 200)
@@ -280,8 +284,8 @@ You might need to reload the map afterwards in case you use VR specific weapons.
 Are you sure you want to continue?]]
 			local lbl = vgui.Create("DLabel", confirm)
 			lbl:SetText(msg)
-			lbl:SetFont("DermaDefault") -- Optional: Use "DermaLarge" for emphasis
-			lbl:SetContentAlignment(7) -- Top-left
+			lbl:SetFont("DermaDefault")
+			lbl:SetContentAlignment(7)
 			lbl:SetWrap(true)
 			lbl:SetAutoStretchVertical(true)
 			lbl:Dock(TOP)
@@ -303,13 +307,11 @@ Are you sure you want to continue?]]
 
 			local yesBtn = vgui.Create("DButton", btnPanel)
 			yesBtn:SetText("Yes")
-			yesBtn:SetSize(100, 30)
 			yesBtn:Dock(LEFT)
 			yesBtn:DockMargin(20, 5, 10, 5)
 			yesBtn.DoClick = DoReset
 			local noBtn = vgui.Create("DButton", btnPanel)
 			noBtn:SetText("Cancel")
-			noBtn:SetSize(100, 30)
 			noBtn:Dock(RIGHT)
 			noBtn:DockMargin(10, 5, 20, 5)
 			noBtn.DoClick = function() confirm:Close() end
@@ -320,7 +322,7 @@ Are you sure you want to continue?]]
 			if selected then
 				local class = listview:GetLine(selected):GetValue(1)
 				g_VR.viewModelInfo[class] = nil
-				UpdateListView() -- full reload because we remove a line
+				UpdateListView()
 			end
 		end)
 
