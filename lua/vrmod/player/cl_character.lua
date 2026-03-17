@@ -3,6 +3,8 @@ if CLIENT then
 	g_VR.characterYaw = 0
 	local convars, convarValues = vrmod.GetConvars()
 	-- Constants
+	local DEFAULT_EYE_HEIGHT = 66.8
+	local DEFAULT_HEAD_TO_HMD_DIST = 6.3
 	local NUM_FINGER_BONES = 30
 	local ZERO_VEC = Vector()
 	local ZERO_ANG = Angle()
@@ -13,233 +15,6 @@ if CLIENT then
 	------------------------------------------------------------------------
 	-- CONVARS
 	------------------------------------------------------------------------
-	vrmod.AddCallbackedConvar("vrmod_charactereyeheight", "characterEyeHeight", "66.8", FCVAR_ARCHIVE, "Character eye height", 30, 100, tonumber)
-	vrmod.AddCallbackedConvar("vrmod_characterheadtohmddist", "characterHeadToHmdDist", "6.3", FCVAR_ARCHIVE, "Head to HMD distance", 0, 20, tonumber)
-	vrmod.AddCallbackedConvar("vrmod_characterik", "characterIK", "1", FCVAR_ARCHIVE, "Enable character IK", nil, nil, tobool)
-	vrmod.AddCallbackedConvar("vrmod_armstretcher", "armStretcher", "0", FCVAR_ARCHIVE, "Enable arm stretching", nil, nil, tobool)
-	------------------------------------------------------------------------
-	-- SPAWN MENU
-	------------------------------------------------------------------------
-	function CreateCharacterPanel(panel)
-		panel:ClearControls()
-		panel:SetName("VR Character Animations")
-		panel:Help("Controls for VR character animations, arm stretching, and model calibration.")
-		panel:ControlHelp("\n--- Animation System ---")
-		local animCheckbox = panel:CheckBox("Disable Animations")
-		animCheckbox:SetChecked(not GetConVar("vrmod_characterik"):GetBool())
-		function animCheckbox:OnChange(val)
-			RunConsoleCommand("vrmod_characterik", val and "0" or "1")
-		end
-
-		panel:Help("When checked, the player model stays in place without animations.")
-		panel:CheckBox("Enable Arm Stretcher", "vrmod_armstretcher")
-		panel:Help("Stretches arm bones to reach targets beyond the model's natural arm length.")
-		panel:ControlHelp("\n--- Model Calibration ---")
-		panel:NumSlider("Eye Height", "vrmod_charactereyeheight", 30, 100, 1)
-		panel:Help("Character eye height in source units. Default 66.8. Affects crouching and body position.")
-		panel:NumSlider("Head to HMD Distance", "vrmod_characterheadtohmddist", 0, 20, 1)
-		panel:Help("Distance from HMD to head bone. Default 6.3.")
-		panel:ControlHelp("\n")
-		local restoreBtn = panel:Button("Restore Defaults")
-		restoreBtn.DoClick = function()
-			RunConsoleCommand("vrmod_characterik", "1")
-			RunConsoleCommand("vrmod_armstretcher", "0")
-			RunConsoleCommand("vrmod_charactereyeheight", "66.8")
-			RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
-			chat.AddText(Color(100, 255, 100), "[VR Character] ", Color(255, 255, 255), "Settings reset to defaults!")
-		end
-	end
-
-	------------------------------------------------------------------------
-	-- VR MIRROR: Separate panel that appears when heightmenu is open
-	------------------------------------------------------------------------
-	local charIKMenuOpen = false
-	local function OpenCharIKPanel()
-		if charIKMenuOpen then return end
-		if not VRUtilIsMenuOpen("heightmenu") then return end
-		charIKMenuOpen = true
-		VRUtilMenuOpen("charik", 200, 200, nil, nil, Vector(), Angle(), 0.1, true, function()
-			hook.Remove("PreRender", "VRModCharIK_RenderPanel")
-			hook.Remove("VRMod_Input", "VRModCharIK_PanelInput")
-			charIKMenuOpen = false
-		end)
-
-		local buttons = {}
-		local function rebuildButtons()
-			buttons = {
-				{
-					x = 0,
-					y = 5,
-					w = 55,
-					h = 35,
-					text = "Eye +",
-					font = "Trebuchet18",
-					text_x = 27,
-					text_y = 8,
-					fn = function() RunConsoleCommand("vrmod_charactereyeheight", tostring(math.Clamp((convarValues.characterEyeHeight or 66.8) + 1, 30, 100))) end
-				},
-				{
-					x = 0,
-					y = 45,
-					w = 55,
-					h = 35,
-					text = "Eye -",
-					font = "Trebuchet18",
-					text_x = 27,
-					text_y = 8,
-					fn = function() RunConsoleCommand("vrmod_charactereyeheight", tostring(math.Clamp((convarValues.characterEyeHeight or 66.8) - 1, 30, 100))) end
-				},
-				{
-					x = 60,
-					y = 5,
-					w = 55,
-					h = 35,
-					text = "HMD +",
-					font = "Trebuchet18",
-					text_x = 27,
-					text_y = 8,
-					fn = function() RunConsoleCommand("vrmod_characterheadtohmddist", tostring(math.Clamp((convarValues.characterHeadToHmdDist or 6.3) + 0.5, 0, 20))) end
-				},
-				{
-					x = 60,
-					y = 45,
-					w = 55,
-					h = 35,
-					text = "HMD -",
-					font = "Trebuchet18",
-					text_x = 27,
-					text_y = 8,
-					fn = function() RunConsoleCommand("vrmod_characterheadtohmddist", tostring(math.Clamp((convarValues.characterHeadToHmdDist or 6.3) - 0.5, 0, 20))) end
-				},
-				{
-					x = 120,
-					y = 5,
-					w = 75,
-					h = 35,
-					text = "Auto\nEye",
-					font = "Trebuchet18",
-					text_x = 37,
-					text_y = 1,
-					fn = function()
-						if g_VR and g_VR.tracking and g_VR.tracking.hmd and g_VR.origin then
-							local h = g_VR.tracking.hmd.pos.z - g_VR.origin.z
-							if g_VR.scale then h = h / g_VR.scale end
-							h = math.Clamp(math.Round(h, 1), 30, 100)
-							RunConsoleCommand("vrmod_charactereyeheight", tostring(h))
-						end
-					end
-				},
-				{
-					x = 120,
-					y = 45,
-					w = 75,
-					h = 35,
-					text = convarValues.characterIK and "Anim: ON" or "Anim: OFF",
-					font = "Trebuchet18",
-					text_x = 37,
-					text_y = 8,
-					fn = function() RunConsoleCommand("vrmod_characterik", convarValues.characterIK and "0" or "1") end
-				},
-				{
-					x = 0,
-					y = 90,
-					w = 95,
-					h = 35,
-					text = convarValues.armStretcher and "Stretch: ON" or "Stretch: OFF",
-					font = "Trebuchet18",
-					text_x = 47,
-					text_y = 8,
-					fn = function() RunConsoleCommand("vrmod_armstretcher", convarValues.armStretcher and "0" or "1") end
-				},
-				{
-					x = 100,
-					y = 90,
-					w = 95,
-					h = 35,
-					text = "Defaults",
-					font = "Trebuchet18",
-					text_x = 47,
-					text_y = 8,
-					fn = function()
-						RunConsoleCommand("vrmod_charactereyeheight", "66.8")
-						RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
-						RunConsoleCommand("vrmod_characterik", "1")
-						RunConsoleCommand("vrmod_armstretcher", "0")
-					end
-				},
-			}
-		end
-
-		rebuildButtons()
-		local lastEyeH, lastHmdD, lastIK, lastStretch = -1, -1, nil, nil
-		hook.Add("PreRender", "VRModCharIK_RenderPanel", function()
-			if not VRUtilIsMenuOpen("charik") then return end
-			-- Only redraw if values changed
-			local eyeH = convarValues.characterEyeHeight or 66.8
-			local hmdD = convarValues.characterHeadToHmdDist or 6.3
-			local ik = convarValues.characterIK
-			local stretch = convarValues.armStretcher
-			if eyeH == lastEyeH and hmdD == lastHmdD and ik == lastIK and stretch == lastStretch then return end
-			lastEyeH, lastHmdD, lastIK, lastStretch = eyeH, hmdD, ik, stretch
-			rebuildButtons()
-			VRUtilMenuRenderStart("charik")
-			-- Labels
-			draw.DrawText(string.format("Eye: %.1f  HMD: %.1f", eyeH, hmdD), "Trebuchet18", 3, 135, color_white, TEXT_ALIGN_LEFT)
-			draw.DrawText("Character Animations", "Trebuchet18", 3, 155, Color(150, 200, 255), TEXT_ALIGN_LEFT)
-			-- Buttons
-			for _, btn in ipairs(buttons) do
-				surface.SetDrawColor(0, 0, 0, 220)
-				surface.DrawRect(btn.x, btn.y, btn.w, btn.h)
-				draw.DrawText(btn.text, btn.font, btn.x + btn.text_x, btn.y + btn.text_y, color_white, TEXT_ALIGN_CENTER)
-			end
-
-			VRUtilMenuRenderEnd()
-		end)
-
-		hook.Add("VRMod_Input", "VRModCharIK_PanelInput", function(action, pressed)
-			if g_VR.menuFocus ~= "charik" then return end
-			if action ~= "boolean_primaryfire" or not pressed then return end
-			for _, btn in ipairs(buttons) do
-				if g_VR.menuCursorX > btn.x and g_VR.menuCursorX < btn.x + btn.w and g_VR.menuCursorY > btn.y and g_VR.menuCursorY < btn.y + btn.h then
-					btn.fn()
-					-- Force redraw
-					lastEyeH = -1
-				end
-			end
-		end)
-
-		-- Position panel near the height menu (slightly to the right and below)
-		-- The height menu positions itself dynamically; we piggyback off its transform
-		hook.Add("PreDrawTranslucentRenderables", "VRModCharIK_PositionPanel", function()
-			if not VRUtilIsMenuOpen("heightmenu") or not VRUtilIsMenuOpen("charik") then
-				if charIKMenuOpen then VRUtilMenuClose("charik") end
-				hook.Remove("PreDrawTranslucentRenderables", "VRModCharIK_PositionPanel")
-				return
-			end
-
-			if g_VR.menus and g_VR.menus.heightmenu and g_VR.menus.charik then
-				local hm = g_VR.menus.heightmenu
-				-- Place below the height menu
-				g_VR.menus.charik.pos = hm.pos + hm.ang:Up() * -20
-				g_VR.menus.charik.ang = hm.ang
-			end
-		end)
-	end
-
-	-- Auto-open our panel when the height menu opens, auto-close when it closes
-	hook.Add("Think", "VRModCharIK_WatchHeightMenu", function()
-		if not g_VR or not g_VR.active then
-			if charIKMenuOpen then VRUtilMenuClose("charik") end
-			return
-		end
-
-		if VRUtilIsMenuOpen and VRUtilIsMenuOpen("heightmenu") then
-			if not charIKMenuOpen then OpenCharIKPanel() end
-		elseif charIKMenuOpen then
-			VRUtilMenuClose("charik")
-		end
-	end)
-
 	------------------------------------------------------------------------
 	-- HAND ANGLES
 	------------------------------------------------------------------------
@@ -497,9 +272,10 @@ if CLIENT then
 		lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
 	end
 
-	------------------------------------------------------------------------
 	local function CharacterInit(ply)
 		local steamid = ply:SteamID()
+		g_VR.cache = g_VR.cache or {}
+		g_VR.cache[steamid] = g_VR.cache[steamid] or {}
 		local pmname = ply:GetModel()
 		if characterInfo[steamid] and characterInfo[steamid].modelName == pmname then return end
 		if ply == LocalPlayer() then
@@ -509,10 +285,10 @@ if CLIENT then
 					for i = 1, 2 do
 						for k, v in pairs(i == 1 and g_VR.input.skeleton_lefthand.fingerCurls or g_VR.input.skeleton_righthand.fingerCurls) do
 							if v < 0 or v > 1 or k == 3 and v == 0.75 then
-								g_VR.defaultOpenHandAngles = g_VR.zeroHandAngles
-								g_VR.defaultClosedHandAngles = g_VR.zeroHandAngles
-								g_VR.openHandAngles = g_VR.zeroHandAngles
-								g_VR.closedHandAngles = g_VR.zeroHandAngles
+								g_VR.defaultOpenHandAngles = g_VR.defaultOpenHandAngles
+								g_VR.defaultClosedHandAngles = g_VR.defaultClosedHandAngles
+								g_VR.openHandAngles = g_VR.defaultOpenHandAngles
+								g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
 								break
 							end
 						end
@@ -524,6 +300,8 @@ if CLIENT then
 		characterInfo[steamid] = {
 			preRenderPos = Vector(0, 0, 0),
 			renderPos = Vector(0, 0, 0),
+			characterHeadToHmdDist = 0,
+			characterEyeHeight = 0,
 			bones = {},
 			boneinfo = {},
 			boneorder = {},
@@ -540,6 +318,15 @@ if CLIENT then
 		cm:SetupBones()
 		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_L_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
 		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_R_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
+		for bone, data in pairs(characterInfo[steamid].boneinfo) do
+			data.targetMatrix = Matrix()
+			data.pos = Vector()
+			data.ang = Angle()
+			data.lastPos = nil
+			data.lastAng = nil
+			data.overrideAng = nil
+		end
+
 		local boneNames = {
 			b_leftClavicle = "ValveBiped.Bip01_L_Clavicle",
 			b_leftUpperarm = "ValveBiped.Bip01_L_UpperArm",
@@ -594,8 +381,10 @@ if CLIENT then
 		characterInfo[steamid].lowerArmLen = lowerPos:Distance(handPos)
 		characterInfo[steamid].upperLegLen = thighPos:Distance(calfPos)
 		characterInfo[steamid].lowerLegLen = calfPos:Distance(footPos)
+		characterInfo[steamid].characterEyeHeight = DEFAULT_EYE_HEIGHT
+		characterInfo[steamid].characterHeadToHmdDist = DEFAULT_HEAD_TO_HMD_DIST
 		characterInfo[steamid].spineZ = spinePos.z - cm:GetPos().z
-		characterInfo[steamid].spineLen = (convarValues.characterEyeHeight or 66.8) - characterInfo[steamid].spineZ
+		characterInfo[steamid].spineLen = (cm:GetPos().z + characterInfo[steamid].characterEyeHeight) - spinePos.z
 		cm:Remove()
 	end
 
@@ -622,6 +411,7 @@ if CLIENT then
 	local up = Vector(0, 0, 1)
 	local function PreRenderFunc()
 		if convars.vrmod_oldcharacteryaw:GetBool() then
+			-- old behavior (unchanged)
 			local _, relativeAng = WorldToLocal(zeroVec, Angle(0, g_VR.tracking.hmd.ang.yaw, 0), zeroVec, Angle(0, g_VR.characterYaw, 0))
 			if relativeAng.yaw > 45 then
 				g_VR.characterYaw = g_VR.characterYaw + relativeAng.yaw - 45
@@ -633,20 +423,47 @@ if CLIENT then
 			return
 		end
 
-		local leftPos, rightPos, hmdPos, hmdAng = g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos, g_VR.tracking.hmd.pos, g_VR.tracking.hmd.ang
-		local NA, Clamp, RealFT = math.NormalizeAngle, math.Clamp, RealFrameTime()
-		local lpos_local = WorldToLocal(leftPos, zeroAng, hmdPos, hmdAng)
+		-- ---- optimized method ----
+		local leftPos = g_VR.tracking.pose_lefthand.pos
+		local rightPos = g_VR.tracking.pose_righthand.pos
+		local hmdPos = g_VR.tracking.hmd.pos
+		local hmdAng = g_VR.tracking.hmd.ang
+		-- local helpers to avoid repeated global lookups
+		local NormalizeAngle = math.NormalizeAngle
+		local Clamp = math.Clamp
+		local RealFT = RealFrameTime()
+		-- compute hand positions relative to HMD once (WorldToLocal returns pos, ang)
+		-- Use the returned pos.y for the left/right crossing check
+		local lpos_local = WorldToLocal(leftPos, zeroAng, hmdPos, hmdAng) -- (pos, ang) unused ang
 		local rpos_local = WorldToLocal(rightPos, zeroAng, hmdPos, hmdAng)
+		-- update handYaw only if hands are not crossed (same logic)
 		if lpos_local.y > rpos_local.y then
-			local handYaw = NA(math.deg(math.atan2(rightPos.y - leftPos.y, rightPos.x - leftPos.x)) + 90)
+			-- compute yaw from delta x,y via atan2 to avoid Vector():Angle() allocations
+			local dx = rightPos.x - leftPos.x
+			local dy = rightPos.y - leftPos.y
+			local handYaw = math.deg(math.atan2(dy, dx)) + 90
+			-- normalize to -180..180
+			handYaw = NormalizeAngle(handYaw)
+			-- compute forward angle projected to horizontal plane (zero pitch)
 			local fwd = hmdAng:Forward()
 			fwd.z = 0
-			if fwd:LengthSqr() < 1e-6 then fwd = Angle(0, hmdAng.yaw, 0):Forward() end
+			if fwd:LengthSqr() < 1e-6 then
+				-- fallback to HMD yaw if forward degenerate
+				fwd = Angle(0, hmdAng.yaw, 0):Forward()
+			end
+
 			local forwardYaw = fwd:Angle().yaw
-			local targetYaw = forwardYaw + Clamp(NA(handYaw - forwardYaw), -45, 45)
-			g_VR.characterYaw = NA(g_VR.characterYaw + NA(targetYaw - g_VR.characterYaw) * 8 * RealFT)
+			-- compute relative yaw from forward to handYaw in degrees, clamp at ±45
+			local relativeToForward = NormalizeAngle(handYaw - forwardYaw)
+			local clamped = Clamp(relativeToForward, -45, 45)
+			local targetYaw = forwardYaw + clamped
+			-- compute yaw difference between targetYaw and current characterYaw, normalized
+			local yawDiff = NormalizeAngle(targetYaw - g_VR.characterYaw)
+			-- smooth toward target; keep your existing responsiveness (8 * RealFrameTime)
+			g_VR.characterYaw = NormalizeAngle(g_VR.characterYaw + yawDiff * 8 * RealFT)
 		end
 
+		-- If movement inputs require snapping the char yaw to HMD yaw, keep that behavior
 		if g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright then g_VR.characterYaw = g_VR.tracking.hmd.ang.yaw end
 	end
 
@@ -686,7 +503,6 @@ if CLIENT then
 			updatedPlayers[steamid] = 1
 		end
 
-		if ply:InVehicle() and ply:GetVehicle():GetClass() ~= "prop_vehicle_prisoner_pod" then return end
 		if characterInfo[steamid].boneorder and characterInfo[steamid].boneinfo then
 			for i = 1, #characterInfo[steamid].boneorder do
 				local bone = characterInfo[steamid].boneorder[i]
@@ -698,9 +514,10 @@ if CLIENT then
 	local function PostPlayerDrawFunc(ply)
 		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
-		if not activePlayers[steamid] or not g_VR.net or not g_VR.net[steamid] or not g_VR.net[steamid].lerpedFrame then return end
+		if activePlayers[steamid] == nil then return end
+		if not g_VR.net or not g_VR.net[steamid] or not g_VR.net[steamid].lerpedFrame then return end
 		if not characterInfo or not characterInfo[steamid] then return end
-		if ply:InVehicle() then return end
+		if g_VR.vehicle.current then return end
 		ply:SetPos(characterInfo[steamid].preRenderPos)
 	end
 

@@ -15,7 +15,7 @@ function VRUtilOpenMenu()
 		tmp:SetWrap(true)
 		tmp:SetSize(250, 100)
 		tmp:SetAutoStretchVertical(true)
-		tmp:SetFont("Trebuchet24") 
+		tmp:SetFont("Trebuchet24")
 		function tmp:PerformLayout()
 			tmp:Center()
 		end
@@ -215,29 +215,6 @@ function VRUtilOpenMenu()
 	form:CheckBox("Replace climbing mechanics (when available)", "vrmod_climbing")
 	form:CheckBox("Replace door use mechanics (when available)", "vrmod_doors")
 	form:Button("Reset settings to default", "vrmod_reset")
-	form:ControlHelp("\n--- Character Animations ---")
-	local animCheckbox = form:CheckBox("Disable Animations")
-	animCheckbox:SetChecked(not GetConVar("vrmod_characterik"):GetBool())
-	function animCheckbox:OnChange(val)
-		RunConsoleCommand("vrmod_characterik", val and "0" or "1")
-	end
-
-	form:ControlHelp("When checked, the player model stays in place without animations.")
-	form:CheckBox("Enable Arm Stretcher", "vrmod_armstretcher")
-	form:ControlHelp("Stretches arm bones to reach targets beyond the model's natural arm length.")
-	form:NumSlider("Eye Height", "vrmod_charactereyeheight", 30, 100, 1)
-	form:ControlHelp("Character eye height in source units. Default 66.8.")
-	form:NumSlider("Head to HMD Distance", "vrmod_characterheadtohmddist", 0, 20, 1)
-	form:ControlHelp("Distance from HMD to head bone. Default 6.3.")
-	local charRestoreBtn = form:Button("Restore Character Defaults")
-	function charRestoreBtn:DoClick()
-		RunConsoleCommand("vrmod_characterik", "1")
-		RunConsoleCommand("vrmod_armstretcher", "0")
-		RunConsoleCommand("vrmod_charactereyeheight", "66.8")
-		RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
-		chat.AddText(Color(100, 255, 100), "[VR Character] ", Color(255, 255, 255), "Settings reset to defaults!")
-	end
-
 	-- ─────────────── Rendering Tab ───────────────
 	do
 		local t = vgui.Create("DScrollPanel", sheet)
@@ -560,6 +537,87 @@ function VRUtilOpenMenu()
 		end
 
 		y = y + 45
+	end
+
+	-- ─────────────── Character Tab ───────────────
+	do
+		local t = vgui.Create("DPanel", sheet)
+		sheet:AddSheet("Character", t, "icon16/user.png")
+		local y = 10
+		local function AddCB(lbl, cv)
+			local cb = t:Add("DCheckBoxLabel")
+			cb:SetDark(true)
+			cb:SetText(lbl)
+			cb:SetConVar(cv)
+			cb:SetPos(20, y)
+			cb:SizeToContents()
+			y = y + 20
+			return cb
+		end
+
+		local function AddCustomCB(lbl, getFunc, onChange)
+			local cb = t:Add("DCheckBoxLabel")
+			cb:SetDark(true)
+			cb:SetText(lbl)
+			cb:SetPos(20, y)
+			cb:SetValue(getFunc() and 1 or 0)
+			cb:SizeToContents()
+			function cb:OnChange(val)
+				onChange(val)
+			end
+
+			y = y + 20
+			return cb
+		end
+
+		local function AddSl(lbl, cv, mn, mx, dec)
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetDark(true)
+			s:SetText(lbl)
+			s:SetMin(mn)
+			s:SetMax(mx)
+			s:SetDecimals(dec)
+			s:SetConVar(cv)
+			y = y + 40
+			return s
+		end
+
+		-- Header
+		local lbl = vgui.Create("DLabel", t)
+		lbl:SetText("Animation System")
+		lbl:SetPos(20, y)
+		lbl:SizeToContents()
+		y = y + 25
+		-- Disable animations (custom logic)
+		AddCustomCB("Disable Animations", function() return not GetConVar("vrmod_characterik"):GetBool() end, function(val) RunConsoleCommand("vrmod_characterik", val and "0" or "1") end)
+		-- Arm stretcher
+		AddCB("Enable Arm Stretcher", "vrmod_armstretcher")
+		y = y + 10
+		-- Calibration header
+		local lbl2 = vgui.Create("DLabel", t)
+		lbl2:SetText("Model Calibration")
+		lbl2:SetPos(20, y)
+		lbl2:SizeToContents()
+		y = y + 25
+		-- Sliders
+		AddSl("Eye Height", "vrmod_charactereyeheight", 30, 100, 1)
+		AddSl("Head to HMD Distance", "vrmod_characterheadtohmddist", 0, 20, 1)
+		-- Restore button
+		local btn = vgui.Create("DButton", t)
+		btn:SetText("Restore Defaults")
+		btn:SetPos(20, y + 20)
+		btn:SetSize(350, 30)
+		function btn:DoClick()
+			RunConsoleCommand("vrmod_characterik", "1")
+			RunConsoleCommand("vrmod_armstretcher", "0")
+			RunConsoleCommand("vrmod_charactereyeheight", "66.8")
+			RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
+			chat.AddText(Color(100, 255, 100), "[VR Character] ", Color(255, 255, 255), "Settings reset to defaults!")
+		end
+
+		y = y + 60
 	end
 
 	-- ─────────────── HUD/UI Tab ───────────────
