@@ -475,6 +475,7 @@ function vrmod_fbt.Start(ply)
 			if player ~= ply then return end
 			local eyePos = EyePos()
 			ply:ManipulateBoneScale(info.boneids.head, (eyePos == g_VR.eyePosLeft or eyePos == g_VR.eyePosRight) and ply:GetViewEntity() == ply and vrmod_fbt.zeroVec or Vector(1, 1, 1))
+			ply:ManipulateBonePosition(info.boneids.head, (eyePos == g_VR.eyePosLeft or eyePos == g_VR.eyePosRight) and ply:GetViewEntity() == ply and Vector(0, 20, 0) or vrmod_fbt.zeroVec)
 		end)
 	end
 
@@ -493,7 +494,10 @@ function vrmod_fbt.Stop(ply)
 
 	if ply == LocalPlayer() then
 		hook.Remove("PrePlayerDraw", "fbt_hide_head")
-		if info then ply:ManipulateBoneScale(info.boneids.head, Vector(1, 1, 1)) end
+		if info then
+			ply:ManipulateBoneScale(info.boneids.head, Vector(1, 1, 1))
+			ply:ManipulateBonePosition(info.boneids.head, vrmod_fbt.zeroVec)
+		end
 	end
 
 	g_VR.fbtActive[steamid] = nil
