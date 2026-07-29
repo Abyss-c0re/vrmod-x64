@@ -625,23 +625,20 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
 
     local pushOutPos = pos
     if isClipped and not gripping then
-        -- Prefer surface resolve (smooth slide along wall). lastNonClipped is only a
-        -- fallback — always snapping there causes hand flicker when the free sample
-        -- and the wall alternate under small tracking noise.
-        if resolvedPos and isvector(resolvedPos) then
-            pushOutPos = resolvedPos
-        elseif lastNonClippedPos[hand] then
+        -- Prefer last free sample (blocks pass-through), else depenetration result
+        if lastNonClippedPos[hand] then
             pushOutPos = lastNonClippedPos[hand]
+        elseif resolvedPos and isvector(resolvedPos) then
+            pushOutPos = resolvedPos
+            if hitNormal and not hitNormal:IsZero() then
+                pushOutPos = pushOutPos + hitNormal * 0.25
+            end
         else
-            pushOutPos = pos + (hitNormal or ZERO_UP)
-        end
-        -- Small outward bias so the next frame does not immediately re-penetrate
-        if hitNormal and not hitNormal:IsZero() then
-            pushOutPos = pushOutPos + hitNormal * 0.15
+            pushOutPos = pos + (hitNormal or ZERO_UP) * (radius or vrmod.DEFAULT_RADIUS)
         end
         cachedPushOutPos[hand] = pushOutPos
     else
-        lastNonClippedPos[hand] = Vector(pos)
+        lastNonClippedPos[hand] = pos
         cachedPushOutPos[hand] = nil
     end
 
@@ -769,110 +766,208 @@ local handShapeStore = {
     right = nil
 }
 
+-- Per-hand free-space sample (climbing-style sweep start). Never feed corrected poses
+-- back as "desired" — that fights tracking and causes flicker/pass-through.
+local handWall = {
+    left = {
+        lastFree = Vector(),
+        hasFree = false
+    },
+    right = {
+        lastFree = Vector(),
+        hasFree = false
+    }
+}
+
+local HAND_WALL_PAD = 0.75 -- extra clearance past sphere radius (see climbing camera padding)
+
+--- Hull-sweep from last free sample → desired sample (same idea as
+--- vrmod_climbing ResolveCameraOriginCollision). Returns safeSample, clipped, normal.
+local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
+    local mins, maxs = SetSymmetricHull(radius)
+    local pad = radius + HAND_WALL_PAD
+    local st = handWall[handKey]
+    local startPos = (st.hasFree and st.lastFree) or desiredSample
+
+    local tr = util.TraceHull({
+        start = startPos,
+        endpos = desiredSample,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_SOLID_BRUSHONLY,
+        filter = filter
+    })
+
+    -- Stuck in solid at the start of the sweep
+    if tr.StartSolid or tr.AllSolid then
+        local n = tr.HitNormal
+        if not n or n:LengthSqr() < 0.01 then
+            n = ZERO_UP
+        end
+        local push = desiredSample
+        for _ = 1, 5 do
+            local t2 = util.TraceHull({
+                start = push,
+                endpos = push + n * (radius * 2.5),
+                mins = mins,
+                maxs = maxs,
+                mask = MASK_SOLID_BRUSHONLY,
+                filter = filter
+            })
+            if not t2.StartSolid then
+                if t2.Hit then
+                    return t2.HitPos + t2.HitNormal * pad, true, t2.HitNormal
+                end
+                return t2.EndPos, true, n
+            end
+            if t2.HitNormal and t2.HitNormal:LengthSqr() > 0.01 then
+                n = t2.HitNormal
+            end
+            push = push + n * radius
+        end
+        -- Stay at last free if still valid
+        if st.hasFree then
+            local t3 = util.TraceHull({
+                start = st.lastFree,
+                endpos = st.lastFree,
+                mins = mins,
+                maxs = maxs,
+                mask = MASK_SOLID_BRUSHONLY,
+                filter = filter
+            })
+            if not t3.StartSolid then
+                return st.lastFree, true, n
+            end
+        end
+        return desiredSample, true, n
+    end
+
+    if tr.Hit then
+        -- Contact: rest just outside the wall (climbing-style)
+        return tr.HitPos + tr.HitNormal * pad, true, tr.HitNormal
+    end
+
+    return desiredSample, false, nil
+end
+
+local function MakeHandShape(samplePos, radius, ang, clipped, pushOut, normal, reachHit)
+    return {
+        pos = samplePos,
+        radius = radius,
+        mins = Vector(-radius, -radius, -radius),
+        maxs = Vector(radius, radius, radius),
+        angles = ang,
+        hit = reachHit or false,
+        pushOutPos = pushOut or samplePos,
+        isClipped = clipped and true or false,
+        hitNormal = normal,
+        hitWorld = clipped and true or false
+    }
+end
+
+local function ClearHandWallState(handKey)
+    handWall[handKey].hasFree = false
+    lastNonClippedPos[handKey] = nil
+    lastNonClippedNormal[handKey] = nil
+    cachedPushOutPos[handKey] = nil
+end
+
+--- Real-time hand wall collisions. Always runs when enabled (no broadphase gate —
+--- that was letting hands clip through walls). Climb grip still bypasses correction
+--- so vrmod_climbing is not fought.
 function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos, righthandAng)
-    if not vrmod._collisionNearby then
+    local ply = LocalPlayer()
+    local function passthrough()
         table.Empty(vrmod.collisionSpheres)
-        table.Empty(vrmod.collisionBoxes)
         handShapeStore.left = nil
         handShapeStore.right = nil
         vrmod._collisionShapeByHand = handShapeStore
-        lastNonClippedPos.left = nil
-        lastNonClippedPos.right = nil
-        lastNonClippedNormal.left = nil
-        lastNonClippedNormal.right = nil
-        cachedPushOutPos.left = nil
-        cachedPushOutPos.right = nil
-        hasWepCache = false
+        ClearHandWallState("left")
+        ClearHandWallState("right")
+        vrmod._lastGoodShapeLeft = nil
+        vrmod._lastGoodShapeRight = nil
         return lefthandPos, lefthandAng, righthandPos, righthandAng
     end
 
-    local ply = LocalPlayer()
-    if not IsValid(ply) then return lefthandPos, lefthandAng, righthandPos, righthandAng end
+    if not IsValid(ply)
+        or not g_VR.active
+        or not ply:GetNWBool("vrmod_server_enforce_collision", true)
+        or ply:GetMoveType() == MOVETYPE_NOCLIP
+        or not ply:Alive()
+        or not vrmod.IsPlayerInVR(ply)
+        or ply:InVehicle()
+    then
+        hasWepCache = false
+        return passthrough()
+    end
+
     if not vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then
         table.Empty(vrmod.collisionBoxes)
     end
 
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    local leftPos = lefthandPos + lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
-    local rightPos = righthandPos + righthandAng:Forward() * vrmod.DEFAULT_OFFSET
+    local radius = vrmod.DEFAULT_RADIUS
+    local offset = vrmod.DEFAULT_OFFSET
+    local filter = ply
 
     table.Empty(vrmod.collisionSpheres)
     handShapeStore.left = nil
     handShapeStore.right = nil
     vrmod._collisionShapeByHand = handShapeStore
 
-    -- ==================== LEFT HAND ====================
-    if leftGrip then
-        cachedPushOutPos.left = nil
-        lastNonClippedPos.left = nil
-        lastNonClippedNormal.left = nil
-        vrmod._lastGoodShapeLeft = nil
-    else
-        -- Always re-trace when clipped last frame so we track the wall continuously;
-        -- only skip traces when free and the hand barely moved.
-        local wasClipped = vrmod._lastGoodShapeLeft and vrmod._lastGoodShapeLeft.isClipped
-        local moved = leftPos:DistToSqr(lastCheckedHandPos.left) > POS_TOLERANCE_SQR
-            or math.abs(lefthandAng.pitch - lastCheckedHandAng.left.pitch) > ANG_TOLERANCE
-            or math.abs(lefthandAng.yaw - lastCheckedHandAng.left.yaw) > ANG_TOLERANCE
-        local shape
-        if moved or wasClipped then
-            shape = vrmod.utils.CheckWorldCollisions(leftPos, vrmod.DEFAULT_RADIUS, nil, nil, lefthandAng, "left", vrmod.DEFAULT_REACH, leftGrip)
-            lastCheckedHandPos.left:Set(leftPos)
-            lastCheckedHandAng.left:Set(lefthandAng)
-        else
-            shape = vrmod._lastGoodShapeLeft or handShapeStore.left
+    local function processHand(handKey, trackPos, trackAng, gripping)
+        if gripping then
+            ClearHandWallState(handKey)
+            if handKey == "left" then
+                vrmod._lastGoodShapeLeft = nil
+            else
+                vrmod._lastGoodShapeRight = nil
+            end
+            return trackPos, trackAng
         end
 
-        if shape and shape.isClipped and shape.pushOutPos then
-            -- Apply offset from sample point (leftPos) back onto tracking origin
-            lefthandPos = lefthandPos + (shape.pushOutPos - leftPos)
-            cachedPushOutPos.left = shape.pushOutPos
-            lastNonClippedNormal.left = shape.hitNormal
+        local desiredSample = trackPos + trackAng:Forward() * offset
+        local safeSample, clipped, normal = ResolveHandWallSweep(desiredSample, handKey, radius, filter)
+
+        -- Reach probe (debug / shape.hit only — does not drive pose)
+        local reachHit = false
+        local trReach = util.TraceLine({
+            start = desiredSample,
+            endpos = desiredSample + trackAng:Forward() * vrmod.DEFAULT_REACH,
+            mask = MASK_SOLID_BRUSHONLY,
+            filter = filter
+        })
+        reachHit = trReach.Hit and trReach.HitWorld or false
+
+        local shape = MakeHandShape(desiredSample, radius, trackAng, clipped, safeSample, normal, reachHit)
+        vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
+        handShapeStore[handKey] = shape
+
+        if handKey == "left" then
             vrmod._lastGoodShapeLeft = shape
-        else
-            vrmod._lastGoodShapeLeft = shape
-        end
-
-        if shape then
-            vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-            handShapeStore.left = shape
-        end
-    end
-
-    -- ==================== RIGHT HAND ====================
-    if rightGrip then
-        cachedPushOutPos.right = nil
-        lastNonClippedPos.right = nil
-        lastNonClippedNormal.right = nil
-        vrmod._lastGoodShapeRight = nil
-    else
-        local wasClipped = vrmod._lastGoodShapeRight and vrmod._lastGoodShapeRight.isClipped
-        local moved = rightPos:DistToSqr(lastCheckedHandPos.right) > POS_TOLERANCE_SQR
-            or math.abs(righthandAng.pitch - lastCheckedHandAng.right.pitch) > ANG_TOLERANCE
-            or math.abs(righthandAng.yaw - lastCheckedHandAng.right.yaw) > ANG_TOLERANCE
-        local shape
-        if moved or wasClipped then
-            shape = vrmod.utils.CheckWorldCollisions(rightPos, vrmod.DEFAULT_RADIUS, nil, nil, righthandAng, "right", vrmod.DEFAULT_REACH, rightGrip)
-            lastCheckedHandPos.right:Set(rightPos)
-            lastCheckedHandAng.right:Set(righthandAng)
-        else
-            shape = vrmod._lastGoodShapeRight or handShapeStore.right
-        end
-
-        if shape and shape.isClipped and shape.pushOutPos then
-            righthandPos = righthandPos + (shape.pushOutPos - rightPos)
-            cachedPushOutPos.right = shape.pushOutPos
-            lastNonClippedNormal.right = shape.hitNormal
-            vrmod._lastGoodShapeRight = shape
         else
             vrmod._lastGoodShapeRight = shape
         end
 
-        if shape then
-            vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-            handShapeStore.right = shape
+        if clipped then
+            -- Move tracking origin by the same delta as the sample (keeps DEFAULT_OFFSET)
+            trackPos = trackPos + (safeSample - desiredSample)
+            cachedPushOutPos[handKey] = safeSample
+            lastNonClippedNormal[handKey] = normal
+            -- do not update lastFree while blocked
+        else
+            handWall[handKey].lastFree:Set(desiredSample)
+            handWall[handKey].hasFree = true
+            lastNonClippedPos[handKey] = desiredSample
+            cachedPushOutPos[handKey] = nil
         end
+
+        return trackPos, trackAng
     end
+
+    lefthandPos, lefthandAng = processHand("left", lefthandPos, lefthandAng, leftGrip)
+    righthandPos, righthandAng = processHand("right", righthandPos, righthandAng, rightGrip)
+
     return lefthandPos, lefthandAng, righthandPos, righthandAng
 end
 

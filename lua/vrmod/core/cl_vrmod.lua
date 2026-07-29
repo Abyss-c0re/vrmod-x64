@@ -26,9 +26,6 @@ if CLIENT then
 	local eyeOffset = nil
 	local forwardOffset = nil
 	local moduleFile
-	-- Broadphase precheck only: hand push-out must run every frame or hands flicker
-	-- (raw tracking vs corrected pose alternating).
-	local COLLISION_PRECHECK_INTERVAL = 2
 	local frameCounter = 0
 	local prevRawHeadPos = Vector(0, 0, 0)
 	local prevRawHeadTime = 0
@@ -288,20 +285,29 @@ if CLIENT then
 	end
 
 	local function UpdateCollisionsAndWepPos()
-		-- === ALWAYS update viewmodel when right hand exists ===
-		if g_VR.tracking.pose_righthand then vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang) end
-		-- === Only do heavy collision work when both hands + utils are ready ===
+		-- Viewmodel always follows right hand (may be collision-corrected below)
+		if g_VR.tracking.pose_righthand then
+			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+		end
 		if not (g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils) then return end
 		frameCounter = frameCounter + 1
-		-- Broadphase can be every other frame; hand push-out every frame (no flicker)
-		if frameCounter % COLLISION_PRECHECK_INTERVAL == 0 then
-			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
-		end
-		local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+		-- Weapon broadphase (optional cost). Hands do NOT depend on this flag.
+		vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
+		-- Real-time hand wall collisions every frame (sweep from last free → desired)
+		local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(
+			g_VR.tracking.pose_lefthand.pos,
+			g_VR.tracking.pose_lefthand.ang,
+			g_VR.tracking.pose_righthand.pos,
+			g_VR.tracking.pose_righthand.ang
+		)
 		g_VR.tracking.pose_lefthand.pos = leftPos
 		g_VR.tracking.pose_lefthand.ang = leftAng
 		g_VR.tracking.pose_righthand.pos = rightPos
 		g_VR.tracking.pose_righthand.ang = rightAng
+		-- Re-apply viewmodel after right-hand correction so gun matches hand
+		if g_VR.tracking.pose_righthand then
+			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+		end
 	end
 
 	local function PerformRenderViews()
