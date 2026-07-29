@@ -200,6 +200,8 @@ if SERVER then
 		end
 	end)
 
+	-- Note: do NOT use GLua `continue` inside coroutines — it can throw
+	-- "attempt to call a number value" (see GitHub issue #30).
 	local function UpdatePickupFlagsCoroutine()
 		local cv = {
 			vrmod_pickup_npcs = GetConVar("vrmod_pickup_npcs"):GetInt(),
@@ -208,22 +210,27 @@ if SERVER then
 		}
 
 		local players = player.GetAll()
-		for _, ply in ipairs(players) do
-			if not IsValid(ply) then continue end
-			if not g_VR[ply:SteamID()] then continue end
-			if ply:InVehicle() then continue end
-			local nearby = ents.FindInSphere(ply:GetPos(), 1000)
-			for _, ent in ipairs(nearby) do
-				if not IsValid(ent) then continue end
-				if ent._vrmod_pickupable == false then continue end
-				local canPickup = vrmod.utils.CanPickupEntity(ent, ply, cv)
-				local flag = "vrmod_pickup_valid_for_" .. ply:SteamID()
-				if ent:GetNWBool(flag, false) ~= canPickup then ent:SetNWBool(flag, canPickup) end
-				-- Yield every few entities (adjust number as needed)
-				if math.random(1, 10) == 1 then coroutine.yield() end
+		for i = 1, #players do
+			local ply = players[i]
+			if IsValid(ply) and g_VR[ply:SteamID()] and not ply:InVehicle() then
+				local sid = ply:SteamID()
+				local nearby = ents.FindInSphere(ply:GetPos(), 1000)
+				for j = 1, #nearby do
+					local ent = nearby[j]
+					if IsValid(ent) and ent._vrmod_pickupable ~= false then
+						local canPickup = vrmod.utils.CanPickupEntity(ent, ply, cv)
+						local flag = "vrmod_pickup_valid_for_" .. sid
+						if ent:GetNWBool(flag, false) ~= canPickup then
+							ent:SetNWBool(flag, canPickup)
+						end
+						-- Yield occasionally so the Think budget stays light
+						if j % 8 == 0 then
+							coroutine.yield()
+						end
+					end
+				end
+				coroutine.yield()
 			end
-
-			coroutine.yield()
 		end
 	end
 
