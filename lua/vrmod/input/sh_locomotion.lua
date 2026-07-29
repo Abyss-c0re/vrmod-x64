@@ -214,7 +214,25 @@ local function start()
 		end
 
 		local mt = ply:GetMoveType()
-		cmd:SetButtons(bit.bor(cmd:GetButtons(), g_VR.input.boolean_jump and IN_JUMP + IN_DUCK or 0, g_VR.input.boolean_sprint and IN_SPEED or 0, mt == MOVETYPE_LADDER and IN_FORWARD or 0, g_VR.tracking.hmd.pos.z < g_VR.origin.z + convarValues.crouchThreshold and IN_DUCK or 0))
+		-- Duck from physical HMD height OR button crouch offset (looking up while
+		-- button-crouched used to clear height duck and allow full sprint — #10).
+		local duckFromHeight = g_VR.tracking.hmd.pos.z < g_VR.origin.z + convarValues.crouchThreshold
+		local duckFromButton = (g_VR.crouchOffsetZ or 0) < -1
+		local duck = duckFromHeight or duckFromButton
+		local buttons = cmd:GetButtons()
+		if g_VR.input.boolean_jump then
+			buttons = bit.bor(buttons, IN_JUMP, IN_DUCK) -- crouch-jump
+		end
+		if g_VR.input.boolean_sprint then
+			buttons = bit.bor(buttons, IN_SPEED)
+		end
+		if mt == MOVETYPE_LADDER then
+			buttons = bit.bor(buttons, IN_FORWARD)
+		end
+		if duck then
+			buttons = bit.bor(buttons, IN_DUCK)
+		end
+		cmd:SetButtons(buttons)
 		local va = g_VR.currentvmi and g_VR.currentvmi.wrongMuzzleAng and g_VR.tracking.pose_righthand.ang or g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang or g_VR.tracking.hmd.ang
 		cmd:SetViewAngles(va:Forward():Angle())
 		if mt == MOVETYPE_NOCLIP then

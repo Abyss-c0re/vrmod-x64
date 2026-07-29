@@ -1,8 +1,13 @@
 if SERVER then return end
 local _, convarValues = vrmod.GetConvars()
 local seatedOffset, crouchOffset = Vector(), Vector()
+-- Exposed so locomotion can force IN_DUCK while button-crouched (see issue #10)
+g_VR = g_VR or {}
+g_VR.crouchOffsetZ = 0
+
 local function updateOffsetHook()
 	seatedOffset.z = convarValues.vrmod_seated and convarValues.vrmod_seatedoffset or 0
+	g_VR.crouchOffsetZ = crouchOffset.z
 	if seatedOffset.z == 0 and crouchOffset.z == 0 then
 		hook.Remove("VRMod_Tracking", "seatedmode")
 		return
