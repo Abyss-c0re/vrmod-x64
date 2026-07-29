@@ -25,13 +25,13 @@ if CLIENT then
 	local lastPosePos = {}
 	local eyeOffset = nil
 	local forwardOffset = nil
-	local convarOverrides = {}
 	local moduleFile
 	local COLLISION_FRAME_INTERVAL = 1 -- 1 = every frame (90 Hz), 2 = every other frame (~60 Hz effective)
 	local frameCounter = 0
 	local prevRawHeadPos = Vector(0, 0, 0)
 	local prevRawHeadTime = 0
-	local convarOverrides = {
+	-- Desired values applied while VR is active (many of these are blocked from RunConsoleCommand)
+	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
 		mat_queue_mode = "1",
@@ -47,6 +47,8 @@ if CLIENT then
 		r_threaded_particles = "1",
 		r_queued_ropes = "1",
 	}
+	-- Stores original convar values so we can restore them on VR exit
+	local convarOverrides = {}
 
 	local wasPaused = false
 	if system.IsLinux() then
@@ -78,19 +80,37 @@ if CLIENT then
 	end
 
 	-- 0) Helper functions
+	-- Prefer ConVar:SetString — GMod blocks many engine cvars from RunConsoleCommand
+	-- (e.g. mat_reduceparticles, r_shadowrendertotexture). See wiki Blocked_ConCommands.
+	local function setConvarValue(name, value)
+		local cv = GetConVar(name)
+		if not cv then return false end
+		value = tostring(value)
+		local ok = pcall(function()
+			cv:SetString(value)
+		end)
+		if ok then return true end
+		-- Fallback for cvars that only accept console sets (non-blocked ones)
+		ok = pcall(RunConsoleCommand, name, value)
+		if not ok then
+			vrmod.logger.Debug("Could not set convar: " .. name)
+		end
+		return ok
+	end
+
 	local function overrideConvar(name, value)
 		local cv = GetConVar(name)
-		if cv then
+		if not cv then return end
+		if convarOverrides[name] == nil then
 			convarOverrides[name] = cv:GetString()
-			RunConsoleCommand(name, value)
 		end
+		setConvarValue(name, value)
 	end
 
 	local function restoreConvarOverrides()
 		for k, v in pairs(convarOverrides) do
-			RunConsoleCommand(k, v)
+			setConvarValue(k, v)
 		end
-
 		convarOverrides = {}
 	end
 
@@ -366,7 +386,9 @@ if CLIENT then
 
 	-- 2) Convar overrides for performance
 	local function OverridePerformanceConvars()
-		for cvar, val in pairs(convarOverrides) do
+		-- Keep skybox flag in sync with current settings at start time
+		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
+		for cvar, val in pairs(PERFORMANCE_CONVARS) do
 			overrideConvar(cvar, val)
 		end
 	end
