@@ -452,24 +452,36 @@ if SERVER then
 		hook.Run("VRMod_Start", ply)
 	end)
 
-	local function net_exit(steamid)
-		if g_VR[steamid] ~= nil then
-			g_VR[steamid] = nil
-			local ply = player.GetBySteamID(steamid)
+	local function net_exit(steamid, ply)
+		if g_VR[steamid] == nil then return end
+		g_VR[steamid] = nil
+
+		-- Prefer the player argument (disconnect hook); fall back to SteamID lookup
+		if not IsValid(ply) then
+			ply = player.GetBySteamID(steamid)
+		end
+
+		if IsValid(ply) then
 			if ply.originalViewOffset then
 				ply:SetCurrentViewOffset(ply.originalViewOffset)
 				ply:SetViewOffset(ply.originalViewOffset)
 			end
-
-			net.Start("vrutil_net_exit")
-			net.WriteString(steamid)
-			net.Broadcast()
 			hook.Run("VRMod_Exit", ply)
 		end
+
+		net.Start("vrutil_net_exit")
+		net.WriteString(steamid)
+		net.Broadcast()
 	end
 
-	vrmod.NetReceiveLimited("vrutil_net_exit", 5, 0, function(len, ply) net_exit(ply:SteamID()) end)
-	hook.Add("PlayerDisconnected", "vrutil_hook_playerdisconnected", function(ply) net_exit(ply:SteamID()) end)
+	vrmod.NetReceiveLimited("vrutil_net_exit", 5, 0, function(len, ply)
+		if not IsValid(ply) then return end
+		net_exit(ply:SteamID(), ply)
+	end)
+	hook.Add("PlayerDisconnected", "vrutil_hook_playerdisconnected", function(ply)
+		if not IsValid(ply) then return end
+		net_exit(ply:SteamID(), ply)
+	end)
 	vrmod.NetReceiveLimited("vrutil_net_requestvrplayers", 5, 0, function(len, ply)
 		ply.hasRequestedVRPlayers = true
 		for k, v in pairs(g_VR) do
