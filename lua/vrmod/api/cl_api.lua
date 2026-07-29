@@ -25,24 +25,34 @@ if CLIENT then
         return g_VR.net[sid]
     end
 
-    -- smoothing helper
+    -- smoothing helper (Angles must use LerpAngle — both Angle and Vector expose :Lerp)
     local function SmoothValue(oldVal, newVal, factor)
         if not oldVal then return newVal end
         if not factor or factor <= 0 then return newVal end
-        if oldVal.Lerp then
-            -- Vector or Angle
+        if isangle and isangle(oldVal) then
+            return LerpAngle(factor, oldVal, newVal)
+        end
+        if isvector and isvector(oldVal) then
             return LerpVector(factor, oldVal, newVal)
-        else
-            -- Fallback for numbers
+        end
+        -- Fallback without isangle/isvector: Angle uses p/y/r, Vector uses x/y/z
+        if oldVal.p ~= nil and oldVal.r ~= nil and oldVal.x == nil then
+            return LerpAngle(factor, oldVal, newVal)
+        end
+        if oldVal.x ~= nil and oldVal.z ~= nil and oldVal.p == nil then
+            return LerpVector(factor, oldVal, newVal)
+        end
+        if type(oldVal) == "number" and type(newVal) == "number" then
             return Lerp(factor, oldVal, newVal)
         end
+        return newVal
     end
 
     vrmod.cachedHeadPose = {
         pos = Vector(0, 0, 0),
         ang = Angle(0, 0, 0),
         vel = Vector(0, 0, 0),
-        angvel = Angle(0, 0, 0),
+        angvel = Vector(0, 0, 0), -- Cube's Law: angvel is Vector(p,y,r)
         lastUpdate = 0
     }
 
@@ -139,7 +149,7 @@ if CLIENT then
     end
 
     function vrmod.GetHMDAngularVelocity()
-        return vrmod.cachedHeadPose.angvel or Angle()
+        return vrmod.cachedHeadPose.angvel or Vector()
     end
 
     function vrmod.GetHMDVelocityRelative()
@@ -151,8 +161,8 @@ if CLIENT then
     end
 
     function vrmod.GetHMDVelocities()
-        if g_VR.threePoints then return vrmod.cachedHeadPose.vel or Vector(), vrmod.cachedHeadPose.angvel or Angle() end
-        return Vector(), Angle()
+        if g_VR.threePoints then return vrmod.cachedHeadPose.vel or Vector(), vrmod.cachedHeadPose.angvel or Vector() end
+        return Vector(), Vector()
     end
 
     function vrmod.GetLeftHandPos(ply)
@@ -178,7 +188,7 @@ if CLIENT then
 
     function vrmod.GetLeftHandAngularVelocity()
         local p = trackPose("pose_lefthand")
-        return (p and p.angvel) or Angle()
+        return (p and p.angvel) or Vector()
     end
 
     function vrmod.GetLeftHandVelocityRelative()
@@ -191,9 +201,9 @@ if CLIENT then
     function vrmod.GetLeftHandVelocities()
         local p = trackPose("pose_lefthand")
         if g_VR.threePoints and p then
-            return p.vel or Vector(), p.angvel or Angle(), vrmod.GetLeftHandVelocityRelative()
+            return p.vel or Vector(), p.angvel or Vector(), vrmod.GetLeftHandVelocityRelative()
         end
-        return Vector(), Angle(), Vector()
+        return Vector(), Vector(), Vector()
     end
 
     function vrmod.GetRightHandPos(ply)
@@ -219,7 +229,7 @@ if CLIENT then
 
     function vrmod.GetRightHandAngularVelocity()
         local p = trackPose("pose_righthand")
-        return (p and p.angvel) or Angle()
+        return (p and p.angvel) or Vector()
     end
 
     function vrmod.GetRightHandVelocityRelative()
@@ -232,9 +242,9 @@ if CLIENT then
     function vrmod.GetRightHandVelocities()
         local p = trackPose("pose_righthand")
         if g_VR.threePoints and p then
-            return p.vel or Vector(), p.angvel or Angle(), vrmod.GetRightHandVelocityRelative()
+            return p.vel or Vector(), p.angvel or Vector(), vrmod.GetRightHandVelocityRelative()
         end
-        return Vector(), Angle(), Vector()
+        return Vector(), Vector(), Vector()
     end
 
     -- Waist (often called "hip" in other VR contexts)
@@ -262,7 +272,7 @@ if CLIENT then
     end
 
     function vrmod.GetWaistAngularVelocity()
-        return g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_waist and g_VR.tracking.pose_waist.angvel or Angle()
+        return g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_waist and g_VR.tracking.pose_waist.angvel or Vector()
     end
 
     -- Optional relative (to HMD)
@@ -295,7 +305,7 @@ if CLIENT then
     end
 
     function vrmod.GetLeftFootAngularVelocity()
-        return g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_leftfoot.angvel or Angle()
+        return g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_leftfoot.angvel or Vector()
     end
 
     function vrmod.GetLeftFootVelocityRelative()
@@ -304,8 +314,8 @@ if CLIENT then
     end
 
     function vrmod.GetLeftFootVelocities()
-        if g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_leftfoot then return g_VR.tracking.pose_leftfoot.vel or Vector(), g_VR.tracking.pose_leftfoot.angvel or Angle(), vrmod.GetLeftFootVelocityRelative() end
-        return Vector(), Angle(), Vector()
+        if g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_leftfoot then return g_VR.tracking.pose_leftfoot.vel or Vector(), g_VR.tracking.pose_leftfoot.angvel or Vector(), vrmod.GetLeftFootVelocityRelative() end
+        return Vector(), Vector(), Vector()
     end
 
     -- Right Foot (symmetric to left)
@@ -332,7 +342,7 @@ if CLIENT then
     end
 
     function vrmod.GetRightFootAngularVelocity()
-        return g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_rightfoot and g_VR.tracking.pose_rightfoot.angvel or Angle()
+        return g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_rightfoot and g_VR.tracking.pose_rightfoot.angvel or Vector()
     end
 
     function vrmod.GetRightFootVelocityRelative()
@@ -341,8 +351,8 @@ if CLIENT then
     end
 
     function vrmod.GetRightFootVelocities()
-        if g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_rightfoot then return g_VR.tracking.pose_rightfoot.vel or Vector(), g_VR.tracking.pose_rightfoot.angvel or Angle(), vrmod.GetRightFootVelocityRelative() end
-        return Vector(), Angle(), Vector()
+        if g_VR.fbtActive and g_VR.tracking and g_VR.tracking.pose_rightfoot then return g_VR.tracking.pose_rightfoot.vel or Vector(), g_VR.tracking.pose_rightfoot.angvel or Vector(), vrmod.GetRightFootVelocityRelative() end
+        return Vector(), Vector(), Vector()
     end
 
     function vrmod.SetLeftHandPose(pos, ang, smoothing)

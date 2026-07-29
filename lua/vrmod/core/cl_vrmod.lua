@@ -531,28 +531,30 @@ if CLIENT then
 		}
 	end
 
-	-- 8) Initial tracking state
+	-- 8) Initial tracking state — core pose tables always exist before first frame
+	-- angvel is Vector(p,y,r) per Cube's Law (never Angle)
+	local function EmptyPose(pos)
+		return {
+			pos = pos or Vector(),
+			ang = Angle(),
+			vel = Vector(),
+			angvel = Vector()
+		}
+	end
+
 	local function InitializeTracking()
 		lastPosePos = {}
+		local origin = LocalPlayer():GetPos()
 		g_VR.tracking = {
-			hmd = {
-				pos = LocalPlayer():GetPos() + Vector(0, 0, 66.8),
-				ang = Angle(),
-				vel = Vector(),
-				angvel = Angle()
-			},
-			pose_lefthand = {
-				pos = LocalPlayer():GetPos(),
-				ang = Angle(),
-				vel = Vector(),
-				angvel = Angle()
-			},
-			pose_righthand = {
-				pos = LocalPlayer():GetPos(),
-				ang = Angle(),
-				vel = Vector(),
-				angvel = Angle()
-			},
+			hmd = EmptyPose(origin + Vector(0, 0, 66.8)),
+			pose_lefthand = EmptyPose(origin),
+			pose_righthand = EmptyPose(origin),
+		}
+		-- Mirror seed into raw so early consumers / getters never see nil cores
+		g_VR.rawTracking = {
+			hmd = EmptyPose(g_VR.tracking.hmd.pos),
+			pose_lefthand = EmptyPose(origin),
+			pose_righthand = EmptyPose(origin),
 		}
 
 		g_VR.threePoints = true
@@ -667,6 +669,7 @@ if CLIENT then
 			hook.Remove("ShouldDrawLocalPlayer", "vrutil_hook_shoulddrawlocalplayer")
 			hook.Remove("CalcView", "vrutil_hook_calcview")
 			g_VR.tracking = {}
+			g_VR.rawTracking = {}
 			g_VR.threePoints = false
 			g_VR.sixPoints = false
 			if g_VR.rt then

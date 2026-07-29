@@ -4,13 +4,24 @@ local meta = getmetatable(vgui.GetWorldPanel())
 local orig = meta.MakePopup
 
 local allPopups = {}
+-- Weak-keyed map so the same panel instance reuses one uid (re-open replaces, no collision)
+local panelUids = setmetatable({}, {
+	__mode = "k"
+})
+local popupSeq = 0
 
--- Generate a clean, unique identifier based on panel name
+-- Unique per panel instance. Name alone collides (two DMenus → one uid, last wins).
 local function getPanelIdentifier(panel)
 	if not IsValid(panel) then return "popup_unknown" end
+	local existing = panelUids[panel]
+	if existing then return existing end
+	popupSeq = popupSeq + 1
 	local name = panel:GetName() or "Panel"
-	name = name:lower():gsub("[^%w]", "") -- Sanitize: remove non-alphanumeric
-	return "popup_" .. name
+	name = name:lower():gsub("[^%w]", "")
+	if name == "" then name = "panel" end
+	local uid = "popup_" .. name .. "_" .. popupSeq
+	panelUids[panel] = uid
+	return uid
 end
 
 -- Overwrite MakePopup
@@ -23,18 +34,19 @@ meta.MakePopup = function(...)
 	if not IsValid(panel) then return end
 
 	local uid = getPanelIdentifier(panel)
-	allPopups[uid] = panel -- Overwrite any existing entry with same name
+	allPopups[uid] = panel
 
 	timer.Simple(0.1, function()
 		if not IsValid(panel) then return end
 		panel:SetPaintedManually(true)
 
+		local paintPanel = panel
 		local name = panel:GetName()
 		if name == "DMenu" or name == "DImage" or name == "DPanel" then
 			local child = panel:GetChildren()[1]
 			if IsValid(child) then
-				panel = child
-				panel.Paint = function(self, w, h)
+				paintPanel = child
+				paintPanel.Paint = function(self, w, h)
 					surface.SetDrawColor(175, 174, 187)
 					surface.DrawRect(0, 0, w, h)
 				end
@@ -42,7 +54,7 @@ meta.MakePopup = function(...)
 		end
 
 		local panelWidth, panelHeight = ScrW(), ScrH()
-		VRUtilMenuOpen(uid, panelWidth, panelHeight, panel, true, Vector(10, 10, 5), Angle(0, -90, 50), 0.03, true, function()
+		VRUtilMenuOpen(uid, panelWidth, panelHeight, paintPanel, true, Vector(10, 10, 5), Angle(0, -90, 50), 0.03, true, function()
 			timer.Simple(0.1, function()
 				if not g_VR.active and IsValid(panel) then
 					panel:MakePopup()
@@ -51,6 +63,7 @@ meta.MakePopup = function(...)
 			end)
 			-- Cleanup
 			allPopups[uid] = nil
+			if panelUids[panel] == uid then panelUids[panel] = nil end
 		end)
 
 		VRUtilMenuRenderPanel(uid)
