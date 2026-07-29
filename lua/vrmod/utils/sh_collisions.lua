@@ -703,6 +703,24 @@ local function WallRestPos(hitPos, hitNormal, pad, fallback)
 	return hitPos + n * (pad or 0)
 end
 
+-- If the wall correction strays too far from the *desired* (raw) sample or from the
+-- HMD, abandon the lock and return raw poses. Prevents hand+gun stuck on a wall while
+-- the player walks away (legacy: pushOutPos:DistToSqr(hmd) > 500).
+local WALL_RELEASE_FROM_DESIRED_SQR = 28 * 28 -- ~28u hand yank / walk-off
+local WALL_RELEASE_FROM_HMD_SQR = 500 -- same as pre-layered CheckWeaponPushout
+
+local function ShouldReleaseWallLock(safePos, desiredPos)
+	if not IsVec(safePos) or not IsVec(desiredPos) then return true end
+	if safePos:DistToSqr(desiredPos) > WALL_RELEASE_FROM_DESIRED_SQR then
+		return true
+	end
+	local hmd = g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.pos
+	if IsVec(hmd) and safePos:DistToSqr(hmd) > WALL_RELEASE_FROM_HMD_SQR then
+		return true
+	end
+	return false
+end
+
 --- Sweep weapon collision box; returns handPos/handAng corrected by the sample delta.
 local function ApplyWeaponWallToHand(handPos, handAng, ply)
     if not IsValid(ply) or not IsVec(handPos) or handAng == nil then return handPos, handAng end
@@ -788,6 +806,15 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
     if not safe or safe.x == nil then
         safe = desired
         clipped = false
+    end
+
+    -- Stuck-release: correction too far from raw desired / HMD → drop lock, use raw
+    if clipped and ShouldReleaseWallLock(safe, desired) then
+        wepWall.hasFree = false
+        clipped = false
+        safe = desired
+        table.Empty(vrmod.collisionBoxes)
+        return handPos, handAng
     end
 
     local shape = {
@@ -1048,7 +1075,14 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
             vrmod._lastGoodShapeRight = shape
         end
 
-        if clipped then
+        if clipped and ShouldReleaseWallLock(safeSample, desiredSample) then
+            -- Player moved / yanked free of the wall lock → raw tracking (no flying gun)
+            ClearHandWallState(handKey)
+            shape.isClipped = false
+            shape.pushOutPos = desiredSample
+            shape.hitWorld = false
+            return trackPos, trackAng
+        elseif clipped then
             -- Move tracking origin by the same delta as the sample (keeps DEFAULT_OFFSET)
             trackPos = trackPos + (safeSample - desiredSample)
             cachedPushOutPos[handKey] = safeSample

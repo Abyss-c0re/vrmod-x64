@@ -617,6 +617,15 @@ if CLIENT then
 			if IsValid(g_VR.viewModel) then
 				blockViewModelDraw = false
 				g_VR.viewModel:DrawModel()
+				-- ArcVR (and others) put mag/attachments in SWEP:PostDrawViewModel —
+				-- engine never runs that when we DrawModel() the VR viewmodel ourselves.
+				local wep = LocalPlayer():GetActiveWeapon()
+				if IsValid(wep) and isfunction(wep.PostDrawViewModel) then
+					local ok, err = pcall(wep.PostDrawViewModel, wep, g_VR.viewModel, LocalPlayer(), wep)
+					if not ok and vrmod.logger then
+						vrmod.logger.Debug("PostDrawViewModel error: %s", tostring(err))
+					end
+				end
 				blockViewModelDraw = true
 			end
 
