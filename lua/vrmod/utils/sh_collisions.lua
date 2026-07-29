@@ -50,9 +50,50 @@ local cachedPushOutPos = {
     right = nil
 }
 
+-- Cached debug convar (avoid GetConVar every collision call)
+local cv_debug_physics
 local function DebugEnabled()
-    local cv = GetConVar("vrmod_debug_physics")
-    return cv and cv:GetBool() or false
+    if cv_debug_physics == nil then
+        cv_debug_physics = GetConVar("vrmod_debug_physics")
+    end
+    return cv_debug_physics and cv_debug_physics:GetBool() or false
+end
+
+-- Reused hull extents for broadphase / sphere probes (cut per-call Vector allocs)
+local tmpHullPos = Vector()
+local tmpHullNeg = Vector()
+local ZERO_UP = Vector(0, 0, 1)
+
+local function SetSymmetricHull(radius)
+    tmpHullPos.x, tmpHullPos.y, tmpHullPos.z = radius, radius, radius
+    tmpHullNeg.x, tmpHullNeg.y, tmpHullNeg.z = -radius, -radius, -radius
+    return tmpHullNeg, tmpHullPos
+end
+
+--- Cheap brush overlap only (no penetration resolve). Used for broadphase.
+local function WorldBrushOverlaps(pos, radius)
+    local mins, maxs = SetSymmetricHull(radius)
+    local tr = util.TraceHull({
+        start = pos,
+        endpos = pos,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_SOLID_BRUSHONLY
+    })
+    return tr.Hit and tr.HitWorld
+end
+
+--- Reach sweep hit test only (no push-out iterations).
+local function BoxSweepHitsWorld(pos, ang, mins, maxs, reach)
+    local tr = util.TraceHull({
+        start = pos,
+        endpos = pos + ang:Forward() * reach,
+        angles = ang,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_SOLID_BRUSHONLY
+    })
+    return tr.Hit and tr.HitWorld
 end
 
 local function GetWeaponCollisionBox(phys, isVertical)
@@ -88,110 +129,89 @@ local function GetWeaponCollisionBox(phys, isVertical)
     return mins, maxs, isVertical, amin, amax
 end
 
-local function SphereCollidesWithWorld(pos, radius)
-    local hullSize = Vector(radius, radius, radius)
-    -- First: detect overlap
+--- Sphere vs world. Returns isClipped, hitNormal, pushOutPos.
+--- resolve=false skips push-out iterations (overlap test only).
+local function SphereCollidesWithWorld(pos, radius, resolve)
+    local mins, maxs = SetSymmetricHull(radius)
     local tr = util.TraceHull({
         start = pos,
         endpos = pos,
-        mins = -hullSize,
-        maxs = hullSize,
+        mins = mins,
+        maxs = maxs,
         mask = MASK_SOLID_BRUSHONLY
     })
 
-    if not tr.Hit or not tr.HitWorld then return false, Vector(0, 0, 1) end
-    -- Second: iterative push-out (resolve penetration)
-    local maxIterations = 2
+    if not tr.Hit or not tr.HitWorld then return false, ZERO_UP, pos end
+    if resolve == false then return true, tr.HitNormal, pos end
+
     local pushPos = pos
     local hitNormal = tr.HitNormal
-    for _ = 1, maxIterations do
+    for _ = 1, 2 do
         local pushTrace = util.TraceHull({
             start = pushPos,
             endpos = pushPos + hitNormal * radius * 1.1,
-            mins = -hullSize,
-            maxs = hullSize,
+            mins = mins,
+            maxs = maxs,
             mask = MASK_SOLID_BRUSHONLY
         })
 
         if not pushTrace.Hit then
             pushPos = pushTrace.EndPos
             break
-        else
-            pushPos = pushTrace.HitPos + pushTrace.HitNormal * 0.1
-            hitNormal = pushTrace.HitNormal
         end
+        pushPos = pushTrace.HitPos + pushTrace.HitNormal * 0.1
+        hitNormal = pushTrace.HitNormal
     end
     return true, hitNormal, pushPos
 end
 
-local function BoxCollidesWithWorld(pos, ang, mins, maxs, reach)
-    ang = ang or Angle()
-    ang:Normalize()
-    local hullMins, hullMaxs
-    local tr
-    if not reach then
-        hullMins = Vector(mins.x, mins.y, mins.z)
-        hullMaxs = Vector(maxs.x, maxs.y, maxs.z)
-        tr = util.TraceHull({
-            start = pos,
-            endpos = pos,
-            angles = ang,
-            mins = hullMins,
-            maxs = hullMaxs,
-            mask = MASK_SOLID_BRUSHONLY
-        })
-    else
-        hullMins = Vector(mins.x, mins.y, mins.z)
-        hullMaxs = Vector(maxs.x, maxs.y, maxs.z)
-        local sweepEnd = pos + ang:Forward() * reach
-        tr = util.TraceHull({
-            start = pos,
-            endpos = sweepEnd,
-            angles = ang,
-            mins = hullMins,
-            maxs = hullMaxs,
-            mask = MASK_SOLID_BRUSHONLY
-        })
-    end
+--- Box vs world (optional reach sweep). Returns isClipped, hitNormal, pushOutPos.
+--- When resolve=false, skips push-out (boolean hit only).
+local function BoxCollidesWithWorld(pos, ang, mins, maxs, reach, resolve)
+    ang = ang or angle_zero
+    local endPos = reach and (pos + ang:Forward() * reach) or pos
+    local tr = util.TraceHull({
+        start = pos,
+        endpos = endPos,
+        angles = ang,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_SOLID_BRUSHONLY
+    })
 
-    if not tr.Hit or not tr.HitWorld then return false, Vector(0, 0, 1), pos end
+    if not tr.Hit or not tr.HitWorld then return false, ZERO_UP, pos end
+    if resolve == false then return true, tr.HitNormal, pos end
+
     local hitNormal = tr.HitNormal
     local pushPos
     if not tr.StartSolid then
-        -- Started free, hit during movement/sweep: back off slightly from contact center pos
         if tr.StartPos and tr.EndPos and tr.Fraction then
-            local contactCenter = tr.StartPos + (tr.EndPos - tr.StartPos) * tr.Fraction
-            pushPos = contactCenter - tr.HitNormal * 0.1
+            pushPos = tr.StartPos + (tr.EndPos - tr.StartPos) * tr.Fraction - tr.HitNormal * 0.1
         else
-            -- Fallback if trace data is invalid
-            pushPos = pos - (hitNormal:IsZero() and Vector(0, 0, 1) or hitNormal) * 0.1
+            pushPos = pos - (hitNormal:IsZero() and ZERO_UP or hitNormal) * 0.1
         end
     else
-        -- Started in solid: iterative resolution to find free pos
         if hitNormal:LengthSqr() < 0.1 then
-            hitNormal = Vector(0, 0, 1) -- Default to up if no valid initial normal
+            hitNormal = ZERO_UP
         end
-
-        local boxSize = math.max(hullMaxs.x - hullMins.x, hullMaxs.y - hullMins.y, hullMaxs.z - hullMins.z) / 2
+        local boxSize = math.max(maxs.x - mins.x, maxs.y - mins.y, maxs.z - mins.z) * 0.5
         pushPos = pos
-        local maxIterations = 2
-        for _ = 1, maxIterations do
+        for _ = 1, 2 do
             local pushTrace = util.TraceHull({
                 start = pushPos,
                 endpos = pushPos + hitNormal * boxSize * 1.1,
                 angles = ang,
-                mins = hullMins,
-                maxs = hullMaxs,
+                mins = mins,
+                maxs = maxs,
                 mask = MASK_SOLID_BRUSHONLY
             })
 
             if not pushTrace.Hit then
                 pushPos = pushTrace.EndPos
                 break
-            else
-                pushPos = pushTrace.HitPos + pushTrace.HitNormal * 0.1
-                hitNormal = pushTrace.HitNormal
             end
+            pushPos = pushTrace.HitPos + pushTrace.HitNormal * 0.1
+            hitNormal = pushTrace.HitNormal
         end
     end
     return true, hitNormal, pushPos
@@ -480,6 +500,9 @@ function vrmod.utils.GetClimbingGripState()
     return climb.IsHoldingLeft(), climb.IsHoldingRight()
 end
 
+local PRECHECK_MOVE_SQR = PRECHECK_MOVE_THRESHOLD * PRECHECK_MOVE_THRESHOLD
+local POS_TOLERANCE_SQR = POS_TOLERANCE * POS_TOLERANCE
+
 function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
     local ply = LocalPlayer()
     if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or ply:GetMoveType() == MOVETYPE_NOCLIP or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
@@ -489,77 +512,80 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
     end
 
     -- === MOVEMENT-BASED SKIP ===
-    local leftMoved = (leftPos - lastPreCheckLeft):LengthSqr() > PRECHECK_MOVE_THRESHOLD * PRECHECK_MOVE_THRESHOLD
-    local rightMoved = (rightPos - lastPreCheckRight):LengthSqr() > PRECHECK_MOVE_THRESHOLD * PRECHECK_MOVE_THRESHOLD
+    local leftMoved = leftPos:DistToSqr(lastPreCheckLeft) > PRECHECK_MOVE_SQR
+    local rightMoved = rightPos:DistToSqr(lastPreCheckRight) > PRECHECK_MOVE_SQR
     if not leftMoved and not rightMoved then
         vrmod._collisionNearby = lastPreCheckResult
         return
     end
 
-    lastPreCheckLeft = leftPos
-    lastPreCheckRight = rightPos
+    lastPreCheckLeft:Set(leftPos)
+    lastPreCheckRight:Set(rightPos)
+    -- Broadphase only: single hull each, no push-out resolve
     local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
-    local leftNearby = SphereCollidesWithWorld(leftPos, 30)
-    local rightNearby = SphereCollidesWithWorld(rightPos, bigRadius)
-    lastPreCheckResult = leftNearby or rightNearby
+    lastPreCheckResult = WorldBrushOverlaps(leftPos, 30) or WorldBrushOverlaps(rightPos, bigRadius)
     vrmod._collisionNearby = lastPreCheckResult
 end
 
-function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, reach)
-    local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    local gripping = hand == "left" and leftGrip or hand == "right" and rightGrip
-    local shapeMins = mins or Vector(-radius, -radius, -radius)
-    local shapeMaxs = maxs or Vector(radius, radius, radius)
-    ang = ang or Angle(0, 0, 0) -- Fallback to zero angle
-    ang:Normalize()
-    local isClipped, hitNormal
+--- World collision for a hand/weapon sample.
+--- One clip resolve + optional cheap reach sweep (was up to 3 full resolves).
+function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, reach, gripping)
+    if gripping == nil then
+        local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
+        gripping = hand == "left" and leftGrip or hand == "right" and rightGrip
+    end
+
+    radius = radius or vrmod.DEFAULT_RADIUS
+    local shapeMins = mins
+    local shapeMaxs = maxs
+    if not shapeMins or not shapeMaxs then
+        shapeMins = Vector(-radius, -radius, -radius)
+        shapeMaxs = Vector(radius, radius, radius)
+    end
+    ang = ang or angle_zero
+
+    local isClipped, hitNormal, resolvedPos
     if mins and maxs then
-        -- Clipping check: full box, no reach
-        --isClipped, hitNormal = SphereCollidesWithWorld(pos, reach)
-        isClipped, hitNormal = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs)
-        if DebugEnabled() then if isClipped then vrmod.logger.Debug("Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped) end end
+        isClipped, hitNormal, resolvedPos = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs, nil, true)
+        if DebugEnabled() and isClipped then
+            vrmod.logger.Debug("Box collision for:", hand, "Pos:", pos, "Angles:", ang, "Mins:", shapeMins, "Maxs:", shapeMaxs, "Hit:", isClipped)
+        end
     else
-        if not radius then radius = vrmod.DEFAULT_RADIUS end
-        isClipped, hitNormal = SphereCollidesWithWorld(pos, radius)
-        if DebugEnabled() then if isClipped then vrmod.logger.Debug("Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped) end end
+        isClipped, hitNormal, resolvedPos = SphereCollidesWithWorld(pos, radius, true)
+        if DebugEnabled() and isClipped then
+            vrmod.logger.Debug("Sphere collision for:", hand, "Pos:", pos, "Radius:", radius, "Hit:", isClipped)
+        end
     end
 
     local pushOutPos = pos
     if isClipped and not gripping then
+        -- Prefer last free sample; else use resolve result from the clip probe (no extra trace)
         if lastNonClippedPos[hand] then
             pushOutPos = lastNonClippedPos[hand]
         else
-            local traceOut = util.TraceHull({
-                start = pos,
-                endpos = pos + hitNormal * 2, -- Increase trace distance
-                mins = shapeMins, -- Smaller hull for correction
-                maxs = shapeMaxs,
-                mask = MASK_SOLID_BRUSHONLY
-            })
-
-            pushOutPos = traceOut.Hit and traceOut.HitPos + traceOut.HitNormal or pos + hitNormal
+            pushOutPos = resolvedPos or (pos + (hitNormal or ZERO_UP))
         end
-
         cachedPushOutPos[hand] = pushOutPos
     else
         lastNonClippedPos[hand] = pos
         cachedPushOutPos[hand] = nil
     end
 
-    local reachHit
-    if mins and maxs then
-        reachHit, _ = BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs, reach)
-    else
-        local tr = util.TraceLine({
-            start = pos,
-            endpos = pos + ang:Forward() * reach,
-            mask = MASK_SOLID_BRUSHONLY
-        })
-
-        reachHit = tr.Hit and tr.HitWorld or false
+    local reachHit = false
+    if reach and reach > 0 then
+        if mins and maxs then
+            reachHit = BoxSweepHitsWorld(pos, ang, shapeMins, shapeMaxs, reach)
+        else
+            local tr = util.TraceLine({
+                start = pos,
+                endpos = pos + ang:Forward() * reach,
+                mask = MASK_SOLID_BRUSHONLY
+            })
+            reachHit = tr.Hit and tr.HitWorld or false
+        end
     end
 
-    local shape = {
+    return {
         pos = pos,
         radius = radius,
         mins = shapeMins,
@@ -568,19 +594,36 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
         hit = reachHit,
         pushOutPos = pushOutPos,
         isClipped = isClipped,
-        hitNormal = hitNormal
+        hitNormal = hitNormal,
+        -- Same as clip probe (was a full third Box/Sphere resolve)
+        hitWorld = isClipped
     }
-
-    shape.hitWorld = mins and maxs and BoxCollidesWithWorld(pos, ang, shapeMins, shapeMaxs) or SphereCollidesWithWorld(pos, radius or vrmod.DEFAULT_RADIUS)
-    return shape
 end
 
+-- Weapon pushout input/output cache (UpdateViewModelPos runs every frame)
+local lastWepInPos = Vector()
+local lastWepInAng = Angle()
+local lastWepOutPos = Vector()
+local lastWepOutAng = Angle()
+local hasWepCache = false
+local WEP_POS_EPS_SQR = 0.0025 -- 0.05^2
+local WEP_ANG_EPS = 0.75
+
 function vrmod.utils.CheckWeaponPushout(pos, ang)
-    --local pos, ang = g_VR.viewModelPos, g_VR.viewModelAng
-    -- Early out if no collision broad-phase
     if not vrmod._collisionNearby then
         vrmod.collisionBoxes = {}
+        hasWepCache = false
         return pos, ang
+    end
+
+    -- Reuse last correction when the hand barely moved (big win at 90 Hz viewmodel updates)
+    if hasWepCache
+        and pos:DistToSqr(lastWepInPos) < WEP_POS_EPS_SQR
+        and math.abs(ang.pitch - lastWepInAng.pitch) < WEP_ANG_EPS
+        and math.abs(ang.yaw - lastWepInAng.yaw) < WEP_ANG_EPS
+        and math.abs(ang.roll - lastWepInAng.roll) < WEP_ANG_EPS
+    then
+        return lastWepOutPos, lastWepOutAng
     end
 
     local ply = LocalPlayer()
@@ -594,120 +637,127 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
     reach = reach or vrmod.DEFAULT_REACH
     if not isnumber(reach) then reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2 end
     local adjustedPos = vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
-    local shape = vrmod.utils.CheckWorldCollisions(adjustedPos, nil, mins, maxs, ang, "right", reach)
-    vrmod.collisionBoxes = {} -- Reset vrmod.collisionBoxes
+    local shape = vrmod.utils.CheckWorldCollisions(adjustedPos, nil, mins, maxs, ang, "right", reach, false)
+    vrmod.collisionBoxes = {}
     if shape then
-        vrmod.collisionBoxes[1] = shape -- Update vrmod.collisionBoxes with the weapon shape
+        vrmod.collisionBoxes[1] = shape
     end
 
-    if shape and shape.isClipped and shape.pushOutPos and type(shape.pushOutPos) == "Vector" then
-        local normal = shape.hitNormal
-        local plyPos = g_VR.tracking.hmd.pos or Vector()
-        local distanceSqr = (shape.pushOutPos - plyPos):LengthSqr()
-        if distanceSqr > 500 then
-            vrmod.collisionBoxes = {} -- Clear vrmod.collisionBoxes on reset
+    local outPos, outAng = pos, ang
+    if shape and shape.isClipped and shape.pushOutPos and isvector(shape.pushOutPos) then
+        local normal = shape.hitNormal or ZERO_UP
+        local plyPos = g_VR.tracking.hmd and g_VR.tracking.hmd.pos or vector_origin
+        if shape.pushOutPos:DistToSqr(plyPos) > 500 then
+            vrmod.collisionBoxes = {}
+            hasWepCache = false
             return pos, ang
         end
 
-        -- Calculate corrected position
         local correctedPos = Vector(pos.x, pos.y, pos.z)
         local absX, absY, absZ = math.abs(normal.x), math.abs(normal.y), math.abs(normal.z)
-        local penetrationVec = pos - shape.pushOutPos
-        local penetrationDepth = penetrationVec:Dot(normal)
-        local correctionFactor = 1
+        local penetrationDepth = (pos - shape.pushOutPos):Dot(normal)
         if absX > absY and absX > absZ and absX > 0.45 then
-            correctedPos.x = shape.pushOutPos.x + normal.x * penetrationDepth * correctionFactor
+            correctedPos.x = shape.pushOutPos.x + normal.x * penetrationDepth
         elseif absY > absX and absY > absZ and absY > 0.45 then
-            correctedPos.y = shape.pushOutPos.y + normal.y * penetrationDepth * correctionFactor
+            correctedPos.y = shape.pushOutPos.y + normal.y * penetrationDepth
         elseif absZ > absX and absZ > absY and absZ > 0.45 then
-            correctedPos.z = shape.pushOutPos.z + normal.z * penetrationDepth * correctionFactor
+            correctedPos.z = shape.pushOutPos.z + normal.z * penetrationDepth
         else
-            correctedPos = shape.pushOutPos + normal * penetrationDepth * correctionFactor
+            correctedPos = shape.pushOutPos + normal * penetrationDepth
         end
 
-        -- Calculate corrected angle
         local correctedAng = Angle(ang.pitch, ang.yaw, ang.roll)
         local forward = ang:Forward()
         local dot = forward:Dot(normal)
-        if math.abs(dot) > 0.1 then -- Only adjust if not already nearly perpendicular
-            -- Project forward onto plane perpendicular to normal
+        if math.abs(dot) > 0.1 then
             local adjustedForward = forward - normal * dot
             adjustedForward:Normalize()
-            -- Reconstruct angle from adjusted forward vector, preserving right and up as much as possible
             local newRight = adjustedForward:Cross(normal)
             newRight:Normalize()
-            local newUp = newRight:Cross(adjustedForward)
-            newUp:Normalize()
             correctedAng = adjustedForward:Angle()
-            correctedAng:RotateAroundAxis(newRight, ang:Up():Dot(newUp) < 0 and -90 or 90)
+            correctedAng:RotateAroundAxis(newRight, ang:Up():Dot(newRight:Cross(adjustedForward)) < 0 and -90 or 90)
         end
 
         if DebugEnabled() then vrmod.logger.Debug("Weapon clipping detected. Push-out pos:", correctedPos, "angle:", correctedAng) end
-        return correctedPos, correctedAng
+        outPos, outAng = correctedPos, correctedAng
     end
-    return pos, ang
+
+    lastWepInPos:Set(pos)
+    lastWepInAng:Set(ang)
+    lastWepOutPos:Set(outPos)
+    lastWepOutAng:Set(outAng)
+    hasWepCache = true
+    return outPos, outAng
 end
+
+local handShapeStore = {
+    left = nil,
+    right = nil
+}
 
 function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos, righthandAng)
     if not vrmod._collisionNearby then
-        vrmod.collisionSpheres = {}
-        vrmod.collisionBoxes = {}
-        vrmod._collisionShapeByHand = {
-            left = nil,
-            right = nil
-        }
-
+        table.Empty(vrmod.collisionSpheres)
+        table.Empty(vrmod.collisionBoxes)
+        handShapeStore.left = nil
+        handShapeStore.right = nil
+        vrmod._collisionShapeByHand = handShapeStore
         lastNonClippedPos.left = nil
         lastNonClippedPos.right = nil
         lastNonClippedNormal.left = nil
         lastNonClippedNormal.right = nil
         cachedPushOutPos.left = nil
         cachedPushOutPos.right = nil
+        hasWepCache = false
         return lefthandPos, lefthandAng, righthandPos, righthandAng
     end
 
     local ply = LocalPlayer()
     if not IsValid(ply) then return lefthandPos, lefthandAng, righthandPos, righthandAng end
-    local wep = ply:GetActiveWeapon()
-    if not vrmod.utils.IsValidWep(wep) then vrmod.collisionBoxes = {} end
+    if not vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then
+        table.Empty(vrmod.collisionBoxes)
+    end
+
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
     local leftPos = lefthandPos + lefthandAng:Forward() * vrmod.DEFAULT_OFFSET
     local rightPos = righthandPos + righthandAng:Forward() * vrmod.DEFAULT_OFFSET
-    vrmod.collisionSpheres = {}
-    vrmod._collisionShapeByHand = {
-        left = nil,
-        right = nil
-    }
+
+    table.Empty(vrmod.collisionSpheres)
+    handShapeStore.left = nil
+    handShapeStore.right = nil
+    vrmod._collisionShapeByHand = handShapeStore
 
     -- ==================== LEFT HAND ====================
     if leftGrip then
         cachedPushOutPos.left = nil
         lastNonClippedPos.left = nil
         lastNonClippedNormal.left = nil
+        vrmod._lastGoodShapeLeft = nil
     else
-        local moved = (leftPos - lastCheckedHandPos.left):LengthSqr() > POS_TOLERANCE * POS_TOLERANCE or math.abs(lefthandAng.pitch - lastCheckedHandAng.left.pitch) > ANG_TOLERANCE or math.abs(lefthandAng.yaw - lastCheckedHandAng.left.yaw) > ANG_TOLERANCE
+        local moved = leftPos:DistToSqr(lastCheckedHandPos.left) > POS_TOLERANCE_SQR
+            or math.abs(lefthandAng.pitch - lastCheckedHandAng.left.pitch) > ANG_TOLERANCE
+            or math.abs(lefthandAng.yaw - lastCheckedHandAng.left.yaw) > ANG_TOLERANCE
         local shape
         if moved then
-            shape = vrmod.utils.CheckWorldCollisions(leftPos, vrmod.DEFAULT_RADIUS, nil, nil, lefthandAng, "left", vrmod.DEFAULT_REACH)
-            lastCheckedHandPos.left = leftPos
-            lastCheckedHandAng.left = lefthandAng
+            shape = vrmod.utils.CheckWorldCollisions(leftPos, vrmod.DEFAULT_RADIUS, nil, nil, lefthandAng, "left", vrmod.DEFAULT_REACH, leftGrip)
+            lastCheckedHandPos.left:Set(leftPos)
+            lastCheckedHandAng.left:Set(lefthandAng)
         else
-            -- Reuse last known good push-out position instead of nil
-            shape = vrmod._lastGoodShapeLeft or vrmod._collisionShapeByHand.left
+            shape = vrmod._lastGoodShapeLeft or handShapeStore.left
         end
 
         if shape and shape.isClipped and shape.pushOutPos then
             lefthandPos = shape.pushOutPos
             cachedPushOutPos.left = lefthandPos
             lastNonClippedNormal.left = shape.hitNormal
-            vrmod._lastGoodShapeLeft = shape -- store for next frame
+            vrmod._lastGoodShapeLeft = shape
         else
             vrmod._lastGoodShapeLeft = nil
         end
 
         if shape then
             vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-            vrmod._collisionShapeByHand.left = shape
+            handShapeStore.left = shape
         end
     end
 
@@ -716,15 +766,18 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         cachedPushOutPos.right = nil
         lastNonClippedPos.right = nil
         lastNonClippedNormal.right = nil
+        vrmod._lastGoodShapeRight = nil
     else
-        local moved = (rightPos - lastCheckedHandPos.right):LengthSqr() > POS_TOLERANCE * POS_TOLERANCE or math.abs(righthandAng.pitch - lastCheckedHandAng.right.pitch) > ANG_TOLERANCE or math.abs(righthandAng.yaw - lastCheckedHandAng.right.yaw) > ANG_TOLERANCE
+        local moved = rightPos:DistToSqr(lastCheckedHandPos.right) > POS_TOLERANCE_SQR
+            or math.abs(righthandAng.pitch - lastCheckedHandAng.right.pitch) > ANG_TOLERANCE
+            or math.abs(righthandAng.yaw - lastCheckedHandAng.right.yaw) > ANG_TOLERANCE
         local shape
         if moved then
-            shape = vrmod.utils.CheckWorldCollisions(rightPos, vrmod.DEFAULT_RADIUS, nil, nil, righthandAng, "right", vrmod.DEFAULT_REACH)
-            lastCheckedHandPos.right = rightPos
-            lastCheckedHandAng.right = righthandAng
+            shape = vrmod.utils.CheckWorldCollisions(rightPos, vrmod.DEFAULT_RADIUS, nil, nil, righthandAng, "right", vrmod.DEFAULT_REACH, rightGrip)
+            lastCheckedHandPos.right:Set(rightPos)
+            lastCheckedHandAng.right:Set(righthandAng)
         else
-            shape = vrmod._lastGoodShapeRight or vrmod._collisionShapeByHand.right
+            shape = vrmod._lastGoodShapeRight or handShapeStore.right
         end
 
         if shape and shape.isClipped and shape.pushOutPos then
@@ -738,19 +791,19 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
 
         if shape then
             vrmod.collisionSpheres[#vrmod.collisionSpheres + 1] = shape
-            vrmod._collisionShapeByHand.right = shape
+            handShapeStore.right = shape
         end
     end
     return lefthandPos, lefthandAng, righthandPos, righthandAng
 end
 
 function vrmod.utils.SphereCollidesWithProp(pos, radius, filter)
-    local hullSize = Vector(radius, radius, radius)
+    local mins, maxs = SetSymmetricHull(radius)
     local tr = util.TraceHull({
         start = pos,
         endpos = pos,
-        mins = -hullSize,
-        maxs = hullSize,
+        mins = mins,
+        maxs = maxs,
         mask = MASK_SOLID,
         filter = filter
     })
