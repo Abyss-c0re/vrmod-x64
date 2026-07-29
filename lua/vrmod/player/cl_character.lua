@@ -478,6 +478,7 @@ if CLIENT then
 			local ep = EyePos()
 			local hide = (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight) and ply:GetViewEntity() == ply
 			ply:ManipulateBoneScale(characterInfo[steamid].bones.b_head, hide and zeroVec or Vector(1, 1, 1))
+			ply:ManipulateBonePosition(characterInfo[steamid].bones.b_head, hide and Vector(0, 20, 0) or zeroVec)
 		end
 
 		characterInfo[steamid].preRenderPos = ply:GetPos()
