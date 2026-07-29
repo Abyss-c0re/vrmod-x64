@@ -625,15 +625,23 @@ function vrmod.utils.CheckWorldCollisions(pos, radius, mins, maxs, ang, hand, re
 
     local pushOutPos = pos
     if isClipped and not gripping then
-        -- Prefer last free sample; else use resolve result from the clip probe (no extra trace)
-        if lastNonClippedPos[hand] then
+        -- Prefer surface resolve (smooth slide along wall). lastNonClipped is only a
+        -- fallback — always snapping there causes hand flicker when the free sample
+        -- and the wall alternate under small tracking noise.
+        if resolvedPos and isvector(resolvedPos) then
+            pushOutPos = resolvedPos
+        elseif lastNonClippedPos[hand] then
             pushOutPos = lastNonClippedPos[hand]
         else
-            pushOutPos = resolvedPos or (pos + (hitNormal or ZERO_UP))
+            pushOutPos = pos + (hitNormal or ZERO_UP)
+        end
+        -- Small outward bias so the next frame does not immediately re-penetrate
+        if hitNormal and not hitNormal:IsZero() then
+            pushOutPos = pushOutPos + hitNormal * 0.15
         end
         cachedPushOutPos[hand] = pushOutPos
     else
-        lastNonClippedPos[hand] = pos
+        lastNonClippedPos[hand] = Vector(pos)
         cachedPushOutPos[hand] = nil
     end
 
@@ -800,11 +808,14 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         lastNonClippedNormal.left = nil
         vrmod._lastGoodShapeLeft = nil
     else
+        -- Always re-trace when clipped last frame so we track the wall continuously;
+        -- only skip traces when free and the hand barely moved.
+        local wasClipped = vrmod._lastGoodShapeLeft and vrmod._lastGoodShapeLeft.isClipped
         local moved = leftPos:DistToSqr(lastCheckedHandPos.left) > POS_TOLERANCE_SQR
             or math.abs(lefthandAng.pitch - lastCheckedHandAng.left.pitch) > ANG_TOLERANCE
             or math.abs(lefthandAng.yaw - lastCheckedHandAng.left.yaw) > ANG_TOLERANCE
         local shape
-        if moved then
+        if moved or wasClipped then
             shape = vrmod.utils.CheckWorldCollisions(leftPos, vrmod.DEFAULT_RADIUS, nil, nil, lefthandAng, "left", vrmod.DEFAULT_REACH, leftGrip)
             lastCheckedHandPos.left:Set(leftPos)
             lastCheckedHandAng.left:Set(lefthandAng)
@@ -813,12 +824,13 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         end
 
         if shape and shape.isClipped and shape.pushOutPos then
-            lefthandPos = shape.pushOutPos
-            cachedPushOutPos.left = lefthandPos
+            -- Apply offset from sample point (leftPos) back onto tracking origin
+            lefthandPos = lefthandPos + (shape.pushOutPos - leftPos)
+            cachedPushOutPos.left = shape.pushOutPos
             lastNonClippedNormal.left = shape.hitNormal
             vrmod._lastGoodShapeLeft = shape
         else
-            vrmod._lastGoodShapeLeft = nil
+            vrmod._lastGoodShapeLeft = shape
         end
 
         if shape then
@@ -834,11 +846,12 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         lastNonClippedNormal.right = nil
         vrmod._lastGoodShapeRight = nil
     else
+        local wasClipped = vrmod._lastGoodShapeRight and vrmod._lastGoodShapeRight.isClipped
         local moved = rightPos:DistToSqr(lastCheckedHandPos.right) > POS_TOLERANCE_SQR
             or math.abs(righthandAng.pitch - lastCheckedHandAng.right.pitch) > ANG_TOLERANCE
             or math.abs(righthandAng.yaw - lastCheckedHandAng.right.yaw) > ANG_TOLERANCE
         local shape
-        if moved then
+        if moved or wasClipped then
             shape = vrmod.utils.CheckWorldCollisions(rightPos, vrmod.DEFAULT_RADIUS, nil, nil, righthandAng, "right", vrmod.DEFAULT_REACH, rightGrip)
             lastCheckedHandPos.right:Set(rightPos)
             lastCheckedHandAng.right:Set(righthandAng)
@@ -847,12 +860,12 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         end
 
         if shape and shape.isClipped and shape.pushOutPos then
-            righthandPos = shape.pushOutPos
-            cachedPushOutPos.right = righthandPos
+            righthandPos = righthandPos + (shape.pushOutPos - rightPos)
+            cachedPushOutPos.right = shape.pushOutPos
             lastNonClippedNormal.right = shape.hitNormal
             vrmod._lastGoodShapeRight = shape
         else
-            vrmod._lastGoodShapeRight = nil
+            vrmod._lastGoodShapeRight = shape
         end
 
         if shape then

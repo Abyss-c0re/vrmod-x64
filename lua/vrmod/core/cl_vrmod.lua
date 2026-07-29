@@ -26,8 +26,9 @@ if CLIENT then
 	local eyeOffset = nil
 	local forwardOffset = nil
 	local moduleFile
-	-- Hand hull traces are expensive; every other stereo frame is enough at ~90 Hz
-	local COLLISION_FRAME_INTERVAL = 2
+	-- Broadphase precheck only: hand push-out must run every frame or hands flicker
+	-- (raw tracking vs corrected pose alternating).
+	local COLLISION_PRECHECK_INTERVAL = 2
 	local frameCounter = 0
 	local prevRawHeadPos = Vector(0, 0, 0)
 	local prevRawHeadTime = 0
@@ -292,15 +293,15 @@ if CLIENT then
 		-- === Only do heavy collision work when both hands + utils are ready ===
 		if not (g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils) then return end
 		frameCounter = frameCounter + 1
-		-- === PERFORMANCE WRAPPER ===
-		if frameCounter % COLLISION_FRAME_INTERVAL == 0 then
+		-- Broadphase can be every other frame; hand push-out every frame (no flicker)
+		if frameCounter % COLLISION_PRECHECK_INTERVAL == 0 then
 			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
-			local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-			g_VR.tracking.pose_lefthand.pos = leftPos
-			g_VR.tracking.pose_lefthand.ang = leftAng
-			g_VR.tracking.pose_righthand.pos = rightPos
-			g_VR.tracking.pose_righthand.ang = rightAng
 		end
+		local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang, g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+		g_VR.tracking.pose_lefthand.pos = leftPos
+		g_VR.tracking.pose_lefthand.ang = leftAng
+		g_VR.tracking.pose_righthand.pos = rightPos
+		g_VR.tracking.pose_righthand.ang = rightAng
 	end
 
 	local function PerformRenderViews()
