@@ -214,7 +214,7 @@ if SERVER then
 			if ply:InVehicle() then continue end
 			local nearby = ents.FindInSphere(ply:GetPos(), 1000)
 			for _, ent in ipairs(nearby) do
-				if not IsValid(ent) then return end
+				if not IsValid(ent) then continue end
 				if ent._vrmod_pickupable == false then continue end
 				local canPickup = vrmod.utils.CanPickupEntity(ent, ply, cv)
 				local flag = "vrmod_pickup_valid_for_" .. ply:SteamID()
