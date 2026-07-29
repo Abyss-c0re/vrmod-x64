@@ -146,14 +146,16 @@ if CLIENT then
 		}
 	end
 
-	-- Pose pipeline:
-	--   1) device sample  → g_VR.rawTracking  (never mutated by collisions/UI)
-	--   2) copy to         → g_VR.tracking
-	--   3) VRMod_Tracking  → early modifiers (seated, crouch, simulate hands…)
-	--   4) ApplyPoseModifiers → wall/weapon collision writes final tracking
-	--   5) viewmodel / net / character all read g_VR.tracking only
-	-- angvel is stored as Vector(p,y,r) in the sample path, but some code may leave
-	-- an Angle in the table — never call :Set across mismatched types.
+	-- Cube's Law — Truth Matrix pose flow (do not break the public surface of tracking):
+	--   rawTracking  = device energy (unfiltered sample; modifiers must not own this)
+	--   tracking     = Source of Truth for all consumers (same tables/fields as always)
+	--   VRMod_Tracking → early lawful modifiers (seated, crouch, sim hands…)
+	--   ApplyPoseModifiers → wall/weapon (write only into tracking hands)
+	--   viewmodel / net / character / melee → read tracking only
+	-- Integrity rules:
+	--   • Never nil-out hmd / pose_lefthand / pose_righthand mid-session
+	--   • Never let a modifier invent a second parallel gun/hand truth
+	--   • angvel is Vector(p,y,r); never Angle:Set(Vector)
 	local function AsVector(v)
 		if not v then return Vector() end
 		if v.x ~= nil then return Vector(v.x, v.y, v.z) end
