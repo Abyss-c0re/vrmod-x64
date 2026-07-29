@@ -26,7 +26,8 @@ if CLIENT then
 	local eyeOffset = nil
 	local forwardOffset = nil
 	local moduleFile
-	local COLLISION_FRAME_INTERVAL = 1 -- 1 = every frame (90 Hz), 2 = every other frame (~60 Hz effective)
+	-- Hand hull traces are expensive; every other stereo frame is enough at ~90 Hz
+	local COLLISION_FRAME_INTERVAL = 2
 	local frameCounter = 0
 	local prevRawHeadPos = Vector(0, 0, 0)
 	local prevRawHeadTime = 0
