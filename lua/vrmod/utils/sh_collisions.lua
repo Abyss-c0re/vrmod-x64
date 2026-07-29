@@ -703,17 +703,13 @@ local function WallRestPos(hitPos, hitNormal, pad, fallback)
 	return hitPos + n * (pad or 0)
 end
 
--- If the wall correction strays too far from the *desired* (raw) sample or from the
--- HMD, abandon the lock and return raw poses. Prevents hand+gun stuck on a wall while
--- the player walks away (legacy: pushOutPos:DistToSqr(hmd) > 500).
-local WALL_RELEASE_FROM_DESIRED_SQR = 28 * 28 -- ~28u hand yank / walk-off
-local WALL_RELEASE_FROM_HMD_SQR = 500 -- same as pre-layered CheckWeaponPushout
+-- ONLY abandon wall correction for absurd teleports (safe sample far beyond arm reach
+-- of the HMD). Do NOT compare safe vs desired — that distance IS penetration depth,
+-- and releasing there made hands pass through walls as soon as you pressed in.
+local WALL_RELEASE_FROM_HMD_SQR = 100 * 100 -- ~100u past arm-length absurdity
 
-local function ShouldReleaseWallLock(safePos, desiredPos)
-	if not IsVec(safePos) or not IsVec(desiredPos) then return true end
-	if safePos:DistToSqr(desiredPos) > WALL_RELEASE_FROM_DESIRED_SQR then
-		return true
-	end
+local function ShouldReleaseWallLock(safePos, _desiredPos)
+	if not IsVec(safePos) then return true end
 	local hmd = g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.pos
 	if IsVec(hmd) and safePos:DistToSqr(hmd) > WALL_RELEASE_FROM_HMD_SQR then
 		return true
@@ -808,13 +804,17 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
         clipped = false
     end
 
-    -- Stuck-release: correction too far from raw desired / HMD → drop lock, use raw
+    -- Absurd teleport only — never drop solid wall contact just because
+    -- the gun is pressed deep into geometry (that's intended correction)
     if clipped and ShouldReleaseWallLock(safe, desired) then
         wepWall.hasFree = false
-        clipped = false
-        safe = desired
-        table.Empty(vrmod.collisionBoxes)
-        return handPos, handAng
+        -- keep safe if it's a real correction; only abandon if safe == nonsense
+        if not IsVec(safe) or safe == desired then
+            clipped = false
+            safe = desired
+            table.Empty(vrmod.collisionBoxes)
+            return handPos, handAng
+        end
     end
 
     local shape = {
@@ -833,9 +833,12 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
 
     if clipped and handPos and handPos.x and safe and desired then
         -- Same delta on hand tracking so gun (parented to hand) cannot fly free
-        handPos = handPos + (safe - desired)
-        if DebugEnabled() then
-            vrmod.logger.Debug("Weapon wall: hand delta %s", tostring(safe - desired))
+        local delta = safe - desired
+        if delta:LengthSqr() > 0.0001 then
+            handPos = handPos + delta
+            if DebugEnabled() then
+                vrmod.logger.Debug("Weapon wall: hand delta %s", tostring(delta))
+            end
         end
     end
 
@@ -894,7 +897,26 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		st.hasFree = false
 	end
 
-	local startPos = (st.hasFree and IsVec(st.lastFree) and st.lastFree) or desiredSample
+	local function isFree(pos)
+		local t = util.TraceHull({
+			start = pos,
+			endpos = pos,
+			mins = mins,
+			maxs = maxs,
+			mask = MASK_SOLID_BRUSHONLY,
+			filter = filter
+		})
+		return not (t.StartSolid or t.AllSolid)
+	end
+
+	-- Prefer last free → desired sweep (climbing-style). If lastFree is itself
+	-- buried (player teleported / map change), drop it and depenetrate from desired.
+	local startPos = desiredSample
+	if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
+		startPos = st.lastFree
+	else
+		st.hasFree = false
+	end
 
 	local tr = util.TraceHull({
 		start = startPos,
@@ -907,15 +929,22 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 
 	-- Stuck in solid at the start of the sweep
 	if tr.StartSolid or tr.AllSolid then
+		-- Prefer known free sample over raw desired (desired is still in the wall)
+		if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
+			local n = tr.HitNormal
+			if not IsVec(n) or n:LengthSqr() < 0.01 then n = ZERO_UP end
+			return Vector(st.lastFree), true, n
+		end
+
 		local n = tr.HitNormal
 		if not IsVec(n) or n:LengthSqr() < 0.01 then
 			n = ZERO_UP
 		end
-		local push = desiredSample
-		for _ = 1, 5 do
+		local push = Vector(desiredSample)
+		for _ = 1, 12 do
 			local t2 = util.TraceHull({
 				start = push,
-				endpos = push + n * (radius * 2.5),
+				endpos = push + n * (radius * 3),
 				mins = mins,
 				maxs = maxs,
 				mask = MASK_SOLID_BRUSHONLY,
@@ -923,39 +952,31 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 			})
 			if not t2.StartSolid then
 				if t2.Hit then
-					return WallRestPos(t2.HitPos, t2.HitNormal, pad, desiredSample), true, (IsVec(t2.HitNormal) and t2.HitNormal) or n
+					return WallRestPos(t2.HitPos, t2.HitNormal, pad, push), true, (IsVec(t2.HitNormal) and t2.HitNormal) or n
 				end
-				return (IsVec(t2.EndPos) and t2.EndPos) or desiredSample, true, n
+				local endp = (IsVec(t2.EndPos) and t2.EndPos) or push
+				return endp, true, n
 			end
 			if IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01 then
 				n = t2.HitNormal
 			end
-			push = push + n * radius
+			push = push + n * math.max(radius, 1)
 		end
-		-- Stay at last free if still valid
+		-- Still solid: hold last free if any, else try a hard normal kick from desired
 		if st.hasFree and IsVec(st.lastFree) then
-			local t3 = util.TraceHull({
-				start = st.lastFree,
-				endpos = st.lastFree,
-				mins = mins,
-				maxs = maxs,
-				mask = MASK_SOLID_BRUSHONLY,
-				filter = filter
-			})
-			if not t3.StartSolid then
-				return st.lastFree, true, n
-			end
+			return Vector(st.lastFree), true, n
 		end
-		return desiredSample, true, n
+		return desiredSample + n * (radius + pad + 2), true, n
 	end
 
 	if tr.Hit then
-		-- Contact: rest just outside the wall (climbing-style)
+		-- Contact: rest just outside the wall (climbing-style). This is the
+		-- path that must always block — never pass desired through.
 		local n = tr.HitNormal
 		if not IsVec(n) or n:LengthSqr() < 0.01 then
 			n = ZERO_UP
 		end
-		return WallRestPos(tr.HitPos, n, pad, desiredSample), true, n
+		return WallRestPos(tr.HitPos, n, pad, startPos), true, n
 	end
 
 	return desiredSample, false, nil
@@ -1024,8 +1045,10 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     end
 
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    local radius = vrmod.DEFAULT_RADIUS
-    local offset = vrmod.DEFAULT_OFFSET
+    -- Slightly larger than visual knuckle so the correction engages before the mesh digs in
+    local radius = math.max(vrmod.DEFAULT_RADIUS, 3.0)
+    -- Sample near the palm/knuckles (small forward offset), not far ahead of the hand
+    local offset = math.min(vrmod.DEFAULT_OFFSET or 5, 2.5)
     local filter = ply
 
     table.Empty(vrmod.collisionSpheres)
@@ -1076,18 +1099,20 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         end
 
         if clipped and ShouldReleaseWallLock(safeSample, desiredSample) then
-            -- Player moved / yanked free of the wall lock → raw tracking (no flying gun)
+            -- Absurd teleport only — clear free sample but still apply safe if we have one
             ClearHandWallState(handKey)
-            shape.isClipped = false
-            shape.pushOutPos = desiredSample
-            shape.hitWorld = false
-            return trackPos, trackAng
-        elseif clipped then
-            -- Move tracking origin by the same delta as the sample (keeps DEFAULT_OFFSET)
-            trackPos = trackPos + (safeSample - desiredSample)
+            -- Fall through: still use safeSample if it differs from desired
+        end
+
+        if clipped then
+            -- Move tracking origin by the same delta as the sample (keeps offset)
+            local delta = safeSample - desiredSample
+            if delta:LengthSqr() > 0.0001 then
+                trackPos = trackPos + delta
+            end
             cachedPushOutPos[handKey] = safeSample
             lastNonClippedNormal[handKey] = normal
-            -- do not update lastFree while blocked
+            -- do not update lastFree while blocked (keeps sweep origin in free space)
         else
             local st = handWall[handKey]
             if st then
