@@ -38,7 +38,9 @@ if CLIENT then
     local function drawLaser()
         if not g_VR.viewModelMuzzle or g_VR.menuFocus then return end
         local wep = LocalPlayer():GetActiveWeapon()
-        if not IsValid(wep) or g_VR.viewModelInfo[wep:GetClass()].noLaser then return end
+        if not IsValid(wep) then return end
+        local info = g_VR.viewModelInfo[wep:GetClass()]
+        if info and info.noLaser then return end
         local startPos = g_VR.viewModelMuzzle.Pos
         local dir = g_VR.viewModelMuzzle.Ang:Forward()
         local endPos = startPos + dir * 10000
