@@ -68,19 +68,10 @@ This build focuses on **optimization** by merging essential features from semi-o
    - Place it in:
      `./GarrysMod/garrysmod/addons/vrmod`
 
-## Why the New License?
+## License
 
-I’ve always loved sharing VRMod-x64 with the community and seeing what everyone creates with it. Unfortunately, a recent situation forced me to rethink the licensing.
+**CUBECHAIN LICENSE** (ProjectNexus station law) — energy must flow. We no longer contain.
 
-A commissioner hired a content creator to make a paid/custom fork of the project. While they were profiting from the work, the commissioner repeatedly pressured me — for free — to debug and fix issues specific to their paid version. This took up hours of my personal time while they monetized the result.
+See [LICENSE](LICENSE). Cubechain: https://github.com/Abyss-c0re/vrmod-x64  
+Station SoT: https://github.com/Abyss-c0re/ProjectNexus
 
-Because of this, I’ve updated the license to a **Custom Restricted Share-Alike License**. Here’s what it means for you:
-
-- ✅ **Non-commercial use is still completely free** — personal play, free mods, community servers, educational use, etc.
-- ✅ **All modifications must be shared publicly** (so the community benefits from your improvements).
-- ✅ **Commercial use** (monetized content, commissioned forks, paid addons, etc.) now requires my explicit written approval. I’m happy to grant it **for free** if no profit is being made.
-- ❌ No more “take the code, profit from it, then demand free support” situations.
-
-If you’d like to use VRMod-x64 commercially or commission a custom fork/addon, just email me at **info@abyss-core.com** and we’ll work something out.
-
-I want VRMod-x64 to keep growing and stay fun for everyone. This change simply protects the time and effort that goes into maintaining it. Thank you for understanding — and thank you for being part of the community! ❤️
