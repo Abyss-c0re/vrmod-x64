@@ -30,7 +30,9 @@ if CLIENT then
 	local frameCounter = 0
 	local prevRawHeadPos = Vector(0, 0, 0)
 	local prevRawHeadTime = 0
-	-- Desired values applied while VR is active (many of these are blocked from RunConsoleCommand)
+	-- Desired values applied while VR is active.
+	-- Do NOT include cvars on GMod's Blocked_ConCommands list (mat_reduceparticles,
+	-- r_shadowrendertotexture, etc.) — Lua cannot change them without console spam.
 	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
@@ -41,8 +43,6 @@ if CLIENT then
 		mat_disable_ps_patch = "1",
 		mat_motion_blur_enabled = "0",
 		mat_fastspecular = "0",
-		mat_reduceparticles = "1",
-		r_shadowrendertotexture = "0",
 		r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
 		r_threaded_particles = "1",
 		r_queued_ropes = "1",
@@ -80,8 +80,8 @@ if CLIENT then
 	end
 
 	-- 0) Helper functions
-	-- Prefer ConVar:SetString — GMod blocks many engine cvars from RunConsoleCommand
-	-- (e.g. mat_reduceparticles, r_shadowrendertotexture). See wiki Blocked_ConCommands.
+	-- Only ConVar:SetString — never RunConsoleCommand (GMod blacklists many engine cvars
+	-- and prints "Command is blocked!" even when pcall'd).
 	local function setConvarValue(name, value)
 		local cv = GetConVar(name)
 		if not cv then return false end
@@ -89,22 +89,22 @@ if CLIENT then
 		local ok = pcall(function()
 			cv:SetString(value)
 		end)
-		if ok then return true end
-		-- Fallback for cvars that only accept console sets (non-blocked ones)
-		ok = pcall(RunConsoleCommand, name, value)
 		if not ok then
 			vrmod.logger.Debug("Could not set convar: " .. name)
+			return false
 		end
-		return ok
+		return true
 	end
 
 	local function overrideConvar(name, value)
 		local cv = GetConVar(name)
 		if not cv then return end
+		local previous = cv:GetString()
+		if not setConvarValue(name, value) then return end
+		-- Only remember originals for cvars we actually changed
 		if convarOverrides[name] == nil then
-			convarOverrides[name] = cv:GetString()
+			convarOverrides[name] = previous
 		end
-		setConvarValue(name, value)
 	end
 
 	local function restoreConvarOverrides()
