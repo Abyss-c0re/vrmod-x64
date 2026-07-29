@@ -475,10 +475,15 @@ if CLIENT then
 		if not characterInfo or not characterInfo[steamid] or not characterInfo[steamid].bones then return end
 		local headToHmdDist = convarValues.characterHeadToHmdDist or 6.3
 		if ply == LocalPlayer() then
-			local ep = EyePos()
-			local hide = (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight) and ply:GetViewEntity() == ply
-			ply:ManipulateBoneScale(characterInfo[steamid].bones.b_head, hide and zeroVec or Vector(1, 1, 1))
-			ply:ManipulateBonePosition(characterInfo[steamid].bones.b_head, hide and Vector(0, 20, 0) or zeroVec)
+			-- Hide local head in stereo eye views only (mirrors / 3rd person keep the head).
+			-- Scale alone leaves residual mesh; nudge the bone away from the eyes as well.
+			local headBone = characterInfo[steamid].bones.b_head
+			if isnumber(headBone) then
+				local ep = EyePos()
+				local hide = (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight) and ply:GetViewEntity() == ply
+				ply:ManipulateBoneScale(headBone, hide and zeroVec or Vector(1, 1, 1))
+				ply:ManipulateBonePosition(headBone, hide and Vector(0, 20, 0) or zeroVec)
+			end
 		end
 
 		characterInfo[steamid].preRenderPos = ply:GetPos()
@@ -594,7 +599,11 @@ if CLIENT then
 			ply:RemoveCallback("BuildBonePositions", characterInfo[steamid].boneCallback)
 			if ply == LocalPlayer() then
 				hook.Remove("VRMod_PreRender", "vrutil_hook_calcplyrenderpos")
-				ply:ManipulateBoneScale(characterInfo[steamid].bones.b_head, Vector(1, 1, 1))
+				local headBone = characterInfo[steamid].bones.b_head
+				if isnumber(headBone) then
+					ply:ManipulateBoneScale(headBone, Vector(1, 1, 1))
+					ply:ManipulateBonePosition(headBone, zeroVec)
+				end
 			end
 		end
 
