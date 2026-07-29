@@ -152,41 +152,30 @@ if CLIENT then
 	--   3) VRMod_Tracking  → early modifiers (seated, crouch, simulate hands…)
 	--   4) ApplyPoseModifiers → wall/weapon collision writes final tracking
 	--   5) viewmodel / net / character all read g_VR.tracking only
+	-- angvel is stored as Vector(p,y,r) in the sample path, but some code may leave
+	-- an Angle in the table — never call :Set across mismatched types.
+	local function AsVector(v)
+		if not v then return Vector() end
+		if v.x ~= nil then return Vector(v.x, v.y, v.z) end
+		-- Angle-like (p/y/r or pitch/yaw/roll)
+		return Vector(v.p or v.pitch or 0, v.y or v.yaw or 0, v.r or v.roll or 0)
+	end
+
+	local function AsAngle(a)
+		if not a then return Angle() end
+		if a.p ~= nil or a.pitch ~= nil then
+			return Angle(a.p or a.pitch or 0, a.y or a.yaw or 0, a.r or a.roll or 0)
+		end
+		-- Vector mistaken for angle
+		return Angle(a.x or 0, a.y or 0, a.z or 0)
+	end
+
 	local function CopyPoseFields(src, dst)
 		dst = dst or {}
-		if src.pos then
-			if dst.pos then
-				dst.pos:Set(src.pos)
-			else
-				dst.pos = Vector(src.pos)
-			end
-		end
-		if src.ang then
-			if dst.ang then
-				dst.ang:Set(src.ang)
-			else
-				dst.ang = Angle(src.ang)
-			end
-		end
-		if src.vel then
-			if dst.vel then
-				dst.vel:Set(src.vel)
-			else
-				dst.vel = Vector(src.vel)
-			end
-		else
-			dst.vel = dst.vel or Vector()
-		end
-		if src.angvel then
-			if dst.angvel then
-				dst.angvel:Set(src.angvel)
-			else
-				dst.angvel = Vector(src.angvel)
-			end
-		else
-			dst.angvel = dst.angvel or Vector()
-		end
-		-- Preserve late-sim flags only when present on src
+		dst.pos = AsVector(src.pos)
+		dst.ang = AsAngle(src.ang)
+		dst.vel = AsVector(src.vel)
+		dst.angvel = AsVector(src.angvel)
 		dst.simulatedPos = src.simulatedPos
 		return dst
 	end
