@@ -112,16 +112,26 @@ if CLIENT then
         return nil
     end
 
+    -- Safe pose table lookup: g_VR.tracking.* must never nil-index for callers.
+    local function trackPose(name)
+        local t = g_VR and g_VR.tracking
+        return t and t[name] or nil
+    end
+
     function vrmod.GetHMDPos(ply)
-        return g_VR.tracking.hmd.pos or Vector()
+        local p = trackPose("hmd")
+        return (p and p.pos) or Vector()
     end
 
     function vrmod.GetHMDAng(ply)
-        return g_VR.tracking.hmd.ang or Angle()
+        local p = trackPose("hmd")
+        return (p and p.ang) or Angle()
     end
 
     function vrmod.GetHMDPose(ply)
-        return g_VR.tracking.hmd.pos or Vector(), g_VR.tracking.hmd.ang or Angle()
+        local p = trackPose("hmd")
+        if not p then return Vector(), Angle() end
+        return p.pos or Vector(), p.ang or Angle()
     end
 
     function vrmod.GetHMDVelocity()
@@ -146,62 +156,84 @@ if CLIENT then
     end
 
     function vrmod.GetLeftHandPos(ply)
-        return g_VR.tracking.pose_lefthand.pos or Vector()
+        local p = trackPose("pose_lefthand")
+        return (p and p.pos) or Vector()
     end
 
     function vrmod.GetLeftHandAng(ply)
-        return g_VR.tracking.pose_lefthand.ang or Angle()
+        local p = trackPose("pose_lefthand")
+        return (p and p.ang) or Angle()
     end
 
     function vrmod.GetLeftHandPose(ply)
-        return g_VR.tracking.pose_lefthand.pos or Vector(), g_VR.tracking.pose_lefthand.ang or Angle()
+        local p = trackPose("pose_lefthand")
+        if not p then return Vector(), Angle() end
+        return p.pos or Vector(), p.ang or Angle()
     end
 
     function vrmod.GetLeftHandVelocity()
-        return g_VR.tracking.pose_lefthand.vel or Vector()
+        local p = trackPose("pose_lefthand")
+        return (p and p.vel) or Vector()
     end
 
     function vrmod.GetLeftHandAngularVelocity()
-        return g_VR.tracking.pose_lefthand.angvel or Angle()
+        local p = trackPose("pose_lefthand")
+        return (p and p.angvel) or Angle()
     end
 
     function vrmod.GetLeftHandVelocityRelative()
-        if not g_VR.threePoints or not g_VR.tracking or not g_VR.tracking.pose_lefthand or not g_VR.tracking.hmd then return Vector() end
-        return (g_VR.tracking.pose_lefthand.vel or Vector()) - (g_VR.tracking.hmd.vel or Vector())
+        local hand = trackPose("pose_lefthand")
+        local hmd = trackPose("hmd")
+        if not g_VR.threePoints or not hand or not hmd then return Vector() end
+        return (hand.vel or Vector()) - (hmd.vel or Vector())
     end
 
     function vrmod.GetLeftHandVelocities()
-        if g_VR.threePoints and g_VR.tracking and g_VR.tracking.pose_lefthand then return g_VR.tracking.pose_lefthand.vel or Vector(), g_VR.tracking.pose_lefthand.angvel or Angle(), vrmod.GetLeftHandVelocityRelative() end
+        local p = trackPose("pose_lefthand")
+        if g_VR.threePoints and p then
+            return p.vel or Vector(), p.angvel or Angle(), vrmod.GetLeftHandVelocityRelative()
+        end
         return Vector(), Angle(), Vector()
     end
 
     function vrmod.GetRightHandPos(ply)
-        return g_VR.tracking.pose_righthand.pos or Vector()
+        local p = trackPose("pose_righthand")
+        return (p and p.pos) or Vector()
     end
 
     function vrmod.GetRightHandAng(ply)
-        return g_VR.tracking.pose_righthand.ang or Angle()
+        local p = trackPose("pose_righthand")
+        return (p and p.ang) or Angle()
     end
 
     function vrmod.GetRightHandPose(ply)
-        return g_VR.tracking.pose_righthand.pos or Vector(), g_VR.tracking.pose_righthand.ang or Angle()
+        local p = trackPose("pose_righthand")
+        if not p then return Vector(), Angle() end
+        return p.pos or Vector(), p.ang or Angle()
     end
 
     function vrmod.GetRightHandVelocity()
-        return g_VR.tracking.pose_righthand.vel or Vector()
+        local p = trackPose("pose_righthand")
+        return (p and p.vel) or Vector()
     end
 
     function vrmod.GetRightHandAngularVelocity()
-        return g_VR.tracking.pose_righthand.angvel or Angle()
+        local p = trackPose("pose_righthand")
+        return (p and p.angvel) or Angle()
     end
 
     function vrmod.GetRightHandVelocityRelative()
-        if not g_VR.threePoints or not g_VR.tracking or not g_VR.tracking.pose_righthand or not g_VR.tracking.hmd then return Vector() end
-        return (g_VR.tracking.pose_righthand.vel or Vector()) - (g_VR.tracking.hmd.vel or Vector())
+        local hand = trackPose("pose_righthand")
+        local hmd = trackPose("hmd")
+        if not g_VR.threePoints or not hand or not hmd then return Vector() end
+        return (hand.vel or Vector()) - (hmd.vel or Vector())
     end
 
     function vrmod.GetRightHandVelocities()
-        if g_VR.threePoints and g_VR.tracking and g_VR.tracking.pose_righthand then return g_VR.tracking.pose_righthand.vel or Vector(), g_VR.tracking.pose_righthand.angvel or Angle(), vrmod.GetRightHandVelocityRelative() end
+        local p = trackPose("pose_righthand")
+        if g_VR.threePoints and p then
+            return p.vel or Vector(), p.angvel or Angle(), vrmod.GetRightHandVelocityRelative()
+        end
         return Vector(), Angle(), Vector()
     end
 

@@ -183,14 +183,11 @@ if CLIENT then
 	local function CopyRawIntoTracking()
 		g_VR.rawTracking = g_VR.rawTracking or {}
 		g_VR.tracking = g_VR.tracking or {}
+		-- Only OVERWRITE keys present this frame. Never delete pose_lefthand /
+		-- pose_righthand / hmd when a sample is briefly missing — consumers
+		-- (melee, character, UI) assume those tables stay alive for the session.
 		for k, rawPose in pairs(g_VR.rawTracking) do
 			g_VR.tracking[k] = CopyPoseFields(rawPose, g_VR.tracking[k])
-		end
-		-- Drop tracking keys that disappeared from the device sample
-		for k in pairs(g_VR.tracking) do
-			if g_VR.rawTracking[k] == nil then
-				g_VR.tracking[k] = nil
-			end
 		end
 	end
 
