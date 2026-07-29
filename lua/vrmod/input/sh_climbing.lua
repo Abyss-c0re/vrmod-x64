@@ -970,8 +970,22 @@ elseif SERVER then
 		end
 	end)
 
+	-- Max distance from player origin for a ladder dismount (generous; local only)
+	local LADDER_TELEPORT_MAX_DIST_SQR = 768 * 768
+
 	net.Receive("vrmod_ladderteleport", function(len, ply)
+		if not IsValid(ply) or not ply:Alive() then return end
+		if not g_VR[ply:SteamID()] then return end
+		-- Climbing is only meaningful on maps with VR ladder data
+		if not vrmod_ladders[game.GetMap()] then return end
+
 		local pos = net.ReadVector()
+		if not isvector(pos) then return end
+		-- Reject NaN / inf
+		if pos.x ~= pos.x or pos.y ~= pos.y or pos.z ~= pos.z then return end
+		if math.abs(pos.x) > 16384 or math.abs(pos.y) > 16384 or math.abs(pos.z) > 16384 then return end
+		if ply:GetPos():DistToSqr(pos) > LADDER_TELEPORT_MAX_DIST_SQR then return end
+
 		ply:SetPos(pos)
 	end)
 
