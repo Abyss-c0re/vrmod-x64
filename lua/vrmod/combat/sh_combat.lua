@@ -197,7 +197,7 @@ if SERVER then
             endpos = src + dir * reach,
             radius = radius,
             mins = mins,
-            max = maxs,
+            maxs = maxs,
             filter = function(ent) return vrmod.utils.MeleeFilter(ent, ply, hand) end,
             mask = MASK_SHOT
         }
