@@ -69,7 +69,10 @@ if CLIENT then
 	end
 
 	function VRUtilRenderMenuSystem()
-		if menusExist == false then return end
+		if not menusExist or #menuOrder == 0 then
+			g_VR.menuFocus = false
+			return
+		end
 		g_VR.menuFocus = false
 		local cursorX, cursorY = 0, 0
 		local menuFocusDist = 99999
