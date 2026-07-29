@@ -506,6 +506,7 @@ function VRUtilOpenMenu()
 			y = y + 40
 		end
 
+		AddSl("Wall collision push (units)", "vrmod_hand_collision_push", 0, 8, 2)
 		AddSl("Pickup weight (server)", "vrmod_pickup_weight", 1, 10000, 0)
 		AddSl("Pickup range  (server)", "vrmod_pickup_range", 0.0, 10.0, 1)
 		local btn = vgui.Create("DButton", t)

@@ -315,22 +315,53 @@ if CLIENT then
 
     function vrmod.SetLeftHandPose(pos, ang, smoothing)
         local ply = LocalPlayer()
+        -- Late override: write final tracking (what every local system reads)
+        if g_VR.tracking and g_VR.tracking.pose_lefthand and pos and ang then
+            g_VR.tracking.pose_lefthand.pos = SmoothValue(g_VR.tracking.pose_lefthand.pos, pos, smoothing or 0)
+            g_VR.tracking.pose_lefthand.ang = SmoothValue(g_VR.tracking.pose_lefthand.ang, ang, smoothing or 0)
+            pos = g_VR.tracking.pose_lefthand.pos
+            ang = g_VR.tracking.pose_lefthand.ang
+        end
         local netFrame = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
         if not netFrame then return end
-        -- Apply smoothing
         netFrame.lefthandPos = SmoothValue(netFrame.lefthandPos, pos, smoothing or 0)
         netFrame.lefthandAng = SmoothValue(netFrame.lefthandAng, ang, smoothing or 0)
     end
 
     function vrmod.SetRightHandPose(pos, ang, smoothing)
         local ply = LocalPlayer()
+        if g_VR.tracking and g_VR.tracking.pose_righthand and pos and ang then
+            g_VR.tracking.pose_righthand.pos = SmoothValue(g_VR.tracking.pose_righthand.pos, pos, smoothing or 0)
+            g_VR.tracking.pose_righthand.ang = SmoothValue(g_VR.tracking.pose_righthand.ang, ang, smoothing or 0)
+            pos = g_VR.tracking.pose_righthand.pos
+            ang = g_VR.tracking.pose_righthand.ang
+        end
         local netFrame = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
         if not netFrame then return end
-        -- Apply smoothing
         netFrame.righthandPos = SmoothValue(netFrame.righthandPos, pos, smoothing or 0)
         netFrame.righthandAng = SmoothValue(netFrame.righthandAng, ang, smoothing or 0)
-        -- Call utils update if available
-        --if vrmod.utils then vrmod.utils.UpdateViewModelPos(netFrame.righthandPos, netFrame.righthandAng) end
+        if vrmod.utils and vrmod.utils.UpdateViewModelPos then
+            vrmod.utils.UpdateViewModelPos(pos, ang, true)
+        end
+    end
+
+    --- Unmodified device poses (pre-collision / pre-UI). Safe for velocity & gestures.
+    function vrmod.GetRawLeftHandPose()
+        local p = g_VR.rawTracking and g_VR.rawTracking.pose_lefthand
+        if not p then return Vector(), Angle() end
+        return p.pos or Vector(), p.ang or Angle()
+    end
+
+    function vrmod.GetRawRightHandPose()
+        local p = g_VR.rawTracking and g_VR.rawTracking.pose_righthand
+        if not p then return Vector(), Angle() end
+        return p.pos or Vector(), p.ang or Angle()
+    end
+
+    function vrmod.GetRawHMDPose()
+        local p = g_VR.rawTracking and g_VR.rawTracking.hmd
+        if not p then return Vector(), Angle() end
+        return p.pos or Vector(), p.ang or Angle()
     end
 
     local function HandleFingerAngles(mode, hand, state, tbl)

@@ -58,6 +58,8 @@ function vrmod.utils.WepInfo(wep)
     if class and vm then return class, vm end
 end
 
+--- Viewmodel is a pure slave of the (already modifier-resolved) right-hand pose.
+--- Do NOT run a separate weapon pushout here — that was detaching the gun from the hand.
 function vrmod.utils.UpdateViewModelPos(pos, ang, override)
     local ply = LocalPlayer()
     if vrmod.suppressViewModelUpdates and not override then
@@ -65,23 +67,22 @@ function vrmod.utils.UpdateViewModelPos(pos, ang, override)
         return
     end
 
-    pos, ang = vrmod.utils.CheckWeaponPushout(pos, ang)
     if not IsValid(ply) or not g_VR.active then return end
     if not ply:Alive() then return end
     local currentvmi = g_VR.currentvmi
-    local modelPos = pos
-    if currentvmi then
-        local collisionShape = vrmod._collisionShapeByHand and vrmod._collisionShapeByHand.right
-        if collisionShape and collisionShape.isClipped and collisionShape.pushOutPos then
-            modelPos = collisionShape.pushOutPos
-            vrmod.logger.Debug("[VRMod] Applying collision-corrected pos for viewmodel:", modelPos)
-        end
+    if not currentvmi then return end
 
-        local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos, currentvmi.offsetAng, modelPos, ang)
-        g_VR.viewModelPos = offsetPos
-        g_VR.viewModelAng = offsetAng
-        vrmod.utils.UpdateViewModel()
+    -- Prefer live tracking if caller forgot to pass post-modifier poses
+    if (not pos or not ang) and g_VR.tracking and g_VR.tracking.pose_righthand then
+        pos = g_VR.tracking.pose_righthand.pos
+        ang = g_VR.tracking.pose_righthand.ang
     end
+    if not pos or not ang then return end
+
+    local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos or Vector(), currentvmi.offsetAng or Angle(), pos, ang)
+    g_VR.viewModelPos = offsetPos
+    g_VR.viewModelAng = offsetAng
+    vrmod.utils.UpdateViewModel()
 end
 
 function vrmod.utils.UpdateViewModel()
@@ -89,7 +90,7 @@ function vrmod.utils.UpdateViewModel()
     local vmi = g_VR.currentvmi
     if not IsValid(vm) then return end
     if vmi and vmi.useWorldModel then
-        -- Move the world model manually to hand position
+        -- Always from final tracking (post wall/weapon modifiers)
         local handPos, handAng = vrmod.GetRightHandPose()
         local pos = handPos + handAng:Forward() * vmi.offsetPos.x + handAng:Right() * vmi.offsetPos.y + handAng:Up() * vmi.offsetPos.z
         local ang = handAng + vmi.offsetAng
@@ -97,7 +98,6 @@ function vrmod.utils.UpdateViewModel()
         vm:SetAngles(ang)
         vm:SetupBones()
     else
-        -- Normal viewmodel behavior
         vm:SetPos(g_VR.viewModelPos)
         vm:SetAngles(g_VR.viewModelAng)
         vm:SetupBones()

@@ -72,30 +72,16 @@ local function IsValidForegripWeapon(wep)
     return not (string.find(class, "weapon_fists") or string.find(class, "arcticvr_") or class == "weapon_vrmod_empty")
 end
 
--- Official viewmodel updater with collision support (from vrmod.utils)
+-- Slave of pose pipeline: write guided pose into tracking, then lock gun to hand
 local function UpdateViewModelPos(pos, ang, override)
-    local ply = LocalPlayer()
-    if vrmod.suppressViewModelUpdates and not override then
-        if vrmod.utils and vrmod.utils.UpdateViewModel then vrmod.utils.UpdateViewModel() end
-        return
+    if not g_VR.active then return end
+    -- Keep g_VR.tracking as single source of truth for the right hand
+    if g_VR.tracking and g_VR.tracking.pose_righthand and pos and ang then
+        g_VR.tracking.pose_righthand.pos = pos
+        g_VR.tracking.pose_righthand.ang = ang
     end
-
-    pos, ang = vrmod.utils and vrmod.utils.CheckWeaponPushout and vrmod.utils.CheckWeaponPushout(pos, ang) or pos, ang
-    if not IsValid(ply) or not g_VR.active then return end
-    if not ply:Alive() then return end
-    local currentvmi = g_VR.currentvmi
-    if currentvmi then
-        local modelPos = pos
-        local collisionShape = vrmod._collisionShapeByHand and vrmod._collisionShapeByHand.right
-        if collisionShape and collisionShape.isClipped and collisionShape.pushOutPos then
-            modelPos = collisionShape.pushOutPos
-            if vrmod.logger then vrmod.logger.Debug("[Foregrip] Applying collision-corrected pos for viewmodel: %s", tostring(modelPos)) end
-        end
-
-        local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos or Vector(), currentvmi.offsetAng or Angle(), modelPos, ang)
-        g_VR.viewModelPos = offsetPos
-        g_VR.viewModelAng = offsetAng
-        if vrmod.utils and vrmod.utils.UpdateViewModel then vrmod.utils.UpdateViewModel() end
+    if vrmod.utils and vrmod.utils.UpdateViewModelPos then
+        vrmod.utils.UpdateViewModelPos(pos, ang, override or true)
     end
 end
 

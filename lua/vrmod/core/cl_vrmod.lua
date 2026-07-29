@@ -146,11 +146,72 @@ if CLIENT then
 		}
 	end
 
+	-- Pose pipeline:
+	--   1) device sample  → g_VR.rawTracking  (never mutated by collisions/UI)
+	--   2) copy to         → g_VR.tracking
+	--   3) VRMod_Tracking  → early modifiers (seated, crouch, simulate hands…)
+	--   4) ApplyPoseModifiers → wall/weapon collision writes final tracking
+	--   5) viewmodel / net / character all read g_VR.tracking only
+	local function CopyPoseFields(src, dst)
+		dst = dst or {}
+		if src.pos then
+			if dst.pos then
+				dst.pos:Set(src.pos)
+			else
+				dst.pos = Vector(src.pos)
+			end
+		end
+		if src.ang then
+			if dst.ang then
+				dst.ang:Set(src.ang)
+			else
+				dst.ang = Angle(src.ang)
+			end
+		end
+		if src.vel then
+			if dst.vel then
+				dst.vel:Set(src.vel)
+			else
+				dst.vel = Vector(src.vel)
+			end
+		else
+			dst.vel = dst.vel or Vector()
+		end
+		if src.angvel then
+			if dst.angvel then
+				dst.angvel:Set(src.angvel)
+			else
+				dst.angvel = Vector(src.angvel)
+			end
+		else
+			dst.angvel = dst.angvel or Vector()
+		end
+		-- Preserve late-sim flags only when present on src
+		dst.simulatedPos = src.simulatedPos
+		return dst
+	end
+
+	local function CopyRawIntoTracking()
+		g_VR.rawTracking = g_VR.rawTracking or {}
+		g_VR.tracking = g_VR.tracking or {}
+		for k, rawPose in pairs(g_VR.rawTracking) do
+			g_VR.tracking[k] = CopyPoseFields(rawPose, g_VR.tracking[k])
+		end
+		-- Drop tracking keys that disappeared from the device sample
+		for k in pairs(g_VR.tracking) do
+			if g_VR.rawTracking[k] == nil then
+				g_VR.tracking[k] = nil
+			end
+		end
+	end
+
 	local function UpdateTracking()
 		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local maxPosDeltaSqr = 100
 		VRMOD_UpdatePosesAndActions()
 		local rawPoses = VRMOD_GetPoses()
+		g_VR.rawTracking = g_VR.rawTracking or {}
+
 		for k, v in pairs(rawPoses) do
 			local lastPos = lastPosePos[k]
 			local currentPos = v.pos
@@ -166,18 +227,19 @@ if CLIENT then
 			end
 
 			lastPosePos[k] = currentPos
-			g_VR.tracking[k] = g_VR.tracking[k] or {}
-			local worldPose = g_VR.tracking[k]
+			g_VR.rawTracking[k] = g_VR.rawTracking[k] or {}
+			local rawPose = g_VR.rawTracking[k]
 			local pos, ang = LocalToWorld(currentPos * g_VR.scale, v.ang, g_VR.origin, g_VR.originAngle)
 			if k == "pose_righthand" or k == "pose_lefthand" then
-				worldPose.pos = worldPose.pos and vrmod.utils.SmoothVector(worldPose.pos, pos, smoothingFactor) or pos
-				worldPose.ang = worldPose.ang and vrmod.utils.SmoothAngle(worldPose.ang, ang, smoothingFactor) or ang
+				-- Smooth only the raw stream (tracking is re-copied each frame)
+				rawPose.pos = rawPose.pos and vrmod.utils.SmoothVector(rawPose.pos, pos, smoothingFactor) or pos
+				rawPose.ang = rawPose.ang and vrmod.utils.SmoothAngle(rawPose.ang, ang, smoothingFactor) or ang
 			else
-				worldPose.pos = pos
-				worldPose.ang = ang
+				rawPose.pos = pos
+				rawPose.ang = ang
 			end
 
-			-- === NEW: Head velocity from RAW pose (fixes gamepad locomotion bug) ===
+			-- Head velocity from RAW device sample (not post-modifier tracking)
 			if k == "hmd" then
 				local now = CurTime()
 				if prevRawHeadTime > 0 then
@@ -197,22 +259,50 @@ if CLIENT then
 				prevRawHeadTime = now
 			end
 
-			-- =====================================================================
-			worldPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), vector_origin, g_VR.originAngle) * g_VR.scale
-			worldPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), vector_origin, g_VR.originAngle)
+			rawPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), vector_origin, g_VR.originAngle) * g_VR.scale
+			rawPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), vector_origin, g_VR.originAngle)
 			local isRight = k == "pose_righthand"
 			local isLeft = k == "pose_lefthand"
 			if isRight or isLeft then
 				local offsetPos = (isRight and g_VR.rightControllerOffsetPos or g_VR.leftControllerOffsetPos) * 0.01 * g_VR.scale
 				local offsetAng = isRight and g_VR.rightControllerOffsetAng or g_VR.leftControllerOffsetAng
-				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, vector_origin, worldPose.ang)
-				worldPose.pos = worldPose.pos + offsetWorldPos
-				worldPose.ang = offsetWorldAng
+				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, vector_origin, rawPose.ang)
+				rawPose.pos = rawPose.pos + offsetWorldPos
+				rawPose.ang = offsetWorldAng
 			end
 		end
 
-		g_VR.sixPoints = g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot
+		-- Reset public tracking from raw every frame, then run early modifiers
+		CopyRawIntoTracking()
+		g_VR.sixPoints = (g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot) and true or false
+		-- Early modifiers (seated offset, crouch, hand simulation…) may edit g_VR.tracking
 		hook.Call("VRMod_Tracking")
+	end
+
+	--- Late pose modifiers: wall/weapon collisions write final g_VR.tracking hands.
+	local function ApplyPoseModifiers()
+		if not (g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils) then return end
+		frameCounter = frameCounter + 1
+		-- Weapon broadphase for gun debug boxes / optional weapon sweeps
+		if vrmod.utils.CollisionsPreCheck then
+			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
+		end
+		local lp, la, rp, ra = vrmod.utils.UpdateHandCollisions(
+			g_VR.tracking.pose_lefthand.pos,
+			g_VR.tracking.pose_lefthand.ang,
+			g_VR.tracking.pose_righthand.pos,
+			g_VR.tracking.pose_righthand.ang
+		)
+		g_VR.tracking.pose_lefthand.pos = lp
+		g_VR.tracking.pose_lefthand.ang = la
+		g_VR.tracking.pose_righthand.pos = rp
+		g_VR.tracking.pose_righthand.ang = ra
+		-- Optional extra modifiers
+		hook.Call("VRMod_TrackingModified", nil, g_VR.tracking, g_VR.rawTracking)
+		-- Viewmodel is a pure slave of final right-hand tracking (no independent push)
+		if g_VR.tracking.pose_righthand and vrmod.utils.UpdateViewModelPos then
+			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+		end
 	end
 
 	local function HandleInput()
@@ -284,31 +374,7 @@ if CLIENT then
 		g_VR.view.angles = finalAng
 	end
 
-	local function UpdateCollisionsAndWepPos()
-		-- Viewmodel always follows right hand (may be collision-corrected below)
-		if g_VR.tracking.pose_righthand then
-			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-		end
-		if not (g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils) then return end
-		frameCounter = frameCounter + 1
-		-- Weapon broadphase (optional cost). Hands do NOT depend on this flag.
-		vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
-		-- Real-time hand wall collisions every frame (sweep from last free → desired)
-		local leftPos, leftAng, rightPos, rightAng = vrmod.utils.UpdateHandCollisions(
-			g_VR.tracking.pose_lefthand.pos,
-			g_VR.tracking.pose_lefthand.ang,
-			g_VR.tracking.pose_righthand.pos,
-			g_VR.tracking.pose_righthand.ang
-		)
-		g_VR.tracking.pose_lefthand.pos = leftPos
-		g_VR.tracking.pose_lefthand.ang = leftAng
-		g_VR.tracking.pose_righthand.pos = rightPos
-		g_VR.tracking.pose_righthand.ang = rightAng
-		-- Re-apply viewmodel after right-hand correction so gun matches hand
-		if g_VR.tracking.pose_righthand then
-			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
-		end
-	end
+
 
 	local function PerformRenderViews()
 		local eyeScale = convars.vrmod_eyescale:GetFloat()
@@ -539,8 +605,9 @@ if CLIENT then
 	local function BindRenderSceneHook()
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			if DrawErrorOverlay() then return true end
+			-- raw → tracking → early modifiers → wall/weapon modifiers → viewmodel
 			UpdateTracking()
-			UpdateCollisionsAndWepPos()
+			ApplyPoseModifiers()
 			HandleInput()
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
