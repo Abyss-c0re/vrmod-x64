@@ -96,37 +96,48 @@ local function BoxSweepHitsWorld(pos, ang, mins, maxs, reach)
     return tr.Hit and tr.HitWorld
 end
 
+local MIN_BOX_SIZE = vrmod.DEFAULT_RADIUS * 0.5
+
+local function EnforceMinBoxSize(mins, maxs)
+    mins.x = math.min(mins.x, -MIN_BOX_SIZE)
+    mins.y = math.min(mins.y, -MIN_BOX_SIZE)
+    mins.z = math.min(mins.z, -MIN_BOX_SIZE)
+    maxs.x = math.max(maxs.x, MIN_BOX_SIZE)
+    maxs.y = math.max(maxs.y, MIN_BOX_SIZE)
+    maxs.z = math.max(maxs.z, MIN_BOX_SIZE)
+    return mins, maxs
+end
+
+--- Build both hand-space collision boxes from a single AABB (half-extents).
+--- Horizontal = forward-aligned weapon; vertical = upright melee.
+local function BoxesFromAABB(amin, amax)
+    local ex = (amax.x - amin.x) * 0.5
+    local ey = (amax.y - amin.y) * 0.5
+    local ez = (amax.z - amin.z) * 0.5
+
+    local hMins = Vector(-ex * 0.8, -ey * 0.35, -ez * 0.35)
+    local hMaxs = Vector(ex * 0.8, ey * 0.35, ez * 0.35)
+    EnforceMinBoxSize(hMins, hMaxs)
+
+    local vMins = Vector(-ez * 0.35, -ey * 0.35, -ex)
+    local vMaxs = Vector(ez * 0.35, ey * 0.35, ex)
+    EnforceMinBoxSize(vMins, vMaxs)
+
+    return hMins, hMaxs, vMins, vMaxs, ex, ey, ez
+end
+
+-- Kept for any external callers expecting the old single-orientation helper
 local function GetWeaponCollisionBox(phys, isVertical)
-    local mins, maxs = phys:GetAABB()
-    if not mins or not maxs then
+    local amin, amax = phys:GetAABB()
+    if not amin or not amax then
         if DebugEnabled() then vrmod.logger.Debug("GetWeaponCollisionBox: Invalid AABB, returning defaults") end
         return vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, isVertical, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS
     end
-
-    local amin, amax = mins, maxs -- Store raw AABB for return
-    -- Calculate the extents of the AABB
-    local extents = (maxs - mins) * 0.5
+    local hMins, hMaxs, vMins, vMaxs = BoxesFromAABB(amin, amax)
     if isVertical then
-        -- Vertical alignment: prioritize z-axis, swap x and z extents
-        mins = Vector(-extents.z * 0.35, -extents.y * 0.35, -extents.x)
-        maxs = Vector(extents.z * 0.35, extents.y * 0.35, extents.x)
-        if DebugEnabled() then vrmod.logger.Debug("GetWeaponCollisionBox: Vertical-aligned (z-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs)) end
-    else
-        -- Forward alignment: prioritize x-axis
-        mins = Vector(-extents.x * 0.8, -extents.y * 0.35, -extents.z * 0.35)
-        maxs = Vector(extents.x * 0.8, extents.y * 0.35, extents.z * 0.35)
-        if DebugEnabled() then vrmod.logger.Debug("GetWeaponCollisionBox: Forward-aligned (x-axis) | Mins: %s, Maxs: %s", tostring(mins), tostring(maxs)) end
+        return vMins, vMaxs, true, amin, amax
     end
-
-    -- Ensure the box isn't too small by enforcing minimum dimensions
-    local minSize = vrmod.DEFAULT_RADIUS * 0.5
-    mins.x = math.min(mins.x, -minSize)
-    mins.y = math.min(mins.y, -minSize)
-    mins.z = math.min(mins.z, -minSize)
-    maxs.x = math.max(maxs.x, minSize)
-    maxs.y = math.max(maxs.y, minSize)
-    maxs.z = math.max(maxs.z, minSize)
-    return mins, maxs, isVertical, amin, amax
+    return hMins, hMaxs, false, amin, amax
 end
 
 --- Sphere vs world. Returns isClipped, hitNormal, pushOutPos.
@@ -217,64 +228,117 @@ local function BoxCollidesWithWorld(pos, ang, mins, maxs, reach, resolve)
     return true, hitNormal, pushPos
 end
 
-local function DetectMeleeFromModel(modelPath, phys, offsetAng)
-    if not IsValid(phys) then return false end
-    -- 1. Filename hints
-    local lowerPath = string.lower(modelPath)
-    if lowerPath:find("crowbar") or lowerPath:find("knife") or lowerPath:find("melee") or lowerPath:find("bat") or lowerPath:find("katana") or lowerPath:find("sword") then return true end
-    -- 2. Get raw bounding box verts
-    local mins, maxs = phys:GetAABB()
-    local verts = {Vector(mins.x, mins.y, mins.z), Vector(mins.x, mins.y, maxs.z), Vector(mins.x, maxs.y, mins.z), Vector(mins.x, maxs.y, maxs.z), Vector(maxs.x, mins.y, mins.z), Vector(maxs.x, mins.y, maxs.z), Vector(maxs.x, maxs.y, mins.z), Vector(maxs.x, maxs.y, maxs.z)}
-    -- 3. Apply VRMod offsetAng if provided (align model to hand space)
-    local ang = offsetAng or Angle(0, 0, 0)
-    for i = 1, #verts do
-        verts[i]:Rotate(ang)
+-- Reused corner vectors for offsetAng AABB transform (no per-call allocs)
+local meleeCorners = {
+    Vector(), Vector(), Vector(), Vector(),
+    Vector(), Vector(), Vector(), Vector()
+}
+
+local MELEE_NAME_HINTS = {
+    crowbar = true, knife = true, melee = true, bat = true,
+    katana = true, sword = true, axe = true, machete = true, club = true
+}
+
+local function ModelNameLooksMelee(modelPath)
+    local lower = string.lower(modelPath or "")
+    for hint in pairs(MELEE_NAME_HINTS) do
+        if string.find(lower, hint, 1, true) then return true end
+    end
+    return false
+end
+
+--- Melee detection from AABB sizes (optionally rotated into hand space).
+--- Uses precomputed amin/amax — no second GetAABB.
+local function DetectMeleeFromAABB(modelPath, amin, amax, offsetAng)
+    if ModelNameLooksMelee(modelPath) then return true end
+    if not amin or not amax then return false end
+
+    local sizeX = amax.x - amin.x
+    local sizeY = amax.y - amin.y
+    local sizeZ = amax.z - amin.z
+
+    -- Only rotate the box when offsetAng is meaningful
+    local ang = offsetAng
+    if ang and (ang.p ~= 0 or ang.y ~= 0 or ang.r ~= 0) then
+        local i = 1
+        for ix = 0, 1 do
+            local x = ix == 0 and amin.x or amax.x
+            for iy = 0, 1 do
+                local y = iy == 0 and amin.y or amax.y
+                for iz = 0, 1 do
+                    local z = iz == 0 and amin.z or amax.z
+                    local v = meleeCorners[i]
+                    v.x, v.y, v.z = x, y, z
+                    v:Rotate(ang)
+                    i = i + 1
+                end
+            end
+        end
+        local mnX, mnY, mnZ = meleeCorners[1].x, meleeCorners[1].y, meleeCorners[1].z
+        local mxX, mxY, mxZ = mnX, mnY, mnZ
+        for j = 2, 8 do
+            local v = meleeCorners[j]
+            if v.x < mnX then mnX = v.x end
+            if v.y < mnY then mnY = v.y end
+            if v.z < mnZ then mnZ = v.z end
+            if v.x > mxX then mxX = v.x end
+            if v.y > mxY then mxY = v.y end
+            if v.z > mxZ then mxZ = v.z end
+        end
+        sizeX, sizeY, sizeZ = mxX - mnX, mxY - mnY, mxZ - mnZ
     end
 
-    -- 4. Measure extents in aligned space
-    local minAligned = Vector(verts[1].x, verts[1].y, verts[1].z)
-    local maxAligned = Vector(verts[1].x, verts[1].y, verts[1].z)
-    for i = 2, #verts do
-        minAligned.x = math.min(minAligned.x, verts[i].x)
-        minAligned.y = math.min(minAligned.y, verts[i].y)
-        minAligned.z = math.min(minAligned.z, verts[i].z)
-        maxAligned.x = math.max(maxAligned.x, verts[i].x)
-        maxAligned.y = math.max(maxAligned.y, verts[i].y)
-        maxAligned.z = math.max(maxAligned.z, verts[i].z)
-    end
-
-    local sizeX = maxAligned.x - minAligned.x
-    local sizeY = maxAligned.y - minAligned.y
-    local sizeZ = maxAligned.z - minAligned.z
     local longest = math.max(sizeX, sizeY, sizeZ)
     local shortest = math.min(sizeX, sizeY, sizeZ)
     if shortest < 0.01 then return false end
-    local aspect = longest / shortest
-    -- 5. Melee = longest axis is aligned Z (up in hand space) + long/thin shape
-    if sizeZ == longest and aspect >= 4.5 then return true end
-    return false
+    -- Long/thin with longest axis along Z (hand up) → melee
+    return sizeZ == longest and (longest / shortest) >= 4.5
+end
+
+local function MakeDefaultParams(isMelee)
+    return {
+        radius = vrmod.DEFAULT_RADIUS,
+        reach = vrmod.DEFAULT_REACH,
+        mins_horizontal = vrmod.DEFAULT_MINS,
+        maxs_horizontal = vrmod.DEFAULT_MAXS,
+        mins_vertical = vrmod.DEFAULT_MINS,
+        maxs_vertical = vrmod.DEFAULT_MAXS,
+        angles = vrmod.DEFAULT_ANGLES,
+        computed = true,
+        isMelee = isMelee or false
+    }
+end
+
+local function ScheduleModelCompute(modelPath, ply, offsetAng)
+    if not modelPath or modelPath == "" then return end
+    if vrmod.modelCache[modelPath] and vrmod.modelCache[modelPath].computed then return end
+    if pending[modelPath] then return end
+    pending[modelPath] = {
+        attempts = 0
+    }
+    timer.Simple(0, function()
+        vrmod.utils.ComputePhysicsParams(modelPath)
+        local cache = vrmod.modelCache[modelPath]
+        if cache and cache.computed and IsValid(ply) then
+            vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
+        end
+    end)
+    if DebugEnabled() then vrmod.logger.Debug("ScheduleModelCompute: queued %s", modelPath) end
 end
 
 -- COLLISIONS
 function vrmod.utils.ComputePhysicsParams(modelPath)
     if not modelPath or modelPath == "" then
         if DebugEnabled() then vrmod.logger.Warn("Invalid or empty model path, caching defaults") end
-        vrmod.modelCache[modelPath] = {
-            radius = vrmod.DEFAULT_RADIUS,
-            reach = vrmod.DEFAULT_REACH,
-            mins_horizontal = vrmod.DEFAULT_MINS,
-            maxs_horizontal = vrmod.DEFAULT_MAXS,
-            mins_vertical = vrmod.DEFAULT_MINS,
-            maxs_vertical = vrmod.DEFAULT_MAXS,
-            angles = vrmod.DEFAULT_ANGLES,
-            computed = true,
-            isMelee = false
-        }
+        vrmod.modelCache[modelPath or ""] = MakeDefaultParams(false)
         return
     end
 
     local originalModelPath = modelPath
-    -- Fallback for c_models to w_models
+    local existing = vrmod.modelCache[originalModelPath]
+    if existing and existing.computed then return end
+
+    -- Prefer world models for c_ viewmodels (better phys AABB)
     if modelPath:match("^models/weapons/c_") then
         local baseName = modelPath:match("models/weapons/c_(.-)%.mdl")
         if baseName then
@@ -284,43 +348,20 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
                 modelPath = fallback
             else
                 if DebugEnabled() then vrmod.logger.Debug("No valid fallback for %s, caching defaults", modelPath) end
-                vrmod.modelCache[originalModelPath] = {
-                    radius = vrmod.DEFAULT_RADIUS,
-                    reach = vrmod.DEFAULT_REACH,
-                    mins_horizontal = vrmod.DEFAULT_MINS,
-                    maxs_horizontal = vrmod.DEFAULT_MAXS,
-                    mins_vertical = vrmod.DEFAULT_MINS,
-                    maxs_vertical = vrmod.DEFAULT_MAXS,
-                    angles = vrmod.DEFAULT_ANGLES,
-                    computed = true,
-                    isMelee = false
-                }
+                vrmod.modelCache[originalModelPath] = MakeDefaultParams(false)
+                pending[originalModelPath] = nil
                 return
             end
         end
     end
 
-    -- Already computed?
-    if vrmod.modelCache[originalModelPath] and vrmod.modelCache[originalModelPath].computed then return end
-    -- Retry protection
     pending[originalModelPath] = pending[originalModelPath] or {
         attempts = 0
     }
 
     if pending[originalModelPath].attempts >= 2 then
         if DebugEnabled() then vrmod.logger.Warn("Max retries (2) reached for %s, caching defaults", originalModelPath) end
-        vrmod.modelCache[originalModelPath] = {
-            radius = vrmod.DEFAULT_RADIUS,
-            reach = vrmod.DEFAULT_REACH,
-            mins_horizontal = vrmod.DEFAULT_MINS,
-            maxs_horizontal = vrmod.DEFAULT_MAXS,
-            mins_vertical = vrmod.DEFAULT_MINS,
-            maxs_vertical = vrmod.DEFAULT_MAXS,
-            angles = vrmod.DEFAULT_ANGLES,
-            computed = true,
-            isMelee = false
-        }
-
+        vrmod.modelCache[originalModelPath] = MakeDefaultParams(false)
         pending[originalModelPath] = nil
         return
     end
@@ -339,150 +380,175 @@ function vrmod.utils.ComputePhysicsParams(modelPath)
     ent:PhysicsInit(SOLID_VPHYSICS)
     ent:SetMoveType(MOVETYPE_NONE)
     ent:Spawn()
+
     local phys = ent:GetPhysicsObject()
     if IsValid(phys) then
-        local ang = Angle(0, 0, 0)
-        local currentvmi = g_VR.currentvmi
-        if currentvmi then ang = currentvmi.offsetAng end
-        local isMelee = DetectMeleeFromModel(modelPath, phys, ang)
-        local mins_horizontal, maxs_horizontal, mins_vertical, maxs_vertical
-        if isMelee then
-            mins_vertical, maxs_vertical = GetWeaponCollisionBox(phys, true)
-            mins_horizontal, maxs_horizontal = vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS
+        -- Single GetAABB for everything: melee detect, both boxes, reach
+        local amin, amax = phys:GetAABB()
+        if amin and amax then
+            local offsetAng = vrmod.DEFAULT_ANGLES
+            if g_VR and g_VR.currentvmi and g_VR.currentvmi.offsetAng then
+                offsetAng = g_VR.currentvmi.offsetAng
+            end
+
+            local isMelee = DetectMeleeFromAABB(modelPath, amin, amax, offsetAng)
+            local hMins, hMaxs, vMins, vMaxs = BoxesFromAABB(amin, amax)
+
+            if isMelee then
+                -- Melee uses vertical box; keep horizontal as defaults for non-melee callers
+                hMins, hMaxs = vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS
+            end
+
+            local sizeX = amax.x - amin.x
+            local sizeY = amax.y - amin.y
+            local sizeZ = amax.z - amin.z
+            local reach = math.Clamp(math.max(sizeX, sizeY, sizeZ) * 0.75, 6.6, 50)
+
+            vrmod.modelCache[originalModelPath] = {
+                radius = reach,
+                reach = reach,
+                mins_horizontal = hMins,
+                maxs_horizontal = hMaxs,
+                mins_vertical = vMins,
+                maxs_vertical = vMaxs,
+                angles = vrmod.DEFAULT_ANGLES,
+                computed = true,
+                isMelee = isMelee
+            }
+
+            -- Also cache under the resolved world-model path so lookups by either key hit
+            if modelPath ~= originalModelPath then
+                vrmod.modelCache[modelPath] = vrmod.modelCache[originalModelPath]
+            end
+
+            if DebugEnabled() then
+                vrmod.logger.Info("Computed collision boxes for %s → reach: %.2f units, melee: %s", modelPath, reach, tostring(isMelee))
+            end
         else
-            mins_horizontal, maxs_horizontal, _, amin, amax = GetWeaponCollisionBox(phys, false)
-            mins_vertical, maxs_vertical = GetWeaponCollisionBox(phys, true)
+            if DebugEnabled() then vrmod.logger.Warn("Empty AABB for %s, attempt %d", modelPath, pending[originalModelPath].attempts) end
         end
-
-        local mins, maxs = phys:GetAABB()
-        local reach = math.max(maxs.x - mins.x, maxs.y - mins.y, maxs.z - mins.z) * 0.5
-        reach = math.Clamp(reach * 1.5, 6.6, 50)
-        vrmod.modelCache[originalModelPath] = {
-            radius = reach,
-            reach = reach,
-            mins_horizontal = mins_horizontal or vrmod.DEFAULT_MINS,
-            maxs_horizontal = maxs_horizontal or vrmod.DEFAULT_MAXS,
-            mins_vertical = mins_vertical or vrmod.DEFAULT_MINS,
-            maxs_vertical = maxs_vertical or vrmod.DEFAULT_MAXS,
-            angles = vrmod.DEFAULT_ANGLES,
-            computed = true,
-            isMelee = isMelee
-        }
-
-        if DebugEnabled() then vrmod.logger.Info("Computed collision boxes for %s → reach: %.2f units, melee: %s", modelPath, reach, tostring(isMelee)) end
     else
         if DebugEnabled() then vrmod.logger.Warn("No valid physobj for %s, attempt %d", modelPath, pending[originalModelPath].attempts) end
     end
 
     ent:Remove()
     pending[originalModelPath].lastAttempt = CurTime()
-    if pending[originalModelPath].attempts >= 2 then pending[originalModelPath] = nil end
+    if vrmod.modelCache[originalModelPath] and vrmod.modelCache[originalModelPath].computed then
+        pending[originalModelPath] = nil
+    elseif pending[originalModelPath].attempts >= 2 then
+        pending[originalModelPath] = nil
+        if not vrmod.modelCache[originalModelPath] then
+            vrmod.modelCache[originalModelPath] = MakeDefaultParams(false)
+        end
+    end
+end
+
+local function SyncModelParamsOnce(modelPath, cache, mins, maxs)
+    if cache.sent then return end
+    local isDefault = mins == vrmod.DEFAULT_MINS
+        and maxs == vrmod.DEFAULT_MAXS
+        and cache.radius == vrmod.DEFAULT_RADIUS
+        and cache.reach == vrmod.DEFAULT_REACH
+    if isDefault then
+        if DebugEnabled() then vrmod.logger.Info("GetModelParams: Skipping sync for %s due to default parameters", modelPath) end
+        return
+    end
+
+    net.Start("vrmod_sync_model_params")
+    net.WriteString(modelPath)
+    net.WriteFloat(cache.radius)
+    net.WriteFloat(cache.reach)
+    net.WriteVector(mins)
+    net.WriteVector(maxs)
+    net.WriteVector(cache.mins_vertical)
+    net.WriteVector(cache.maxs_vertical)
+    net.WriteAngle(cache.angles)
+    if CLIENT then
+        net.SendToServer()
+    else
+        net.Broadcast()
+    end
+    cache.sent = true
+    if DebugEnabled() then vrmod.logger.Info("GetModelParams: Synced params for %s", modelPath) end
 end
 
 function vrmod.utils.GetModelParams(modelPath, ply, offsetAng)
-    if vrmod.modelCache[modelPath] and vrmod.modelCache[modelPath].computed then
-        local cache = vrmod.modelCache[modelPath]
-        local ang = vrmod.GetRightHandAng(ply)
+    local cache = modelPath and vrmod.modelCache[modelPath]
+    if cache and cache.computed then
         local mins = cache.isMelee and cache.mins_vertical or cache.mins_horizontal
         local maxs = cache.isMelee and cache.maxs_vertical or cache.maxs_horizontal
-        -- Validate that parameters aren't just defaults
-        local isDefault = mins == vrmod.DEFAULT_MINS and maxs == vrmod.DEFAULT_MAXS and cache.radius == vrmod.DEFAULT_RADIUS and cache.reach == vrmod.DEFAULT_REACH
-        if not isDefault then
-            -- Only send once per model
-            if not cache.sent then
-                if CLIENT then
-                    net.Start("vrmod_sync_model_params")
-                    net.WriteString(modelPath)
-                    net.WriteFloat(cache.radius)
-                    net.WriteFloat(cache.reach)
-                    net.WriteVector(mins)
-                    net.WriteVector(maxs)
-                    net.WriteVector(cache.mins_vertical)
-                    net.WriteVector(cache.maxs_vertical)
-                    net.WriteAngle(cache.angles)
-                    net.SendToServer()
-                    if DebugEnabled() then vrmod.logger.Info("GetModelParams: Sent computed params for %s to server", modelPath) end
-                elseif SERVER then
-                    net.Start("vrmod_sync_model_params")
-                    net.WriteString(modelPath)
-                    net.WriteFloat(cache.radius)
-                    net.WriteFloat(cache.reach)
-                    net.WriteVector(mins)
-                    net.WriteVector(maxs)
-                    net.WriteVector(cache.mins_vertical)
-                    net.WriteVector(cache.maxs_vertical)
-                    net.WriteAngle(cache.angles)
-                    net.Broadcast()
-                    if DebugEnabled() then vrmod.logger.Info("GetModelParams: Sent computed params for %s to clients", modelPath) end
-                end
-
-                -- mark as sent
-                cache.sent = true
-            end
-        else
-            if DebugEnabled() then vrmod.logger.Info("GetModelParams: Skipping sync for %s due to default parameters", modelPath) end
-        end
+        SyncModelParamsOnce(modelPath, cache, mins, maxs)
+        local ang = IsValid(ply) and vrmod.GetRightHandAng(ply) or vrmod.DEFAULT_ANGLES
         return cache.radius, cache.reach, mins, maxs, ang, cache.isMelee
     end
 
-    -- Schedule computation if needed
-    if not pending[modelPath] then
-        pending[modelPath] = {
-            attempts = 0
-        }
+    ScheduleModelCompute(modelPath, ply, offsetAng)
+    local ang = IsValid(ply) and vrmod.GetRightHandAng(ply) or vrmod.DEFAULT_ANGLES
+    return vrmod.DEFAULT_RADIUS, vrmod.DEFAULT_REACH, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, ang, false
+end
 
-        timer.Simple(0, function()
-            vrmod.utils.ComputePhysicsParams(modelPath)
-            -- Optionally re-call GetModelParams to trigger sync after computation
-            if vrmod.modelCache[modelPath] and vrmod.modelCache[modelPath].computed then vrmod.utils.GetModelParams(modelPath, ply, offsetAng) end
-        end)
+-- Per-weapon model path cache (avoids WepInfo + string work every frame)
+local wepModelCache = setmetatable({}, {
+    __mode = "k"
+}) -- weak keys: weapon entities
 
-        if DebugEnabled() then vrmod.logger.Debug("GetModelParams: Scheduled computation for %s", modelPath) end
+local function ResolveWeaponModel(wep, hand)
+    if hand ~= "right" then
+        return cl_effectmodel:GetString(), vrmod.DEFAULT_ANGLES
     end
-    return vrmod.DEFAULT_RADIUS, vrmod.DEFAULT_REACH, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, vrmod.GetRightHandAng(ply), false
+    if not IsValid(wep) then return nil, vrmod.DEFAULT_ANGLES end
+
+    local cached = wepModelCache[wep]
+    if cached then return cached.model, cached.offsetAng end
+
+    local class, vm = vrmod.utils.WepInfo(wep)
+    if not class then return nil, vrmod.DEFAULT_ANGLES end
+
+    local model, offsetAng
+    if CLIENT then
+        local vmInfo = g_VR.viewModelInfo and g_VR.viewModelInfo[class]
+        offsetAng = vmInfo and vmInfo.offsetAng or vrmod.DEFAULT_ANGLES
+        model = vm
+    else
+        offsetAng = vrmod.DEFAULT_ANGLES
+        model = vrmod.MODEL_OVERRIDES[class] or wep:GetModel()
+    end
+
+    wepModelCache[wep] = {
+        model = model,
+        offsetAng = offsetAng,
+        class = class
+    }
+    return model, offsetAng
 end
 
 function vrmod.utils.GetWeaponMeleeParams(wep, ply, hand)
-    local model = cl_effectmodel:GetString()
-    local offsetAng = vrmod.DEFAULT_ANGLES
-    if hand == "right" then
-        local class, vm = vrmod.utils.WepInfo(wep)
-        if not class then return vrmod.DEFAULT_RADIUS, vrmod.DEFAULT_REACH end
-        if CLIENT then
-            local vmInfo = g_VR.viewModelInfo[class]
-            offsetAng = vmInfo and vmInfo.offsetAng or vrmod.DEFAULT_ANGLES
-            model = vm
-        else
-            model = vrmod.MODEL_OVERRIDES[class] or wep:GetModel()
-        end
-        return vrmod.utils.GetModelParams(model, ply, offsetAng)
-    else
-        return vrmod.utils.GetModelParams(model, ply, offsetAng)
-    end
+    local model, offsetAng = ResolveWeaponModel(wep, hand or "right")
+    if not model then return vrmod.DEFAULT_RADIUS, vrmod.DEFAULT_REACH, vrmod.DEFAULT_MINS, vrmod.DEFAULT_MAXS, vrmod.DEFAULT_ANGLES, false end
+    return vrmod.utils.GetModelParams(model, ply, offsetAng)
 end
 
 function vrmod.utils.GetCachedWeaponParams(wep, ply, side)
     if not vrmod.utils.IsValidWep(wep) then return nil end
-    local radius, reach, mins, maxs, angles, isMelee = vrmod.utils.GetWeaponMeleeParams(wep, ply, side)
-    local model = vrmod.utils.WepInfo(wep)
-    if SERVER and vrmod.modelCache[model] and vrmod.modelCache[model].computed then
-        local c = vrmod.modelCache[model]
-        if DebugEnabled() then vrmod.logger.Info("GetCachedWeaponParams: Using server-side synced params for %s", model) end
-        return c.radius, c.reach, c.mins_horizontal, c.maxs_horizontal, c.angles, c.isMelee
+
+    local model, offsetAng = ResolveWeaponModel(wep, side or "right")
+    if not model then return nil end
+
+    local cache = vrmod.modelCache[model]
+    if cache and cache.computed then
+        local mins = cache.isMelee and cache.mins_vertical or cache.mins_horizontal
+        local maxs = cache.isMelee and cache.maxs_vertical or cache.maxs_horizontal
+        return cache.radius, cache.reach, mins, maxs, cache.angles, cache.isMelee
     end
 
-    if pending[model] and CurTime() - (pending[model].lastAttempt or 0) < 2 then
-        if DebugEnabled() then vrmod.logger.Debug("GetCachedWeaponParams: Computation pending for %s, waiting", model) end
+    -- Still computing / failed recently
+    local p = pending[model]
+    if p and CurTime() - (p.lastAttempt or 0) < 2 and p.attempts > 0 and not (vrmod.modelCache[model] and vrmod.modelCache[model].computed) then
+        if DebugEnabled() then vrmod.logger.Debug("GetCachedWeaponParams: waiting on %s", model) end
         return nil
     end
 
-    if radius ~= vrmod.DEFAULT_RADIUS or reach ~= vrmod.DEFAULT_REACH or mins ~= vrmod.DEFAULT_MINS then return radius, reach, mins, maxs, angles, isMelee end
-    if not pending[model] then
-        if DebugEnabled() then
-            vrmod.logger.Debug("GetCachedWeaponParams: Scheduling computation for %s", model)
-            timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(model) end)
-        end
-    end
+    ScheduleModelCompute(model, ply, offsetAng)
     return nil
 end
 
