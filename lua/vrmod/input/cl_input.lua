@@ -319,17 +319,15 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 				vrmod.logger.Debug(string.format("Client sending - Throttle: %.2f, Brake: %.2f, Steer: %.2f", throttle, brake, steer))
 			end
 
+			-- Always write 6 floats so the server net reader stays in sync
 			net.Start("glide_vr_input")
 			net.WriteString("analog")
 			net.WriteFloat(throttle)
 			net.WriteFloat(brake)
 			net.WriteFloat(steer)
-			if g_VR.vehicle.type == "aircraft" then
-				net.WriteFloat(pitch)
-				net.WriteFloat(yaw)
-				net.WriteFloat(roll)
-			end
-
+			net.WriteFloat(pitch)
+			net.WriteFloat(yaw)
+			net.WriteFloat(roll)
 			net.SendToServer()
 		end
 
