@@ -686,9 +686,26 @@ local function GetWallPushPad()
     return math.Clamp(cv:GetFloat(), 0, 8)
 end
 
+--- True if v is a usable Vector-like (engine Vector or plain table with x/y/z).
+local function IsVec(v)
+	return v ~= nil and v.x ~= nil and v.y ~= nil and v.z ~= nil
+end
+
+--- Rest position just outside a brush hit. Never returns nil.
+local function WallRestPos(hitPos, hitNormal, pad, fallback)
+	if not IsVec(hitPos) then
+		return fallback
+	end
+	local n = hitNormal
+	if not IsVec(n) or n:LengthSqr() < 0.01 then
+		n = ZERO_UP
+	end
+	return hitPos + n * (pad or 0)
+end
+
 --- Sweep weapon collision box; returns handPos/handAng corrected by the sample delta.
 local function ApplyWeaponWallToHand(handPos, handAng, ply)
-    if not IsValid(ply) then return handPos, handAng end
+    if not IsValid(ply) or not IsVec(handPos) or handAng == nil then return handPos, handAng end
     local wep = ply:GetActiveWeapon()
     if not vrmod.utils.IsValidWep(wep) then
         wepWall.hasFree = false
@@ -706,8 +723,9 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
     end
 
     local desired = vrmod.utils.AdjustCollisionsBox(handPos, handAng, isMelee)
+    if not IsVec(desired) then return handPos, handAng end
     local pad = GetWallPushPad()
-    local startPos = wepWall.hasFree and wepWall.lastFree or desired
+    local startPos = (wepWall.hasFree and IsVec(wepWall.lastFree) and wepWall.lastFree) or desired
 
     local tr = util.TraceHull({
         start = startPos,
@@ -741,11 +759,15 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
                     filter = ply
                 })
                 if not t2.StartSolid then
-                    safe = t2.Hit and (t2.HitPos + t2.HitNormal * pad) or t2.EndPos
-                    normal = t2.HitNormal or normal
+                    if t2.Hit then
+                        safe = WallRestPos(t2.HitPos, t2.HitNormal, pad, desired)
+                        normal = (t2.HitNormal and t2.HitNormal.x and t2.HitNormal:LengthSqr() > 0.01) and t2.HitNormal or normal
+                    else
+                        safe = (t2.EndPos and t2.EndPos.x) and t2.EndPos or desired
+                    end
                     break
                 end
-                if t2.HitNormal and t2.HitNormal:LengthSqr() > 0.01 then
+                if t2.HitNormal and t2.HitNormal.x and t2.HitNormal:LengthSqr() > 0.01 then
                     normal = t2.HitNormal
                 end
                 push = push + normal * 2
@@ -753,11 +775,19 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
         end
     elseif tr.Hit then
         clipped = true
-        normal = tr.HitNormal
-        safe = tr.HitPos + tr.HitNormal * pad
+        normal = (tr.HitNormal and tr.HitNormal.x and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
+        safe = WallRestPos(tr.HitPos, normal, pad, desired)
     else
+        if not wepWall.lastFree then
+            wepWall.lastFree = Vector()
+        end
         wepWall.lastFree:Set(desired)
         wepWall.hasFree = true
+    end
+
+    if not safe or safe.x == nil then
+        safe = desired
+        clipped = false
     end
 
     local shape = {
@@ -774,7 +804,7 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
     }
     vrmod.collisionBoxes = {shape}
 
-    if clipped then
+    if clipped and handPos and handPos.x and safe and desired then
         -- Same delta on hand tracking so gun (parented to hand) cannot fly free
         handPos = handPos + (safe - desired)
         if DebugEnabled() then
@@ -820,71 +850,88 @@ local handWall = {
 
 --- Hull-sweep from last free sample → desired sample (same idea as
 --- vrmod_climbing ResolveCameraOriginCollision). Returns safeSample, clipped, normal.
+--- safeSample is always a Vector (never nil) when desiredSample is valid.
 local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
-    local mins, maxs = SetSymmetricHull(radius)
-    local pad = radius + GetWallPushPad()
-    local st = handWall[handKey]
-    local startPos = (st.hasFree and st.lastFree) or desiredSample
+	if not IsVec(desiredSample) then
+		return Vector(), false, nil
+	end
 
-    local tr = util.TraceHull({
-        start = startPos,
-        endpos = desiredSample,
-        mins = mins,
-        maxs = maxs,
-        mask = MASK_SOLID_BRUSHONLY,
-        filter = filter
-    })
+	local mins, maxs = SetSymmetricHull(radius)
+	local pad = radius + GetWallPushPad()
+	local st = handWall[handKey]
+	if not st then
+		return desiredSample, false, nil
+	end
+	if not IsVec(st.lastFree) then
+		st.lastFree = Vector()
+		st.hasFree = false
+	end
 
-    -- Stuck in solid at the start of the sweep
-    if tr.StartSolid or tr.AllSolid then
-        local n = tr.HitNormal
-        if not n or n:LengthSqr() < 0.01 then
-            n = ZERO_UP
-        end
-        local push = desiredSample
-        for _ = 1, 5 do
-            local t2 = util.TraceHull({
-                start = push,
-                endpos = push + n * (radius * 2.5),
-                mins = mins,
-                maxs = maxs,
-                mask = MASK_SOLID_BRUSHONLY,
-                filter = filter
-            })
-            if not t2.StartSolid then
-                if t2.Hit then
-                    return t2.HitPos + t2.HitNormal * pad, true, t2.HitNormal
-                end
-                return t2.EndPos, true, n
-            end
-            if t2.HitNormal and t2.HitNormal:LengthSqr() > 0.01 then
-                n = t2.HitNormal
-            end
-            push = push + n * radius
-        end
-        -- Stay at last free if still valid
-        if st.hasFree then
-            local t3 = util.TraceHull({
-                start = st.lastFree,
-                endpos = st.lastFree,
-                mins = mins,
-                maxs = maxs,
-                mask = MASK_SOLID_BRUSHONLY,
-                filter = filter
-            })
-            if not t3.StartSolid then
-                return st.lastFree, true, n
-            end
-        end
-        return desiredSample, true, n
-    end
+	local startPos = (st.hasFree and IsVec(st.lastFree) and st.lastFree) or desiredSample
 
-    if tr.Hit then
-        -- Contact: rest just outside the wall (climbing-style)
-        return tr.HitPos + tr.HitNormal * pad, true, tr.HitNormal
-    end
+	local tr = util.TraceHull({
+		start = startPos,
+		endpos = desiredSample,
+		mins = mins,
+		maxs = maxs,
+		mask = MASK_SOLID_BRUSHONLY,
+		filter = filter
+	})
 
-    return desiredSample, false, nil
+	-- Stuck in solid at the start of the sweep
+	if tr.StartSolid or tr.AllSolid then
+		local n = tr.HitNormal
+		if not IsVec(n) or n:LengthSqr() < 0.01 then
+			n = ZERO_UP
+		end
+		local push = desiredSample
+		for _ = 1, 5 do
+			local t2 = util.TraceHull({
+				start = push,
+				endpos = push + n * (radius * 2.5),
+				mins = mins,
+				maxs = maxs,
+				mask = MASK_SOLID_BRUSHONLY,
+				filter = filter
+			})
+			if not t2.StartSolid then
+				if t2.Hit then
+					return WallRestPos(t2.HitPos, t2.HitNormal, pad, desiredSample), true, (IsVec(t2.HitNormal) and t2.HitNormal) or n
+				end
+				return (IsVec(t2.EndPos) and t2.EndPos) or desiredSample, true, n
+			end
+			if IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01 then
+				n = t2.HitNormal
+			end
+			push = push + n * radius
+		end
+		-- Stay at last free if still valid
+		if st.hasFree and IsVec(st.lastFree) then
+			local t3 = util.TraceHull({
+				start = st.lastFree,
+				endpos = st.lastFree,
+				mins = mins,
+				maxs = maxs,
+				mask = MASK_SOLID_BRUSHONLY,
+				filter = filter
+			})
+			if not t3.StartSolid then
+				return st.lastFree, true, n
+			end
+		end
+		return desiredSample, true, n
+	end
+
+	if tr.Hit then
+		-- Contact: rest just outside the wall (climbing-style)
+		local n = tr.HitNormal
+		if not IsVec(n) or n:LengthSqr() < 0.01 then
+			n = ZERO_UP
+		end
+		return WallRestPos(tr.HitPos, n, pad, desiredSample), true, n
+	end
+
+	return desiredSample, false, nil
 end
 
 local function MakeHandShape(samplePos, radius, ang, clipped, pushOut, normal, reachHit)
@@ -926,6 +973,11 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         return lefthandPos, lefthandAng, righthandPos, righthandAng
     end
 
+    -- Integrity: never run Vector math on missing poses (early session / bad modifiers)
+    if not IsVec(lefthandPos) or not IsVec(righthandPos) or lefthandAng == nil or righthandAng == nil then
+        return passthrough()
+    end
+
     if not IsValid(ply)
         or not g_VR.active
         or not ply:GetNWBool("vrmod_server_enforce_collision", true)
@@ -955,6 +1007,11 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     vrmod._collisionShapeByHand = handShapeStore
 
     local function processHand(handKey, trackPos, trackAng, gripping)
+        -- Nil / non-vector poses must never enter Vector arithmetic (spam-errors every frame)
+        if not IsVec(trackPos) or trackAng == nil then
+            return trackPos, trackAng
+        end
+
         if gripping then
             ClearHandWallState(handKey)
             if handKey == "left" then
@@ -967,6 +1024,10 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
 
         local desiredSample = trackPos + trackAng:Forward() * offset
         local safeSample, clipped, normal = ResolveHandWallSweep(desiredSample, handKey, radius, filter)
+        if not IsVec(safeSample) then
+            safeSample = desiredSample
+            clipped = false
+        end
 
         -- Reach probe (debug / shape.hit only — does not drive pose)
         local trReach = util.TraceLine({
@@ -994,8 +1055,14 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
             lastNonClippedNormal[handKey] = normal
             -- do not update lastFree while blocked
         else
-            handWall[handKey].lastFree:Set(desiredSample)
-            handWall[handKey].hasFree = true
+            local st = handWall[handKey]
+            if st then
+                if not IsVec(st.lastFree) then
+                    st.lastFree = Vector()
+                end
+                st.lastFree:Set(desiredSample)
+                st.hasFree = true
+            end
             lastNonClippedPos[handKey] = desiredSample
             cachedPushOutPos[handKey] = nil
         end

@@ -269,22 +269,20 @@ if CLIENT then
 
 	--- Late pose modifiers: wall/weapon collisions write final g_VR.tracking hands.
 	local function ApplyPoseModifiers()
-		if not (g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and vrmod.utils) then return end
+		local left = g_VR.tracking and g_VR.tracking.pose_lefthand
+		local right = g_VR.tracking and g_VR.tracking.pose_righthand
+		if not (left and right and vrmod.utils and left.pos and right.pos and left.ang and right.ang) then return end
 		frameCounter = frameCounter + 1
 		-- Weapon broadphase for gun debug boxes / optional weapon sweeps
 		if vrmod.utils.CollisionsPreCheck then
-			vrmod.utils.CollisionsPreCheck(g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_righthand.pos)
+			vrmod.utils.CollisionsPreCheck(left.pos, right.pos)
 		end
-		local lp, la, rp, ra = vrmod.utils.UpdateHandCollisions(
-			g_VR.tracking.pose_lefthand.pos,
-			g_VR.tracking.pose_lefthand.ang,
-			g_VR.tracking.pose_righthand.pos,
-			g_VR.tracking.pose_righthand.ang
-		)
-		g_VR.tracking.pose_lefthand.pos = lp
-		g_VR.tracking.pose_lefthand.ang = la
-		g_VR.tracking.pose_righthand.pos = rp
-		g_VR.tracking.pose_righthand.ang = ra
+		local lp, la, rp, ra = vrmod.utils.UpdateHandCollisions(left.pos, left.ang, right.pos, right.ang)
+		-- Only write back real vectors (collision must not nil-out the SoT)
+		if lp then left.pos = lp end
+		if la then left.ang = la end
+		if rp then right.pos = rp end
+		if ra then right.ang = ra end
 		-- Optional extra modifiers
 		hook.Call("VRMod_TrackingModified", nil, g_VR.tracking, g_VR.rawTracking)
 		-- Viewmodel is a pure slave of final right-hand tracking (no independent push)
