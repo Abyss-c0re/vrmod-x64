@@ -92,8 +92,10 @@ local function AddHUD()
 	end
 
 	if table.Count(blacklist) > 0 then hook.Add("HUDShouldDraw", "vrmod_hud", function(name) if blacklist[name] then return false end end) end
-	hook.Add("VRMod_PreRender", "hud", function()
+	-- VRMod_PreRender runs once per eye; only rasterize the HUD RT for the left eye
+	hook.Add("VRMod_PreRender", "hud", function(eye)
 		if not g_VR.threePoints then return end
+		if eye == "right" then return end
 		render.PushRenderTarget(rt)
 		render.OverrideAlphaWriteEnable(true, true)
 		render.Clear(0, 0, 0, convarValues.vrmod_hudtestalpha, true, true)
