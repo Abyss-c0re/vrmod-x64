@@ -8,48 +8,79 @@ local function init()
 			local localAng = net.ReadAngle()
 			if not IsValid(ply) or not IsValid(ent) then return end
 			local steamid = ply:SteamID()
-			if g_VR.net[steamid] == nil then return end
-			--
-			ent.RenderOverride = function()
-				if not IsValid(ent) then return end
-				local netData = g_VR.net[steamid]
-				if not netData or not netData.lerpedFrame then return end
-				local frame = netData.lerpedFrame
-				local wpos, wang
-				if leftHand then
-					wpos, wang = LocalToWorld(localPos, localAng, frame.lefthandPos, frame.lefthandAng)
+			-- Ensure local player has a net table so ArcVR pickups always attach
+			if g_VR.net[steamid] == nil then
+				g_VR.net[steamid] = {
+					lastFrame = nil,
+					playbackTime = 0,
+				}
+			end
+
+			-- Capture hand flag for this entity (avoid stale closure bugs across pickups)
+			ent.VRPickupLeftHand = leftHand and true or false
+			ent.VRPickupLocalPos = Vector(localPos)
+			ent.VRPickupLocalAng = Angle(localAng.p, localAng.y, localAng.r)
+
+			ent.RenderOverride = function(self)
+				if not IsValid(self) then return end
+				local useLeft = self.VRPickupLeftHand
+				local lpos = self.VRPickupLocalPos or vector_origin
+				local lang = self.VRPickupLocalAng or angle_zero
+				local handPos, handAng
+
+				-- Local player: always use live tracking (net frame can lag / be relative mismatch)
+				if ply == LocalPlayer() and g_VR.tracking then
+					local pose = useLeft and g_VR.tracking.pose_lefthand or g_VR.tracking.pose_righthand
+					if not pose or not pose.pos then return end
+					handPos, handAng = pose.pos, pose.ang
 				else
-					wpos, wang = LocalToWorld(localPos, localAng, frame.righthandPos, frame.righthandAng)
+					local netData = g_VR.net[steamid]
+					if not netData or not netData.lerpedFrame then return end
+					local frame = netData.lerpedFrame
+					if useLeft then
+						handPos, handAng = frame.lefthandPos, frame.lefthandAng
+					else
+						handPos, handAng = frame.righthandPos, frame.righthandAng
+					end
+					if not handPos or not handAng then return end
 				end
 
-				ent:SetPos(wpos)
-				ent:SetAngles(wang)
-				ent:SetupBones()
-				ent:DrawModel()
+				local wpos, wang = LocalToWorld(lpos, lang, handPos, handAng)
+				self:SetPos(wpos)
+				self:SetAngles(wang)
+				self:SetupBones()
+				self:DrawModel()
 			end
 
 			ent.VRPickupRenderOverride = ent.RenderOverride
-			--]]
+
 			if ply == LocalPlayer() then
 				if leftHand then
 					g_VR.heldEntityLeft = ent
+					-- Don't leave the mag also registered as right-hand hold
+					if g_VR.heldEntityRight == ent then g_VR.heldEntityRight = nil end
 				else
 					g_VR.heldEntityRight = ent
+					if g_VR.heldEntityLeft == ent then g_VR.heldEntityLeft = nil end
 				end
 			end
 
 			hook.Call("VRMod_Pickup", nil, ply, ent)
-			hook.Add("VRMod_Input", "arc_pickup_compat", function(action, pressed)
-				if action == "boolean_left_pickup" and not pressed then
-					net.Start("vrutil_net_drop")
-					net.WriteBool(true)
-					net.WriteVector(g_VR.tracking.pose_lefthand.pos)
-					net.WriteAngle(g_VR.tracking.pose_lefthand.ang)
-					net.SendToServer()
-					g_VR.heldEntityLeft = nil
-					hook.Remove("VRMod_Input", "arc_pickup_compat")
-				end
-			end)
+			if leftHand then
+				hook.Add("VRMod_Input", "arc_pickup_compat", function(action, pressed)
+					if action == "boolean_left_pickup" and not pressed then
+						local track = g_VR.tracking and g_VR.tracking.pose_lefthand
+						if not track then return end
+						net.Start("vrutil_net_drop")
+						net.WriteBool(true)
+						net.WriteVector(track.pos)
+						net.WriteAngle(track.ang)
+						net.SendToServer()
+						g_VR.heldEntityLeft = nil
+						hook.Remove("VRMod_Input", "arc_pickup_compat")
+					end
+				end)
+			end
 
 			--notify server that arcvr pickups exist and we should run the position update thing
 			net.Start("vrutil_net_pickup")
@@ -112,8 +143,13 @@ local function init()
 							continue
 						end
 
-						local handPos = LocalToWorld(v.left and frame.lefthandPos or frame.righthandPos, Angle(), ply:GetPos(), Angle())
-						local handAng = v.left and frame.lefthandAng or frame.righthandAng
+						if not frame then continue end
+						local relPos = v.left and frame.lefthandPos or frame.righthandPos
+						local relAng = v.left and frame.lefthandAng or frame.righthandAng
+						if not relPos or not relAng then continue end
+						-- latestFrame hand poses are relative to player origin
+						local handPos = LocalToWorld(relPos, Angle(), ply:GetPos(), Angle())
+						local handAng = relAng
 						local wPos, wAng = LocalToWorld(v.localPos, v.localAng, handPos, handAng)
 						v.targetPos = wPos
 						v.ent:GetPhysicsObject():UpdateShadow(wPos, wAng, 1 / tickrate)
