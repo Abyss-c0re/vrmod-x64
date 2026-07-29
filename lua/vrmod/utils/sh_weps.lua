@@ -5,9 +5,22 @@ vrmod.suppressViewModelUpdates = false
 -- WEP UTILS
 function vrmod.utils.CreateWorldModelVM(class, vmi)
     if not IsValid(g_VR.worldModelVM) then
-        g_VR.worldModelVM = ClientsideModel(vmi.modelOverride or LocalPlayer():GetActiveWeapon():GetModel())
+        local model = vmi and vmi.modelOverride
+        if not model then
+            local wep = LocalPlayer():GetActiveWeapon()
+            if IsValid(wep) then
+                model = wep:GetModel()
+            end
+        end
+        if not model or model == "" then return end
+
+        g_VR.worldModelVM = ClientsideModel(model)
+        if not IsValid(g_VR.worldModelVM) then return end
         g_VR.worldModelVM:SetNoDraw(false)
-        g_VR.worldModelVM:SetParent(LocalPlayer():GetViewModel()) -- temporary parent
+        local vm = LocalPlayer():GetViewModel()
+        if IsValid(vm) then
+            g_VR.worldModelVM:SetParent(vm) -- temporary parent
+        end
         g_VR.worldModelVM:DrawShadow(false)
     end
 
