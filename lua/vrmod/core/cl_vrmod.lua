@@ -589,8 +589,14 @@ if CLIENT then
 			if IsValid(g_VR.viewModel) and g_VR.viewModel:GetClass() == "class C_BaseFlex" then g_VR.viewModel:Remove() end
 			g_VR.viewModel = nil
 			g_VR.viewModelMuzzle = nil
-			LocalPlayer():GetViewModel().RenderOverride = nil
-			LocalPlayer():GetViewModel():RemoveEffects(EF_NODRAW)
+			local ply = LocalPlayer()
+			if IsValid(ply) then
+				local vm = ply:GetViewModel()
+				if IsValid(vm) then
+					vm.RenderOverride = nil
+					vm:RemoveEffects(EF_NODRAW)
+				end
+			end
 			hook.Remove("RenderScene", "vrutil_hook_renderscene")
 			hook.Remove("CalcViewModelView", "vrutil_hook_calcviewmodelview")
 			hook.Remove("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel")
