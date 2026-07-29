@@ -261,13 +261,15 @@ if SERVER then
 	end)
 
 	hook.Add("Think", "VRMod_UpdatePickupFlags", function()
-		if not UpdateCoroutine or coroutine.status(UpdateCoroutine) == "dead" then UpdateCoroutine = coroutine.create(UpdatePickupFlagsCoroutine) end
-		if coroutine.status(UpdateCoroutine) == "suspended" then
-			local success, err = coroutine.resume(UpdateCoroutine)
-			if not success then
-				ErrorNoHaltWithStack("Pickup flag coroutine error: " .. tostring(err))
-				UpdateCoroutine = nil
-			end
+		if not UpdateCoroutine or coroutine.status(UpdateCoroutine) == "dead" then
+			UpdateCoroutine = coroutine.create(UpdatePickupFlagsCoroutine)
+		end
+		-- Only resume suspended coroutines (skip "running" / "dead")
+		if coroutine.status(UpdateCoroutine) ~= "suspended" then return end
+		local success, err = coroutine.resume(UpdateCoroutine)
+		if not success then
+			ErrorNoHaltWithStack("Pickup flag coroutine error: " .. tostring(err) .. "\n" .. debug.traceback(UpdateCoroutine))
+			UpdateCoroutine = nil
 		end
 	end)
 

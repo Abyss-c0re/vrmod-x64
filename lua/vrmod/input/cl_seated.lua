@@ -36,14 +36,17 @@ hook.Add("VRMod_Input", "crouching", function(action, pressed)
 		local speed = (crouchTarget == 0 and 36 or -36) * 1 / LocalPlayer():GetDuckSpeed() --eye pos difference between standing and crouched gmod player is 36 units, this distance is travelled in GetDuckSpeed seconds
 		hook.Add("PreRender", "vrmod_crouch", function()
 			crouchOffset.z = crouchOffset.z + speed * FrameTime()
+			g_VR.crouchOffsetZ = crouchOffset.z
 			if crouchOffset.z > 0 or crouchTarget < 0 and crouchOffset.z < crouchTarget then
 				crouchOffset.z = crouchTarget
+				g_VR.crouchOffsetZ = crouchOffset.z
 				hook.Remove("PreRender", "vrmod_crouch")
 				updateOffsetHook()
 			end
 		end)
 
 		crouchOffset.z = crouchOffset.z + 0.01
+		g_VR.crouchOffsetZ = crouchOffset.z
 		updateOffsetHook()
 	end
 end)
