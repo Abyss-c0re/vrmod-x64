@@ -1,7 +1,12 @@
 -- =============================================================================
 -- vrmod.avatar — Cube player customization twin
--- Drives a ClientsideModel from g_VR.tracking (Pescorr 2-bone IK lineage).
--- Customization: model, skin, bodygroups, hide head/hands.
+--
+-- SoT path (every frame, same as real players):
+--   VRUtilNetUpdateLocalPly / buildClientFrame  →  net frame
+--   TransformFrame (clone = rigid rotate, facing = mirror rotate + L/R swap)
+--   vrmod.frameik.Apply  →  same arm IK as cl_character UpdateIK
+--
+-- No custom arm reinvent. No algocube UI. Customization only on twin model looks.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
 if SERVER then return end
@@ -334,6 +339,7 @@ function Session:SetModel(path)
 	self.ent:SetupBones()
 	self:_cacheBones()
 	self:_measureArms()
+	self.ik = vrmod.frameik and vrmod.frameik.Init(self.ent) or nil
 	self:_applyHideBones()
 	return true
 end
@@ -669,296 +675,74 @@ local function ClampBoneDist(targets, parentId, childId, maxLen)
 	end
 end
 
---- Copy the LIVE VR player's posed bones into twin space via _map (mirror or clone).
--- True mirror (no twisted/stretched limbs) requires ALL of:
---   1) MapMirror spatial flip (sagittal X)
---   2) L↔R bone id remap when writing targets
---   3) Apply only inside BuildBonePositions (see Open)
---   4) Shared characterYaw frame in _applyTracking
-function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
-	local ply = LocalPlayer()
-	if not IsValid(ply) then return false end
+--- Net frame SoT → rotate/mirror → same character IK (vrmod.frameik).
+function Session:_applyFromNetFrame(playerFeet, playerYaw)
+	if not vrmod.frameik then return false end
+	if not self.ik then
+		self.ik = vrmod.frameik.Init(self.ent)
+	end
+	if not self.ik then return false end
 
-	-- Force a bone solve even if floating-hands hid the body this frame
-	local prevAllow = g_VR.allowPlayerDraw
-	g_VR.allowPlayerDraw = true
-	local okSetup = pcall(function()
-		ply:InvalidateBoneCache()
-		ply:SetupBones()
-	end)
-	g_VR.allowPlayerDraw = prevAllow
-	if not okSetup then return false end
-
-	local map = function(p, a)
-		return self:_map(p, a, playerFeet, playerYaw)
+	-- Same absolute frame the game posts each tick (buildClientFrame)
+	local src
+	if isfunction(VRUtilNetUpdateLocalPly) then
+		src = VRUtilNetUpdateLocalPly(false)
+	end
+	if not src then
+		local ply = LocalPlayer()
+		local sid = IsValid(ply) and ply:SteamID()
+		src = sid and g_VR.net and g_VR.net[sid] and g_VR.net[sid].lerpedFrame
+	end
+	if not src or (not src.lefthandPos and not src.righthandPos) then
+		return false
 	end
 
-	local targets = {}
-	local n = ply:GetBoneCount() or 0
-	if n < 1 then return false end
+	local mode = self.mode or "facing"
+	if mode == "mirror" then mode = "facing" end
+	local twinFrame = vrmod.frameik.TransformFrame(
+		src, mode, playerFeet, playerYaw, self.standPos, self.standAng or playerYaw
+	)
+	if not twinFrame then return false end
 
-	local sameSkel = (self.ent:GetModel() == ply:GetModel())
-		or (self.ent:GetModel() == (ply.vrmod_pm or ""))
-		or (self.model == ply:GetModel())
-	local doMirror = self:_isMirrorMode()
+	-- Place twin root for clavicle GetBoneMatrix during Apply
+	self.ent:SetPos(self.standPos)
+	self.ent:SetAngles(self.standAng or Angle(0, twinFrame.characterYaw or 0, 0))
+	self.ent:InvalidateBoneCache()
+	self.ent:SetupBones()
 
-	-- Rebuild map if twin model bone count changed / first frame
-	if doMirror and sameSkel and (not self.mirrorBoneMap or not next(self.mirrorBoneMap)) then
-		self:_buildMirrorBoneMap()
+	if not vrmod.frameik.Apply(self.ent, self.ik, twinFrame) then
+		return false
 	end
-
-	if sameSkel then
-		for i = 0, n - 1 do
-			local m = ply:GetBoneMatrix(i)
-			if m then
-				local bn = ply:GetBoneName(i)
-				if not IsValidBoneName(bn) then continue end
-				local pos, ang = m:GetTranslation(), m:GetAngles()
-				local np, na = map(pos, ang)
-				local twinId = self:_twinBoneFor(i, bn, i)
-				if twinId ~= nil then
-					targets[twinId] = MatFrom(np, na)
-				end
-			end
-		end
-	else
-		for name, twinId in pairs(self.bones) do
-			local boneName = BONES[name]
-			if twinId and boneName then
-				-- In mirror mode, twin L_Hand is driven by player R_Hand (mirrored)
-				local srcName = doMirror and MirrorBoneName(boneName) or boneName
-				local plyId = ply:LookupBone(srcName)
-				if plyId and plyId >= 0 then
-					local m = ply:GetBoneMatrix(plyId)
-					if m then
-						local pos, ang = m:GetTranslation(), m:GetAngles()
-						local np, na = map(pos, ang)
-						targets[twinId] = MatFrom(np, na)
-					end
-				end
-			end
-		end
-	end
-
-	-- Soft length clamps on head only (body copy can giraffe; arms come from tracking next)
-	if next(targets) and self.headDampen ~= false then
-		self:_dampenHeadTargets(targets)
-	end
-
-	-- CRITICAL: LocalPlayer SetupBones does NOT run PrePlayerDraw/UpdateIK.
-	-- Hand/arm bones stay idle unless we drive them from live tracking.
-	self:_driveArmsFromTracking(playerFeet, playerYaw, targets)
-
-	if not next(targets) then return false end
-	self.targets = targets
-	return true
-end
-
---- Live controller → twin arm chain (2-bone IK). Always overwrites hand/fore/upper.
--- Mirror: your right controller → twin left mesh (after MapMirror, on your right).
--- Clone:  same laterality. Angles use ValveBiped R-hand +180 like cl_character.
-function Session:_driveArmsFromTracking(playerFeet, playerYaw, targets)
-	local b = self.bones
-	if not b or (not b.lHand and not b.rHand) then return end
-
-	local tr = g_VR.tracking
-	local lhPose = tr and tr.pose_lefthand
-	local rhPose = tr and tr.pose_righthand
-
-	-- Fallback to network lerped frame (same SoT as body IK when present)
-	local ply = LocalPlayer()
-	local sid = IsValid(ply) and ply:SteamID() or nil
-	local frame = sid and g_VR.net and g_VR.net[sid] and g_VR.net[sid].lerpedFrame
-	if (not lhPose or not lhPose.pos) and frame and frame.lefthandPos then
-		lhPose = { pos = frame.lefthandPos, ang = frame.lefthandAng or Angle() }
-	end
-	if (not rhPose or not rhPose.pos) and frame and frame.righthandPos then
-		rhPose = { pos = frame.righthandPos, ang = frame.righthandAng or Angle() }
-	end
-	if (not lhPose or not lhPose.pos) and (not rhPose or not rhPose.pos) then
-		return
-	end
-
-	local uLen = math.max(4, self.upperArmLen or 12)
-	local fLen = math.max(4, self.forearmLen or 12)
-	local shoulderW = self.shoulderWidth or DEFAULT_SHOULDER_W
-
-	-- Twin chest frame for shoulder anchors
-	local chestId = b.chest or b.spine2 or b.spine4 or b.spine1 or b.spine
-	local chestPos, chestAng
-	if chestId and targets[chestId] then
-		chestPos = targets[chestId]:GetTranslation()
-		chestAng = targets[chestId]:GetAngles()
-	else
-		chestPos = (self.standPos or VEC_ZERO) + Vector(0, 0, self.pelvisOffset or DEFAULT_PELVIS_OFFSET)
-		chestAng = self.standAng or Angle(0, 0, 0)
-	end
-	local bodyRight = chestAng:Right()
-	local bodyUp = chestAng:Up()
-	local bodyFwd = chestAng:Forward()
-
-	local function driveMeshSide(isLeftMesh, handPose, angExtra)
-		if not handPose or not handPose.pos then return end
-		local upperId = isLeftMesh and b.lUpper or b.rUpper
-		local foreId = isLeftMesh and b.lFore or b.rFore
-		local handId = isLeftMesh and b.lHand or b.rHand
-		if not handId then return end
-
-		local srcAng = handPose.ang or Angle()
-		if angExtra then
-			srcAng = Angle(srcAng.p, srcAng.y, srcAng.r) + angExtra
-		end
-		local hpos, hang = self:_map(handPose.pos, srcAng, playerFeet, playerYaw)
-
-		-- Shoulder: clavicle bone if already mapped, else chest ± right
-		local clavId = isLeftMesh and b.lClav or b.rClav
-		local shoulder
-		if clavId and targets[clavId] then
-			shoulder = targets[clavId]:GetTranslation()
-			-- step out along bone right a bit
-			local side = isLeftMesh and -1 or 1
-			shoulder = shoulder + bodyRight * (side * 2) + bodyUp * 1
-		else
-			local side = isLeftMesh and -1 or 1
-			shoulder = chestPos + bodyRight * (side * shoulderW) + bodyUp * 3 + bodyFwd * 2
-		end
-
-		-- Elbow pole: slightly forward/down so arms don't lock planar
-		local pole = shoulder + bodyFwd * 8 + bodyUp * -6 + bodyRight * ((isLeftMesh and -1 or 1) * 4)
-		local elbow = SolveTwoBoneIK(shoulder, hpos, uLen, fLen, pole)
-
-		if upperId then
-			targets[upperId] = MatFrom(shoulder, AngleBetween(shoulder, elbow))
-		end
-		if foreId then
-			targets[foreId] = MatFrom(elbow, AngleBetween(elbow, hpos))
-		end
-		targets[handId] = MatFrom(hpos, hang)
-	end
-
-	local mirror = self:_isMirrorMode()
-	if mirror then
-		-- Real mirror: right controller drives twin LEFT mesh (and vice versa)
-		driveMeshSide(true, rhPose, nil)
-		driveMeshSide(false, lhPose, RIGHT_HAND_OFFSET)
-	else
-		-- Clone / world: same laterality as player (R-hand bone +180)
-		driveMeshSide(true, lhPose, nil)
-		driveMeshSide(false, rhPose, RIGHT_HAND_OFFSET)
-	end
-end
-
---- Pull head toward spine if stretched past maxLen (KDE MetaCam giraffe pathology).
-function Session:_dampenHeadTargets(targets)
-	if not targets then return end
-	local headId = self.bones and self.bones.head
-	local chestId = self.bones and (self.bones.spine4 or self.bones.spine2 or self.bones.spine1 or self.bones.spine)
-	if not headId or not chestId then return end
-	local hm = targets[headId]
-	local cm = targets[chestId]
-	if not hm or not cm then return end
-
-	local hp = hm:GetTranslation()
-	local ha = hm:GetAngles()
-	local cp = cm:GetTranslation()
-	local neck = hp - cp
-	local len = neck:Length()
-	local maxLen = self.headMaxLen or 14 -- Source units; normal head offset ~8–12
-	if len > maxLen and len > 0.01 then
-		local np = cp + neck:GetNormalized() * maxLen
-		targets[headId] = MatFrom(np, ha)
-	end
-
-	-- Soft-clamp neck chain bones if present (Spine4 / Head path stretch)
-	for _, key in ipairs({ "spine4", "spine2", "spine1" }) do
-		local bid = self.bones and self.bones[key]
-		if bid and targets[bid] and chestId and targets[chestId] and bid ~= chestId then
-			local bm = targets[bid]
-			local bp = bm:GetTranslation()
-			local ba = bm:GetAngles()
-			local d = bp - cp
-			local lim = (key == "spine4") and 10 or 16
-			if d:Length() > lim and d:Length() > 0.01 then
-				targets[bid] = MatFrom(cp + d:GetNormalized() * lim, ba)
-			end
-		end
-	end
-end
-
---- Clamp arm/leg segment lengths to rest-pose measure (anti-stretch after map).
-function Session:_dampenLimbTargets(targets)
-	if not targets or not self.bones then return end
-	local b = self.bones
-	local uA = self.upperArmLen or 12
-	local fA = self.forearmLen or 12
-	local uL = self.upperLegLen or 16
-	local lL = self.lowerLegLen or 16
-	-- Both sides (mirror may have swapped content but lengths are symmetric)
-	ClampBoneDist(targets, b.rUpper, b.rFore, uA)
-	ClampBoneDist(targets, b.rFore, b.rHand, fA)
-	ClampBoneDist(targets, b.lUpper, b.lFore, uA)
-	ClampBoneDist(targets, b.lFore, b.lHand, fA)
-	ClampBoneDist(targets, b.rThigh, b.rCalf, uL)
-	ClampBoneDist(targets, b.rCalf, b.rFoot, lL)
-	ClampBoneDist(targets, b.lThigh, b.lCalf, uL)
-	ClampBoneDist(targets, b.lCalf, b.lFoot, lL)
-end
-
-function Session:SetAlgoDigit(digit)
-	if vrmod.algocube and vrmod.algocube.mirror then
-		local d, policy = vrmod.algocube.mirror.Roll({ digit = digit })
-		vrmod.algocube.mirror.ApplyToSession(self, policy)
-		return d, policy
-	end
-	return nil
-end
-
-function Session:GetAlgoStatus()
-	return self.algoDigit, self.algoPolicy, self.headDampen
+	self.targets = self.ik.targets or {}
+	return next(self.targets) ~= nil
 end
 
 function Session:_applyTracking()
 	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
 	if not hmd then return end
 
-	-- Prefer characterYaw so bone matrices and map share the same body frame
-	-- (mismatch here is a primary cause of "twisted" twins vs live IK)
+	-- Same body yaw as net frame / character system
 	local cyaw = g_VR.characterYaw
 	if isnumber(cyaw) then
 		yaw = cyaw
 		playerYaw = Angle(0, yaw, 0)
 	end
-	-- Feet under HMD on playspace floor (matches character root)
 	local originZ = (g_VR.origin and g_VR.origin.z) or playerFeet.z
 	playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
 
-	local fbt = self:_fbtLive()
-	if fbt and not self.idleOnly then
-		self.follow.waist = true
-		self.follow.feet = true
-		self.showTrackers = self.showTrackers or self.showFBTTrackers
-	end
-
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
-	-- Place twin root only — do NOT SetupBones before targets are filled
-	-- (early SetupBones would thrash with stale matrices)
-	self.ent:SetPos(self.standPos)
-	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 
 	if self.idleOnly then
+		self.ent:SetPos(self.standPos)
+		self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 		self.targets = {}
 		return
 	end
 
-	-- Live VR body → twin (MapMirror+L↔R for facing, MapClone for clone)
-	-- Hands always driven from controllers inside _copyFromLocalPlayer.
-	if not self:_copyFromLocalPlayer(playerFeet, playerYaw) then
-		-- Still try arms alone if body copy failed
-		local targets = {}
-		self:_driveArmsFromTracking(playerFeet, playerYaw, targets)
-		self.targets = targets
+	-- Net frame → transform → character IK. Nothing else.
+	if not self:_applyFromNetFrame(playerFeet, playerYaw) then
+		self.targets = {}
 	end
-	-- Caller (draw hook) runs SetupBones once → BuildBonePositions applies targets
 end
 
 function Session:_drawTrackers()
@@ -1092,19 +876,16 @@ function vrmod.avatar.Open(opts)
 
 	s:_cacheBones()
 	s:_measureArms()
+	s.ik = vrmod.frameik and vrmod.frameik.Init(ent) or nil
 	s:_applyHideBones()
 	sessions[id] = s
 
-	-- Apply solved matrices ONLY in BuildBonePositions (stable vs free thrash).
-	-- Free SetBoneMatrix outside this callback is a known stretch/twist failure mode.
+	-- Apply frame-IK matrices only in BuildBonePositions
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
 		if not s.active or not s.targets then return end
 		for boneId, mat in pairs(s.targets) do
-			if boneId and mat then
-				local cur = e:GetBoneMatrix(boneId)
-				if cur then
-					e:SetBoneMatrix(boneId, mat)
-				end
+			if boneId and mat and e:GetBoneMatrix(boneId) then
+				e:SetBoneMatrix(boneId, mat)
 			end
 		end
 	end)
