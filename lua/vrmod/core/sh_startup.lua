@@ -60,10 +60,10 @@ if CLIENT then
     -- Render supersample: multiplies per-eye RT vs HMD recommended (1=native, 1.5/2=SS).
     -- Requires VR restart. Clamped so SBS fits in 4096.
     vrmod.AddCallbackedConvar("vrmod_supersample", nil, "1.25", FCVAR_ARCHIVE, "VR render supersample 0.5–2.0 (restart VR)", 0.5, 2.0, tonumber)
-    vrmod.AddCallbackedConvar("vrmod_scalefactor", nil, "1")
+    vrmod.AddCallbackedConvar("vrmod_scalefactor", nil, "1", FCVAR_ARCHIVE, "Submit UV scale factor (border crop)", 0.05, 4.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_eyescale", nil, "0.5")
-    vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0")
-    vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0")
+    vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV vertical offset", -1.0, 1.0, tonumber)
+    vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset", -1.0, 1.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
     vrmod.AddCallbackedConvar("vrmod_skybox", nil, "0", nil, nil, nil, nil, tobool, function(val) RunConsoleCommand("r_3dsky", val and "1" or "0") end)

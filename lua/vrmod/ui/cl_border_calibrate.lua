@@ -17,8 +17,8 @@ local Cal = {
 			title = "STEP 1 · SCALE",
 			hint = "Black borders? Trigger = tighter (-). Secondary = looser (+). Menu = next.",
 			step = 0.02,
-			min = 0.5,
-			max = 1.5,
+			min = 0.05,
+			max = 4.0,
 		},
 		{
 			id = "vertical",
@@ -26,8 +26,8 @@ local Cal = {
 			title = "STEP 2 · VERTICAL",
 			hint = "Top/bottom edges. Trigger = -, Secondary = +. Menu = next.",
 			step = 0.01,
-			min = -0.5,
-			max = 0.5,
+			min = -1.0,
+			max = 1.0,
 		},
 		{
 			id = "horizontal",
@@ -35,8 +35,8 @@ local Cal = {
 			title = "STEP 3 · HORIZONTAL",
 			hint = "Left/right edges (both eyes). Trigger = -, Secondary = +. Menu = save.",
 			step = 0.01,
-			min = -0.5,
-			max = 0.5,
+			min = -1.0,
+			max = 1.0,
 		},
 		{
 			id = "done",
