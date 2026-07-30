@@ -99,6 +99,7 @@ if CLIENT then
 			local keepScale = v.cubeMenu or v.cubeui
 				or uid == "heightmenu"
 				or uid == "cube_settings"
+				or uid == "cubeui_main"
 				or string.StartWith(uid, "cubeui_")
 			if not keepScale then
 				if v.attachment then
@@ -106,8 +107,8 @@ if CLIENT then
 				else
 					v.scale = 0.02
 				end
-			elseif not v.scale or v.scale < 0.028 then
-				v.scale = string.StartWith(uid, "cubeui_") and 0.028 or 0.04
+			elseif not v.scale or v.scale < 0.03 then
+				v.scale = (uid == "cubeui_main") and 0.036 or 0.04
 			end
 			if v.attachment then
 				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
