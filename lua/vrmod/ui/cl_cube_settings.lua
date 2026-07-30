@@ -196,7 +196,8 @@ local function drawCubeGlyph(cx, cy, s)
 	surface.DrawRect(cx - s + 3, cy + s - 7, s * 2 - 6, 4)
 end
 
-local function draw(w, h, focused)
+-- Named paintSettings so we do not shadow global draw.* (SimpleText etc.)
+local function paintSettings(w, h, focused)
 	W, H = w, h
 	surface.SetDrawColor(Theme.bg)
 	surface.DrawRect(0, 0, w, h)
@@ -367,7 +368,7 @@ function vrmod.CubeSettings_Open()
 	category = 1
 	scroll = 0
 
-	local uid, dirty = vrmod.panel2vr.ManifestNative(UID, W, H, draw, {
+	local uid, dirty = vrmod.panel2vr.ManifestNative(UID, W, H, paintSettings, {
 		place = "float",
 		alwaysRedraw = true,
 		onClose = function()
