@@ -58,10 +58,21 @@ if CLIENT then
 				local netFrame = g_VR.net[steamid] and g_VR.net[steamid].lerpedFrame
 				local useTrack = (ply == LocalPlayer()) and g_VR.tracking and g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand
 				if useTrack then
-					boneinfo[leftHand].overridePos = g_VR.tracking.pose_lefthand.pos
-					boneinfo[leftHand].overrideAng = g_VR.tracking.pose_lefthand.ang
-					boneinfo[rightHand].overridePos = g_VR.tracking.pose_righthand.pos
-					boneinfo[rightHand].overrideAng = g_VR.tracking.pose_righthand.ang + Angle(0, 0, 180)
+					-- Use live tracking; never share one Vector for both override slots
+					local lpos, lang = g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang
+					local rpos, rang = g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang
+					if lpos and rpos and lpos == rpos then
+						-- Defensive: glued SoT — skip bone override this frame after heal
+						rpos = Vector(rpos.x, rpos.y, rpos.z)
+					end
+					if leftHand and leftHand >= 0 and boneinfo[leftHand] then
+						boneinfo[leftHand].overridePos = lpos
+						boneinfo[leftHand].overrideAng = lang
+					end
+					if rightHand and rightHand >= 0 and boneinfo[rightHand] then
+						boneinfo[rightHand].overridePos = rpos
+						boneinfo[rightHand].overrideAng = rang + Angle(0, 0, 180)
+					end
 					-- fingers from input / netFrame
 					local curls = g_VR.input and g_VR.input.skeleton_lefthand and g_VR.input.skeleton_lefthand.fingerCurls
 					for k, v in pairs(fingerboneids) do

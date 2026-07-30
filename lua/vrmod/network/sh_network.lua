@@ -63,16 +63,21 @@ local function buildClientFrame(relative)
 		frame.lefthandPos = netFrame.lefthandPos
 		frame.lefthandAng = netFrame.lefthandAng
 	else
-		frame.lefthandPos = g_VR.tracking.pose_lefthand.pos
-		frame.lefthandAng = g_VR.tracking.pose_lefthand.ang
+		-- Clone — never put tracking Vector identity into the net frame (L/R glue risk)
+		local lp = g_VR.tracking.pose_lefthand.pos
+		local la = g_VR.tracking.pose_lefthand.ang
+		frame.lefthandPos = Vector(lp.x, lp.y, lp.z)
+		frame.lefthandAng = Angle(la.p, la.y, la.r)
 	end
 
 	if g_VR.wheelGrippedRight and netFrame then
 		frame.righthandPos = netFrame.righthandPos
 		frame.righthandAng = netFrame.righthandAng
 	else
-		frame.righthandPos = g_VR.tracking.pose_righthand.pos
-		frame.righthandAng = g_VR.tracking.pose_righthand.ang
+		local rp = g_VR.tracking.pose_righthand.pos
+		local ra = g_VR.tracking.pose_righthand.ang
+		frame.righthandPos = Vector(rp.x, rp.y, rp.z)
+		frame.righthandAng = Angle(ra.p, ra.y, ra.r)
 	end
 
 	-- Assign fingers using loop
