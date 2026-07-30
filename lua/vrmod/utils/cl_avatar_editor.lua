@@ -44,8 +44,8 @@ local cv_body = CreateClientConVar("vrmod_avatar_bodygroups", "", true, FCVAR_AR
 local cv_hide_head = CreateClientConVar("vrmod_avatar_hide_head", "0", true, FCVAR_ARCHIVE)
 local cv_hide_hands = CreateClientConVar("vrmod_avatar_hide_hands", "0", true, FCVAR_ARCHIVE)
 local cv_distance = CreateClientConVar("vrmod_avatar_distance", "40", true, FCVAR_ARCHIVE)
--- facing = stand in front facing you (MapClone, no L/R flip — flip made mesh "inside out")
--- clone  = stand in front same yaw as player
+-- facing = stand in front facing you (true mirror: sagittal flip + L↔R bone remap)
+-- clone  = stand in front same yaw as player (no L/R flip — over-shoulder debug)
 local cv_mode = CreateClientConVar("vrmod_avatar_mode", "facing", true, FCVAR_ARCHIVE)
 -- Semicolon-separated bone names hidden via laser pick
 local cv_hidden_bones = CreateClientConVar("vrmod_avatar_hidden_bones", "", true, FCVAR_ARCHIVE)
@@ -142,26 +142,43 @@ local function AngleFromBasis(forward, up)
 	return ang
 end
 
+--- Swap ValveBiped (and common) left/right bone names.
+-- A real mirror needs BOTH spatial reflection AND writing the mirrored matrix
+-- onto the opposite limb bone — same-ID flip stretches R arm mesh to the left.
+local function MirrorBoneName(name)
+	if not name or name == "" then return name end
+	if string.find(name, "_L_", 1, true) then
+		return (string.gsub(name, "_L_", "_R_", 1))
+	end
+	if string.find(name, "_R_", 1, true) then
+		return (string.gsub(name, "_R_", "_L_", 1))
+	end
+	-- rarer conventions
+	if string.find(name, "Left", 1, true) then
+		return (string.gsub(name, "Left", "Right", 1))
+	end
+	if string.find(name, "Right", 1, true) then
+		return (string.gsub(name, "Right", "Left", 1))
+	end
+	return name
+end
+
 --- True mirror: left-right reflection in the player's sagittal plane, then into twin space.
 -- WorldToLocal with playerYaw: X=Right, Y=Forward, Z=Up.
--- Flip X on position; reflect bone basis across YZ and restore right-handed frame
--- so the mesh is NOT inside-out (Householder + re-handedness).
+-- Flip X on position; reflect bone basis across YZ.
+-- AngleFromBasis rebuilds a right-handed frame (Householder det=-1 is corrected via f×u).
+-- Caller MUST also remap L↔R bone targets via MirrorBoneName (see _copyFromLocalPlayer).
 local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 
 	-- Position: your right (+X) becomes left (−X) in player frame
 	relPos.x = -relPos.x
 
-	-- Orientation: reflect Forward/Right/Up across the sagittal plane (YZ)
+	-- Orientation: reflect Forward/Up across the sagittal plane (YZ)
 	local f = relAng:Forward()
-	local r = relAng:Right()
 	local u = relAng:Up()
 	f = Vector(-f.x, f.y, f.z)
-	r = Vector(-r.x, r.y, r.z)
 	u = Vector(-u.x, u.y, u.z)
-	-- Reflection reverses chirality → flip Right so bone matrices stay right-handed
-	r = -r
-	-- Rebuild from reflected forward + up (up may need re-ortho)
 	local nang = AngleFromBasis(f, u)
 
 	return LocalToWorld(relPos, nang, avatarFeet, avatarYaw)
@@ -538,8 +555,14 @@ function Session:_computeStand(hmd, playerFeet, playerYaw, yaw)
 		-- same facing as player (looks over twin's shoulder from behind-ish)
 		return playerFeet + playerYaw:Forward() * dist, Angle(0, yaw, 0)
 	end
-	-- facing: twin in front looking at you (no bone-axis flip)
+	-- facing: twin in front looking at you (true mirror + L↔R remap)
 	return playerFeet + playerYaw:Forward() * dist, Angle(0, yaw + 180, 0)
+end
+
+function Session:_isMirrorMode()
+	local mode = self.mode or "facing"
+	-- facing (and legacy "mirror") = real mirror; clone/world = no L/R flip
+	return mode ~= "clone" and mode ~= "world"
 end
 
 function Session:_map(pos, ang, playerFeet, playerYaw)
@@ -549,7 +572,7 @@ function Session:_map(pos, ang, playerFeet, playerYaw)
 		-- Same laterality (debug / over-shoulder view)
 		return MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 	end
-	-- facing / mirror: proper left-right mirror with rotated bone matrices
+	-- facing / mirror: sagittal flip; L↔R bone IDs remapped in _copyFromLocalPlayer
 	return MapMirror(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 end
 
@@ -560,7 +583,23 @@ local function MatFrom(pos, ang)
 	return m
 end
 
+--- Resolve twin bone id for a player bone name (L↔R swap in mirror mode).
+function Session:_twinBoneFor(playerBoneName, fallbackId)
+	if not self:_isMirrorMode() or not playerBoneName then
+		return fallbackId
+	end
+	local mirrorName = MirrorBoneName(playerBoneName)
+	if mirrorName == playerBoneName then
+		return fallbackId -- center bone (spine/head/pelvis)
+	end
+	local tid = self.ent:LookupBone(mirrorName)
+	if tid and tid >= 0 then return tid end
+	return fallbackId
+end
+
 --- Copy the LIVE VR player's posed bones into twin space via _map (mirror or clone).
+-- Mirror mode: MapMirror transform + write onto opposite L/R limb bones so the
+-- skinned mesh stays coherent (your right hand → twin's left arm mesh on your right).
 function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return false end
@@ -586,6 +625,7 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 	local sameSkel = (self.ent:GetModel() == ply:GetModel())
 		or (self.ent:GetModel() == (ply.vrmod_pm or ""))
 		or (self.model == ply:GetModel())
+	local doMirror = self:_isMirrorMode()
 
 	if sameSkel then
 		for i = 0, n - 1 do
@@ -593,14 +633,18 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 			if m then
 				local pos, ang = m:GetTranslation(), m:GetAngles()
 				local np, na = map(pos, ang)
-				targets[i] = MatFrom(np, na)
+				local bn = ply:GetBoneName(i)
+				local twinId = self:_twinBoneFor(bn, i)
+				targets[twinId] = MatFrom(np, na)
 			end
 		end
 	else
 		for name, twinId in pairs(self.bones) do
 			local boneName = BONES[name]
 			if twinId and boneName then
-				local plyId = ply:LookupBone(boneName)
+				-- In mirror mode, twin L_Hand is driven by player R_Hand (mirrored)
+				local srcName = doMirror and MirrorBoneName(boneName) or boneName
+				local plyId = ply:LookupBone(srcName)
 				if plyId and plyId >= 0 then
 					local m = ply:GetBoneMatrix(plyId)
 					if m then
