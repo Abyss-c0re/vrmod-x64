@@ -152,24 +152,41 @@ if CLIENT then
 		local viewscale = convars.vrmod_viewscale:GetFloat()
 		local fovX, fovY = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
 		local di = VRMOD_GetDisplayInfo(1, 10)
-		local rawW, rawH = di.RecommendedWidth * 2, di.RecommendedHeight
-		-- preserve your variables exactly
+		-- Per-eye recommended from module (already 4096-safe), then supersample
+		local eyeW = tonumber(di.RecommendedWidth) or 1024
+		local eyeH = tonumber(di.RecommendedHeight) or 1024
+		local ss = 1.0
+		if convars.vrmod_supersample then
+			ss = math.Clamp(convars.vrmod_supersample:GetFloat(), 0.5, 2.0)
+		end
+		eyeW = math.floor(eyeW * ss + 0.5)
+		eyeH = math.floor(eyeH * ss + 0.5)
+		-- Shared SBS + height must fit 4096 (Linux/OpenGL shared-image contract)
+		local maxDim = 4096
+		local sbsW = eyeW * 2
+		if sbsW > maxDim or eyeH > maxDim then
+			local scale = math.min(maxDim / sbsW, maxDim / eyeH)
+			eyeW = math.max(16, math.floor(eyeW * scale))
+			eyeH = math.max(16, math.floor(eyeH * scale))
+			sbsW = eyeW * 2
+		end
+		local rawW, rawH = sbsW, eyeH
+
 		local leftProj = vrmod.utils.AdjustFOV(di.ProjectionLeft, fovX, fovY)
 		local rightProj = vrmod.utils.AdjustFOV(di.ProjectionRight, fovX, fovY)
 		local leftCalc = vrmod.utils.CalculateProjectionParams(leftProj, viewscale)
 		local rightCalc = vrmod.utils.CalculateProjectionParams(rightProj, viewscale)
-		-- clamp on Linux exactly as before
-		if system.IsLinux() then
-			local maxW, maxH = 4096, 4096
-			local cw, ch = math.min(maxW, rawW), math.min(maxH, rawH)
-			rawW, rawH = cw, ch
-		end
 
 		local ipd = di.TransformRight[1][4] * 2
 		local eyez = di.TransformRight[3][4]
+		if vrmod.logger then
+			vrmod.logger.Info("Display RT SBS %dx%d (eye %dx%d, SS=%.2f)", rawW, rawH, eyeW, eyeH, ss)
+		end
 		return {
 			rtW = rawW,
 			rtH = rawH,
+			eyeW = eyeW,
+			eyeH = eyeH,
 			leftCalc = leftCalc,
 			rightCalc = rightCalc,
 			hfovL = leftCalc.HorizontalFOV,
@@ -820,6 +837,8 @@ if CLIENT then
 		local dp = ComputeDisplayParams() or {}
 		g_VR.rtWidth = dp.rtW or 1024
 		g_VR.rtHeight = dp.rtH or 1024
+		local eyeW = dp.eyeW or math.floor(g_VR.rtWidth / 2)
+		local eyeH = dp.eyeH or g_VR.rtHeight
 		leftCalc = dp.leftCalc or 0
 		rightCalc = dp.rightCalc or 0
 		hfovLeft = dp.hfovL or 90
@@ -829,7 +848,8 @@ if CLIENT then
 		ipd = dp.ipd or 0.064
 		eyez = dp.eyez or 0
 		cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
-		VRMOD_ShareTextureBegin()
+		-- Pass supersampled eye size so module OUT matches engine RT (optional args; old modules ignore)
+		VRMOD_ShareTextureBegin(eyeW, eyeH)
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
 		-- safe fallback for constants
 		local depthMode = MATERIAL_RT_DEPTH_SEPARATE or 0

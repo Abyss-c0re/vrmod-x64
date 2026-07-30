@@ -325,6 +325,31 @@ function VRUtilOpenMenu()
 			s:SetPos(20, y + 10)
 			s:SetSize(370, 25)
 			s:SetDark(true)
+			s:SetText("Supersample")
+			s:SetMin(0.5)
+			s:SetMax(2.0)
+			s:SetDecimals(2)
+			s:SetConVar("vrmod_supersample")
+			y = y + 40
+		end
+
+		do
+			local label = vgui.Create("DLabel", t)
+			label:SetPos(20, y + 5)
+			label:SetSize(370, 30)
+			label:SetDark(true)
+			label:SetText("Render resolution vs HMD recommended (1.0 = native, 1.25–1.5 sharper, 2.0 heavy). Restart VR after change. Capped so stereo RT ≤ 4096.")
+			label:SetWrap(true)
+			label:SetAutoStretchVertical(true)
+			label:SetFont("BoldSliderFont")
+			y = y + 40
+		end
+
+		do
+			local s = vgui.Create("DNumSlider", t)
+			s:SetPos(20, y + 10)
+			s:SetSize(370, 25)
+			s:SetDark(true)
 			s:SetText("Fov scale X")
 			s:SetMin(0.1)
 			s:SetMax(2.0)
@@ -486,6 +511,7 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_skybox", "0")
 			RunConsoleCommand("vrmod_renderoffset", "1")
 			RunConsoleCommand("vrmod_viewscale", "1.0")
+			RunConsoleCommand("vrmod_supersample", "1.25")
 			RunConsoleCommand("vrmod_fovscale_x", "1.0")
 			RunConsoleCommand("vrmod_fovscale_y", "1.0")
 			RunConsoleCommand("vrmod_znear", "1.0")

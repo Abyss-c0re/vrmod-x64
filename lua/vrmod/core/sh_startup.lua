@@ -57,6 +57,9 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_viewscale", nil, "1.0")
     vrmod.AddCallbackedConvar("vrmod_fovscale_x", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_fovscale_y", nil, "1")
+    -- Render supersample: multiplies per-eye RT vs HMD recommended (1=native, 1.5/2=SS).
+    -- Requires VR restart. Clamped so SBS fits in 4096.
+    vrmod.AddCallbackedConvar("vrmod_supersample", nil, "1.25", FCVAR_ARCHIVE, "VR render supersample 0.5–2.0 (restart VR)", 0.5, 2.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_scalefactor", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_eyescale", nil, "0.5")
     vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0")
