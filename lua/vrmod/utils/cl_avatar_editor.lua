@@ -236,7 +236,8 @@ function Session:_map(pos, ang, playerFeet, playerYaw)
 	return MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 end
 
---- Puppeteer body solve in player world space, then map into avatar space
+--- Puppeteer body solve in player world space, then map into avatar space.
+--- When FBT is live: pelvis from waist tracker, legs via 2-bone IK to feet.
 function Session:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 	local tr = g_VR.tracking
 	local left = tr.pose_lefthand
@@ -255,14 +256,28 @@ function Session:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 	local shoulderW = self.shoulderWidth or DEFAULT_SHOULDER_W
 	local upperLen = self.upperArmLen or 12
 	local foreLen = self.forearmLen or 12
+	local upperLeg = self.upperLegLen or 16
+	local lowerLeg = self.lowerLegLen or 16
+
+	local fbt = self:_fbtLive()
+	local follow = self.follow
 
 	-- === Player-space body (Pescorr puppeteer) ===
 	local headPos = hmdPos
 	local headAng = Angle(hmdAng.p - 90, hmdAng.y, hmdAng.r + 90)
+
+	-- 3-point: pelvis under HMD. FBT: waist tracker is SoT for hips.
 	local pelvisPos = hmdPos - Vector(0, 0, pelvisOff)
 	local pelvisAng = Angle(0, hmdAng.y, 0)
+	local waist = tr.pose_waist
+	if fbt and follow.waist ~= false and waist and waist.pos then
+		pelvisPos = Vector(waist.pos.x, waist.pos.y, waist.pos.z)
+		local wy = (waist.ang and waist.ang.y) or hmdAng.y
+		pelvisAng = Angle(0, wy, 0)
+	end
+
 	local spinePos = LerpVector(0.4, pelvisPos, headPos)
-	local spineAng = Angle(hmdAng.p * 0.3, hmdAng.y, 0)
+	local spineAng = Angle(hmdAng.p * 0.3, pelvisAng.y, 0)
 	local spineRight = spineAng:Right()
 	local shoulderL = spinePos - spineRight * shoulderW
 	local shoulderR = spinePos + spineRight * shoulderW
@@ -275,7 +290,6 @@ function Session:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 		return self:_map(p, a, playerFeet, playerYaw)
 	end
 
-	-- Mirror: swap visual L/R so twin faces you correctly
 	local mirror = (self.mode == "mirror")
 	local b = self.bones
 	local ent = self.ent
@@ -291,36 +305,78 @@ function Session:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 	drive(b.pelvis, pPelvis, aPelvis)
 	if b.chest then drive(b.chest, pSpine, aSpine) end
 	if b.spine and b.spine ~= b.chest then drive(b.spine, pSpine, aSpine) end
-	if self.follow.hmd then
+	if follow.hmd then
 		drive(b.head, pHead, aHead)
 	end
 
-	if not self.follow.hands then return end
-
-	-- Arms: in mirror mode player-left drives avatar-right bones
-	local function driveArm(shPos, elPos, handPos, handAng, upperId, foreId, handId, flipHand)
-		local pS, _ = map(shPos, Angle())
-		local pE, _ = map(elPos, Angle())
-		local pH, aH = map(handPos, handAng)
-		if flipHand then aH = aH + Angle(0, 0, 180) end
-		drive(upperId, pS, AngleBetween(pS, pE))
-		drive(foreId, pE, AngleBetween(pE, pH))
-		drive(handId, pH, aH)
+	-- Arms
+	if follow.hands then
+		local function driveArm(shPos, elPos, handPos, handAng, upperId, foreId, handId, flipHand)
+			local pS = map(shPos, Angle())
+			local pE = map(elPos, Angle())
+			local pH, aH = map(handPos, handAng)
+			if flipHand then aH = aH + Angle(0, 0, 180) end
+			drive(upperId, pS, AngleBetween(pS, pE))
+			drive(foreId, pE, AngleBetween(pE, pH))
+			drive(handId, pH, aH)
+		end
+		if mirror then
+			driveArm(shoulderL, elbowL, lhPos, lhAng, b.rUpper, b.rFore, b.rHand, true)
+			driveArm(shoulderR, elbowR, rhPos, rhAng, b.lUpper, b.lFore, b.lHand, false)
+		else
+			driveArm(shoulderL, elbowL, lhPos, lhAng, b.lUpper, b.lFore, b.lHand, false)
+			driveArm(shoulderR, elbowR, rhPos, rhAng, b.rUpper, b.rFore, b.rHand, true)
+		end
 	end
 
-	if mirror then
-		-- Visual: avatar's right = player's left (mirrored)
-		driveArm(shoulderL, elbowL, lhPos, lhAng, b.rUpper, b.rFore, b.rHand, true)
-		driveArm(shoulderR, elbowR, rhPos, rhAng, b.lUpper, b.lFore, b.lHand, false)
-	else
-		driveArm(shoulderL, elbowL, lhPos, lhAng, b.lUpper, b.lFore, b.lHand, false)
-		driveArm(shoulderR, elbowR, rhPos, rhAng, b.rUpper, b.rFore, b.rHand, true)
+	-- Legs (FBT only — puppeteer auto mode with foot trackers)
+	if fbt and follow.feet ~= false then
+		local lfoot = tr.pose_leftfoot
+		local rfoot = tr.pose_rightfoot
+		if lfoot and lfoot.pos and rfoot and rfoot.pos then
+			local lfPos = Vector(lfoot.pos.x, lfoot.pos.y, lfoot.pos.z)
+			local rfPos = Vector(rfoot.pos.x, rfoot.pos.y, rfoot.pos.z)
+			local lfAng = lfoot.ang and Angle(lfoot.ang.p, lfoot.ang.y, lfoot.ang.r) or Angle()
+			local rfAng = rfoot.ang and Angle(rfoot.ang.p, rfoot.ang.y, rfoot.ang.r) or Angle()
+			local hipRight = pelvisAng:Right()
+			local kneeHint = -pelvisAng:Forward()
+			local hipL = pelvisPos - hipRight * shoulderW - Vector(0, 0, 2)
+			local hipR = pelvisPos + hipRight * shoulderW - Vector(0, 0, 2)
+			local kneeL = SolveTwoBoneIK(hipL, lfPos, upperLeg, lowerLeg, kneeHint)
+			local kneeR = SolveTwoBoneIK(hipR, rfPos, upperLeg, lowerLeg, kneeHint)
+
+			local function driveLeg(hip, knee, foot, footAng, thighId, calfId, footId)
+				local pH = map(hip, Angle())
+				local pK = map(knee, Angle())
+				local pF, aF = map(foot, footAng)
+				drive(thighId, pH, AngleBetween(pH, pK))
+				drive(calfId, pK, AngleBetween(pK, pF))
+				drive(footId, pF, aF)
+			end
+
+			if mirror then
+				-- swap visual legs
+				driveLeg(hipL, kneeL, lfPos, lfAng, b.rThigh, b.rCalf, b.rFoot)
+				driveLeg(hipR, kneeR, rfPos, rfAng, b.lThigh, b.lCalf, b.lFoot)
+			else
+				driveLeg(hipL, kneeL, lfPos, lfAng, b.lThigh, b.lCalf, b.lFoot)
+				driveLeg(hipR, kneeR, rfPos, rfAng, b.rThigh, b.rCalf, b.rFoot)
+			end
+		end
 	end
 end
 
 function Session:_applyTracking()
 	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
 	if not hmd then return end
+
+	-- Live-upgrade follow when FBT appears mid-session (Cube: one util, more trackers)
+	local fbt = self:_fbtLive()
+	if fbt and not self.idleOnly then
+		self.follow.waist = true
+		self.follow.feet = true
+		self.showTrackers = self.showTrackers or self.showFBTTrackers
+	end
 
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
 	self.ent:SetPos(self.standPos)
@@ -332,7 +388,6 @@ function Session:_applyTracking()
 	local anyDrive = follow.hmd or follow.hands or follow.waist or follow.feet
 
 	if anyDrive and not self.idleOnly then
-		-- Full puppeteer-style copy (head + arms + torso)
 		self:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 	end
 
@@ -344,7 +399,9 @@ function Session:_applyTracking()
 end
 
 function Session:_drawTrackers()
-	if not self.showTrackers or not g_VR.tracking then return end
+	if not g_VR.tracking then return end
+	local fbt = self:_fbtLive()
+	if not self.showTrackers and not (fbt and self.showFBTTrackers) then return end
 	render.SetColorMaterial()
 	local function box(pose, col)
 		if not pose or not pose.pos then return end
@@ -405,9 +462,11 @@ function vrmod.avatar.Open(opts)
 		distance = opts.distance or 52,
 		follow = follow,
 		idleOnly = idleOnly,
+		forceFBT = opts.forceFBT, -- nil=auto, true=force, false=never
 		pelvisOffset = opts.pelvisOffset or DEFAULT_PELVIS_OFFSET,
 		shoulderWidth = opts.shoulderWidth or DEFAULT_SHOULDER_W,
 		showTrackers = opts.showTrackers or false,
+		showFBTTrackers = opts.showFBTTrackers ~= false, -- when FBT live, show waist/feet boxes
 		showHandTrackers = opts.showHandTrackers or false,
 		menuUid = opts.menuUid,
 		menuAnchor = opts.menuAnchor,
@@ -420,6 +479,8 @@ function vrmod.avatar.Open(opts)
 		bones = {},
 		upperArmLen = 12,
 		forearmLen = 12,
+		upperLegLen = 16,
+		lowerLegLen = 16,
 	}, Session)
 
 	s:_cacheBones()
@@ -468,32 +529,45 @@ function vrmod.avatar.IsOpen(id)
 	return s and s:IsValid()
 end
 
---- Height-cal: mirror twin that COPIES player via puppeteer 2-bone IK
+--- Height / mirror twin: 3-point (HMD+hands) or full FBT when sixPoints live.
+--- Cube: one util — FBT on → waist + feet auto, tracker boxes, leg IK.
 function vrmod.avatar.OpenHeightCal(menuUid)
+	local fbt = g_VR and (g_VR.sixPoints or false)
 	return vrmod.avatar.Open({
 		id = "height",
 		mode = "mirror",
 		distance = 52,
 		idleOnly = false,
-		follow = { hmd = true, hands = true, waist = false, feet = false },
+		forceFBT = nil, -- auto-detect each frame
+		follow = {
+			hmd = true,
+			hands = true,
+			waist = fbt, -- upgraded live if trackers appear later
+			feet = fbt,
+		},
+		showFBTTrackers = true,
 		pelvisOffset = 30,
 		shoulderWidth = 8,
 		menuUid = menuUid or "heightmenu",
 		menuAnchor = function(standPos, standAng)
-			-- Large panel to the twin's left, chest height
 			return standPos + Vector(0, 0, 48) + standAng:Right() * -28,
 				Angle(0, standAng.y + 90, 90)
 		end,
 	})
 end
 
+--- FBT calibration: world-aligned twin + tracker boxes (measure offsets / T-pose)
+--- Still copies upper body if not idleOnly; default shows trackers for cal.
 function vrmod.avatar.OpenFBTCal()
 	return vrmod.avatar.Open({
 		id = "fbt_cal",
 		mode = "world",
 		distance = 0,
-		idleOnly = true,
+		idleOnly = false,
+		forceFBT = true,
+		follow = { hmd = true, hands = true, waist = true, feet = true },
 		showTrackers = true,
+		showFBTTrackers = true,
 		showHandTrackers = false,
 		hideLocalPlayer = true,
 	})
