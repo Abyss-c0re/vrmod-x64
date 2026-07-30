@@ -148,32 +148,72 @@ if CLIENT then
 		end
 	end
 
+	-- Module capability gates (Lua must never require new exports that ancient modules lack).
+	-- v23+: ShareTextureBegin(eyeW, eyeH) optional args + raw HMD rec (crisp SS path).
+	-- Older: ShareTextureBegin() only; RT size must match module-owned OUT.
+	local MODULE_SS_EYE_ARGS = 23
+
+	local function ModuleSupportsEyeSizeArgs()
+		return (g_VR.moduleVersion or 0) >= MODULE_SS_EYE_ARGS
+	end
+
+	local function SafeShareTextureBegin(eyeW, eyeH)
+		if not isfunction(VRMOD_ShareTextureBegin) then return false end
+		if ModuleSupportsEyeSizeArgs() and eyeW and eyeH then
+			-- New module: optional numbers; no new API name
+			return pcall(VRMOD_ShareTextureBegin, eyeW, eyeH)
+		end
+		-- Ancient / mid: no args — module sizes from its own recommendation
+		return pcall(VRMOD_ShareTextureBegin)
+	end
+
+	local function SafeShareTextureFinish()
+		if not isfunction(VRMOD_ShareTextureFinish) then return false end
+		return pcall(VRMOD_ShareTextureFinish)
+	end
+
 	local function ComputeDisplayParams()
 		local viewscale = convars.vrmod_viewscale:GetFloat()
 		local fovX, fovY = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
+		if not isfunction(VRMOD_GetDisplayInfo) then
+			return nil
+		end
 		local di = VRMOD_GetDisplayInfo(1, 10)
-		-- Raw HMD recommended per-eye from module, then supersample, then one 4096 clamp
+		if not di then return nil end
+		-- Recommended per-eye from module (raw on v23+, pre-clamped on ancient)
 		local eyeW = tonumber(di.RecommendedWidth) or 1024
 		local eyeH = tonumber(di.RecommendedHeight) or 1024
 		local ss = 1.0
 		if convars.vrmod_supersample then
 			ss = math.Clamp(convars.vrmod_supersample:GetFloat(), 0.5, 2.0)
 		end
-		eyeW = math.floor(eyeW * ss + 0.5)
-		eyeH = math.floor(eyeH * ss + 0.5)
-		-- Shared SBS + height must fit 4096 (Linux/OpenGL shared-image contract)
-		local maxDim = 4096
-		local sbsW = eyeW * 2
-		if sbsW > maxDim or eyeH > maxDim then
-			local scale = math.min(maxDim / sbsW, maxDim / eyeH)
-			eyeW = math.max(16, math.floor(eyeW * scale))
-			eyeH = math.max(16, math.floor(eyeH * scale))
-			sbsW = eyeW * 2
+		local canSS = ModuleSupportsEyeSizeArgs()
+		if canSS then
+			-- Full crisp path: SS then one 4096 SBS clamp; pass size into ShareTextureBegin
+			eyeW = math.floor(eyeW * ss + 0.5)
+			eyeH = math.floor(eyeH * ss + 0.5)
+			local maxDim = 4096
+			local sbsW = eyeW * 2
+			if sbsW > maxDim or eyeH > maxDim then
+				local scale = math.min(maxDim / sbsW, maxDim / eyeH)
+				eyeW = math.max(16, math.floor(eyeW * scale))
+				eyeH = math.max(16, math.floor(eyeH * scale))
+			end
+		else
+			-- Ancient module: OUT texture is sized inside the module. Oversizing the
+			-- engine RT causes mismatch / stretch / potato — ignore SS size bumps.
+			if ss ~= 1.0 and vrmod.logger then
+				vrmod.logger.Info(
+					"vrmod_supersample=%.2f ignored (module v%d; need v%d+ modules.zip for SS)",
+					ss, g_VR.moduleVersion or 0, MODULE_SS_EYE_ARGS
+				)
+			end
+			ss = 1.0
 		end
 		-- Even dimensions help some GPU / blit paths
 		eyeW = math.max(16, math.floor(eyeW / 2) * 2)
 		eyeH = math.max(16, math.floor(eyeH / 2) * 2)
-		sbsW = eyeW * 2
+		local sbsW = eyeW * 2
 		local rawW, rawH = sbsW, eyeH
 
 		local leftProj = vrmod.utils.AdjustFOV(di.ProjectionLeft, fovX, fovY)
@@ -181,16 +221,21 @@ if CLIENT then
 		local leftCalc = vrmod.utils.CalculateProjectionParams(leftProj, viewscale)
 		local rightCalc = vrmod.utils.CalculateProjectionParams(rightProj, viewscale)
 
-		local ipd = di.TransformRight[1][4] * 2
-		local eyez = di.TransformRight[3][4]
+		local ipd = di.TransformRight and di.TransformRight[1] and di.TransformRight[1][4] and (di.TransformRight[1][4] * 2) or 0.064
+		local eyez = di.TransformRight and di.TransformRight[3] and di.TransformRight[3][4] or 0
 		if vrmod.logger then
-			vrmod.logger.Info("Display RT SBS %dx%d (eye %dx%d, SS=%.2f)", rawW, rawH, eyeW, eyeH, ss)
+			vrmod.logger.Info(
+				"Display RT SBS %dx%d (eye %dx%d, SS=%.2f, module v%d%s)",
+				rawW, rawH, eyeW, eyeH, ss, g_VR.moduleVersion or 0,
+				canSS and ", eyeArgs" or ", legacy"
+			)
 		end
 		return {
 			rtW = rawW,
 			rtH = rawH,
 			eyeW = eyeW,
 			eyeH = eyeH,
+			passEyeArgs = canSS,
 			leftCalc = leftCalc,
 			rightCalc = rightCalc,
 			hfovL = leftCalc.HorizontalFOV,
@@ -860,10 +905,16 @@ if CLIENT then
 		ipd = dp.ipd or 0.064
 		eyez = dp.eyez or 0
 		cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
-		-- Pass supersampled eye size so module OUT matches engine RT (optional args; old modules ignore)
-		VRMOD_ShareTextureBegin(eyeW, eyeH)
+		-- v23+: pass eye size so OUT matches supersampled RT. Ancient: no args (module owns size).
+		local okBegin, errBegin = SafeShareTextureBegin(
+			(dp.passEyeArgs and eyeW) or nil,
+			(dp.passEyeArgs and eyeH) or nil
+		)
+		if not okBegin and vrmod.logger then
+			vrmod.logger.Err("ShareTextureBegin failed: %s", tostring(errBegin))
+		end
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
-		-- Filtered RT (no UNFILTERABLE) — sharper when desktop/mirror samples; SS provides crisp VR
+		-- Filtered RT (no UNFILTERABLE). SS only applied when module can match OUT size.
 		local depthMode = MATERIAL_RT_DEPTH_SEPARATE or 0
 		local rtFlags = 0
 		local imgFormat = IMAGE_FORMAT_RGBA8888
@@ -873,7 +924,10 @@ if CLIENT then
 			["$basetexture"] = g_VR.rt:GetName()
 		})
 
-		VRMOD_ShareTextureFinish()
+		local okFin, errFin = SafeShareTextureFinish()
+		if not okFin and vrmod.logger then
+			vrmod.logger.Err("ShareTextureFinish failed: %s", tostring(errFin))
+		end
 		ApplySubmitBounds()
 		BindBorderConvarCallbacks()
 		BindRenderProfileCallbacks()
@@ -1001,7 +1055,9 @@ if CLIENT then
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
 			PerformRenderViews()
-			VRMOD_SubmitSharedTexture()
+			if isfunction(VRMOD_SubmitSharedTexture) then
+				VRMOD_SubmitSharedTexture()
+			end
 			hook.Call("VRMod_PostRender")
 			return true
 		end, HOOK_HIGH or 1)

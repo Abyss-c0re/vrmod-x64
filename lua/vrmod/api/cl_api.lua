@@ -69,15 +69,20 @@ if CLIENT then
     function vrmod.GetStartupError()
         local error = nil
         local moduleFile = nil
+        -- requiredVersion = hard floor (must boot). latestVersion = full feature set (SS eye args, etc).
+        -- Lua degrades gracefully on older modules; only refuse if too ancient / missing.
         local requiredVersion, latestVersion
         if system.IsLinux() then
-            requiredVersion = 23
+            requiredVersion = 20
             latestVersion = 23
             moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
         else
-            requiredVersion = 21
-            latestVersion = 21
+            requiredVersion = 20
+            latestVersion = 23
             moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
+            if not file.Exists(moduleFile, "GAME") then
+                moduleFile = "lua/bin/gmcl_vrmod_win32.dll"
+            end
         end
 
         g_VR.moduleVersion = g_VR.moduleVersion or 0
@@ -89,16 +94,29 @@ if CLIENT then
             end
         elseif g_VR.moduleVersion < requiredVersion then
             error = "Module update required.\nRun the installer or re-download from the workshop.\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
-        elseif g_VR.moduleVersion > latestVersion then
-            print("[VRMOD] Warning: Module version is newer than tested. Installed: v" .. g_VR.moduleVersion .. " | Required: v" .. requiredVersion .. " | Addon version: " .. vrmod.GetVersion() .. " | Most features should work, but some bugs may exist.")
-        elseif VRMOD_IsHMDPresent and not VRMOD_IsHMDPresent() then
-            error = "VR headset not detected."
+        else
+            if g_VR.moduleVersion < latestVersion then
+                print(string.format(
+                    "[VRMOD] Module v%d is older than recommended v%d. VR still runs; supersample eye sizing and some crisp-path fixes need the latest modules.zip.",
+                    g_VR.moduleVersion, latestVersion
+                ))
+            elseif g_VR.moduleVersion > latestVersion then
+                print("[VRMOD] Warning: Module version is newer than tested. Installed: v" .. g_VR.moduleVersion .. " | Recommended: v" .. latestVersion .. " | Addon: " .. vrmod.GetVersion() .. " | Most features should work.")
+            end
+            if VRMOD_IsHMDPresent and not VRMOD_IsHMDPresent() then
+                error = "VR headset not detected."
+            end
         end
         return error
     end
 
+    --- Feature flags for optional module APIs (never hard-crash on missing exports).
+    function vrmod.ModuleSupportsEyeSizeArgs()
+        return (g_VR.moduleVersion or 0) >= 23
+    end
+
     function vrmod.GetModuleVersion()
-        return g_VR.moduleVersion, requiredModuleVersion, latestModuleVersion
+        return g_VR.moduleVersion, 20, 23
     end
 
     function vrmod.IsPlayerInVR(ply)
