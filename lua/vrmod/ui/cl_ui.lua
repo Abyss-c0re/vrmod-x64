@@ -94,13 +94,19 @@ if CLIENT then
 			end
 
 			local pos, ang = v.pos, v.ang
+			-- heightmenu keeps its own scale (large / reachable); others default 0.02
 			if v.uid ~= "heightmenu" then
 				v.scale = 0.02
-				if v.attachment then
-					pos, ang = LocalToWorld(pos, ang, g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang)
-				else
-					pos, ang = LocalToWorld(pos, ang, g_VR.origin, g_VR.originAngle)
+			elseif not v.scale or v.scale < 0.03 then
+				v.scale = 0.04
+			end
+			if v.attachment then
+				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
+				if hand and hand.pos and hand.ang then
+					pos, ang = LocalToWorld(pos, ang, hand.pos, hand.ang)
 				end
+			else
+				pos, ang = LocalToWorld(pos, ang, g_VR.origin, g_VR.originAngle)
 			end
 
 			if v.mat and not v.mat:IsError() then

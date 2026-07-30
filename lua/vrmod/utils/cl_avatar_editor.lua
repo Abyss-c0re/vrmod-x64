@@ -1,17 +1,12 @@
 -- =============================================================================
 -- vrmod.avatar — unified 3D avatar editor utility
--- Shared by height calibration and FBT tracking (same PM, same bone vocabulary).
--- Modes:
---   "mirror" — stand in front of player, face them, L/R flipped (height twin)
---   "clone"  — stand offset with same facing (third-person twin)
---   "world"  — body at feet under HMD, same yaw as player (FBT T-pose cal)
--- Follow flags map g_VR.tracking → ValveBiped bones (HMD/hands/waist/feet).
+-- Modes: mirror | clone | world
 --
--- CREDITS (limb / body drive when not idle-only):
---   Pescorr — [VRMOD] VR Ragdoll Puppeteer
+-- Body drive (copy player) uses Pescorr's VR Ragdoll Puppeteer algorithm:
 --   https://steamcommunity.com/sharedfiles/filedetails/?id=3695733221
---   2-bone IK, pelvis-from-HMD, arm/leg chain lengths (see docs/CREDITS.md)
---   Original VRMod character systems — Catse
+--   pelvis-from-HMD, spine lerp, 2-bone arm IK, full chain SetBoneMatrix
+--   (not raw head-only SetBoneWorld — that stretches the mesh).
+-- Credits: Pescorr · Catse — docs/CREDITS.md
 -- =============================================================================
 if SERVER then return end
 
@@ -21,12 +16,18 @@ vrmod.avatar = vrmod.avatar or {}
 local BONES = {
 	head = "ValveBiped.Bip01_Head1",
 	pelvis = "ValveBiped.Bip01_Pelvis",
+	spine = "ValveBiped.Bip01_Spine",
+	spine1 = "ValveBiped.Bip01_Spine1",
+	spine2 = "ValveBiped.Bip01_Spine2",
+	spine4 = "ValveBiped.Bip01_Spine4",
 	lHand = "ValveBiped.Bip01_L_Hand",
 	rHand = "ValveBiped.Bip01_R_Hand",
 	lFore = "ValveBiped.Bip01_L_Forearm",
 	rFore = "ValveBiped.Bip01_R_Forearm",
 	lUpper = "ValveBiped.Bip01_L_UpperArm",
 	rUpper = "ValveBiped.Bip01_R_UpperArm",
+	lClav = "ValveBiped.Bip01_L_Clavicle",
+	rClav = "ValveBiped.Bip01_R_Clavicle",
 	lFoot = "ValveBiped.Bip01_L_Foot",
 	rFoot = "ValveBiped.Bip01_R_Foot",
 	lThigh = "ValveBiped.Bip01_L_Thigh",
@@ -35,7 +36,11 @@ local BONES = {
 	rCalf = "ValveBiped.Bip01_R_Calf",
 }
 
-local sessions = {} -- id → session
+local sessions = {}
+
+-- Defaults from puppeteer convars
+local DEFAULT_PELVIS_OFFSET = 30
+local DEFAULT_SHOULDER_W = 8
 
 local function CopyLooks(dst, src)
 	if not IsValid(dst) or not IsValid(src) then return end
@@ -61,8 +66,41 @@ local function SetBoneWorld(ent, bone, pos, ang)
 	ent:SetBoneMatrix(bone, m)
 end
 
+--- Pescorr puppeteer: 2-bone IK elbow position
+local function SolveTwoBoneIK(shoulder, hand, lenUpper, lenLower, poleHint)
+	local toHand = hand - shoulder
+	local dist = toHand:Length()
+	if dist < 0.01 then
+		return shoulder + poleHint * lenUpper
+	end
+	local maxReach = lenUpper + lenLower - 0.1
+	if dist >= maxReach then
+		return shoulder + toHand:GetNormalized() * lenUpper
+	end
+	local cosA = (lenUpper * lenUpper + dist * dist - lenLower * lenLower) / (2 * lenUpper * dist)
+	cosA = math.Clamp(cosA, -1, 1)
+	local angleA = math.acos(cosA)
+	local fwd = toHand / dist
+	local projHint = poleHint - fwd * poleHint:Dot(fwd)
+	if projHint:LengthSqr() < 0.001 then
+		projHint = Vector(0, 0, -1) - fwd * fwd.z
+		if projHint:LengthSqr() < 0.001 then
+			projHint = Vector(0, 1, 0)
+		end
+	end
+	projHint:Normalize()
+	local elbowDir = fwd * math.cos(angleA) + projHint * math.sin(angleA)
+	return shoulder + elbowDir * lenUpper
+end
+
+local function AngleBetween(fromPos, toPos)
+	local dir = toPos - fromPos
+	if dir:LengthSqr() < 0.01 then return Angle(0, 0, 0) end
+	return dir:Angle()
+end
+
 local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
-	local relPos, relAng = WorldToLocal(worldPos, worldAng, playerFeet, playerYaw)
+	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 	relPos.y = -relPos.y
 	relAng.y = -relAng.y
 	relAng.r = -relAng.r
@@ -70,30 +108,8 @@ local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, 
 end
 
 local function MapClone(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
-	local relPos, relAng = WorldToLocal(worldPos, worldAng, playerFeet, playerYaw)
+	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 	return LocalToWorld(relPos, relAng, avatarFeet, avatarYaw)
-end
-
-local function AimLimb(ent, upperId, foreId, handPos)
-	if not handPos then return end
-	for _, boneId in ipairs({ upperId, foreId }) do
-		if boneId then
-			local m = ent:GetBoneMatrix(boneId)
-			if m then
-				local o = m:GetTranslation()
-				local dir = handPos - o
-				if dir:LengthSqr() > 1 then
-					local ang = dir:GetNormalized():Angle()
-					ang:RotateAroundAxis(ang:Right(), 90)
-					SetBoneWorld(ent, boneId, o, ang)
-				end
-			end
-		end
-	end
-end
-
-local function AimLeg(ent, thighId, calfId, footPos)
-	AimLimb(ent, thighId, calfId, footPos)
 end
 
 local Session = {}
@@ -136,6 +152,7 @@ function Session:RefreshModel()
 		CopyLooks(self.ent, ply)
 		self.ent:SetupBones()
 		self:_cacheBones()
+		self:_measureArms()
 	end
 end
 
@@ -145,131 +162,156 @@ function Session:_cacheBones()
 	for k, name in pairs(BONES) do
 		self.bones[k] = Lookup(e, name)
 	end
+	-- Prefer Spine2 / Spine4 for chest
+	self.bones.chest = self.bones.spine2 or self.bones.spine4 or self.bones.spine1 or self.bones.spine
+end
+
+--- Measure arm chain lengths from bind pose (puppeteer CreatePuppet pattern)
+function Session:_measureArms()
+	local e = self.ent
+	local b = self.bones
+	self.upperArmLen = 12
+	self.forearmLen = 12
+	if not (b.rUpper and b.rFore and b.rHand) then return end
+	e:SetupBones()
+	local mu = e:GetBoneMatrix(b.rUpper)
+	local mf = e:GetBoneMatrix(b.rFore)
+	local mh = e:GetBoneMatrix(b.rHand)
+	if mu and mf and mh then
+		local u, f, h = mu:GetTranslation(), mf:GetTranslation(), mh:GetTranslation()
+		self.upperArmLen = math.max(4, u:Distance(f))
+		self.forearmLen = math.max(4, f:Distance(h))
+	end
 end
 
 function Session:_playerFrame()
 	local hmd = g_VR.tracking and g_VR.tracking.hmd
-	if not hmd then return end
-	local yaw = hmd.ang.yaw
+	if not hmd or not hmd.pos then return end
+	local yaw = hmd.ang and hmd.ang.yaw or 0
 	local playerYaw = Angle(0, yaw, 0)
-	local playerFeet = Vector(hmd.pos.x, hmd.pos.y, g_VR.origin and g_VR.origin.z or hmd.pos.z - 66.8)
+	local originZ = (g_VR.origin and g_VR.origin.z) or (hmd.pos.z - 66.8)
+	local playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
 	return hmd, playerFeet, playerYaw, yaw
 end
 
 function Session:_computeStand(hmd, playerFeet, playerYaw, yaw)
-	local dist = self.distance or 48
+	local dist = self.distance or 52
 	local mode = self.mode or "mirror"
 	if mode == "world" then
-		-- FBT-style: avatar under player, same facing as HMD
 		return playerFeet, Angle(0, yaw, 0)
 	elseif mode == "clone" then
 		return playerFeet + playerYaw:Forward() * dist, Angle(0, yaw, 0)
-	else -- mirror
-		return playerFeet + playerYaw:Forward() * dist, Angle(0, yaw + 180, 0)
 	end
+	return playerFeet + playerYaw:Forward() * dist, Angle(0, yaw + 180, 0)
 end
 
-function Session:_map(worldPos, worldAng, playerFeet, playerYaw)
-	if self.mode == "mirror" then
-		return MapMirror(worldPos, worldAng, playerFeet, playerYaw, self.standPos, self.standAng)
+function Session:_map(pos, ang, playerFeet, playerYaw)
+	if self.mode == "world" then
+		return pos, ang
+	elseif self.mode == "mirror" then
+		return MapMirror(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 	end
-	return MapClone(worldPos, worldAng, playerFeet, playerYaw, self.standPos, self.standAng)
+	return MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
+end
+
+--- Puppeteer body solve in player world space, then map into avatar space
+function Session:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
+	local tr = g_VR.tracking
+	local left = tr.pose_lefthand
+	local right = tr.pose_righthand
+	if not left or not left.pos or not right or not right.pos then return end
+
+	-- Clone positions so L/R identity glue never feeds both targets
+	local hmdPos = Vector(hmd.pos.x, hmd.pos.y, hmd.pos.z)
+	local hmdAng = Angle(hmd.ang.p, hmd.ang.y, hmd.ang.r)
+	local lhPos = Vector(left.pos.x, left.pos.y, left.pos.z)
+	local lhAng = left.ang and Angle(left.ang.p, left.ang.y, left.ang.r) or Angle()
+	local rhPos = Vector(right.pos.x, right.pos.y, right.pos.z)
+	local rhAng = right.ang and Angle(right.ang.p, right.ang.y, right.ang.r) or Angle()
+
+	local pelvisOff = self.pelvisOffset or DEFAULT_PELVIS_OFFSET
+	local shoulderW = self.shoulderWidth or DEFAULT_SHOULDER_W
+	local upperLen = self.upperArmLen or 12
+	local foreLen = self.forearmLen or 12
+
+	-- === Player-space body (Pescorr puppeteer) ===
+	local headPos = hmdPos
+	local headAng = Angle(hmdAng.p - 90, hmdAng.y, hmdAng.r + 90)
+	local pelvisPos = hmdPos - Vector(0, 0, pelvisOff)
+	local pelvisAng = Angle(0, hmdAng.y, 0)
+	local spinePos = LerpVector(0.4, pelvisPos, headPos)
+	local spineAng = Angle(hmdAng.p * 0.3, hmdAng.y, 0)
+	local spineRight = spineAng:Right()
+	local shoulderL = spinePos - spineRight * shoulderW
+	local shoulderR = spinePos + spineRight * shoulderW
+	local bodyFwd = spineAng:Forward()
+	local hintBack = (-bodyFwd + Vector(0, 0, -0.3)):GetNormalized()
+	local elbowL = SolveTwoBoneIK(shoulderL, lhPos, upperLen, foreLen, hintBack)
+	local elbowR = SolveTwoBoneIK(shoulderR, rhPos, upperLen, foreLen, hintBack)
+
+	local map = function(p, a)
+		return self:_map(p, a, playerFeet, playerYaw)
+	end
+
+	-- Mirror: swap visual L/R so twin faces you correctly
+	local mirror = (self.mode == "mirror")
+	local b = self.bones
+	local ent = self.ent
+
+	local function drive(boneId, pos, ang)
+		if boneId then SetBoneWorld(ent, boneId, pos, ang) end
+	end
+
+	-- Core body
+	local pPelvis, aPelvis = map(pelvisPos, pelvisAng)
+	local pSpine, aSpine = map(spinePos, spineAng)
+	local pHead, aHead = map(headPos, headAng)
+	drive(b.pelvis, pPelvis, aPelvis)
+	if b.chest then drive(b.chest, pSpine, aSpine) end
+	if b.spine and b.spine ~= b.chest then drive(b.spine, pSpine, aSpine) end
+	if self.follow.hmd then
+		drive(b.head, pHead, aHead)
+	end
+
+	if not self.follow.hands then return end
+
+	-- Arms: in mirror mode player-left drives avatar-right bones
+	local function driveArm(shPos, elPos, handPos, handAng, upperId, foreId, handId, flipHand)
+		local pS, _ = map(shPos, Angle())
+		local pE, _ = map(elPos, Angle())
+		local pH, aH = map(handPos, handAng)
+		if flipHand then aH = aH + Angle(0, 0, 180) end
+		drive(upperId, pS, AngleBetween(pS, pE))
+		drive(foreId, pE, AngleBetween(pE, pH))
+		drive(handId, pH, aH)
+	end
+
+	if mirror then
+		-- Visual: avatar's right = player's left (mirrored)
+		driveArm(shoulderL, elbowL, lhPos, lhAng, b.rUpper, b.rFore, b.rHand, true)
+		driveArm(shoulderR, elbowR, rhPos, rhAng, b.lUpper, b.lFore, b.lHand, false)
+	else
+		driveArm(shoulderL, elbowL, lhPos, lhAng, b.lUpper, b.lFore, b.lHand, false)
+		driveArm(shoulderR, elbowR, rhPos, rhAng, b.rUpper, b.rFore, b.rHand, true)
+	end
 end
 
 function Session:_applyTracking()
 	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
 	if not hmd then return end
-	local follow = self.follow
-	local tr = g_VR.tracking
-	local b = self.bones
 
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
 	self.ent:SetPos(self.standPos)
-	self.standAng = self.standAng or Angle()
-	self.ent:SetAngles(self.standAng)
-	-- Keep idle sequence alive (height twin = human-looking PM, not bone soup)
-	if self.ent.FrameAdvance then
-		self.ent:FrameAdvance(FrameTime())
-	end
+	self.ent:SetAngles(self.standAng or Angle())
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
-	-- Idle-only (height cal default): no SetBoneWorld — world matrix hacks
-	-- stretch head/arms off the neck (giraffe / cursed twin).
-	local anyBone = follow.hmd or follow.hands or follow.waist or follow.feet
-	if not anyBone then
-		if self.menuAnchor and g_VR.menus and g_VR.menus[self.menuUid] then
-			local mp, ma = self.menuAnchor(self.standPos, self.standAng, self)
-			if mp then g_VR.menus[self.menuUid].pos = mp end
-			if ma then g_VR.menus[self.menuUid].ang = ma end
-		end
-		return
-	end
+	local follow = self.follow
+	local anyDrive = follow.hmd or follow.hands or follow.waist or follow.feet
 
-	local map = function(pos, ang)
-		if self.mode == "world" then
-			return pos, ang
-		end
-		return self:_map(pos, ang, playerFeet, playerYaw)
-	end
-
-	-- Safe mode: only FBT world mode may write full bone chains.
-	-- Partial head/hand world overrides without a full IK solve = cursed mesh.
-	if self.mode ~= "world" or self.safeBoneDrive then
-		-- Optional: soft head look (angles only) — never teleport head bone in world space
-		if follow.hmd and b.head and self.ent.ManipulateBoneAngles then
-			local targetYaw = math.NormalizeAngle((hmd.ang and hmd.ang.yaw or yaw) - yaw)
-			local pitch = math.Clamp(hmd.ang and hmd.ang.pitch or 0, -35, 35)
-			self.ent:ManipulateBoneAngles(b.head, Angle(0, math.Clamp(targetYaw * 0.35, -40, 40), math.Clamp(-pitch * 0.25, -20, 20)))
-		end
-		if self.menuAnchor and g_VR.menus and g_VR.menus[self.menuUid] then
-			local mp, ma = self.menuAnchor(self.standPos, self.standAng, self)
-			if mp then g_VR.menus[self.menuUid].pos = mp end
-			if ma then g_VR.menus[self.menuUid].ang = ma end
-		end
-		return
-	end
-
-	-- World / FBT advanced: full bone drive (only when explicitly requested)
-	if follow.hmd and b.head then
-		local hp, ha = map(hmd.pos + hmd.ang:Forward() * -2, hmd.ang)
-		SetBoneWorld(self.ent, b.head, hp, ha)
-	end
-
-	local left = tr.pose_lefthand
-	local right = tr.pose_righthand
-	if follow.hands then
-		if left and left.pos and b.lHand then
-			local p, a = map(left.pos, left.ang or Angle())
-			SetBoneWorld(self.ent, b.lHand, p, a)
-			AimLimb(self.ent, b.lUpper, b.lFore, p)
-		end
-		if right and right.pos and b.rHand then
-			local p, a = map(right.pos, right.ang or Angle())
-			SetBoneWorld(self.ent, b.rHand, p, a)
-			AimLimb(self.ent, b.rUpper, b.rFore, p)
-		end
-	end
-
-	local waist = tr.pose_waist
-	if follow.waist and waist and waist.pos and b.pelvis then
-		local p, a = map(waist.pos, waist.ang or Angle())
-		SetBoneWorld(self.ent, b.pelvis, p, a)
-	end
-
-	local lfoot = tr.pose_leftfoot
-	local rfoot = tr.pose_rightfoot
-	if follow.feet then
-		if lfoot and lfoot.pos and b.lFoot then
-			local p, a = map(lfoot.pos, lfoot.ang or Angle())
-			SetBoneWorld(self.ent, b.lFoot, p, a)
-			AimLeg(self.ent, b.lThigh, b.lCalf, p)
-		end
-		if rfoot and rfoot.pos and b.rFoot then
-			local p, a = map(rfoot.pos, rfoot.ang or Angle())
-			SetBoneWorld(self.ent, b.rFoot, p, a)
-			AimLeg(self.ent, b.rThigh, b.rCalf, p)
-		end
+	if anyDrive and not self.idleOnly then
+		-- Full puppeteer-style copy (head + arms + torso)
+		self:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 	end
 
 	if self.menuAnchor and g_VR.menus and g_VR.menus[self.menuUid] then
@@ -296,11 +338,6 @@ function Session:_drawTrackers()
 	end
 end
 
---- Open an avatar editor session.
--- @param opts table
---   id (string, required), mode ("mirror"|"clone"|"world"), distance (number),
---   follow { hmd, hands, waist, feet }, showTrackers, showHandTrackers,
---   menuUid, menuAnchor(standPos, standAng, session), onClose, hideLocalPlayer
 function vrmod.avatar.Open(opts)
 	opts = opts or {}
 	local id = opts.id or "default"
@@ -320,6 +357,7 @@ function vrmod.avatar.Open(opts)
 	ent:SetIK(false)
 	CopyLooks(ent, ply)
 	local idle = ply:LookupSequence("idle_all_01")
+	if idle < 0 then idle = ply:LookupSequence("idle_subtle") end
 	ent:ResetSequence(idle >= 0 and idle or 0)
 	ent:SetCycle(0)
 	ent:SetPlaybackRate(0)
@@ -332,8 +370,8 @@ function vrmod.avatar.Open(opts)
 		follow.waist = opts.follow.waist and true or false
 		follow.feet = opts.follow.feet and true or false
 	end
-	-- World/FBT cal: idle body, trackers only (bone measure against T-pose)
-	if opts.idleOnly then
+	local idleOnly = opts.idleOnly and true or false
+	if idleOnly then
 		follow = { hmd = false, hands = false, waist = false, feet = false }
 	end
 
@@ -342,8 +380,11 @@ function vrmod.avatar.Open(opts)
 		active = true,
 		ent = ent,
 		mode = opts.mode or "mirror",
-		distance = opts.distance or 48,
+		distance = opts.distance or 52,
 		follow = follow,
+		idleOnly = idleOnly,
+		pelvisOffset = opts.pelvisOffset or DEFAULT_PELVIS_OFFSET,
+		shoulderWidth = opts.shoulderWidth or DEFAULT_SHOULDER_W,
 		showTrackers = opts.showTrackers or false,
 		showHandTrackers = opts.showHandTrackers or false,
 		menuUid = opts.menuUid,
@@ -355,9 +396,12 @@ function vrmod.avatar.Open(opts)
 		standPos = Vector(),
 		standAng = Angle(),
 		bones = {},
+		upperArmLen = 12,
+		forearmLen = 12,
 	}, Session)
 
 	s:_cacheBones()
+	s:_measureArms()
 	sessions[id] = s
 
 	if s.hideLocalPlayer then
@@ -402,23 +446,25 @@ function vrmod.avatar.IsOpen(id)
 	return s and s:IsValid()
 end
 
---- Height-cal preset: idle PM twin (looks human). No bone-world stretch.
+--- Height-cal: mirror twin that COPIES player via puppeteer 2-bone IK
 function vrmod.avatar.OpenHeightCal(menuUid)
 	return vrmod.avatar.Open({
 		id = "height",
 		mode = "mirror",
-		distance = 48,
-		idleOnly = true, -- critical: SetBoneWorld head = giraffe
-		follow = { hmd = false, hands = false, waist = false, feet = false },
+		distance = 52,
+		idleOnly = false,
+		follow = { hmd = true, hands = true, waist = false, feet = false },
+		pelvisOffset = 30,
+		shoulderWidth = 8,
 		menuUid = menuUid or "heightmenu",
 		menuAnchor = function(standPos, standAng)
-			return standPos + Vector(0, 0, 52) + standAng:Right() * -18,
+			-- Large panel to the twin's left, chest height
+			return standPos + Vector(0, 0, 48) + standAng:Right() * -28,
 				Angle(0, standAng.y + 90, 90)
 		end,
 	})
 end
 
---- FBT calibration preset: world-aligned idle PM + tracker boxes (same concept as height avatar)
 function vrmod.avatar.OpenFBTCal()
 	return vrmod.avatar.Open({
 		id = "fbt_cal",
