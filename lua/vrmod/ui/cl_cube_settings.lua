@@ -1,8 +1,8 @@
 if SERVER then return end
 -- =============================================================================
 -- Glorious Crimson Cube — VR-native settings (HL:Alyx energy)
--- Desktop keeps Derma web panes (VRUtilOpenMenu). In VR this surface is SoT.
--- Built on vrmod.web2vr.ManifestNative + laser focus from cl_ui.
+-- Desktop keeps Derma Derma panes (VRUtilOpenMenu). In VR this surface is SoT.
+-- Built on vrmod.panel2vr (Derma/VGUI → VR surfaces) + laser focus from cl_ui.
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -116,7 +116,7 @@ categories = {
 			{ kind = "bool", label = "Door replace", cvar = "vrmod_doors" },
 			{ kind = "bool", label = "Autostart VR", cvar = "vrmod_autostart" },
 			{ kind = "action", label = "UI reset surfaces", cmd = "vrmod_vgui_reset" },
-			{ kind = "action", label = "Close all web2vr", cmd = "vrmod_web2vr_closeall" },
+			{ kind = "action", label = "Close all panel2vr", cmd = "vrmod_panel2vr_closeall" },
 		},
 	},
 	{
@@ -137,11 +137,11 @@ categories = {
 			end },
 			{ kind = "action", label = "Desktop settings pane", action = function()
 				vrmod.CubeSettings_Close()
-				-- Force derma even in VR (debug) via web2vr panel path
+				-- Force derma even in VR (debug) via panel2vr panel path
 				if VRUtilOpenMenu then
 					local f = VRUtilOpenMenu()
-					if IsValid(f) and vrmod.web2vr then
-						vrmod.web2vr.ManifestPanel(f, { place = "float", hint = "settings_derma" })
+					if IsValid(f) and vrmod.panel2vr then
+						vrmod.panel2vr.ManifestPanel(f, { place = "float", hint = "settings_derma" })
 					end
 				end
 			end },
@@ -326,8 +326,8 @@ function vrmod.CubeSettings_Close()
 	if not open then return end
 	open = false
 	hook.Remove("VRMod_Input", "cube_settings_input")
-	if vrmod.web2vr then
-		vrmod.web2vr.Close(UID)
+	if vrmod.panel2vr then
+		vrmod.panel2vr.Close(UID)
 	elseif VRUtilMenuClose then
 		VRUtilMenuClose(UID)
 	end
@@ -347,13 +347,13 @@ function vrmod.CubeSettings_Open()
 	if opening then return end
 	opening = true
 
-	if not vrmod.web2vr or not vrmod.web2vr.ManifestNative then
+	if not vrmod.panel2vr or not vrmod.panel2vr.ManifestNative then
 		opening = false
 		-- Fallback: paint Derma as VR surface (kind=panel skips native redirect)
 		if VRUtilOpenMenu then
 			local f = VRUtilOpenMenu()
-			if IsValid(f) and vrmod.web2vr and vrmod.web2vr.ManifestPanel then
-				vrmod.web2vr.ManifestPanel(f, {
+			if IsValid(f) and vrmod.panel2vr and vrmod.panel2vr.ManifestPanel then
+				vrmod.panel2vr.ManifestPanel(f, {
 					place = "float",
 					hint = "settings_derma",
 					kind = "panel",
@@ -367,7 +367,7 @@ function vrmod.CubeSettings_Open()
 	category = 1
 	scroll = 0
 
-	local uid, dirty = vrmod.web2vr.ManifestNative(UID, W, H, draw, {
+	local uid, dirty = vrmod.panel2vr.ManifestNative(UID, W, H, draw, {
 		place = "float",
 		alwaysRedraw = true,
 		onClose = function()
@@ -410,8 +410,8 @@ end
 -- Register as native adapter for settings-like panels
 hook.Add("InitPostEntity", "cube_settings_register", function()
 	timer.Simple(0.1, function()
-		if not vrmod.web2vr then return end
-		vrmod.web2vr.RegisterNative("settings", function(_panel, _opts)
+		if not vrmod.panel2vr then return end
+		vrmod.panel2vr.RegisterNative("settings", function(_panel, _opts)
 			vrmod.CubeSettings_Open()
 			return true
 		end)

@@ -1,22 +1,22 @@
 if SERVER then return end
 -- =============================================================================
--- Derma popup intercept — now owned by vrmod.web2vr (cl_web2vr.lua)
+-- Derma popup intercept — now owned by vrmod.panel2vr (cl_panel2vr.lua)
 -- This file remains for load-order compatibility and a thin bridge.
 -- Legacy MakePopup hook is intentionally NOT installed here (double-manifest).
 -- =============================================================================
 
 -- Re-export convenience for older call sites
 function VRUtilManifestPanel(panel, opts)
-	if vrmod and vrmod.web2vr and vrmod.web2vr.ManifestPanel then
-		return vrmod.web2vr.ManifestPanel(panel, opts)
+	if vrmod and vrmod.panel2vr and vrmod.panel2vr.ManifestPanel then
+		return vrmod.panel2vr.ManifestPanel(panel, opts)
 	end
 end
 
--- If web2vr failed to load for any reason, install a minimal fallback once.
+-- If panel2vr failed to load for any reason, install a minimal fallback once.
 hook.Add("InitPostEntity", "vrmod_dermapopups_fallback", function()
 	timer.Simple(1, function()
-		if vrmod and vrmod.web2vr and vrmod.web2vr.InstallHooks then
-			vrmod.web2vr.InstallHooks()
+		if vrmod and vrmod.panel2vr and vrmod.panel2vr.InstallHooks then
+			vrmod.panel2vr.InstallHooks()
 			return
 		end
 		-- Absolute fallback: previous MakePopup paint path (best-effort)

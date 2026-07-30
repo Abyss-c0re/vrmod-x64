@@ -47,8 +47,8 @@ vrmod_border_calibrate   -- vision only
 
 ## Settings & menus in VR
 
-After first-run, everyday UI uses **web2vr** (see [`CUBE_WEB2VR.md`](CUBE_WEB2VR.md)):
+After first-run, everyday UI uses **panel2vr** (see [`CUBE_PANEL2VR.md`](CUBE_PANEL2VR.md)):
 
-- **Desktop / non-VR** — Derma “web panes” (`VRUtilOpenMenu`)
+- **Desktop / non-VR** — flat Derma/VGUI (`VRUtilOpenMenu`)
 - **VR Settings** — **Glorious Crimson Cube** (`vrmod_cube_settings` / Quickmenu → Settings)
 - **Spawn / Context / any MakePopup** — intercepted live into 3D laser surfaces

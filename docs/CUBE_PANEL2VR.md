@@ -1,15 +1,17 @@
-# Cube web2vr — desktop UI → true VR surfaces
+# Cube panel2vr — Derma/VGUI → true VR surfaces
 
-When **not** in VR, GMod menus stay as normal Derma / DHTML “web panes” on the flat screen.
+**panel2vr** (not “web”): Source **Derma / VGUI panels** (DFrame, spawnmenu, context menu, DHTML-as-panel). Flat screen UI is intercepted and manifested into laser-driven 3D surfaces.
 
-When **in** VR, anything that tries to become a screen popup is **intercepted and manifested** as a laser-driven 3D surface in the world (HL:Alyx energy). Settings use the **Glorious Crimson Cube** native shell instead of dumping the full Derma tree into your face.
+When **not** in VR, GMod menus stay as normal Derma/VGUI on the flat screen.
+
+When **in** VR, anything that tries to become a screen popup is **intercepted and manifested** as a laser-driven 3D surface (HL:Alyx energy). Settings use the **Glorious Crimson Cube** native shell instead of dumping the full Derma tree into your face.
 
 ## Law
 
 | Realm | UI path |
 |-------|---------|
 | Desktop / non-VR | Derma, DHTML, spawnmenu, context menu as usual |
-| VR | `vrmod.web2vr` intercept → RT + `cam.Start3D2D` + pointer beam |
+| VR | `vrmod.panel2vr` intercept → RT + `cam.Start3D2D` + pointer beam |
 | VR Settings | **Glorious Crimson Cube** (`vrmod.CubeSettings_Open`) — native schema UI |
 
 HUD stays on. No mat_queue changes. No dual-truth pose forks.
@@ -26,11 +28,11 @@ Existing VRMod glue: `VRUtilMenuOpen` / `VRUtilRenderMenuSystem` in `cl_ui.lua` 
 ## Architecture
 
 ```
-Desktop web pane (Derma / DHTML / spawnmenu)
+Desktop Derma/VGUI panel (DFrame / spawnmenu / context / DHTML panel)
         │
         │  MakePopup  OR  OnSpawnMenuOpen / OnContextMenuOpen
         ▼
- vrmod.web2vr.ManifestPanel
+ vrmod.panel2vr.ManifestPanel
         │
         ├─ NativeAdapters[key]?  ──►  Cube Settings / custom Alyx surface
         │
@@ -53,7 +55,7 @@ Desktop web pane (Derma / DHTML / spawnmenu)
 
 ```lua
 -- Manifest any live panel into VR (no-op if not in VR)
-vrmod.web2vr.ManifestPanel(panel, {
+vrmod.panel2vr.ManifestPanel(panel, {
   kind = "spawnmenu",      -- optional
   place = "workbench",     -- wrist|popup|float|workbench
   width = 960, height = 720,
@@ -62,46 +64,46 @@ vrmod.web2vr.ManifestPanel(panel, {
 })
 
 -- Pure VR surface (no VGUI) — drawFn paints 2D into RT
-local uid, dirty = vrmod.web2vr.ManifestNative("my_ui", 512, 512, function(w, h, focused)
+local uid, dirty = vrmod.panel2vr.ManifestNative("my_ui", 512, 512, function(w, h, focused)
   -- surface.* / draw.*
 end, { place = "float", alwaysRedraw = true })
 
 -- Register converter: when this kind/name is intercepted, open true VR UI instead
-vrmod.web2vr.RegisterNative("my_addon_menu", function(panel, opts)
+vrmod.panel2vr.RegisterNative("my_addon_menu", function(panel, opts)
   OpenMyAlyxMenu()
   return true -- consumed
 end)
 
-vrmod.web2vr.OpenSettings()  -- Cube in VR, Derma on desktop
-vrmod.web2vr.CloseAll()
+vrmod.panel2vr.OpenSettings()  -- Cube in VR, Derma on desktop
+vrmod.panel2vr.CloseAll()
 ```
 
 ### Commands
 
 ```
-vrmod_cube_settings      -- open Glorious Crimson Cube
-vrmod_web2vr_status      -- bound surfaces
-vrmod_web2vr_closeall    -- tear down manifests
-vrmod_vgui_reset         -- close all VRUtil menus
+vrmod_cube_settings        -- open Glorious Crimson Cube
+vrmod_panel2vr_status      -- bound surfaces
+vrmod_panel2vr_closeall    -- tear down manifests
+vrmod_vgui_reset           -- close all VRUtil menus
 ```
 
 ## Quick menu integration
 
 - **Settings** → Cube (VR) / Derma (desktop)
-- **Spawn Menu** / **Context Menu** → open sandbox shells → web2vr resizes to 960×720 and workbench-places them
+- **Spawn Menu** / **Context Menu** → open sandbox shells → panel2vr resizes to 960×720 and workbench-places them
 - Any other `MakePopup()` while VR is active → auto-manifest
 
 ## Adding a new Alyx-style menu
 
 1. Build a schema + draw/hit-test (see `cl_cube_settings.lua`).
-2. `vrmod.web2vr.ManifestNative(...)` for the surface.
-3. Optionally `RegisterNative("classname_or_name", openFn)` so MakePopup never shows the flat web pane.
+2. `vrmod.panel2vr.ManifestNative(...)` for the surface.
+3. Optionally `RegisterNative("classname_or_name", openFn)` so MakePopup never shows the flat Derma pane.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `lua/vrmod/ui/cl_web2vr.lua` | Framework, intercepts, placement, adapters |
+| `lua/vrmod/ui/cl_panel2vr.lua` | Framework, intercepts, placement, adapters |
 | `lua/vrmod/ui/cl_cube_settings.lua` | Glorious Crimson Cube settings |
 | `lua/vrmod/ui/cl_dermapopups.lua` | Thin bridge / emergency fallback |
 | `lua/vrmod/ui/cl_ui.lua` | RT menu system, laser, mouse inject |

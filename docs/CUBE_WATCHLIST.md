@@ -7,7 +7,7 @@ Sources (live watch):
 - Open topics: fisheye, one-eye, no HMD image, Glide, worldmodels, FBT
 - GitHub: [Abyss-c0re/vrmod-x64 issues](https://github.com/Abyss-c0re/vrmod-x64/issues)
 
-**Cube law when deciding:** one energy direction · no dual-truth pose forks · HUD stays · `mat_queue_mode=1` only pin that matters · never fight engine blacklists · Vision is guided (not a slider maze) · web panes on desktop, Crimson Cube / web2vr in headset.
+**Cube law when deciding:** one energy direction · no dual-truth pose forks · HUD stays · `mat_queue_mode=1` only pin that matters · never fight engine blacklists · Vision is guided (not a slider maze) · Derma/VGUI on desktop, Crimson Cube / panel2vr in headset.
 
 ---
 
@@ -100,7 +100,7 @@ Sources (live watch):
 
 ## Implementation order (Cube backlog)
 
-1. **Done / doing:** blocked cvars, swap eyes, SS+4096 crisp, web2vr + Crimson Cube, border Experience  
+1. **Done / doing:** blocked cvars, swap eyes, SS+4096 crisp, panel2vr + Crimson Cube, border Experience  
 2. **Next:** Glide input SoT after API check  
 3. **Next:** action manifest path heal + startup stereo self-test  
 4. **Then:** hand bullet filter polish; worldmodel single path  
@@ -116,7 +116,7 @@ vrmod_border_calibrate   -- vision only
 vrmod_swap_eyes 1        -- inverted stereo
 vrmod_supersample 1.5    -- crisp (restart VR)
 vrmod_cube_settings      -- Crimson Cube in VR
-vrmod_web2vr_status
+vrmod_panel2vr_status
 ```
 
 ---

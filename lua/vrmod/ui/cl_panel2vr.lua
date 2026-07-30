@@ -1,11 +1,13 @@
 if SERVER then return end
 -- =============================================================================
--- vrmod.web2vr — Real-time desktop/web UI → VR surface framework
+-- vrmod.panel2vr — Real-time Derma/VGUI panel → VR surface framework
 --
 -- Law (Cube Experience):
---   Desktop / non-VR  → Derma, DHTML, spawnmenu as normal "web panes"
+--   Desktop / non-VR  → Derma / VGUI / spawnmenu as flat 2D panels
 --   In VR             → intercept MakePopup / known shells and MANIFEST them
 --                       as world/hand 3D surfaces (laser + trigger)
+--
+-- Name: panel2vr (not "web") — Source VGUI/Derma, not browser UI.
 --
 -- GMod anchors (wiki.facepunch.com):
 --   Panel:SetPaintedManually(true) + Panel:PaintManual() into an RT
@@ -15,9 +17,9 @@ if SERVER then return end
 -- =============================================================================
 
 vrmod = vrmod or {}
-vrmod.web2vr = vrmod.web2vr or {}
+vrmod.panel2vr = vrmod.panel2vr or {}
 
-local W = vrmod.web2vr
+local W = vrmod.panel2vr
 
 -- Glorious Crimson Cube palette (shared with native surfaces)
 W.Theme = {
@@ -80,9 +82,9 @@ local MIN_RT = 128
 
 local function log(fmt, ...)
 	if vrmod.logger then
-		vrmod.logger.Info("[web2vr] " .. fmt, ...)
+		vrmod.logger.Info("[panel2vr] " .. fmt, ...)
 	else
-		print("[web2vr] " .. string.format(fmt, ...))
+		print("[panel2vr] " .. string.format(fmt, ...))
 	end
 end
 
@@ -101,7 +103,7 @@ local function uidFor(panel, hint)
 	local name = hint or (IsValid(panel) and panel:GetName()) or "surface"
 	name = tostring(name):lower():gsub("[^%w]", "")
 	if name == "" then name = "surface" end
-	local uid = "w2v_" .. name .. "_" .. seq
+	local uid = "p2v_" .. name .. "_" .. seq
 	if IsValid(panel) then panelUids[panel] = uid end
 	return uid
 end
@@ -266,14 +268,14 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 	local dirty = true
 
 	VRUtilMenuOpen(uid, w, h, nil, place.attachment, place.pos, place.ang, place.scale, true, function()
-		hook.Remove("PreRender", "web2vr_native_" .. uid)
+		hook.Remove("PreRender", "panel2vr_native_" .. uid)
 		bound[uid] = nil
 		if opts.onClose then opts.onClose() end
 	end)
 
-	hook.Add("PreRender", "web2vr_native_" .. uid, function()
+	hook.Add("PreRender", "panel2vr_native_" .. uid, function()
 		if not VRUtilIsMenuOpen or not VRUtilIsMenuOpen(uid) then
-			hook.Remove("PreRender", "web2vr_native_" .. uid)
+			hook.Remove("PreRender", "panel2vr_native_" .. uid)
 			return
 		end
 		if not dirty and not opts.alwaysRedraw then return end
@@ -356,7 +358,7 @@ function W.InstallHooks()
 
 	-- Spawn / context: ensure open shells are resized + manifested even if
 	-- they already called MakePopup before VR, or use non-standard popup paths.
-	hook.Add("OnSpawnMenuOpen", "web2vr_spawn", function()
+	hook.Add("OnSpawnMenuOpen", "panel2vr_spawn", function()
 		if not W.IsVR() then return end
 		timer.Simple(0, function()
 			if IsValid(g_SpawnMenu) then
@@ -369,13 +371,13 @@ function W.InstallHooks()
 		end)
 	end)
 
-	hook.Add("OnSpawnMenuClose", "web2vr_spawn", function()
+	hook.Add("OnSpawnMenuClose", "panel2vr_spawn", function()
 		if IsValid(g_SpawnMenu) and panelUids[g_SpawnMenu] then
 			W.Close(panelUids[g_SpawnMenu])
 		end
 	end)
 
-	hook.Add("OnContextMenuOpen", "web2vr_ctx", function()
+	hook.Add("OnContextMenuOpen", "panel2vr_ctx", function()
 		if not W.IsVR() then return end
 		timer.Simple(0, function()
 			if IsValid(g_ContextMenu) then
@@ -388,14 +390,14 @@ function W.InstallHooks()
 		end)
 	end)
 
-	hook.Add("OnContextMenuClose", "web2vr_ctx", function()
+	hook.Add("OnContextMenuClose", "panel2vr_ctx", function()
 		if IsValid(g_ContextMenu) and panelUids[g_ContextMenu] then
 			W.Close(panelUids[g_ContextMenu])
 		end
 	end)
 
 	-- Continuous re-paint for live HTML / animated derma
-	hook.Add("Think", "web2vr_repaint", function()
+	hook.Add("Think", "panel2vr_repaint", function()
 		if not W.IsVR() then return end
 		for uid, info in pairs(bound) do
 			if info.panel and IsValid(info.panel) and isfunction(VRUtilMenuRenderPanel) then
@@ -409,7 +411,7 @@ function W.InstallHooks()
 		end
 	end)
 
-	hook.Add("VRMod_Exit", "web2vr_cleanup", function()
+	hook.Add("VRMod_Exit", "panel2vr_cleanup", function()
 		W.CloseAll()
 	end)
 
@@ -428,22 +430,31 @@ function W.OpenSettings()
 end
 
 -- Install after UI subsystem is ready
-hook.Add("InitPostEntity", "web2vr_install", function()
+hook.Add("InitPostEntity", "panel2vr_install", function()
 	timer.Simple(0, function() W.InstallHooks() end)
 end)
 
 -- Also on VR start (in case world panel meta was reset)
-hook.Add("VRMod_Start", "web2vr_install", function()
+hook.Add("VRMod_Start", "panel2vr_install", function()
 	W.InstallHooks()
 end)
 
-concommand.Add("vrmod_web2vr_status", function()
-	print("[web2vr] VR=", tostring(W.IsVR()), "hooks=", tostring(hooksInstalled))
+concommand.Add("vrmod_panel2vr_status", function()
+	print("[panel2vr] VR=", tostring(W.IsVR()), "hooks=", tostring(hooksInstalled))
 	for uid, info in pairs(bound) do
 		print(" ", uid, info.kind, info.place, IsValid(info.panel) and info.panel:GetName() or "-")
 	end
 end)
 
-concommand.Add("vrmod_web2vr_closeall", function()
+concommand.Add("vrmod_panel2vr_closeall", function()
 	W.CloseAll()
+end)
+
+-- Deprecated aliases (old web2vr name — Derma/VGUI is not web)
+vrmod.web2vr = vrmod.panel2vr
+concommand.Add("vrmod_web2vr_status", function()
+	RunConsoleCommand("vrmod_panel2vr_status")
+end)
+concommand.Add("vrmod_web2vr_closeall", function()
+	RunConsoleCommand("vrmod_panel2vr_closeall")
 end)
