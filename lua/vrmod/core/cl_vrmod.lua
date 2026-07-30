@@ -453,12 +453,38 @@ if CLIENT then
 		end
 	end
 
-	-- 3) Display parameters & render target setup
-	local function SetupRenderTargets()
+	-- Apply UV submit bounds from border convars (safe to call live while VR active)
+	local function ApplySubmitBounds()
+		if not g_VR.active and not leftCalc then return end
+		if type(leftCalc) ~= "table" or type(rightCalc) ~= "table" then return end
+		if not VRMOD_SetSubmitTextureBounds then return end
 		local hOffset = convars.vrmod_horizontaloffset:GetFloat()
 		local vOffset = convars.vrmod_verticaloffset:GetFloat()
 		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
 		local renderOffset = convars.vrmod_renderoffset:GetBool()
+		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
+		VRMOD_SetSubmitTextureBounds(unpack(bounds))
+	end
+
+	-- Live update: sliders used to do nothing until full VR restart
+	local function BindBorderConvarCallbacks()
+		local names = {
+			"vrmod_horizontaloffset",
+			"vrmod_verticaloffset",
+			"vrmod_scalefactor",
+			"vrmod_renderoffset",
+		}
+		for _, name in ipairs(names) do
+			cvars.RemoveChangeCallback(name, "vrmod_submit_bounds")
+			cvars.AddChangeCallback(name, function()
+				if not g_VR.active then return end
+				ApplySubmitBounds()
+			end, "vrmod_submit_bounds")
+		end
+	end
+
+	-- 3) Display parameters & render target setup
+	local function SetupRenderTargets()
 		g_VR.desktopView = convars.vrmod_desktopview:GetInt()
 		-- compute display params with fallback
 		local dp = ComputeDisplayParams() or {}
@@ -486,9 +512,8 @@ if CLIENT then
 		})
 
 		VRMOD_ShareTextureFinish()
-		-- submit bounds
-		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
-		VRMOD_SetSubmitTextureBounds(unpack(bounds))
+		ApplySubmitBounds()
+		BindBorderConvarCallbacks()
 	end
 
 	-- 4) Action manifest & input initialization
@@ -616,9 +641,15 @@ if CLIENT then
 			if bSky or not LocalPlayer():Alive() then return end
 			if IsValid(g_VR.viewModel) then
 				blockViewModelDraw = false
-				g_VR.viewModel:DrawModel()
+				-- DrawModel can invoke SWEP:PostDrawViewModel (ArcVR) — never let nils blow the frame
+				local okDraw, errDraw = pcall(function()
+					g_VR.viewModel:DrawModel()
+				end)
+				if not okDraw and vrmod.logger then
+					vrmod.logger.Debug("viewModel DrawModel error: %s", tostring(errDraw))
+				end
 				-- ArcVR (and others) put mag/attachments in SWEP:PostDrawViewModel —
-				-- engine never runs that when we DrawModel() the VR viewmodel ourselves.
+				-- engine may not run that when we DrawModel() the VR viewmodel ourselves.
 				local wep = LocalPlayer():GetActiveWeapon()
 				if IsValid(wep) and isfunction(wep.PostDrawViewModel) then
 					local ok, err = pcall(wep.PostDrawViewModel, wep, g_VR.viewModel, LocalPlayer(), wep)

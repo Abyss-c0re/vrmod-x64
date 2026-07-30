@@ -96,10 +96,16 @@ local function AddHUD()
 	hook.Add("VRMod_PreRender", "hud", function(eye)
 		if not g_VR.threePoints then return end
 		if eye == "right" then return end
+		-- Consumers (minimap/radar) prepare RTs here — before nested RenderHUD
+		hook.Call("VRMod_PreRenderHUD", nil, eye)
 		render.PushRenderTarget(rt)
 		render.OverrideAlphaWriteEnable(true, true)
 		render.Clear(0, 0, 0, convarValues.vrmod_hudtestalpha, true, true)
+		-- Flag so HUDPaint knows this is the stereo HUD capture (not desktop)
+		g_VR._renderingHudRT = true
 		render.RenderHUD(0, 0, vrScrW:GetInt(), vrScrH:GetInt())
+		g_VR._renderingHudRT = false
+		hook.Call("VRMod_PostRenderHUD", nil, eye)
 		render.OverrideAlphaWriteEnable(false)
 		render.PopRenderTarget()
 		mtx:Identity()

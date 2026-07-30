@@ -398,7 +398,7 @@ function VRUtilOpenMenu()
 			label:SetPos(20, y + 5)
 			label:SetSize(370, 30)
 			label:SetDark(true)
-			label:SetText("Adjust parameters below if you see borders, start with small values like 0.01")
+			label:SetText("Borders / black edges: use small steps (±0.01). H/V offsets crop BOTH eyes together (not per-lens). Prefer Scale Factor first. Right-eye-only borders usually need FOV scale X/Y or restart after module update — offsets now apply live while in VR.")
 			label:SetWrap(true)
 			label:SetAutoStretchVertical(true)
 			y = y + 35
@@ -442,6 +442,24 @@ function VRUtilOpenMenu()
 			s:SetConVar("vrmod_horizontaloffset")
 			y = y + 40
 		end
+
+		local cal = vgui.Create("DButton", t)
+		cal:SetPos(20, y + 10)
+		cal:SetSize(200, 30)
+		cal:SetText("Border Calibrate (guided)")
+		cal.DoClick = function()
+			RunConsoleCommand("vrmod_border_calibrate")
+		end
+		y = y + 40
+
+		local loadp = vgui.Create("DButton", t)
+		loadp:SetPos(20, y + 10)
+		loadp:SetSize(200, 30)
+		loadp:SetText("Load border profile")
+		loadp.DoClick = function()
+			RunConsoleCommand("vrmod_border_profile_load")
+		end
+		y = y + 40
 
 		local reset = vgui.Create("DButton", t)
 		reset:SetPos(20, y + 10)

@@ -46,6 +46,7 @@ local function InitializeMenuItems()
     -- Row 3
     vrmod.AddInGameMenuItem("Reset Vehicle View", 0, 2, function() VRUtilresetVehicleView() end, true)
     vrmod.AddInGameMenuItem("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end, true)
+    vrmod.AddInGameMenuItem("Border Cal", 1, 3, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true)
     vrmod.AddInGameMenuItem("Toggle blacklist weapon", 2, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true)
     vrmod.AddInGameMenuItem("Map Browser", 3, 2, function()
         local window = VRUtilCreateMapBrowserWindow()

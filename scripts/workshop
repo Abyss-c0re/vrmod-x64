@@ -1,0 +1,255 @@
+#!/bin/bash
+#
+# VRMOD Workshop Publisher & Updater (Flag-based)
+# https://github.com/Abyss-c0re/vrmod-x64
+
+set -o pipefail
+
+MODE=""
+ADDON_FOLDER=""
+PREVIEW_IMAGE=""
+WORKSHOP_ID_ARG=""
+CHANGES_ARG=""
+CHANGES_FILE=""
+
+show_help() {
+    echo "VRMOD Workshop Tool"
+    echo ""
+    echo "Usage:"
+    echo "  Publish:          $0 --publish --addon <path> --thumb <image> [--changes \"...\"]"
+    echo "  Update files:     $0 --update  --addon <path> [--thumb <image>] [--id <id>] --changes \"...\""
+    echo "  Update thumbnail: $0 --update-thumb --id <id_or_url> --thumb <image>"
+    echo ""
+    echo "Options:"
+    echo "  -p, --publish          Publish new addon"
+    echo "  -u, --update           Update addon files (+ optional thumbnail)"
+    echo "  -ut, --update-thumb    Update ONLY the thumbnail (no addon files)"
+    echo "  -a, --addon <path>     Addon folder path"
+    echo "  -t, --thumb <image>    Preview image"
+    echo "  -i, --id <id_or_url>   Workshop ID or URL"
+    echo "  -c, --changes <text>   Changelog text (REQUIRED for --update to avoid empty notes)"
+    echo "  -cf, --changes-file    Read changelog from file"
+    echo "  -h, --help             Show help"
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --publish|-p)
+            MODE="publish"
+            shift
+            ;;
+        --update|-u)
+            MODE="update"
+            shift
+            ;;
+        --update-thumb|-ut)
+            MODE="update-thumb"
+            shift
+            ;;
+        --addon|-a)
+            ADDON_FOLDER="$2"
+            shift 2
+            ;;
+        --thumb|-t)
+            PREVIEW_IMAGE="$2"
+            shift 2
+            ;;
+        --id|-i)
+            WORKSHOP_ID_ARG="$2"
+            shift 2
+            ;;
+        --changes|-c)
+            CHANGES_ARG="$2"
+            shift 2
+            ;;
+        --changes-file|-cf)
+            CHANGES_FILE="$2"
+            shift 2
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "[!] Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+if [ -n "$CHANGES_FILE" ]; then
+    if [ ! -f "$CHANGES_FILE" ]; then
+        echo "[!] changes file not found: $CHANGES_FILE"
+        exit 1
+    fi
+    CHANGES_ARG="$(cat "$CHANGES_FILE")"
+fi
+
+# Normalize changelog: strip CR, trim leading/trailing whitespace
+if [ -n "$CHANGES_ARG" ]; then
+    CHANGES_ARG="$(printf '%s' "$CHANGES_ARG" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+fi
+
+# === Validation ===
+if [ -z "$MODE" ]; then
+    echo "[!] You must use --publish, --update or --update-thumb"
+    show_help
+    exit 1
+fi
+
+if [ "$MODE" = "publish" ] || [ "$MODE" = "update" ]; then
+    if [ -z "$ADDON_FOLDER" ]; then
+        echo "[!] --addon <path> is required for --publish and --update"
+        exit 1
+    fi
+fi
+
+if [ "$MODE" = "publish" ] && [ -z "$PREVIEW_IMAGE" ]; then
+    echo "[!] --thumb is required for --publish"
+    exit 1
+fi
+
+if [ "$MODE" = "update-thumb" ] && [ -z "$PREVIEW_IMAGE" ]; then
+    echo "[!] --thumb is required for --update-thumb"
+    exit 1
+fi
+
+# Updates MUST carry change notes (gmpublish -changes) — no more "None Provided"
+if [ "$MODE" = "update" ]; then
+    if [ -z "$CHANGES_ARG" ]; then
+        echo "[!] --changes or --changes-file is REQUIRED for --update"
+        echo "    Example:"
+        echo "      $0 --update --addon ./vrmod-x64 --id 3442302711 \\"
+        echo "        --changes \"│ Fixed: hand wall collisions block properly\""
+        echo "      $0 --update --addon ./vrmod-x64 --id 3442302711 \\"
+        echo "        --changes-file ./CHANGELOG_SNIPPET.txt"
+        exit 1
+    fi
+    # Reject placeholder empties
+    case "$CHANGES_ARG" in
+        ""|"None Provided"|"none"|"n/a"|"N/A"|"."|"-")
+            echo "[!] Changelog is empty or placeholder — refusing publish"
+            exit 1
+            ;;
+    esac
+fi
+
+# Resolve Workshop ID
+WORKSHOP_ID=""
+if [ "$MODE" = "update" ] || [ "$MODE" = "update-thumb" ]; then
+    if [ -n "$WORKSHOP_ID_ARG" ]; then
+        if [[ "$WORKSHOP_ID_ARG" =~ ([0-9]{5,}) ]]; then
+            WORKSHOP_ID="${BASH_REMATCH[1]}"
+        else
+            echo "[!] Invalid Workshop ID/URL"
+            exit 1
+        fi
+    elif [ "$MODE" = "update" ] && [ -f "$ADDON_FOLDER/.workshop_id" ]; then
+        WORKSHOP_ID=$(cat "$ADDON_FOLDER/.workshop_id" | tr -d '[:space:]')
+    else
+        echo "[!] No Workshop ID provided. Use --id <id_or_url>"
+        exit 1
+    fi
+    echo "[*] Target Workshop ID: $WORKSHOP_ID"
+fi
+
+# Convert thumbnail if provided
+ICON_PATH=""
+if [ -n "$PREVIEW_IMAGE" ]; then
+    if [ ! -f "$PREVIEW_IMAGE" ]; then
+        echo "[!] Thumbnail not found: $PREVIEW_IMAGE"
+        exit 1
+    fi
+
+    echo "[*] Converting thumbnail to 512x512 baseline JPEG..."
+    ICON_PATH="/tmp/vrmod_thumb_$(date +%s).jpg"
+
+    if command -v convert >/dev/null 2>&1; then
+        convert "$PREVIEW_IMAGE" -resize 512x512! -strip -interlace none -quality 90 "$ICON_PATH" || {
+            echo "[!] ImageMagick conversion failed."
+            exit 1
+        }
+    else
+        echo "[!] ImageMagick 'convert' not found."
+        exit 1
+    fi
+fi
+
+# Paths
+GMAD_PATH="$HOME/.steam/steam/steamapps/common/GarrysMod/bin/linux64/gmad"
+GMPUBLISH_PATH="$HOME/.steam/steam/steamapps/common/GarrysMod/bin/linux64/gmpublish"
+TEMP_GMA="/tmp/$(basename "$ADDON_FOLDER" 2>/dev/null || echo addon).gma"
+
+# === MODE: UPDATE THUMB ONLY ===
+if [ "$MODE" = "update-thumb" ]; then
+    echo "[*] Updating thumbnail only..."
+    "$GMPUBLISH_PATH" update -icon "$ICON_PATH" -id "$WORKSHOP_ID" || {
+        echo "[!] Thumbnail update failed!"
+        exit 1
+    }
+    echo "[✔️] Thumbnail updated successfully!"
+    rm -f "$ICON_PATH" 2>/dev/null || true
+    exit 0
+fi
+
+# === Normal publish / update path (with GMA) ===
+if [ ! -f "$ADDON_FOLDER/addon.json" ]; then
+    echo "[!] addon.json not found in '$ADDON_FOLDER'"
+    exit 1
+fi
+
+# Clean junk
+echo "[*] Cleaning disallowed files..."
+find "$ADDON_FOLDER" -type f \( \
+    -regex '.*_[0-9]\.vtx$' \
+    -o -name '*.sw.vtx' \
+    -o -iname '*.psd' \
+    -o -iname 'thumbs.db' \
+    -o -iname '*.db' \
+    -o -iname '*.blend' \
+    -o -iname '*.smd' \
+    -o -iname '*.qc' \
+\) -delete
+
+# Create GMA
+echo "[*] Creating GMA file..."
+"$GMAD_PATH" create -folder "$ADDON_FOLDER" -out "$TEMP_GMA" || {
+    echo "[!] Failed to create .gma file."
+    exit 1
+}
+
+if [ "$MODE" = "publish" ]; then
+    echo "[*] Publishing new addon..."
+    UPLOAD_OUTPUT=$("$GMPUBLISH_PATH" create -addon "$TEMP_GMA" -icon "$ICON_PATH" 2>&1)
+    echo "$UPLOAD_OUTPUT"
+
+    if [[ "$UPLOAD_OUTPUT" =~ id=([0-9]+) ]]; then
+        ADDON_ID="${BASH_REMATCH[1]}"
+        echo "[✔️] Published! Workshop ID: $ADDON_ID"
+        echo "$ADDON_ID" > "$ADDON_FOLDER/.workshop_id"
+    else
+        echo "[!] Could not detect Workshop ID."
+        exit 1
+    fi
+else
+    echo "[*] Updating addon..."
+    if [ -z "$CHANGES_ARG" ]; then
+        echo "[!] Refusing update with empty changelog."
+        echo "    Pass --changes \"notes…\" or --changes-file path"
+        echo "    (prevents Workshop 'None Provided' entries)"
+        exit 1
+    fi
+    UPDATE_ARGS=(-addon "$TEMP_GMA" -id "$WORKSHOP_ID" -changes "$CHANGES_ARG")
+    if [ -n "$ICON_PATH" ]; then
+        UPDATE_ARGS+=(-icon "$ICON_PATH")
+        echo "[*] Also updating thumbnail..."
+    fi
+    "$GMPUBLISH_PATH" update "${UPDATE_ARGS[@]}" || {
+        echo "[!] Update failed!"
+        exit 1
+    }
+    echo "[✔️] Addon updated successfully!"
+fi
+
+rm -f "$TEMP_GMA" "$ICON_PATH" 2>/dev/null || true
