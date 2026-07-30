@@ -35,9 +35,8 @@ if CLIENT then
 	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
-		-- mat_queue_mode=1 threads materials across stereo eye passes → decals/overlays
-		-- often update one eye late and "flicker" in the HMD. Synchronous is stable.
-		mat_queue_mode = "0",
+		-- ALWAYS "1" in VR. Never change, never restore on exit.
+		mat_queue_mode = "1", --never change
 		mat_disable_bloom = "1",
 		mat_disable_fancy_blending = "1",
 		mat_disable_lightwarp = "1",
@@ -52,6 +51,10 @@ if CLIENT then
 		r_drawmodeldecals = "1",
 		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
 		snd_mute_losefocus = "0",
+	}
+	-- Convars that must stay at their PERFORMANCE value forever once VR sets them.
+	local NEVER_RESTORE_CONVARS = {
+		mat_queue_mode = true, -- always "1"; never change in VR or on exit
 	}
 	-- Stores original convar values so we can restore them on VR exit
 	local convarOverrides = {}
@@ -107,6 +110,8 @@ if CLIENT then
 		if not cv then return end
 		local previous = cv:GetString()
 		if not setConvarValue(name, value) then return end
+		-- Pinned cvars: apply value only, never restore previous
+		if NEVER_RESTORE_CONVARS[name] then return end
 		-- Only remember originals for cvars we actually changed
 		if convarOverrides[name] == nil then
 			convarOverrides[name] = previous
@@ -115,9 +120,32 @@ if CLIENT then
 
 	local function restoreConvarOverrides()
 		for k, v in pairs(convarOverrides) do
-			setConvarValue(k, v)
+			if not NEVER_RESTORE_CONVARS[k] then
+				setConvarValue(k, v)
+			end
 		end
 		convarOverrides = {}
+		-- Re-assert pinned VR cvars after restore (mat_queue_mode must stay "1")
+		for name, _ in pairs(NEVER_RESTORE_CONVARS) do
+			local pinned = PERFORMANCE_CONVARS[name]
+			if pinned ~= nil then
+				setConvarValue(name, pinned)
+			end
+		end
+	end
+
+	-- While VR is active, force pinned cvars every frame if something else changes them.
+	local function EnsurePinnedConvars()
+		if not g_VR.active then return end
+		for name, _ in pairs(NEVER_RESTORE_CONVARS) do
+			local want = PERFORMANCE_CONVARS[name]
+			if want ~= nil then
+				local cv = GetConVar(name)
+				if cv and cv:GetString() ~= tostring(want) then
+					setConvarValue(name, want)
+				end
+			end
+		end
 	end
 
 	local function ComputeDisplayParams()
@@ -925,6 +953,9 @@ if CLIENT then
 		--   → stereo eyes (engine RealRenderView only) → submit → PostRender
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			if DrawErrorOverlay() then return true end
+
+			-- mat_queue_mode must stay "1" for every VR frame (never change)
+			EnsurePinnedConvars()
 
 			-- Keep World Portals suppressed for the entire VR frame (do not restore mid-frame)
 			local wp = rawget(_G, "wp")
