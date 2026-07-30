@@ -1151,7 +1151,8 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     end
 
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    local radius = math.max(vrmod.DEFAULT_RADIUS, 3.0)
+    -- Keep hull modest — oversized radius permanently clips near floors/walls ("tied")
+    local radius = math.max(vrmod.DEFAULT_RADIUS or 2.2, 2.2)
     local offset = math.min(vrmod.DEFAULT_OFFSET or 5, 2.5)
     -- Ignore held mags/props — otherwise left-hand mag reloads fight wall push (flicker)
     local filter = WallFilter(ply)
@@ -1212,6 +1213,13 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         if clipped then
             -- IN-PLACE override of the tracking Vector (gun/hands see this immediately)
             local delta = safeSample - desiredSample
+            -- Cap correction so a bad lastFree cannot tether hands far from controllers
+            local dlen = delta:Length()
+            if dlen > MAX_HAND_CORRECTION then
+                delta = delta * (MAX_HAND_CORRECTION / dlen)
+                -- Stale lock — drop free anchor so next frame re-evaluates from tracking
+                ClearHandWallState(handKey)
+            end
             trackPos = AddPosInPlace(trackPos, delta)
             cachedPushOutPos[handKey] = safeSample
             lastNonClippedNormal[handKey] = normal
