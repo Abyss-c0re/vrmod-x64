@@ -34,16 +34,27 @@ local fontsReady = false
 
 local function EnsureCubeFonts()
 	if fontsReady then return end
+	-- Tahoma is often missing on Linux → silent bad font; prefer cross-platform faces
+	local face = "Roboto"
+	if system.IsLinux and system.IsLinux() then
+		face = "DejaVu Sans"
+	end
 	local specs = {
-		CubeTitle = { font = "Tahoma", size = 28, weight = 800, antialias = true },
-		CubeLabel = { font = "Tahoma", size = 16, weight = 700, antialias = true },
-		CubeSmall = { font = "Tahoma", size = 13, weight = 500, antialias = true },
-		CubeHuge = { font = "Tahoma", size = 36, weight = 900, antialias = true },
+		CubeTitle = { font = face, size = 28, weight = 800, antialias = true, extended = true },
+		CubeLabel = { font = face, size = 16, weight = 700, antialias = true, extended = true },
+		CubeSmall = { font = face, size = 13, weight = 500, antialias = true, extended = true },
+		CubeHuge = { font = face, size = 36, weight = 900, antialias = true, extended = true },
 	}
 	for name, spec in pairs(specs) do
+		-- Try preferred face, then Arial, then Trebuchet MS
 		local ok = pcall(surface.CreateFont, name, spec)
 		if not ok then
-			-- keep fallback mapping
+			spec.font = "Arial"
+			ok = pcall(surface.CreateFont, name, spec)
+		end
+		if not ok then
+			spec.font = "Trebuchet MS"
+			pcall(surface.CreateFont, name, spec)
 		end
 	end
 	fontsReady = true
@@ -52,13 +63,14 @@ end
 --- Resolve a Cube font name; never returns an unregistered font
 function vrmod.cube.Font(name)
 	EnsureCubeFonts()
-	if name and FONT_FALLBACK[name] then
-		-- Prefer Cube* if created; GMod still errors on unknown names — probe
-		local ok = pcall(surface.SetFont, name)
-		if ok then return name end
-		return FONT_FALLBACK[name]
-	end
-	return name or "DermaDefault"
+	if not name then return "DermaDefault" end
+	-- surface.SetFont does not error on missing fonts; measure width instead
+	local ok, w = pcall(function()
+		surface.SetFont(name)
+		return surface.GetTextSize("W")
+	end)
+	if ok and w and w > 0 then return name end
+	return FONT_FALLBACK[name] or "DermaDefault"
 end
 
 function vrmod.cube.DrawPanel(x, y, w, h, title)
