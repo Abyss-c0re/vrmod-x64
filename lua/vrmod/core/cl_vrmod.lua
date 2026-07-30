@@ -35,7 +35,9 @@ if CLIENT then
 	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
-		mat_queue_mode = "1",
+		-- mat_queue_mode=1 threads materials across stereo eye passes → decals/overlays
+		-- often update one eye late and "flicker" in the HMD. Synchronous is stable.
+		mat_queue_mode = "0",
 		mat_disable_bloom = "1",
 		mat_disable_fancy_blending = "1",
 		mat_disable_lightwarp = "1",
@@ -45,6 +47,11 @@ if CLIENT then
 		r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
 		r_threaded_particles = "1",
 		r_queued_ropes = "1",
+		-- Keep world + model decals on for both eye passes
+		r_drawdecals = "1",
+		r_drawmodeldecals = "1",
+		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
+		snd_mute_losefocus = "0",
 	}
 	-- Stores original convar values so we can restore them on VR exit
 	local convarOverrides = {}
@@ -146,38 +153,76 @@ if CLIENT then
 		}
 	end
 
-	-- Cube's Law — Truth Matrix pose flow (do not break the public surface of tracking):
-	--   rawTracking  = device energy (unfiltered sample; modifiers must not own this)
-	--   tracking     = Source of Truth for all consumers (same tables/fields as always)
-	--   VRMod_Tracking → early lawful modifiers (seated, crouch, sim hands…)
-	--   ApplyPoseModifiers → wall/weapon (write only into tracking hands)
+	-- ═══════════════════════════════════════════════════════════════════════
+	-- Cube's Law — Truth Matrix (pose + stereo render)
+	-- ─────────────────────────────────────────────────────────────────────
+	-- Pose SoT (one truth, energy flows downward only):
+	--   rawTracking  = device energy (unfiltered; modifiers never own this)
+	--   tracking     = Source of Truth for all consumers (stable tables)
+	--   VRMod_Tracking → early modifiers (seated, crouch, sim hands…)
+	--   ApplyPoseModifiers → wall/weapon → write only into tracking hands
 	--   viewmodel / net / character / melee → read tracking only
-	-- Integrity rules:
+	--
+	-- Stereo SoT (one public view, dual eye energy):
+	--   g_VR.view     = cyclopean public SoT (origin/angles/znear for consumers)
+	--   viewLeft/Right= private eye viewsetups (no realloc, no dual gun truth)
+	--   PreRender(eye) → RealRenderView(eye) → ClearDepth → other eye → submit
+	-- Integrity:
 	--   • Never nil-out hmd / pose_lefthand / pose_righthand mid-session
-	--   • Never let a modifier invent a second parallel gun/hand truth
+	--   • Never invent a second parallel gun/hand or eye pose truth
 	--   • angvel is Vector(p,y,r); never Angle:Set(Vector)
-	local function AsVector(v)
-		if not v then return Vector() end
-		if v.x ~= nil then return Vector(v.x, v.y, v.z) end
-		-- Angle-like (p/y/r or pitch/yaw/roll)
-		return Vector(v.p or v.pitch or 0, v.y or v.yaw or 0, v.r or v.roll or 0)
+	--   • Stable Cube beats clever Cube — no thrash, no nested portal RTs
+	-- ═══════════════════════════════════════════════════════════════════════
+
+	--- In-place Vector write (no per-frame Vector() thrash on the hot path)
+	local function WriteVec(dst, src)
+		if not src then
+			if not dst then return Vector() end
+			dst.x, dst.y, dst.z = 0, 0, 0
+			return dst
+		end
+		local x = src.x
+		if x == nil then
+			-- Angle-like (p/y/r) used as angvel carrier
+			x = src.p or src.pitch or 0
+			local y = src.y or src.yaw or 0
+			local z = src.r or src.roll or 0
+			if not dst then return Vector(x, y, z) end
+			dst.x, dst.y, dst.z = x, y, z
+			return dst
+		end
+		if not dst then return Vector(x, src.y or 0, src.z or 0) end
+		dst.x, dst.y, dst.z = x, src.y or 0, src.z or 0
+		return dst
 	end
 
-	local function AsAngle(a)
-		if not a then return Angle() end
-		if a.p ~= nil or a.pitch ~= nil then
-			return Angle(a.p or a.pitch or 0, a.y or a.yaw or 0, a.r or a.roll or 0)
+	local function WriteAng(dst, src)
+		if not src then
+			if not dst then return Angle() end
+			dst.p, dst.y, dst.r = 0, 0, 0
+			return dst
+		end
+		local p = src.p or src.pitch
+		if p ~= nil then
+			local y = src.y or src.yaw or 0
+			local r = src.r or src.roll or 0
+			if not dst then return Angle(p, y, r) end
+			dst.p, dst.y, dst.r = p, y, r
+			return dst
 		end
 		-- Vector mistaken for angle
-		return Angle(a.x or 0, a.y or 0, a.z or 0)
+		local px, py, pz = src.x or 0, src.y or 0, src.z or 0
+		if not dst then return Angle(px, py, pz) end
+		dst.p, dst.y, dst.r = px, py, pz
+		return dst
 	end
 
 	local function CopyPoseFields(src, dst)
 		dst = dst or {}
-		dst.pos = AsVector(src.pos)
-		dst.ang = AsAngle(src.ang)
-		dst.vel = AsVector(src.vel)
-		dst.angvel = AsVector(src.angvel)
+		dst.pos = WriteVec(dst.pos, src.pos)
+		dst.ang = WriteAng(dst.ang, src.ang)
+		dst.vel = WriteVec(dst.vel, src.vel)
+		dst.angvel = WriteVec(dst.angvel, src.angvel)
 		dst.simulatedPos = src.simulatedPos
 		return dst
 	end
@@ -286,58 +331,32 @@ if CLIENT then
 		end
 	end
 
-	--- Late pose modifiers: wall/weapon collisions write final g_VR.tracking hands.
+	--- Late pose modifiers: OVERRIDE g_VR.tracking hands in place.
+	--- rawTracking stays pure device energy (guns/addons that read tracking see the block;
+	--- nobody needs the API — the tables themselves are the SoT).
 	local function ApplyPoseModifiers()
 		local left = g_VR.tracking and g_VR.tracking.pose_lefthand
 		local right = g_VR.tracking and g_VR.tracking.pose_righthand
 		if not (left and right and vrmod.utils and left.pos and right.pos and left.ang and right.ang) then return end
 		frameCounter = frameCounter + 1
-		-- Weapon broadphase for gun debug boxes / optional weapon sweeps
 		if vrmod.utils.CollisionsPreCheck then
 			vrmod.utils.CollisionsPreCheck(left.pos, right.pos)
 		end
-		local lp, la, rp, ra = vrmod.utils.UpdateHandCollisions(left.pos, left.ang, right.pos, right.ang)
-		-- Write back in-place so gun/prop/API sharing .pos/.ang see blocked pose
-		WritePose(left, lp, la)
-		WritePose(right, rp, ra)
-		-- Optional extra modifiers
+
+		-- Zero-arg: mutates g_VR.tracking.pose_*.pos Vectors in place (AddPosInPlace).
+		-- Also accepts explicit refs; same Vector identity as tracking.pos is required for
+		-- zero-copy gun readers (g_VR.tracking.pose_righthand.pos).
+		vrmod.utils.UpdateHandCollisions(left.pos, left.ang, right.pos, right.ang)
+
 		hook.Call("VRMod_TrackingModified", nil, g_VR.tracking, g_VR.rawTracking)
-		-- Viewmodel + muzzle slave final right hand (blocked pose — no wall cheat)
-		if right and vrmod.utils.UpdateViewModelPos then
+
+		-- Viewmodel / gun mesh slaves tracking SoT only (never rawTracking).
+		-- Weapon tip wall already ran in UpdateHandCollisions — no second muzzle TraceLine
+		-- here (that doubled SetupBones + traces and spiked latency).
+		if vrmod.utils.UpdateViewModelPos then
 			vrmod.utils.UpdateViewModelPos(right.pos, right.ang)
-		end
-		if vrmod.utils.UpdateViewModel then
+		elseif vrmod.utils.UpdateViewModel then
 			vrmod.utils.UpdateViewModel()
-		end
-		-- Extra: muzzle tip must not live inside a wall (long guns / ArcVR)
-		if right and right.pos and g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos then
-			local mpos = g_VR.viewModelMuzzle.Pos
-			local tr = util.TraceLine({
-				start = right.pos,
-				endpos = mpos,
-				mask = MASK_SOLID_BRUSHONLY,
-				filter = LocalPlayer()
-			})
-			-- Hit between hand and muzzle ⇒ tip is on far side of brush — pull back
-			if tr.Hit and not tr.StartSolid and tr.Fraction < 0.995 then
-				local n = tr.HitNormal
-				if not n or n:LengthSqr() < 0.01 then n = Vector(0, 0, 1) end
-				local pad = 0.75
-				local cvp = GetConVar("vrmod_hand_collision_push")
-				if cvp then pad = math.max(0.05, cvp:GetFloat()) end
-				-- Move hand by the same delta that brings tip to surface + pad
-				local tipTarget = tr.HitPos + n * pad
-				local pull = tipTarget - mpos
-				if pull:LengthSqr() > 0.0001 then
-					WritePose(right, right.pos + pull, right.ang)
-					if vrmod.utils.UpdateViewModelPos then
-						vrmod.utils.UpdateViewModelPos(right.pos, right.ang)
-					end
-					if vrmod.utils.UpdateViewModel then
-						vrmod.utils.UpdateViewModel()
-					end
-				end
-			end
 		end
 	end
 
@@ -412,69 +431,263 @@ if CLIENT then
 
 
 
+	-- Persistent eye viewsetups (no table alloc per frame — Cube stability)
+	-- drawmonitors MUST be false: monitors nest RenderView while we hold g_VR.rt → heap corruption
+	local viewLeft = {
+		x = 0, y = 0, w = 0, h = 0,
+		origin = nil, angles = nil,
+		fov = 90, aspectratio = 1,
+		drawmonitors = false,
+		drawviewmodel = false,
+		drawhud = false,
+		bloomtone = false,
+		dopostprocess = false,
+		znear = 1,
+	}
+	local viewRight = {
+		x = 0, y = 0, w = 0, h = 0,
+		origin = nil, angles = nil,
+		fov = 90, aspectratio = 1,
+		drawmonitors = false,
+		drawviewmodel = false,
+		drawhud = false,
+		bloomtone = false,
+		dopostprocess = false,
+		znear = 1,
+	}
+
+	-- Freeze evidence (14:21): malloc unsorted double-linked list + empty .txt —
+	-- same class as 12:52 WorldPortals RealRenderView nest. Nested RenderView while
+	-- PushRenderTarget(g_VR.rt) corrupts the engine RT stack / heap.
+	local renderingEyes = false
+	local worldPortalsPatched = false
+	local engineRenderView -- never the WorldPortals wrapper
+	local wpRenderSceneFn -- saved to restore on VR exit
+	local wpDrawingSaved
+
+	local function CaptureEngineRenderView()
+		-- Prefer RealRenderView (WorldPortals saves engine fn there before wrap)
+		if isfunction(render.RealRenderView) then
+			engineRenderView = render.RealRenderView
+			return engineRenderView
+		end
+		if not engineRenderView and isfunction(render.RenderView) then
+			-- Only safe before WorldPortals wraps; if already wrapped, still better than nil
+			engineRenderView = render.RenderView
+		end
+		return engineRenderView
+	end
+
+	-- Capture ASAP (before Doors/WorldPortals InitPostEntity re-wrap if possible)
+	CaptureEngineRenderView()
+	hook.Add("InitPostEntity", "vrmod_capture_engine_renderview", function()
+		-- After WP: RealRenderView should exist
+		if isfunction(render.RealRenderView) then
+			engineRenderView = render.RealRenderView
+		end
+	end)
+
+	local function InstallWorldPortalsVRGuard()
+		local wp = rawget(_G, "wp")
+		if istable(wp) and isfunction(wp.renderportals) and not wp._vrmodRenderGuard then
+			wp._vrmodRenderGuard = true
+			local orig = wp.renderportals
+			wp.renderportals = function(...)
+				if g_VR.active or renderingEyes then return end
+				return orig(...)
+			end
+			worldPortalsPatched = true
+			if vrmod.logger then
+				vrmod.logger.Info("World Portals: VR stereo guard installed")
+			end
+		end
+
+		-- Kill WP's own RenderScene pass while VR owns the frame (nests full-screen RenderViews)
+		local sceneHooks = hook.GetTable()["RenderScene"]
+		if sceneHooks and isfunction(sceneHooks["WorldPortals_Render"]) and not wpRenderSceneFn then
+			wpRenderSceneFn = sceneHooks["WorldPortals_Render"]
+			hook.Remove("RenderScene", "WorldPortals_Render")
+		end
+	end
+
+	local function BeginVRNestedRenderLock()
+		InstallWorldPortalsVRGuard()
+		CaptureEngineRenderView()
+		local wp = rawget(_G, "wp")
+		if istable(wp) then
+			if wpDrawingSaved == nil then
+				wpDrawingSaved = wp.drawing
+			end
+			-- drawing=true means "already drawing / skip portal work" in WorldPortals
+			wp.drawing = true
+		end
+	end
+
+	local function EndVRNestedRenderLock()
+		local wp = rawget(_G, "wp")
+		if istable(wp) and wpDrawingSaved ~= nil then
+			wp.drawing = wpDrawingSaved
+			wpDrawingSaved = nil
+		end
+		if wpRenderSceneFn then
+			hook.Add("RenderScene", "WorldPortals_Render", wpRenderSceneFn)
+			wpRenderSceneFn = nil
+		end
+	end
+
+	local function GetEngineRenderView()
+		if isfunction(render.RealRenderView) then
+			return render.RealRenderView
+		end
+		if engineRenderView then
+			return engineRenderView
+		end
+		-- Last resort — may be wrapped; still better than nil
+		return render.RenderView
+	end
+
+	--- Engine eye pass only — never WorldPortals_RenderView, never nested RTs.
+	local function SafeRenderView(view)
+		if not view or not view.origin or not view.angles then return end
+		local o, a = view.origin, view.angles
+		if o.x ~= o.x or o.y ~= o.y or o.z ~= o.z then return end
+		if a.p ~= a.p or a.y ~= a.y or a.r ~= a.r then return end
+
+		local wp = rawget(_G, "wp")
+		if istable(wp) then
+			wp.drawing = true
+		end
+		local rv = GetEngineRenderView()
+		rv(view)
+	end
+
+	--- Fill a private eye viewsetup from public g_VR.view SoT + eye-specific fields.
+	local function SyncEyeView(dst, origin, fov, aspect, x, y, w, h, angles, znear, dopost)
+		dst.origin = origin
+		dst.angles = angles
+		dst.fov = fov
+		dst.aspectratio = aspect
+		dst.x, dst.y, dst.w, dst.h = x, y, w, h
+		dst.znear = znear
+		dst.dopostprocess = dopost and true or false
+		dst.drawmonitors = false -- nested RenderView = freeze/heap corruption on Linux
+		dst.drawviewmodel = false
+		dst.drawhud = false
+		dst.bloomtone = false
+	end
+
 	local function PerformRenderViews()
-		local eyeScale = convars.vrmod_eyescale:GetFloat()
-		-- cache angles once per frame
-		local ang = g_VR.view.angles
+		if renderingEyes then return end
+		-- Ensure portal nest lock (idempotent); full Begin is on VR start
+		InstallWorldPortalsVRGuard()
+		local wpLock = rawget(_G, "wp")
+		if istable(wpLock) then
+			wpLock.drawing = true
+		end
+
+		local view = g_VR.view
+		if not view or not view.origin or not view.angles then return end
+		if not g_VR.rt then return end
+
+		local ang = view.angles
 		local fwd = ang:Forward()
 		local right = ang:Right()
 		local up = ang:Up()
-		-- only recompute offsets when needed
-		eyeOffset = ipd * g_VR.scale -- scalar, can stay here
-		forwardOffset = fwd * -(eyez * g_VR.scale)
+		local scale = g_VR.scale
+		local eyeScale = convars.vrmod_eyescale:GetFloat()
+		eyeOffset = ipd * scale
+		forwardOffset = fwd * -(eyez * scale)
 		verticalOffset = up * -2.1
-		-- compute eye positions
-		g_VR.eyePosLeft = g_VR.view.origin + forwardOffset + right * -eyeOffset * eyeScale + verticalOffset
-		g_VR.eyePosRight = g_VR.view.origin + forwardOffset + right * eyeOffset * eyeScale + verticalOffset
-		render.PushRenderTarget(g_VR.rt)
-		if DrawErrorOverlay() then
-			render.PopRenderTarget()
-			vrmod.logger.Warn("Render skipped due to error overlay.")
-			return
-		end
 
-		render.Clear(0, 0, 0, 255, true, true)
-		-- cache common values
-		local rtHalfW = g_VR.rtWidth / 2
+		-- Cyclopean SoT (public) — never leave g_VR.view stuck on last eye
+		local cyclopeanOrigin = view.origin
+		local baseAngles = ang
+		local znear = view.znear or 1
+		local dopost = view.dopostprocess and true or false
+
+		g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale) + verticalOffset
+		g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale) + verticalOffset
+
+		local rtW = g_VR.rtWidth
 		local rtH = g_VR.rtHeight
-		-- left eye
-		g_VR.view.origin = g_VR.eyePosLeft
-		g_VR.view.fov = hfovLeft
-		g_VR.view.aspectratio = aspectLeft
-		g_VR.view.x = 0
-		g_VR.view.y = 0
-		g_VR.view.w = rtHalfW
-		g_VR.view.h = rtH
-		hook.Call("VRMod_PreRender", nil, "left")
-		render.RenderView(g_VR.view)
-		-- right eye
-		g_VR.view.origin = g_VR.eyePosRight
-		g_VR.view.fov = hfovRight
-		g_VR.view.aspectratio = aspectRight
-		g_VR.view.x = rtHalfW
-		g_VR.view.y = 0
-		g_VR.view.w = rtHalfW
-		g_VR.view.h = rtH
-		hook.Call("VRMod_PreRender", nil, "right")
-		render.RenderView(g_VR.view)
-		-- death animation
-		local ply = LocalPlayer()
-		if ply and not ply:Alive() then
-			vrmod.utils.DrawDeathAnimation(g_VR.rtWidth, g_VR.rtHeight)
-			vrmod.logger.Debug("Player is dead, drawing death animation.")
-		else
-			g_VR.deathTime = nil
+		local rtHalfW = math.floor(rtW / 2)
+
+		SyncEyeView(viewLeft, g_VR.eyePosLeft, hfovLeft, aspectLeft, 0, 0, rtHalfW, rtH, baseAngles, znear, dopost)
+		SyncEyeView(viewRight, g_VR.eyePosRight, hfovRight, aspectRight, rtHalfW, 0, rtHalfW, rtH, baseAngles, znear, dopost)
+
+		renderingEyes = true
+		local okEyes, errEyes = pcall(function()
+			render.PushRenderTarget(g_VR.rt)
+			if DrawErrorOverlay() then
+				render.PopRenderTarget()
+				return
+			end
+
+			render.Clear(0, 0, 0, 255, true, true)
+
+			-- LEFT
+			view.origin = g_VR.eyePosLeft
+			view.angles = baseAngles
+			view.fov = hfovLeft
+			view.aspectratio = aspectLeft
+			view.x, view.y, view.w, view.h = 0, 0, rtHalfW, rtH
+			g_VR.stereoEye = "left"
+			render.SetScissorRect(0, 0, rtHalfW, rtH, true)
+			hook.Call("VRMod_PreRender", nil, "left")
+			SafeRenderView(viewLeft)
+
+			render.ClearDepth(true)
+
+			-- RIGHT
+			view.origin = g_VR.eyePosRight
+			view.fov = hfovRight
+			view.aspectratio = aspectRight
+			view.x, view.y, view.w, view.h = rtHalfW, 0, rtHalfW, rtH
+			g_VR.stereoEye = "right"
+			render.SetScissorRect(rtHalfW, 0, rtW, rtH, true)
+			hook.Call("VRMod_PreRender", nil, "right")
+			SafeRenderView(viewRight)
+
+			render.SetScissorRect(0, 0, 0, 0, false)
+			g_VR.stereoEye = nil
+
+			-- Restore cyclopean public SoT
+			view.origin = cyclopeanOrigin
+			view.angles = baseAngles
+			view.fov = hfovLeft
+			view.aspectratio = aspectLeft
+			view.x, view.y, view.w, view.h = 0, 0, rtHalfW, rtH
+
+			local ply = LocalPlayer()
+			if IsValid(ply) and not ply:Alive() then
+				vrmod.utils.DrawDeathAnimation(rtW, rtH)
+			else
+				g_VR.deathTime = nil
+			end
+
+			render.PopRenderTarget()
+		end)
+		renderingEyes = false
+		g_VR.stereoEye = nil
+		if view and cyclopeanOrigin then
+			view.origin = cyclopeanOrigin
+			view.angles = baseAngles
 		end
 
-		render.PopRenderTarget()
-		-- desktop view remains untouched
-		if g_VR.desktopView > 1 then
+		if not okEyes then
+			if vrmod.logger then
+				vrmod.logger.Warn("PerformRenderViews error: %s", tostring(errEyes))
+			end
+			pcall(function() render.SetScissorRect(0, 0, 0, 0, false) end)
+			pcall(render.PopRenderTarget)
+		end
+
+		if g_VR.desktopView and g_VR.desktopView > 1 and g_VR.rtMaterial then
 			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(g_VR.rtMaterial)
 			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
 			render.CullMode(0)
-			vrmod.logger.Debug("Desktop view rendered.")
 		end
 	end
 
@@ -637,7 +850,7 @@ if CLIENT then
 			y = 0,
 			w = g_VR.rtWidth / 2,
 			h = g_VR.rtHeight,
-			drawmonitors = true,
+			drawmonitors = false, -- nested RenderView → freeze/heap corruption in VR RT
 			drawviewmodel = false,
 			znear = convars.vrmod_znear:GetFloat(),
 			dopostprocess = convars.vrmod_postprocess:GetBool()
@@ -706,9 +919,19 @@ if CLIENT then
 	end
 
 	local function BindRenderSceneHook()
+		BeginVRNestedRenderLock()
+		-- Cube frame energy (one direction):
+		--   raw → tracking SoT → modifiers → input/net → cyclopean view
+		--   → stereo eyes (engine RealRenderView only) → submit → PostRender
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			if DrawErrorOverlay() then return true end
-			-- raw → tracking → early modifiers → wall/weapon modifiers → viewmodel
+
+			-- Keep World Portals suppressed for the entire VR frame (do not restore mid-frame)
+			local wp = rawget(_G, "wp")
+			if istable(wp) then
+				wp.drawing = true
+			end
+
 			UpdateTracking()
 			ApplyPoseModifiers()
 			HandleInput()
@@ -718,7 +941,7 @@ if CLIENT then
 			VRMOD_SubmitSharedTexture()
 			hook.Call("VRMod_PostRender")
 			return true
-		end)
+		end, HOOK_HIGH or 1)
 	end
 
 	local function SetupModelAndPlayerHooks()
@@ -808,6 +1031,7 @@ if CLIENT then
 			end
 
 			g_VR.active = false
+			EndVRNestedRenderLock()
 			VRMOD_Shutdown()
 			vrmod.logger.Info("Ended VR session")
 		end
@@ -824,13 +1048,17 @@ if CLIENT then
 		SetupNetworkAndOrigin()
 		SetupScaleAndOffsets()
 		SetupViewParams()
+		if g_VR.view then
+			g_VR.view.drawmonitors = false
+		end
 		InitializeTracking()
 		SetupHandSimulation()
+		g_VR.active = true
+		BeginVRNestedRenderLock()
 		BindRenderSceneHook()
 		SetupModelAndPlayerHooks()
 		SetupShutdownHooks()
 		vrmod.StartLocomotion()
-		g_VR.active = true
-		vrmod.logger.Info("Started VR session")
+		vrmod.logger.Info("Started VR session (nested RenderView lock active)")
 	end
 end

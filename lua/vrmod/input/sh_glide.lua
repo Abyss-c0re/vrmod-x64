@@ -293,9 +293,14 @@ else -- CLIENT
 			vrmod.logger.Debug("[Glide] Mouse fly mode already 2")
 		end
 
-		if not Glide.Camera then return end
-		vrmod.utils.PatchGlideCamera()
-		vrmod.logger.Debug("[Glide] Patched Glide.Camera for VR support")
+		if Glide.Camera and vrmod.utils.PatchGlideCamera then
+			vrmod.utils.PatchGlideCamera()
+			vrmod.logger.Debug("[VRMod] Glide camera override installed")
+		end
+		-- Engine sound: VRMod-only overrides (cl_glide_audio) — never edit Glide files
+		if vrmod.utils.PatchGlideAudio then
+			vrmod.utils.PatchGlideAudio()
+		end
 	end)
 
 	hook.Add("VRMod_Exit", "Glide_RestoreMouseFlyMode", function()

@@ -58,8 +58,9 @@ function vrmod.utils.WepInfo(wep)
     if class and vm then return class, vm end
 end
 
---- Viewmodel is a pure slave of the (already modifier-resolved) right-hand pose.
---- Do NOT run a separate weapon pushout here — that was detaching the gun from the hand.
+--- Viewmodel / gun is a pure slave of g_VR.tracking.pose_righthand (SoT).
+--- Never read rawTracking here — wall collision overrides tracking in place;
+--- raw device energy stays elsewhere for consumers that need unfiltered sample.
 function vrmod.utils.UpdateViewModelPos(pos, ang, override)
     local ply = LocalPlayer()
     if vrmod.suppressViewModelUpdates and not override then
@@ -72,10 +73,10 @@ function vrmod.utils.UpdateViewModelPos(pos, ang, override)
     local currentvmi = g_VR.currentvmi
     if not currentvmi then return end
 
-    -- Prefer live tracking if caller forgot to pass post-modifier poses
-    if (not pos or not ang) and g_VR.tracking and g_VR.tracking.pose_righthand then
-        pos = g_VR.tracking.pose_righthand.pos
-        ang = g_VR.tracking.pose_righthand.ang
+    -- Always prefer tracking SoT (post wall override). Args are optional hints only.
+    local hand = g_VR.tracking and g_VR.tracking.pose_righthand
+    if hand and hand.pos and hand.ang then
+        pos, ang = hand.pos, hand.ang
     end
     if not pos or not ang then return end
 
@@ -89,18 +90,28 @@ function vrmod.utils.UpdateViewModel()
     local vm = g_VR.viewModel
     local vmi = g_VR.currentvmi
     if not IsValid(vm) then return end
-    if vmi and vmi.useWorldModel then
-        -- Always from final tracking (post wall/weapon modifiers)
-        local handPos, handAng = vrmod.GetRightHandPose()
-        local pos = handPos + handAng:Forward() * vmi.offsetPos.x + handAng:Right() * vmi.offsetPos.y + handAng:Up() * vmi.offsetPos.z
-        local ang = handAng + vmi.offsetAng
+    -- Cube: gun mesh always follows tracking SoT (same tables ArcVR/hands read)
+    local hand = g_VR.tracking and g_VR.tracking.pose_righthand
+    if vmi and vmi.useWorldModel and hand and hand.pos and hand.ang then
+        local handPos, handAng = hand.pos, hand.ang
+        local off = vmi.offsetPos or Vector()
+        local oang = vmi.offsetAng or Angle()
+        local pos = handPos + handAng:Forward() * off.x + handAng:Right() * off.y + handAng:Up() * off.z
+        local ang = handAng + oang
         vm:SetPos(pos)
         vm:SetAngles(ang)
         vm:SetupBones()
     else
-        vm:SetPos(g_VR.viewModelPos)
-        vm:SetAngles(g_VR.viewModelAng)
-        vm:SetupBones()
+        if hand and hand.pos and hand.ang and vmi then
+            local offsetPos, offsetAng = LocalToWorld(vmi.offsetPos or Vector(), vmi.offsetAng or Angle(), hand.pos, hand.ang)
+            g_VR.viewModelPos = offsetPos
+            g_VR.viewModelAng = offsetAng
+        end
+        if g_VR.viewModelPos and g_VR.viewModelAng then
+            vm:SetPos(g_VR.viewModelPos)
+            vm:SetAngles(g_VR.viewModelAng)
+            vm:SetupBones()
+        end
     end
 
     g_VR.viewModelMuzzle = vm:GetAttachment(1)

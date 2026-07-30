@@ -10,7 +10,9 @@ if CLIENT then
 			flashlight:SetTexture("effects/flashlight001")
 			flashlight:SetFOV(GetConVar("r_flashlightfov"):GetFloat())
 			flashlight:SetFarZ(GetConVar("r_flashlightfar"):GetFloat())
-			hook.Add("VRMod_PreRender", "flashlight", function()
+			-- Update once per stereo pair (left eye) — same light for both eyes
+			hook.Add("VRMod_PreRender", "flashlight", function(eye)
+				if eye == "right" then return end
 				if not g_VR.threePoints then return end
 				local pos = g_VR.tracking[attachments[convarValues.vrmod_flashlight_attachment + 1]].pos
 				local ang = g_VR.tracking[attachments[convarValues.vrmod_flashlight_attachment + 1]].ang

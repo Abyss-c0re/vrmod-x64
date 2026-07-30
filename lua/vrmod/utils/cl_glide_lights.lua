@@ -17,55 +17,40 @@ local patched = false
 local spriteBuffer = {}
 local spriteBufferCount = 0
 local origDrawLightSprite
-local glideVehCache = {}
-local nextVehCacheTime = 0
-local VEH_CACHE_INTERVAL = 0.25
 local spriteColorScratch = Color(255, 255, 255, 255)
 
-local function RefreshGlideVehicleCache()
-	local now = CurTime()
-	if now < nextVehCacheTime then return glideVehCache end
-	nextVehCacheTime = now + VEH_CACHE_INTERVAL
-
-	local list = {}
-	local n = 0
-	for _, ent in ipairs(ents.GetAll()) do
-		if IsValid(ent) and ent.IsGlideVehicle then
-			n = n + 1
-			list[n] = ent
-		end
-	end
-
-	glideVehCache = list
-	return list
+--- Only local player's Glide vehicle — never ents.GetAll (latency spikes on big maps).
+local function LocalGlideVehicle()
+	local ply = LocalPlayer()
+	if not IsValid(ply) or not ply.GlideGetVehicle then return nil end
+	local veh = ply:GlideGetVehicle()
+	if IsValid(veh) and veh.IsGlideVehicle then return veh end
+	return nil
 end
 
---- Pose + Update every projected headlight before this eye's RenderView.
+--- Pose + Update projected headlights before this eye's RenderView.
 local function UpdateProjectedHeadlights()
-	local vehicles = RefreshGlideVehicleCache()
-	for i = 1, #vehicles do
-		local ent = vehicles[i]
-		if not IsValid(ent) then continue end
+	local ent = LocalGlideVehicle()
+	if not IsValid(ent) then return end
 
-		local lights = ent.activeHeadlights
-		if not istable(lights) then continue end
+	local lights = ent.activeHeadlights
+	if not istable(lights) then return end
 
-		local headlights = ent.Headlights
-		for index, light in pairs(lights) do
-			if not IsValid(light) then continue end
+	local headlights = ent.Headlights
+	for index, light in pairs(lights) do
+		if not IsValid(light) then continue end
 
-			if istable(headlights) and headlights[index] then
-				local data = headlights[index]
-				if data.offset then
-					light:SetPos(ent:LocalToWorld(data.offset))
-				end
-				if data.angles then
-					light:SetAngles(ent:LocalToWorldAngles(data.angles))
-				end
+		if istable(headlights) and headlights[index] then
+			local data = headlights[index]
+			if data.offset then
+				light:SetPos(ent:LocalToWorld(data.offset))
 			end
-
-			light:Update()
+			if data.angles then
+				light:SetAngles(ent:LocalToWorldAngles(data.angles))
+			end
 		end
+
+		light:Update()
 	end
 end
 
@@ -132,15 +117,7 @@ function vrmod.utils.PatchGlideLights()
 		return origDrawLightSprite(pos, dir, size, color, material)
 	end
 
-	if isfunction(Glide.GetLocalViewLocation) then
-		local origView = Glide.GetLocalViewLocation
-		function Glide.GetLocalViewLocation()
-			if g_VR.active and g_VR.view and g_VR.view.origin then
-				return g_VR.view.origin, g_VR.view.angles
-			end
-			return origView()
-		end
-	end
+	-- View location override lives in cl_glide_audio.lua only (one SoT wrap).
 
 	-- Per-eye, immediately before render.RenderView (see cl_vrmod PerformRenderViews)
 	hook.Add("VRMod_PreRender", "vrmod_glide_lights", function(_eye)

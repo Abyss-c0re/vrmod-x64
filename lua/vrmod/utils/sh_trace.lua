@@ -3,27 +3,76 @@ vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 local magCache = {}
 local function IsMagazine(ent)
+    if not IsValid(ent) then return false end
     local class = ent:GetClass()
+    if not class then return false end
     if magCache[class] ~= nil then return magCache[class] end
     local isMag = string.StartWith(class, "avrmag_")
     magCache[class] = isMag
     return isMag
 end
 
+vrmod.utils.IsMagazine = IsMagazine
+
 --FILTERS AND TRACE UTILS
 function vrmod.utils.HitFilter(ent, ply, hand)
     if not IsValid(ent) then return false end
-    if ent == ply then return end
+    if ent == ply then return false end
     if ent:GetNWBool("isVRProxy", false) then return false end
+    if IsMagazine(ent) then return false end
     if IsValid(ply) and (hand == "left" or hand == "right") then
         local held = vrmod.GetHeldEntity(ply, hand)
         if IsValid(held) and held == ent then return false end
+        -- Other hand's held prop (reload: mag left, gun right)
+        local other = hand == "left" and "right" or "left"
+        local heldOther = vrmod.GetHeldEntity(ply, other)
+        if IsValid(heldOther) and heldOther == ent then return false end
+    end
+    if CLIENT and g_VR then
+        if ent == g_VR.heldEntityLeft or ent == g_VR.heldEntityRight then return false end
+        if ent == g_VR.viewModel or ent == g_VR.worldModelVM then return false end
     end
     return true
 end
 
 function vrmod.utils.MeleeFilter(ent, ply, hand)
     return vrmod.utils.HitFilter(ent, ply, hand) and not IsMagazine(ent)
+end
+
+--- Trace filter for hand/weapon *wall* collisions.
+--- Return true = can hit. Ignores held mags/props so wall push doesn't fight the mag.
+--- Cached per-frame — never rebuild closure for every TraceHull (latency spikes).
+local wallFilterCachePly, wallFilterCacheFn, wallFilterCacheFrame
+
+function vrmod.utils.WallCollisionFilter(ply)
+    local frame = FrameNumber and FrameNumber() or 0
+    if wallFilterCacheFn and wallFilterCachePly == ply and wallFilterCacheFrame == frame then
+        return wallFilterCacheFn
+    end
+
+    -- Snapshot held ents once (HitFilter used to call GetHeldEntity 4x per candidate)
+    local heldL, heldR, vm, wvm
+    if CLIENT and g_VR then
+        heldL, heldR = g_VR.heldEntityLeft, g_VR.heldEntityRight
+        vm, wvm = g_VR.viewModel, g_VR.worldModelVM
+    end
+    if SERVER and IsValid(ply) and vrmod.GetHeldEntity then
+        heldL = heldL or vrmod.GetHeldEntity(ply, "left")
+        heldR = heldR or vrmod.GetHeldEntity(ply, "right")
+    end
+
+    local fn = function(ent)
+        if not IsValid(ent) then return true end
+        if ent == ply then return false end
+        if ent == heldL or ent == heldR then return false end
+        if ent == vm or ent == wvm then return false end
+        if IsMagazine(ent) then return false end
+        if ent:GetNWBool("isVRProxy", false) then return false end
+        return true
+    end
+
+    wallFilterCachePly, wallFilterCacheFn, wallFilterCacheFrame = ply, fn, frame
+    return fn
 end
 
 function vrmod.utils.TraceHand(ply, hand, fromPalm)

@@ -44,11 +44,14 @@ Linux: OpenGL share + V-axis invert in submit bounds math. Windows: D3D share pa
 
 **Still open (Lua-only, no backend):**
 
-1. Default / document **`vrmod_renderoffset 1`** for new HMDs.  
-2. Residual right-eye: **`vrmod_fovscale_x` / `vrmod_fovscale_y`** + **restart VR** (fovscale not in live path).  
-3. Optionally: re-run `ComputeDisplayParams` + `ApplySubmitBounds` when FOV scales change (session soft-refresh).  
-4. When auto-offset off, avoid fixed factors — derive from projection Width/Height always.  
-5. Source `RenderView` is still symmetric FOV+aspect, not full 4×4 asymmetric proj → residual edge error may remain even when OpenVR data is correct.
+1. Residual right-eye: **`vrmod_fovscale_x` / `vrmod_fovscale_y`** if soft-refresh misses edge cases.  
+2. Source `RenderView` is still symmetric FOV+aspect, not full 4×4 asymmetric proj → residual edge error may remain even when OpenVR data is correct (needs module — Commander only).
+
+**Closed (Lua, this tree):**
+
+1. Default **`vrmod_renderoffset 1`**.  
+2. Soft-refresh FOV/viewscale + submit bounds mid-session.  
+3. Submit UV factors **always** from live projection Width/Height (no fixed 0.25/0.5).
 
 ---
 

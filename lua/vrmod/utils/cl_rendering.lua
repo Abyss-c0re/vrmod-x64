@@ -35,25 +35,40 @@ function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
     return vmargin, hoffset
 end
 
+--- UV submit bounds for the shared stereo RT (Cube: crop from *live* projection).
+--- Never use Q2-era fixed 0.25/0.5 — those mis-crop asymmetric FOV HMDs.
+--- renderOffset=true  → apply OpenVR per-eye Horizontal/VerticalOffset
+--- renderOffset=false → manual H/V sliders only; factors still from projection Width/Height
 function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)
     local isWindows = system.IsWindows()
-    local hFactor, vFactor = 0, 0
-    if renderOffset then
-        local wAvg = (leftCalc.Width + rightCalc.Width) * 0.5
-        local hAvg = (leftCalc.Height + rightCalc.Height) * 0.5
-        hFactor = 0.5 / wAvg
-        vFactor = 1.0 / hAvg
-    else
-        hFactor = 0.25
-        vFactor = 0.5
-    end
+    leftCalc = leftCalc or {}
+    rightCalc = rightCalc or {}
+    scaleFactor = scaleFactor or 1
 
-    hFactor = hFactor * scaleFactor
-    vFactor = vFactor * scaleFactor
+    local wL = tonumber(leftCalc.Width) or 1
+    local wR = tonumber(rightCalc.Width) or 1
+    local hL = tonumber(leftCalc.Height) or 1
+    local hR = tonumber(rightCalc.Height) or 1
+    local wAvg = math.max(0.05, (wL + wR) * 0.5)
+    local hAvg = math.max(0.05, (hL + hR) * 0.5)
+
+    -- Always derive UV scale from live projection extent (not fixed Q2 constants)
+    local hFactor = (0.5 / wAvg) * scaleFactor
+    local vFactor = (1.0 / hAvg) * scaleFactor
+
+    -- Auto-offset: fold asymmetric FOV into crop. Manual: only creator H/V sliders.
+    local useAuto = renderOffset and true or false
+    local lo = useAuto and (tonumber(leftCalc.HorizontalOffset) or 0) or 0
+    local ro = useAuto and (tonumber(rightCalc.HorizontalOffset) or 0) or 0
+    local lv = useAuto and (tonumber(leftCalc.VerticalOffset) or 0) or 0
+    local rv = useAuto and (tonumber(rightCalc.VerticalOffset) or 0) or 0
+    hOffset = tonumber(hOffset) or 0
+    vOffset = tonumber(vOffset) or 0
+
     local TEXTURE_INSET = 0.003
     local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
-    local function calcVMinMax(offset)
-        local adj = offset * vFactor
+    local function calcVMinMax(eyeVOffset)
+        local adj = (eyeVOffset + vOffset) * vFactor
         if isWindows then
             return (vMin + TEXTURE_INSET) - adj, (vMax - TEXTURE_INSET) - adj
         else
@@ -61,14 +76,13 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
         end
     end
 
-    -- U: outer only
-    local uMinLeft = 0.0 + TEXTURE_INSET + (leftCalc.HorizontalOffset + hOffset) * hFactor
-    local uMaxLeft = 0.5 + (leftCalc.HorizontalOffset + hOffset) * hFactor -- inner untouched
-    local uMinRight = 0.5 + (rightCalc.HorizontalOffset + hOffset) * hFactor -- inner untouched
-    local uMaxRight = 1.0 - TEXTURE_INSET + (rightCalc.HorizontalOffset + hOffset) * hFactor
-    -- V: symmetric top/bottom
-    local vMinLeft, vMaxLeft = calcVMinMax(leftCalc.VerticalOffset + vOffset)
-    local vMinRight, vMaxRight = calcVMinMax(rightCalc.VerticalOffset + vOffset)
+    -- U: outer only (inner seam at 0.5 untouched)
+    local uMinLeft = 0.0 + TEXTURE_INSET + (lo + hOffset) * hFactor
+    local uMaxLeft = 0.5 + (lo + hOffset) * hFactor
+    local uMinRight = 0.5 + (ro + hOffset) * hFactor
+    local uMaxRight = 1.0 - TEXTURE_INSET + (ro + hOffset) * hFactor
+    local vMinLeft, vMaxLeft = calcVMinMax(lv)
+    local vMinRight, vMaxRight = calcVMinMax(rv)
     return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
 end
 
