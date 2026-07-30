@@ -332,6 +332,54 @@ if CLIENT then
 		end
 	end
 
+	-- ALWAYS clone Vectors — never store the same Vector in two poses.
+	-- EmptyPose(origin) for both hands with shared `origin` glued L/R forever.
+	local function EmptyPose(pos)
+		local p
+		if pos then
+			p = Vector(pos.x or 0, pos.y or 0, pos.z or 0)
+		else
+			p = Vector()
+		end
+		return {
+			pos = p,
+			ang = Angle(),
+			vel = Vector(),
+			angvel = Vector()
+		}
+	end
+
+	--- Ensure two pose tables never share Vector/Angle identity (runtime heal)
+	local function EnsurePoseIndependence()
+		local tr = g_VR.tracking
+		if not tr then return end
+		local L, R, H = tr.pose_lefthand, tr.pose_righthand, tr.hmd
+		if L and R and L.pos and R.pos and L.pos == R.pos then
+			R.pos = Vector(R.pos.x, R.pos.y, R.pos.z)
+			if vrmod.logger then
+				vrmod.logger.Warn("Healed glued hand pos identity (L==R Vector)")
+			end
+		end
+		if L and R and L.ang and R.ang and L.ang == R.ang then
+			R.ang = Angle(R.ang.p, R.ang.y, R.ang.r)
+		end
+		if H and L and H.pos and L.pos and H.pos == L.pos then
+			L.pos = Vector(L.pos.x, L.pos.y, L.pos.z)
+		end
+		if H and R and H.pos and R.pos and H.pos == R.pos then
+			R.pos = Vector(R.pos.x, R.pos.y, R.pos.z)
+		end
+		local raw = g_VR.rawTracking
+		if not raw then return end
+		local rL, rR = raw.pose_lefthand, raw.pose_righthand
+		if rL and rR and rL.pos and rR.pos and rL.pos == rR.pos then
+			rR.pos = Vector(rR.pos.x, rR.pos.y, rR.pos.z)
+		end
+		if rL and rR and rL.ang and rR.ang and rL.ang == rR.ang then
+			rR.ang = Angle(rR.ang.p, rR.ang.y, rR.ang.r)
+		end
+	end
+
 	local function UpdateTracking()
 		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local maxPosDeltaSqr = 100
@@ -405,6 +453,7 @@ if CLIENT then
 
 		-- Reset public tracking from raw every frame, then run early modifiers
 		CopyRawIntoTracking()
+		EnsurePoseIndependence()
 		g_VR.sixPoints = (g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot) and true or false
 		-- Early modifiers (seated offset, crouch, hand simulation…) may edit g_VR.tracking
 		hook.Call("VRMod_Tracking")
