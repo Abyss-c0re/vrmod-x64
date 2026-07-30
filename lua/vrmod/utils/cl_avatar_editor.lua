@@ -166,22 +166,44 @@ function Session:_cacheBones()
 	self.bones.chest = self.bones.spine2 or self.bones.spine4 or self.bones.spine1 or self.bones.spine
 end
 
---- Measure arm chain lengths from bind pose (puppeteer CreatePuppet pattern)
+--- Measure arm/leg chain lengths from bind pose (puppeteer CreatePuppet pattern)
 function Session:_measureArms()
 	local e = self.ent
 	local b = self.bones
 	self.upperArmLen = 12
 	self.forearmLen = 12
-	if not (b.rUpper and b.rFore and b.rHand) then return end
+	self.upperLegLen = 16
+	self.lowerLegLen = 16
 	e:SetupBones()
-	local mu = e:GetBoneMatrix(b.rUpper)
-	local mf = e:GetBoneMatrix(b.rFore)
-	local mh = e:GetBoneMatrix(b.rHand)
-	if mu and mf and mh then
-		local u, f, h = mu:GetTranslation(), mf:GetTranslation(), mh:GetTranslation()
-		self.upperArmLen = math.max(4, u:Distance(f))
-		self.forearmLen = math.max(4, f:Distance(h))
+	if b.rUpper and b.rFore and b.rHand then
+		local mu, mf, mh = e:GetBoneMatrix(b.rUpper), e:GetBoneMatrix(b.rFore), e:GetBoneMatrix(b.rHand)
+		if mu and mf and mh then
+			local u, f, h = mu:GetTranslation(), mf:GetTranslation(), mh:GetTranslation()
+			self.upperArmLen = math.max(4, u:Distance(f))
+			self.forearmLen = math.max(4, f:Distance(h))
+		end
 	end
+	if b.lThigh and b.lCalf and b.lFoot then
+		local mt, mc, mf = e:GetBoneMatrix(b.lThigh), e:GetBoneMatrix(b.lCalf), e:GetBoneMatrix(b.lFoot)
+		if mt and mc and mf then
+			local t, c, f = mt:GetTranslation(), mc:GetTranslation(), mf:GetTranslation()
+			self.upperLegLen = math.max(4, t:Distance(c))
+			self.lowerLegLen = math.max(4, c:Distance(f))
+		end
+	end
+end
+
+--- FBT live when waist + both feet exist on tracking (or g_VR.sixPoints / fbtActive)
+function Session:_fbtLive()
+	if self.forceFBT == false then return false end
+	if self.forceFBT == true then return true end
+	if g_VR.sixPoints then return true end
+	local sid = LocalPlayer():SteamID()
+	if g_VR.fbtActive and g_VR.fbtActive[sid] then return true end
+	local tr = g_VR.tracking
+	if not tr then return false end
+	local w, lf, rf = tr.pose_waist, tr.pose_leftfoot, tr.pose_rightfoot
+	return w and w.pos and lf and lf.pos and rf and rf.pos
 end
 
 function Session:_playerFrame()

@@ -35,17 +35,30 @@ vrmod.avatar.Get(id)
 vrmod.avatar.IsOpen(id)
 
 -- Presets
-vrmod.avatar.OpenHeightCal("heightmenu")  -- mirror twin + hands/head
-vrmod.avatar.OpenFBTCal()                 -- world idle + tracker boxes
+vrmod.avatar.OpenHeightCal("heightmenu")  -- mirror twin; FBT auto if sixPoints
+vrmod.avatar.OpenFBTCal()                 -- world full-body copy + tracker boxes
 ```
 
 ## Modes
 
 | Mode | Placement | Facing | Use |
 |------|-----------|--------|-----|
-| `mirror` | Ahead of HMD | Toward player (L/R flip) | Height cal twin |
+| `mirror` | Ahead of HMD | Toward player (L/R flip) | Height / mirror twin |
 | `clone` | Ahead of HMD | Same as player | Third-person preview |
-| `world` | Under HMD feet | HMD yaw | FBT calibration pose |
+| `world` | Under HMD feet | HMD yaw | FBT cal / underfoot twin |
+
+## FBT (when on)
+
+The Cube uses **one util**. If `g_VR.sixPoints` or waist+feet trackers live:
+
+| 3-point | FBT |
+|---------|-----|
+| Pelvis ≈ HMD − offset | Pelvis = **waist** tracker |
+| Arms: 2-bone IK → hands | Same |
+| Legs: idle bind | Legs: **2-bone IK → feet** |
+| No tracker boxes | Optional waist/feet boxes |
+
+Algo lineage: Pescorr puppeteer (2-bone IK) — see `docs/CREDITS.md`.
 
 ## Consumers
 
@@ -56,7 +69,7 @@ vrmod.avatar.OpenFBTCal()                 -- world idle + tracker boxes
 
 | Tracking | Bone(s) |
 |----------|---------|
-| `hmd` | Head1 |
-| `pose_lefthand` / `righthand` | L/R Hand (+ upper arm aim) |
-| `pose_waist` | Pelvis |
-| `pose_leftfoot` / `rightfoot` | L/R Foot (+ thigh/calf aim) |
+| `hmd` | Head1 (+ spine/pelvis estimate) |
+| `pose_lefthand` / `righthand` | Full arm chain (IK) |
+| `pose_waist` | Pelvis (FBT) |
+| `pose_leftfoot` / `rightfoot` | Full leg chain (FBT IK) |
