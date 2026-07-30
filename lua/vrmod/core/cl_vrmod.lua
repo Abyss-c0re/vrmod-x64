@@ -441,10 +441,9 @@ if CLIENT then
 			vrmod.utils.CollisionsPreCheck(left.pos, right.pos)
 		end
 
-		-- Zero-arg: mutates g_VR.tracking.pose_*.pos Vectors in place (AddPosInPlace).
-		-- Also accepts explicit refs; same Vector identity as tracking.pos is required for
-		-- zero-copy gun readers (g_VR.tracking.pose_righthand.pos).
-		vrmod.utils.UpdateHandCollisions(left.pos, left.ang, right.pos, right.ang)
+		-- Zero-arg: mutates g_VR.tracking.pose_*.pos in place (Cube SoT).
+		-- Passing explicit Vector copies would break identity for gun readers.
+		vrmod.utils.UpdateHandCollisions()
 
 		hook.Call("VRMod_TrackingModified", nil, g_VR.tracking, g_VR.rawTracking)
 

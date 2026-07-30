@@ -923,6 +923,12 @@ local handWall = {
     }
 }
 
+-- If lastFree is farther than this from desired, path-to-desired can cross solid
+-- (doors, corners, map loads) and permanently "tie" the hand to the old free sample.
+local MAX_LASTFREE_DIST_SQR = 28 * 28
+-- Never pull the hand more than this from device intent (anti-tether)
+local MAX_HAND_CORRECTION = 18
+
 --- Hull-sweep from last free sample → desired sample (same idea as
 --- vrmod_climbing ResolveCameraOriginCollision). Returns safeSample, clipped, normal.
 --- safeSample is always a Vector (never nil) when desiredSample is valid.
@@ -957,6 +963,19 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		return not (t.StartSolid or t.AllSolid)
 	end
 
+	-- Drop stale free anchors — they are the "hands tied" bug (sweep from old room
+	-- always hits something between lastFree and the controller).
+	if st.hasFree and IsVec(st.lastFree) then
+		if st.lastFree:DistToSqr(desiredSample) > MAX_LASTFREE_DIST_SQR or not isFree(st.lastFree) then
+			st.hasFree = false
+		end
+	end
+
+	-- Desired free + no valid continuous lastFree → pure tracking (device energy wins)
+	if isFree(desiredSample) and not st.hasFree then
+		return desiredSample, false, nil
+	end
+
 	-- Prefer last free → desired sweep (climbing-style). If lastFree is itself
 	-- buried (player teleported / map change), drop it and depenetrate from desired.
 	local startPos = desiredSample
@@ -964,6 +983,21 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		startPos = st.lastFree
 	else
 		st.hasFree = false
+	end
+
+	-- Desired free, lastFree nearby: if short path is clear, unlock fully
+	if isFree(desiredSample) and startPos == st.lastFree then
+		local clear = util.TraceHull({
+			start = startPos,
+			endpos = desiredSample,
+			mins = mins,
+			maxs = maxs,
+			mask = HAND_MASK,
+			filter = filter
+		})
+		if not clear.Hit and not clear.StartSolid and not clear.AllSolid then
+			return desiredSample, false, nil
+		end
 	end
 
 	local tr = util.TraceHull({
