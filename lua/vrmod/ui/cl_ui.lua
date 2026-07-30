@@ -72,6 +72,22 @@ if CLIENT then
 		return menus[uid] ~= nil
 	end
 
+	--- Hand-local top-left so the panel CENTER sits near the wrist (not a far corner).
+	-- 3D2D: +X = ang:Right(), +Y cursor = -ang:Forward() (see laser hit test).
+	function VRUtilHandMenuPose(w, h, scale, centerLocal, panelAng)
+		w = w or 512
+		h = h or 512
+		scale = scale or 0.025
+		panelAng = panelAng or Angle(0, -90, 55)
+		-- Palm-forward center (close, readable)
+		centerLocal = centerLocal or Vector(2.5, 3.5, 4)
+		local halfW = w * scale * 0.5
+		local halfH = h * scale * 0.5
+		-- top-left = center - Right*halfW + Forward*halfH  (Y-down = -Forward)
+		local pos = centerLocal - panelAng:Right() * halfW + panelAng:Forward() * halfH
+		return pos, panelAng, scale
+	end
+
 	function VRUtilRenderMenuSystem()
 		if not menusExist or #menuOrder == 0 then
 			g_VR.menuFocus = false
@@ -103,12 +119,13 @@ if CLIENT then
 				or string.StartWith(uid, "cubeui_")
 			if not keepScale then
 				if v.attachment then
-					if not v.scale or v.scale < 0.03 then v.scale = 0.035 end
+					if not v.scale or v.scale < 0.03 then v.scale = 0.04 end
 				else
 					v.scale = 0.02
 				end
 			elseif not v.scale or v.scale < 0.03 then
-				v.scale = (uid == "cubeui_main") and 0.036 or 0.04
+				-- heightmenu / cube_settings SoT scale
+				v.scale = 0.04
 			end
 			if v.attachment then
 				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand

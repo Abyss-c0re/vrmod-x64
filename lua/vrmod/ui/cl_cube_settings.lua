@@ -1,26 +1,49 @@
 if SERVER then return end
 -- =============================================================================
--- Cube Settings — interactive cube on one hand VRMod menu (cubeui_main)
--- Click/close must work: laser lock panel · X button · secondary · rows
+-- Cube Settings — heightmenu-proven VRMod path (CLICKABLE)
+--
+-- SoT: VRUtilMenuOpen left hand + PreRender paint + VRMod_Input hit boxes
+-- Same contract as cl_heightadjust (that one works). No multi-plane cube.
 -- =============================================================================
 
 vrmod = vrmod or {}
 
+local UID = "cube_settings"
 local open = false
 local category = 1
+local liveScale = 0.025
+local livePos, liveAng = Vector(2.5, 3, 4), Angle(0, -90, 55)
 
-local function cv(name)
-	return GetConVar(name)
+local W, H = 512, 560
+local function WristPose()
+	-- Recompute at open (cl_ui may load after this file)
+	if isfunction(VRUtilHandMenuPose) then
+		return VRUtilHandMenuPose(W, H, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
+	end
+	return Vector(2.5, 3, 4), Angle(0, -90, 55), 0.025
 end
 
+local Theme = {
+	bg = Color(12, 6, 10, 250),
+	header = Color(196, 30, 58, 255),
+	headerDim = Color(80, 12, 24, 255),
+	row = Color(40, 14, 20, 245),
+	rowHot = Color(90, 22, 36, 255),
+	text = Color(255, 240, 244, 255),
+	muted = Color(200, 150, 165, 230),
+	hot = Color(255, 70, 100, 255),
+	ok = Color(90, 220, 150, 255),
+	off = Color(70, 20, 30, 255),
+}
+
 local function getBool(name, default)
-	local c = cv(name)
+	local c = GetConVar(name)
 	if c then return c:GetBool() end
 	return default
 end
 
 local function getFloat(name, default)
-	local c = cv(name)
+	local c = GetConVar(name)
 	if c then return c:GetFloat() end
 	return default
 end
@@ -35,7 +58,7 @@ end
 
 local categories = {
 	{
-		id = "vision", title = "Vision", path = "cube_gpu", digit = 2, energy = 0.85,
+		title = "Vision",
 		rows = {
 			{ kind = "slider", label = "Supersample", cvar = "vrmod_supersample", min = 0.5, max = 2.0, decimals = 2 },
 			{ kind = "slider", label = "Scale factor", cvar = "vrmod_scalefactor", min = 0.05, max = 4.0, decimals = 2 },
@@ -46,49 +69,47 @@ local categories = {
 			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },
 			{ kind = "bool", label = "Swap eyes", cvar = "vrmod_swap_eyes" },
 			{ kind = "action", label = "Border calibrate", cmd = "vrmod_border_calibrate" },
-			{ kind = "action", label = "Restart Experience", cmd = "vrmod_experience_reset" },
 		},
 	},
 	{
-		id = "controls", title = "Controls", path = "inject_hybrid", digit = 1, energy = 0.7,
+		title = "Controls",
 		rows = {
 			{ kind = "bool", label = "Smooth turning", cvar = "vrmod_smoothturn" },
 			{ kind = "slider", label = "Turn rate", cvar = "vrmod_smoothturnrate", min = 1, max = 1000, decimals = 0 },
 			{ kind = "bool", label = "Teleport", cvar = "vrmod_allow_teleport_client" },
-			{ kind = "bool", label = "Teleport left hand", cvar = "vrmod_teleport_use_left" },
+			{ kind = "bool", label = "Teleport L hand", cvar = "vrmod_teleport_use_left" },
 			{ kind = "bool", label = "Floating hands", cvar = "vrmod_floatinghands" },
 			{ kind = "bool", label = "Laser pointer", cvar = "vrmod_laserpointer" },
 			{ kind = "action", label = "Edit actions", cmd = "vrmod_actioneditor" },
 		},
 	},
 	{
-		id = "posture", title = "Posture", path = "hud_line", digit = 0, energy = 0.65,
+		title = "Posture",
 		rows = {
 			{ kind = "bool", label = "Height menu", cvar = "vrmod_heightmenu" },
-			{ kind = "bool", label = "Seated offset", cvar = "vrmod_seated" },
-			{ kind = "action", label = "Open height / mirror", action = function()
+			{ kind = "bool", label = "Seated", cvar = "vrmod_seated" },
+			{ kind = "action", label = "Open height", action = function()
 				if VRUtilOpenHeightMenu then VRUtilOpenHeightMenu() end
 			end },
-			{ kind = "action", label = "Auto scale height", action = function()
+			{ kind = "action", label = "Auto height", action = function()
 				if vrmod.AutoScaleHeight then vrmod.AutoScaleHeight() end
 			end },
-			{ kind = "action", label = "Auto seated offset", action = function()
+			{ kind = "action", label = "Auto seated", action = function()
 				if vrmod.AutoSeatedOffset then vrmod.AutoSeatedOffset() end
 			end },
 		},
 	},
 	{
-		id = "world", title = "World", path = "wivrn", digit = 4, energy = 0.6,
+		title = "World",
 		rows = {
-			{ kind = "bool", label = "Climbing replace", cvar = "vrmod_climbing" },
-			{ kind = "bool", label = "Door replace", cvar = "vrmod_doors" },
-			{ kind = "bool", label = "Autostart VR", cvar = "vrmod_autostart" },
+			{ kind = "bool", label = "Climbing", cvar = "vrmod_climbing" },
+			{ kind = "bool", label = "Doors", cvar = "vrmod_doors" },
+			{ kind = "bool", label = "Autostart", cvar = "vrmod_autostart" },
 			{ kind = "action", label = "UI reset", cmd = "vrmod_vgui_reset" },
-			{ kind = "action", label = "Close cube", action = function() vrmod.CubeSettings_Close() end },
 		},
 	},
 	{
-		id = "session", title = "Session", path = "gpu_unity", digit = 9, energy = 0.95,
+		title = "Session",
 		rows = {
 			{ kind = "action", label = "Restart VR", action = function()
 				vrmod.CubeSettings_Close()
@@ -101,115 +122,211 @@ local categories = {
 				vrmod.CubeSettings_Close()
 				RunConsoleCommand("vrmod_exit")
 			end },
-			{ kind = "action", label = "Desktop Derma", action = function()
+			{ kind = "action", label = "CLOSE", action = function()
 				vrmod.CubeSettings_Close()
-				if VRUtilOpenMenu then VRUtilOpenMenu() end
 			end },
-		},
-	},
-	{
-		id = "unity", title = "UNITY", path = "glyph_field", digit = 3, energy = 1.0,
-		rows = {
-			{ kind = "action", label = "cube SoT · law d2", action = function() end },
-			{ kind = "action", label = "helmet=HUD · host=GPU", action = function() end },
-			{ kind = "action", label = "Close", action = function() vrmod.CubeSettings_Close() end },
 		},
 	},
 }
 
-local ROW_H = 42
-local PAD = 12
-local ROW0 = 8
+-- Hit boxes rebuilt every paint (heightmenu style)
+local buttons = {}
 
-local function text(s, f, x, y, c, ax, ay)
-	if vrmod.cubeui and vrmod.cubeui.Text then
-		vrmod.cubeui.Text(s, f, x, y, c, ax, ay)
-	else
-		draw.SimpleText(tostring(s or ""), f or "DermaDefault", x, y, c or color_white, ax or 0, ay or 0)
+local HEADER = 56
+local TAB_H = 40
+local PAD = 16
+local ROW_H = 48
+
+local function rebuildButtons()
+	buttons = {}
+	-- Close X
+	buttons[#buttons + 1] = {
+		x = W - 56, y = 8, w = 44, h = 40,
+		kind = "close",
+	}
+	-- Tabs
+	local n = #categories
+	local tabW = (W - PAD * 2) / n
+	for i = 1, n do
+		buttons[#buttons + 1] = {
+			x = PAD + (i - 1) * tabW,
+			y = HEADER,
+			w = tabW - 4,
+			h = TAB_H,
+			kind = "tab",
+			index = i,
+		}
+	end
+	-- Rows
+	local cat = categories[category]
+	if not cat then return end
+	local y0 = HEADER + TAB_H + 16
+	for i, row in ipairs(cat.rows) do
+		local y = y0 + (i - 1) * (ROW_H + 6)
+		if y + ROW_H > H - 40 then break end
+		buttons[#buttons + 1] = {
+			x = PAD, y = y, w = W - PAD * 2, h = ROW_H,
+			kind = "row",
+			index = i,
+			row = row,
+		}
 	end
 end
 
-local function paintContent(w, h, focused, lx, ly)
-	local cat = categories[category]
-	if not cat then return end
-	local T = (vrmod.cubeui and vrmod.cubeui.Theme) or {}
-	local muted = T.muted or Color(190, 150, 165)
-	local col = T.text or Color(255, 240, 244)
-	local hot = T.hot or Color(255, 90, 120)
-	local ok = T.ok or Color(90, 220, 150)
-	local dim = Color(55, 14, 24, 250)
+local function paint()
+	if not open or not isfunction(VRUtilMenuRenderStart) then return end
+	if not (g_VR.menus and g_VR.menus[UID]) then return end
 
-	text(cat.title .. " settings", "DermaDefaultBold", PAD, 4, col)
-	text("trigger rows · laser lock required", "DermaDefault", PAD, 22, muted)
+	local m = g_VR.menus[UID]
+	m.scale = liveScale
+	m.pos = livePos
+	m.ang = liveAng
+	m.cubeMenu = true
+	m.attachment = true
 
-	for i, row in ipairs(cat.rows) do
-		local y = ROW0 + 36 + (i - 1) * (ROW_H + 4)
-		if y > h - 20 then break end
-		local hovered = focused and lx >= PAD and lx <= w - PAD and ly >= y and ly < y + ROW_H
-		surface.SetDrawColor(hovered and 80 or 32, hovered and 20 or 12, hovered and 30 or 18, 245)
-		surface.DrawRect(PAD, y, w - PAD * 2, ROW_H)
-		if hovered then
-			surface.SetDrawColor(hot)
-			surface.DrawRect(PAD, y, 4, ROW_H)
+	local focused = (g_VR.menuFocus == UID)
+	local mx = g_VR.menuCursorX or -1
+	local my = g_VR.menuCursorY or -1
+
+	rebuildButtons()
+
+	pcall(function()
+		VRUtilMenuRenderStart(UID)
+
+		surface.SetDrawColor(Theme.bg)
+		surface.DrawRect(0, 0, W, H)
+		surface.SetDrawColor(Theme.headerDim)
+		surface.DrawRect(0, 0, W, HEADER)
+		surface.SetDrawColor(Theme.header)
+		surface.DrawRect(0, HEADER - 4, W, 4)
+
+		draw.SimpleText("CUBE", "DermaLarge", PAD, 12, Theme.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		draw.SimpleText(focused and "LASER LOCK · trigger" or "point laser here", "DermaDefault", PAD, 36, focused and Theme.ok or Theme.muted)
+
+		-- Close
+		local cx = W - 56
+		local closeHot = focused and mx >= cx and mx <= cx + 44 and my >= 8 and my <= 48
+		surface.SetDrawColor(closeHot and Theme.hot or Theme.header)
+		surface.DrawRect(cx, 8, 44, 40)
+		draw.SimpleText("X", "DermaLarge", cx + 22, 28, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+		-- Tabs
+		local n = #categories
+		local tabW = (W - PAD * 2) / n
+		for i, cat in ipairs(categories) do
+			local x = PAD + (i - 1) * tabW
+			local hot = focused and mx >= x and mx < x + tabW - 4 and my >= HEADER and my < HEADER + TAB_H
+			local on = (i == category)
+			surface.SetDrawColor(on and Theme.header or (hot and Theme.rowHot or Theme.row))
+			surface.DrawRect(x, HEADER, tabW - 4, TAB_H)
+			draw.SimpleText(cat.title, "DermaDefaultBold", x + (tabW - 4) * 0.5, HEADER + TAB_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
-		text(row.label, "DermaDefaultBold", PAD + 12, y + 12, col)
 
-		if row.kind == "bool" then
-			local on = getBool(row.cvar, false)
-			local bx = w - PAD - 48
-			surface.SetDrawColor(on and ok or dim)
-			surface.DrawRect(bx, y + 8, 40, 26)
-			text(on and "ON" or "OFF", "DermaDefault", bx + 20, y + 21, col, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-		elseif row.kind == "slider" then
-			local val = getFloat(row.cvar, row.min or 0)
-			local t = 0
-			if row.max and row.min and row.max > row.min then
-				t = math.Clamp((val - row.min) / (row.max - row.min), 0, 1)
+		local cat = categories[category]
+		if cat then
+			for i, row in ipairs(cat.rows) do
+				local y = HEADER + TAB_H + 16 + (i - 1) * (ROW_H + 6)
+				if y + ROW_H > H - 40 then break end
+				local hot = focused and mx >= PAD and mx <= W - PAD and my >= y and my < y + ROW_H
+				surface.SetDrawColor(hot and Theme.rowHot or Theme.row)
+				surface.DrawRect(PAD, y, W - PAD * 2, ROW_H)
+				if hot then
+					surface.SetDrawColor(Theme.hot)
+					surface.DrawRect(PAD, y, 5, ROW_H)
+				end
+				draw.SimpleText(row.label, "DermaDefaultBold", PAD + 14, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+
+				if row.kind == "bool" then
+					local on = getBool(row.cvar, false)
+					local bx = W - PAD - 56
+					surface.SetDrawColor(on and Theme.ok or Theme.off)
+					surface.DrawRect(bx, y + 10, 44, 28)
+					draw.SimpleText(on and "ON" or "OFF", "DermaDefaultBold", bx + 22, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				elseif row.kind == "slider" then
+					local val = getFloat(row.cvar, row.min or 0)
+					local t = 0
+					if row.max and row.min and row.max > row.min then
+						t = math.Clamp((val - row.min) / (row.max - row.min), 0, 1)
+					end
+					local x0, x1 = PAD + 160, W - PAD - 14
+					local ty = y + ROW_H * 0.5
+					surface.SetDrawColor(Theme.headerDim)
+					surface.DrawRect(x0, ty - 4, x1 - x0, 8)
+					surface.SetDrawColor(Theme.header)
+					surface.DrawRect(x0, ty - 4, (x1 - x0) * t, 8)
+					surface.SetDrawColor(Theme.hot)
+					surface.DrawRect(x0 + (x1 - x0) * t - 6, ty - 12, 12, 24)
+					draw.SimpleText(string.format("%." .. (row.decimals or 2) .. "f", val), "DermaDefault", x0 - 8, ty, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+				elseif row.kind == "action" then
+					draw.SimpleText("▸", "DermaLarge", W - PAD - 24, y + ROW_H * 0.5, Theme.hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				end
 			end
-			local x0, x1 = PAD + 150, w - PAD - 12
-			local ty = y + ROW_H * 0.5
-			surface.SetDrawColor(dim)
-			surface.DrawRect(x0, ty - 3, x1 - x0, 6)
-			surface.SetDrawColor(hot)
-			surface.DrawRect(x0, ty - 3, (x1 - x0) * t, 6)
-			surface.DrawRect(x0 + (x1 - x0) * t - 4, ty - 8, 8, 16)
-			text(string.format("%." .. (row.decimals or 2) .. "f", val), "DermaDefault", x0 - 6, ty, muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
-		elseif row.kind == "action" then
-			text("▸", "DermaDefaultBold", w - PAD - 18, y + ROW_H * 0.5, hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
-	end
+
+		draw.SimpleText("secondary = close", "DermaDefault", W * 0.5, H - 20, Theme.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+		if focused and mx >= 0 and my >= 0 then
+			surface.SetDrawColor(Theme.hot)
+			surface.DrawRect(mx - 2, my - 14, 4, 28)
+			surface.DrawRect(mx - 14, my - 2, 28, 4)
+		end
+
+		VRUtilMenuRenderEnd()
+	end)
 end
 
-local function clickContent(lx, ly)
-	local cat = categories[category]
-	if not cat then return end
-	local w = 640 - 246 -- content panel width inside cubeui
-	for i, row in ipairs(cat.rows) do
-		local y = ROW0 + 36 + (i - 1) * (ROW_H + 4)
-		if ly >= y and ly < y + ROW_H and lx >= PAD and lx <= w - PAD then
-			if row.kind == "slider" then
-				local x0, x1 = PAD + 150, w - PAD - 12
-				local t = math.Clamp((lx - x0) / math.max(1, x1 - x0), 0, 1)
-				local val = (row.min or 0) + t * ((row.max or 1) - (row.min or 0))
-				if row.decimals == 0 then val = math.floor(val + 0.5) end
-				setFloat(row.cvar, val)
-			elseif row.kind == "bool" then
-				setBool(row.cvar, not getBool(row.cvar, false))
-			elseif row.kind == "action" then
-				if row.cmd then RunConsoleCommand(row.cmd)
-				elseif row.action then row.action() end
+local function activateAt(mx, my)
+	for _, btn in ipairs(buttons) do
+		if mx >= btn.x and mx <= btn.x + btn.w and my >= btn.y and my <= btn.y + btn.h then
+			if btn.kind == "close" then
+				vrmod.CubeSettings_Close()
+				return
+			elseif btn.kind == "tab" then
+				category = btn.index
+				paint()
+				return
+			elseif btn.kind == "row" and btn.row then
+				local row = btn.row
+				if row.kind == "bool" then
+					setBool(row.cvar, not getBool(row.cvar, false))
+				elseif row.kind == "slider" then
+					local x0, x1 = PAD + 160, W - PAD - 14
+					local t = math.Clamp((mx - x0) / math.max(1, x1 - x0), 0, 1)
+					local val = (row.min or 0) + t * ((row.max or 1) - (row.min or 0))
+					if row.decimals == 0 then val = math.floor(val + 0.5) end
+					setFloat(row.cvar, val)
+				elseif row.kind == "action" then
+					if row.cmd then RunConsoleCommand(row.cmd)
+					elseif row.action then row.action() end
+				end
+				paint()
+				return
 			end
-			return
 		end
 	end
 end
 
 function vrmod.CubeSettings_Close()
-	if not open and not (vrmod.cubeui and vrmod.cubeui.IsOpen and vrmod.cubeui.IsOpen()) then
+	if not open then
+		if isfunction(VRUtilMenuClose) and g_VR and g_VR.menus and g_VR.menus[UID] then
+			if g_VR.menus[UID] then g_VR.menus[UID].closeFunc = nil end
+			VRUtilMenuClose(UID)
+		end
 		return
 	end
 	open = false
-	if vrmod.cubeui and vrmod.cubeui.Close then
+	hook.Remove("PreRender", "cube_settings_paint")
+	hook.Remove("VRMod_Input", "cube_settings_input")
+	hook.Remove("VRMod_Exit", "cube_settings_exit")
+	hook.Remove("VRMod_OpenQuickMenu", "cube_settings_qm")
+	if g_VR and g_VR.menus and g_VR.menus[UID] then
+		g_VR.menus[UID].closeFunc = nil
+	end
+	if isfunction(VRUtilMenuClose) then
+		VRUtilMenuClose(UID)
+	end
+	-- drop fancy cubeui if still open
+	if vrmod.cubeui and vrmod.cubeui.IsOpen and vrmod.cubeui.IsOpen() then
 		vrmod.cubeui.Close()
 	end
 end
@@ -219,62 +336,89 @@ function vrmod.CubeSettings_Open()
 		if VRUtilOpenMenu then VRUtilOpenMenu() end
 		return
 	end
-	if open or (vrmod.cubeui and vrmod.cubeui.IsOpen and vrmod.cubeui.IsOpen()) then
+	if open then
 		vrmod.CubeSettings_Close()
 		return
 	end
-	if not vrmod.cubeui or not vrmod.cubeui.Open then
-		if VRUtilOpenMenu then VRUtilOpenMenu() end
-		return
-	end
+	if not isfunction(VRUtilMenuOpen) then return end
+
+	-- Close competing surfaces
+	if vrmod.cubeui and vrmod.cubeui.Close then pcall(vrmod.cubeui.Close) end
 
 	open = true
 	category = 1
+	livePos, liveAng, liveScale = WristPose()
 
-	local faces = {}
-	for i, cat in ipairs(categories) do
-		faces[i] = {
-			title = cat.title,
-			path = cat.path,
-			digit = cat.digit,
-			energy = cat.energy,
-			paint = function(w, h, focused, lx, ly)
-				if category == i then
-					paintContent(w, h, focused, lx, ly)
-				end
-			end,
-			onSelect = function()
-				category = i
-			end,
-			onClick = function(lx, ly)
-				if category == i then
-					clickContent(lx, ly)
-				end
-			end,
-		}
-	end
-
-	local ok = vrmod.cubeui.Open({
-		faces = faces,
-		active = 1,
-		closeOnSecondary = true,
-		closeOnQuickmenu = true,
-		onFace = function(i)
-			category = i
-		end,
-		onClose = function()
-			open = false
-		end,
-	})
-
-	if not ok then
+	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()
 		open = false
-		if VRUtilOpenMenu then VRUtilOpenMenu() end
+		hook.Remove("PreRender", "cube_settings_paint")
+		hook.Remove("VRMod_Input", "cube_settings_input")
+		hook.Remove("VRMod_OpenQuickMenu", "cube_settings_qm")
+	end)
+
+	if not (g_VR.menus and g_VR.menus[UID]) then
+		open = false
+		return
+	end
+	g_VR.menus[UID].scale = liveScale
+	g_VR.menus[UID].pos = livePos
+	g_VR.menus[UID].ang = liveAng
+	g_VR.menus[UID].cubeMenu = true
+	g_VR.menus[UID].attachment = true
+
+	paint()
+
+	hook.Add("PreRender", "cube_settings_paint", function()
+		if not open then
+			hook.Remove("PreRender", "cube_settings_paint")
+			return
+		end
+		if not (g_VR.menus and g_VR.menus[UID]) then
+			open = false
+			hook.Remove("PreRender", "cube_settings_paint")
+			return
+		end
+		g_VR.menus[UID].scale = liveScale
+		g_VR.menus[UID].pos = livePos
+		g_VR.menus[UID].ang = liveAng
+		g_VR.menus[UID].cubeMenu = true
+		g_VR.menus[UID].attachment = true
+		paint()
+	end)
+
+	-- Exact heightmenu input pattern
+	hook.Add("VRMod_Input", "cube_settings_input", function(action, pressed)
+		if not open then return end
+		if pressed and (action == "boolean_secondaryfire" or action == "boolean_chat") then
+			vrmod.CubeSettings_Close()
+			return
+		end
+		if not pressed then return end
+		if g_VR.menuFocus ~= UID then return end
+		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+	end)
+
+	local openedAt = CurTime()
+	hook.Add("VRMod_OpenQuickMenu", "cube_settings_qm", function()
+		if not open then return end
+		if CurTime() - openedAt < 0.4 then return end
+		timer.Simple(0, function()
+			if open then vrmod.CubeSettings_Close() end
+		end)
+	end)
+
+	hook.Add("VRMod_Exit", "cube_settings_exit", function()
+		vrmod.CubeSettings_Close()
+	end)
+
+	if vrmod.logger then
+		vrmod.logger.Info("[CubeSettings] open hand panel %s (heightmenu path)", UID)
 	end
 end
 
 function vrmod.CubeSettings_IsOpen()
-	return open or (vrmod.cubeui and vrmod.cubeui.IsOpen and vrmod.cubeui.IsOpen())
+	return open
 end
 
 hook.Add("InitPostEntity", "cube_settings_register", function()
@@ -289,8 +433,4 @@ end)
 
 concommand.Add("vrmod_cube_settings", function()
 	vrmod.CubeSettings_Open()
-end)
-
-hook.Add("VRMod_Exit", "cube_settings_exit", function()
-	vrmod.CubeSettings_Close()
 end)

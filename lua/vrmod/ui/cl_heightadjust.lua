@@ -57,17 +57,20 @@ function VRUtilOpenHeightMenu()
 		heightSession = vrmod.avatar.OpenHeightCal("heightmenu")
 	end
 
-	-- Large RT + hand attachment (world size ≈ 512*0.04 = 20u — hit-friendly)
-	local W, H = 512, 600
-	local scale = 0.04
-	-- Left hand: same energy as quickmenu / miscmenu
+	-- Wrist-centered (panel center at palm — not top-left corner far from hand)
+	local W, H = 512, 560
+	local scale = 0.025
+	local handPos, handAng = Vector(2.5, 3, 4), Angle(0, -90, 55)
+	if isfunction(VRUtilHandMenuPose) then
+		handPos, handAng, scale = VRUtilHandMenuPose(W, H, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
+	end
 	VRUtilMenuOpen(
 		"heightmenu",
 		W, H,
 		nil,
 		true, -- attachment = left hand
-		Vector(6, 4, 8),
-		Angle(0, -90, 55),
+		handPos,
+		handAng,
 		scale,
 		true,
 		function()
@@ -77,9 +80,10 @@ function VRUtilOpenHeightMenu()
 		end
 	)
 
-	-- cl_ui forces scale 0.02 for non-heightmenu only — keep ours large
 	if g_VR.menus and g_VR.menus.heightmenu then
 		g_VR.menus.heightmenu.scale = scale
+		g_VR.menus.heightmenu.cubeMenu = true
+		g_VR.menus.heightmenu.attachment = true
 	end
 
 	local buttons, renderControls
@@ -193,7 +197,10 @@ function VRUtilOpenHeightMenu()
 		local menu = g_VR.menus and g_VR.menus.heightmenu
 		if menu then
 			menu.scale = scale
-			menu.attachment = true
+			menu.attachment = true -- never let avatar menuAnchor steal world placement
+			menu.cubeMenu = true
+			menu.pos = handPos
+			menu.ang = handAng
 		end
 	end)
 

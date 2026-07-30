@@ -211,13 +211,16 @@ function Session:_playerFrame()
 	if not hmd or not hmd.pos then return end
 	local yaw = hmd.ang and hmd.ang.yaw or 0
 	local playerYaw = Angle(0, yaw, 0)
+	-- Feet under HMD on playspace floor (seated offset lives in tracking already)
 	local originZ = (g_VR.origin and g_VR.origin.z) or (hmd.pos.z - 66.8)
+	local eyeH = math.max(8, hmd.pos.z - originZ)
 	local playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
-	return hmd, playerFeet, playerYaw, yaw
+	return hmd, playerFeet, playerYaw, yaw, eyeH
 end
 
 function Session:_computeStand(hmd, playerFeet, playerYaw, yaw)
-	local dist = self.distance or 52
+	-- Closer twin so alignment is readable (was 52 — felt "far")
+	local dist = self.distance or 40
 	local mode = self.mode or "mirror"
 	if mode == "world" then
 		return playerFeet, Angle(0, yaw, 0)
@@ -264,10 +267,11 @@ function Session:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 
 	-- === Player-space body (Pescorr puppeteer) ===
 	local headPos = hmdPos
-	local headAng = Angle(hmdAng.p - 90, hmdAng.y, hmdAng.r + 90)
+	-- ValveBiped head bone: less aggressive tilt than p-90/r+90 (was giraffe/yaw skew)
+	local headAng = Angle(math.Clamp(hmdAng.p * 0.35, -35, 35), hmdAng.y, math.Clamp(hmdAng.r * 0.25, -25, 25))
 
-	-- 3-point: pelvis under HMD. FBT: waist tracker is SoT for hips.
-	local pelvisPos = hmdPos - Vector(0, 0, pelvisOff)
+	-- 3-point: pelvis under HMD by live eye-height fraction. FBT: waist SoT.
+	local pelvisPos = Vector(hmdPos.x, hmdPos.y, hmdPos.z - pelvisOff)
 	local pelvisAng = Angle(0, hmdAng.y, 0)
 	local waist = tr.pose_waist
 	if fbt and follow.waist ~= false and waist and waist.pos then
@@ -367,7 +371,7 @@ function Session:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 end
 
 function Session:_applyTracking()
-	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
+	local hmd, playerFeet, playerYaw, yaw, eyeH = self:_playerFrame()
 	if not hmd then return end
 
 	-- Live-upgrade follow when FBT appears mid-session (Cube: one util, more trackers)
@@ -378,9 +382,18 @@ function Session:_applyTracking()
 		self.showTrackers = self.showTrackers or self.showFBTTrackers
 	end
 
+	-- Scale body proportions from eye height (fixes giraffe/stumpy misalignment)
+	eyeH = eyeH or 66.8
+	self.pelvisOffset = math.Clamp(eyeH * 0.42, 18, 42)
+	self.shoulderWidth = math.Clamp(eyeH * 0.12, 5, 14)
+	-- Prefer measured bone lengths; keep as floor
+	if self.upperArmLen and self.upperArmLen > 0 then
+		-- already measured
+	end
+
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
 	self.ent:SetPos(self.standPos)
-	self.ent:SetAngles(self.standAng or Angle())
+	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
@@ -391,10 +404,20 @@ function Session:_applyTracking()
 		self:_applyPuppeteerCopy(hmd, playerFeet, playerYaw)
 	end
 
+	-- Optional world-space menu anchor (next to twin). MUST clear attachment —
+	-- otherwise LocalToWorld treats world coords as hand-local → UI flies away.
 	if self.menuAnchor and g_VR.menus and g_VR.menus[self.menuUid] then
 		local mp, ma = self.menuAnchor(self.standPos, self.standAng, self)
-		if mp then g_VR.menus[self.menuUid].pos = mp end
-		if ma then g_VR.menus[self.menuUid].ang = ma end
+		local menu = g_VR.menus[self.menuUid]
+		if menu and mp then
+			menu.attachment = false
+			ma = ma or Angle(0, (self.standAng and self.standAng.y or 0) + 90, 90)
+			if g_VR.origin and g_VR.originAngle then
+				menu.pos, menu.ang = WorldToLocal(mp, ma, g_VR.origin, g_VR.originAngle)
+			else
+				menu.pos, menu.ang = mp, ma
+			end
+		end
 	end
 end
 
@@ -536,7 +559,7 @@ function vrmod.avatar.OpenHeightCal(menuUid)
 	return vrmod.avatar.Open({
 		id = "height",
 		mode = "mirror",
-		distance = 52,
+		distance = 40,
 		idleOnly = false,
 		forceFBT = nil, -- auto-detect each frame
 		follow = {
@@ -548,11 +571,9 @@ function vrmod.avatar.OpenHeightCal(menuUid)
 		showFBTTrackers = true,
 		pelvisOffset = 30,
 		shoulderWidth = 8,
+		-- Height UI stays on LEFT HAND (do not world-anchor — that made UI fly away)
 		menuUid = menuUid or "heightmenu",
-		menuAnchor = function(standPos, standAng)
-			return standPos + Vector(0, 0, 48) + standAng:Right() * -28,
-				Angle(0, standAng.y + 90, 90)
-		end,
+		menuAnchor = nil,
 	})
 end
 

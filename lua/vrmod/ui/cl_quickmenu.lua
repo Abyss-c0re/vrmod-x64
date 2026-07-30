@@ -40,7 +40,12 @@ function g_VR.MenuOpen()
 
 	--
 	local prevHoveredItem = -2
-	VRUtilMenuOpen("miscmenu", 512, 512, nil, true, Vector(4, 3, 9.5), Angle(0, -90, 60), 0.03, true, function()
+	local qmW, qmH, qmScale = 512, 512, 0.025
+	local qmPos, qmAng = Vector(2.5, 3, 4), Angle(0, -90, 55)
+	if isfunction(VRUtilHandMenuPose) then
+		qmPos, qmAng, qmScale = VRUtilHandMenuPose(qmW, qmH, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
+	end
+	VRUtilMenuOpen("miscmenu", qmW, qmH, nil, true, qmPos, qmAng, qmScale, true, function()
 		hook.Remove("PreRender", "vrutil_hook_renderigm")
 		open = false
 		if items[prevHoveredItem] and g_VR.menuItems and g_VR.menuItems[items[prevHoveredItem].index] then
@@ -48,6 +53,11 @@ function g_VR.MenuOpen()
 			if isfunction(fn) then fn() end
 		end
 	end)
+	if g_VR.menus and g_VR.menus.miscmenu then
+		g_VR.menus.miscmenu.scale = qmScale
+		g_VR.menus.miscmenu.cubeMenu = true
+		g_VR.menus.miscmenu.attachment = true
+	end
 
 	if not (g_VR.menus and g_VR.menus.miscmenu) then
 		open = false
