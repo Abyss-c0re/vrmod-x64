@@ -39,14 +39,15 @@ if CLIENT then
 	local prevFocusPanel = nil
 	UpdateBeamColor(convarValues.vrmod_beam_color)
 	function VRUtilMenuRenderPanel(uid)
-		if not menus[uid] or not menus[uid].panel or not menus[uid].panel:IsValid() then return end
-		render.PushRenderTarget(menus[uid].rt)
+		local menu = menus[uid]
+		if not menu or not menu.rt or not menu.panel or not menu.panel:IsValid() then return end
+		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
 		render.OverrideAlphaWriteEnable(true, true)
 		render.Clear(0, 0, 0, 0, true, true)
 		local oldclip = DisableClipping(false)
 		render.SetWriteDepthToDestAlpha(false)
-		menus[uid].panel:PaintManual()
+		menu.panel:PaintManual()
 		render.SetWriteDepthToDestAlpha(true)
 		DisableClipping(oldclip)
 		render.OverrideAlphaWriteEnable(false)
@@ -55,11 +56,14 @@ if CLIENT then
 	end
 
 	function VRUtilMenuRenderStart(uid)
-		render.PushRenderTarget(menus[uid].rt)
+		local menu = menus[uid]
+		if not menu or not menu.rt then return false end
+		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
 		render.OverrideAlphaWriteEnable(true, true)
 		render.Clear(0, 0, 0, 0, true, true)
 		render.SetWriteDepthToDestAlpha(true)
+		return true
 	end
 
 	function VRUtilMenuRenderEnd()
@@ -114,6 +118,7 @@ if CLIENT then
 			local uid = v.uid or ""
 			local keepScale = v.cubeMenu or v.cubeui
 				or uid == "heightmenu"
+				or uid == "avatar_menu"
 				or uid == "cube_settings"
 				or uid == "cubeui_main"
 				or string.StartWith(uid, "cubeui_")

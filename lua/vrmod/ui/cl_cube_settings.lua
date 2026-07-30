@@ -86,10 +86,11 @@ local categories = {
 	{
 		title = "Posture",
 		rows = {
-			{ kind = "bool", label = "Height menu", cvar = "vrmod_heightmenu" },
+			{ kind = "bool", label = "Avatar menu on start", cvar = "vrmod_heightmenu" },
 			{ kind = "bool", label = "Seated", cvar = "vrmod_seated" },
-			{ kind = "action", label = "Open height", action = function()
-				if VRUtilOpenHeightMenu then VRUtilOpenHeightMenu() end
+			{ kind = "action", label = "Open Avatar", action = function()
+				if vrmod.AvatarMenu_Open then vrmod.AvatarMenu_Open()
+				elseif VRUtilOpenHeightMenu then VRUtilOpenHeightMenu() end
 			end },
 			{ kind = "action", label = "Auto height", action = function()
 				if vrmod.AutoScaleHeight then vrmod.AutoScaleHeight() end
@@ -190,9 +191,8 @@ local function paint()
 
 	rebuildButtons()
 
-	pcall(function()
-		VRUtilMenuRenderStart(UID)
-
+	if not isfunction(VRUtilMenuRenderStart) or VRUtilMenuRenderStart(UID) == false then return end
+	local okP, errP = pcall(function()
 		surface.SetDrawColor(Theme.bg)
 		surface.DrawRect(0, 0, W, H)
 		surface.SetDrawColor(Theme.headerDim)
@@ -270,9 +270,8 @@ local function paint()
 			surface.DrawRect(mx - 2, my - 14, 4, 28)
 			surface.DrawRect(mx - 14, my - 2, 28, 4)
 		end
-
-		VRUtilMenuRenderEnd()
 	end)
+	if isfunction(VRUtilMenuRenderEnd) then VRUtilMenuRenderEnd() end
 end
 
 local function activateAt(mx, my)
