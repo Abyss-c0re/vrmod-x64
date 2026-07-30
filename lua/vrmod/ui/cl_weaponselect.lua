@@ -1,4 +1,5 @@
 -- VRMod Weapon Menu UI with Spawnmenu Icons via ContentIcon Cache
+-- Restored pre-Cube radial (512 / scale 0.025) + minimal nil-safe guards.
 if SERVER then return end
 local lastWeaponClass = nil
 local ICON_SIZE = 44
@@ -37,39 +38,41 @@ surface.CreateFont("vrmod_font_small", {
 	antialias = true
 })
 
-local iconMaterials = {} -- final UnlitGenerics
 local rtCache = {} -- render targets per class
 local wireMat = CreateMaterial("vrmod_wireframe_yellow", "Wireframe", {
 	["$basetexture"] = "models/debug/debugwhite",
 	["$color"] = "[3 3 0]"
 })
 
--- Single reusable ent
-local tempEnt = ClientsideModel(DEFAULT_MODEL, RENDER_GROUP_OPAQUE_ENTITY)
-tempEnt:SetNoDraw(true)
--- Helper to get (or create) an RT
+-- Lazy ClientsideModel — can fail at file load on some maps
+local tempEnt
+local function EnsureTempEnt()
+	if IsValid(tempEnt) then return true end
+	tempEnt = ClientsideModel(DEFAULT_MODEL, RENDER_GROUP_OPAQUE_ENTITY)
+	if not IsValid(tempEnt) then return false end
+	tempEnt:SetNoDraw(true)
+	return true
+end
+
 local function GetIconRT(className)
 	if not rtCache[className] then rtCache[className] = GetRenderTarget("vrmod_rt_" .. className, ICON_SIZE, ICON_SIZE) end
 	return rtCache[className]
 end
 
 function RenderWeaponToMaterial(className)
-	-- 1) Return cached final material
 	if iconMaterials[className] then return iconMaterials[className] end
-	-- 2) Pick a valid world model
 	local wepDef = weapons.GetStored(className)
 	local worldMdl = wepDef and wepDef.WorldModel or ""
 	if worldMdl:find("^models/weapons/c_") then
-		worldMdl = "" -- reject any c_ viewmodel
+		worldMdl = ""
 	end
 
-	local model = worldMdl ~= "" and worldMdl or vrmod.MODEL_OVERRIDES[className] or DEFAULT_MODEL
-	-- 3) Ensure model is loaded
+	local overrides = vrmod.MODEL_OVERRIDES or {}
+	local model = worldMdl ~= "" and worldMdl or overrides[className] or DEFAULT_MODEL
 	util.PrecacheModel(model)
-	-- 4) Grab (or create) our RT
 	local rt = GetIconRT(className)
 	if not rt then return DEFAULT_ICON end
-	-- 5) Reuse our temporary entity
+	if not EnsureTempEnt() then return DEFAULT_ICON end
 	tempEnt:SetModel(model)
 	local mins, maxs = tempEnt:GetRenderBounds()
 	local center = (mins + maxs) * 0.5
@@ -77,7 +80,6 @@ function RenderWeaponToMaterial(className)
 	local radius = size:Length() * 0.5
 	local camPos = center + Vector(radius, radius, radius)
 	local camAng = (center - camPos):Angle()
-	-- 6) Render into the RT
 	render.PushRenderTarget(rt)
 	render.Clear(0, 0, 0, 0, true, true)
 	cam.Start3D(camPos, camAng, 35, 0, 0, ICON_SIZE, ICON_SIZE)
@@ -91,9 +93,9 @@ function RenderWeaponToMaterial(className)
 	render.SuppressEngineLighting(false)
 	cam.End3D()
 	render.PopRenderTarget()
-	-- 7) Create and cache the final UnlitGeneric
 	local mat = CreateMaterial("vrmod_icon_mat_" .. className, "UnlitGeneric", {
 		["$basetexture"] = rt:GetName(),
+		["$color"] = "[10 10 0]",
 		["$vertexcolor"] = 1,
 		["$vertexalpha"] = 1
 	})
@@ -104,7 +106,6 @@ end
 
 local function drawSlice(cx, cy, innerR, outerR, startDeg, endDeg, segCount, col)
 	local poly = {}
-	-- Outer arc points
 	for i = 0, segCount do
 		local frac = i / segCount
 		local ang = math.rad(startDeg + (endDeg - startDeg) * frac)
@@ -114,7 +115,6 @@ local function drawSlice(cx, cy, innerR, outerR, startDeg, endDeg, segCount, col
 		}
 	end
 
-	-- Inner arc points (in reverse)
 	for i = segCount, 0, -1 do
 		local frac = i / segCount
 		local ang = math.rad(startDeg + (endDeg - startDeg) * frac)
@@ -128,58 +128,46 @@ local function drawSlice(cx, cy, innerR, outerR, startDeg, endDeg, segCount, col
 	surface.DrawPoly(poly)
 end
 
-local function DrawIconLayered(x, y, size, material, hovered)
+local function DrawIconLayered(x, y, size, material, repeats, alphaStep, scaleStep)
+	if not material then return end
 	surface.SetMaterial(material)
-	if hovered then
-		surface.SetDrawColor(255, 90, 110, 255)
-	else
-		surface.SetDrawColor(255, 200, 210, 230)
+	for i = 1, repeats do
+		local scale = 1 + (i - 1) * scaleStep
+		local alpha = 255 - (i - 1) * alphaStep
+		surface.SetDrawColor(255, 255, 0, math.max(0, alpha))
+		surface.DrawTexturedRect(x - (size * scale) / 2, y - (size * scale) / 2, size * scale, size * scale)
 	end
-	surface.DrawTexturedRect(x - size / 2, y - size / 2, size, size)
 end
 
--- =============================================
--- SMART AMMO GETTER (only ArcticVR uses custom count)
--- =============================================
 local function GetWeaponAmmo(wep, ply)
 	if not IsValid(wep) then return 0, 0, 0 end
 	local clip = 0
 	local total = 0
 	local alt = 0
-	-- Standard methods first
 	if wep.Clip1 then clip = wep:Clip1() or 0 end
 	local primaryType = wep.GetPrimaryAmmoType and wep:GetPrimaryAmmoType() or -1
 	if primaryType and primaryType > 0 then total = ply:GetAmmoCount(primaryType) or 0 end
 	local secondaryType = wep.GetSecondaryAmmoType and wep:GetSecondaryAmmoType() or -1
 	if secondaryType and secondaryType > 0 then alt = ply:GetAmmoCount(secondaryType) or 0 end
-	-- === ONLY FOR ARCTICVR WEAPONS ===
 	if wep.ArcticVR and clip <= 0 then clip = (wep.LoadedRounds or 0) + (wep.Chambered or 0) end
-	-- Fallback for total if still zero
 	if total <= 0 and wep.Primary and wep.Primary.Ammo then total = ply:GetAmmoCount(wep.Primary.Ammo) or 0 end
 	return clip, total, alt
 end
 
--- Main menu open
 local open = false
--- Engine fonts only — never unregistered Cube* names
-local F_LABEL = "DermaDefaultBold"
-local F_SMALL = "DermaDefault"
-local F_MID = "DermaDefaultBold"
-
 function VRUtilWeaponMenuOpen()
+	if open and not (g_VR.menus and g_VR.menus.weaponmenu) then open = false end
 	if open then return end
-	if not g_VR or not g_VR.active then return end
-	if not isfunction(VRUtilMenuOpen) then return end
+	if not g_VR or not g_VR.active or not isfunction(VRUtilMenuOpen) then return end
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return end
+	local hmd = g_VR.tracking and g_VR.tracking.hmd
+	local rh = g_VR.tracking and g_VR.tracking.pose_righthand
+	if not hmd or not hmd.ang or not rh or not rh.pos or not rh.ang then return end
 
 	open = true
 	local innerClick = false
 	local flatItems = {}
-	local ply = LocalPlayer()
-	if not IsValid(ply) then
-		open = false
-		return
-	end
-
 	for _, wep in ipairs(ply:GetWeapons()) do
 		flatItems[#flatItems + 1] = {
 			wep = wep,
@@ -197,7 +185,10 @@ function VRUtilWeaponMenuOpen()
 
 	local slotList = {}
 	for _, item in ipairs(flatItems) do
-		slotList[item.slot] = slotList[item.slot] or { slot = item.slot, items = {} }
+		slotList[item.slot] = slotList[item.slot] or {
+			slot = item.slot,
+			items = {}
+		}
 		slotList[item.slot].items[#slotList[item.slot].items + 1] = item
 	end
 
@@ -218,186 +209,199 @@ function VRUtilWeaponMenuOpen()
 		alt = -1
 	}
 
-	local W, H = 640, 640
-	local menuScale = 0.036
-	local CX, CY = W * 0.5, H * 0.5
-	local INNER_R, OUTER_R = 78, 185
-
-	-- Safe pose (nil tracking used to crash open → open stuck true)
-	local hmd = g_VR.tracking and g_VR.tracking.hmd
-	local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-	local yaw = (hmd and hmd.ang and hmd.ang.yaw) or 0
-	local tmpAng = Angle(0, yaw - 90, 55)
-	local handPos = (rh and rh.pos) or (hmd and hmd.pos) or Vector()
-	local handAng = (rh and rh.ang) or Angle(0, yaw, 0)
-	local worldPos = handPos + handAng:Forward() * 9 + tmpAng:Right() * -5 + tmpAng:Forward() * -4
-	local origin = g_VR.origin or Vector()
-	local originAng = g_VR.originAngle or Angle()
-	local pos, ang = WorldToLocal(worldPos, tmpAng, origin, originAng)
-
-	local function paintMenu(values)
-		pcall(function()
-			VRUtilMenuRenderStart("weaponmenu")
-			surface.SetDrawColor(12, 6, 10, 250)
-			surface.DrawRect(0, 0, W, H)
-
-			-- rings (rect-based, no DrawPoly dependency)
-			surface.SetDrawColor(22, 10, 16, 240)
-			surface.DrawRect(CX - OUTER_R - 20, CY - OUTER_R - 20, (OUTER_R + 20) * 2, (OUTER_R + 20) * 2)
-			surface.SetDrawColor(196, 30, 58, 255)
-			surface.DrawOutlinedRect(CX - OUTER_R - 20, CY - OUTER_R - 20, (OUTER_R + 20) * 2, (OUTER_R + 20) * 2)
-
-			surface.SetDrawColor(18, 8, 12, 250)
-			surface.DrawRect(CX - INNER_R, CY - INNER_R, INNER_R * 2, INNER_R * 2)
-			surface.SetDrawColor(values.innerClick and 255 or 196, values.innerClick and 70 or 30, values.innerClick and 100 or 58, 255)
-			surface.DrawOutlinedRect(CX - 10, CY - 10, 20, 20)
-
-			if #slots > 0 then
-				local sliceAngle = 360 / #slots
-				for i, slot in ipairs(slots) do
-					local sa, ea = (i - 1) * sliceAngle, i * sliceAngle
-					local col = values.hoveredSlot == i and Color(120, 25, 45, 250) or Color(50, 12, 22, 230)
-					draw.NoTexture()
-					drawSlice(CX, CY, INNER_R, INNER_R + 26, sa, ea, 32, col)
-					local mid = (sa + ea) / 2
-					local lx = CX + math.cos(math.rad(mid)) * (INNER_R + 13)
-					local ly = CY + math.sin(math.rad(mid)) * (INNER_R + 13)
-					local tcol = values.hoveredSlot == i and Color(255, 70, 100) or Color(200, 150, 165)
-					draw.SimpleText(slotNames[slot.slot] or "?", F_SMALL, lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-				end
+	-- Original placement
+	local tmpAng = Angle(0, hmd.ang.yaw - 90, 60)
+	local pos, ang = WorldToLocal(
+		rh.pos + rh.ang:Forward() * 7 + tmpAng:Right() * -3.68 + tmpAng:Forward() * -5.45,
+		tmpAng,
+		g_VR.origin or Vector(),
+		g_VR.originAngle or Angle()
+	)
+	VRUtilMenuOpen("weaponmenu", 512, 512, nil, false, pos, ang, 0.025, true, function()
+		hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
+		open = false
+		local p = LocalPlayer()
+		if not IsValid(p) then return end
+		if innerClick then
+			local aw = p:GetActiveWeapon()
+			local activeClass = IsValid(aw) and aw:GetClass() or nil
+			if activeClass ~= "weapon_vrmod_empty" then
+				lastWeaponClass = activeClass
+				local emptyWep = p:GetWeapon("weapon_vrmod_empty")
+				if IsValid(emptyWep) then input.SelectWeapon(emptyWep) end
+			elseif activeClass == "weapon_vrmod_empty" and lastWeaponClass and lastWeaponClass ~= "weapon_vrmod_empty" then
+				local prevWep = p:GetWeapon(lastWeaponClass)
+				if IsValid(prevWep) then input.SelectWeapon(prevWep) end
 			end
+			return
+		end
 
-			if chosenSlot and slots[chosenSlot] then
-				local sel = slots[chosenSlot]
-				local itemCount = #sel.items
-				local arc = math.min(100, itemCount * 22)
-				local startAng = (chosenSlot - 1) * 360 / math.max(1, #slots) - arc / 2
-				local iconR = OUTER_R * 0.88
-				for i, item in ipairs(sel.items) do
-					local a = startAng + (itemCount == 1 and 0 or (i - 1) * arc / math.max(1, itemCount - 1))
-					local rad = math.rad(a)
-					local rx = CX + math.cos(rad) * iconR
-					local ry = CY + math.sin(rad) * iconR
-					local hovered = values.hoveredItem == i
-					if hovered then
-						surface.SetDrawColor(255, 70, 100, 255)
-						surface.DrawOutlinedRect(rx - ICON_SIZE * 0.55, ry - ICON_SIZE * 0.55, ICON_SIZE * 1.1, ICON_SIZE * 1.1)
-					end
-					local mat = RenderWeaponToMaterial(item.class)
-					if mat then DrawIconLayered(rx, ry, ICON_SIZE, mat, hovered) end
-				end
-			end
-
-			local name = "CUBE · arms"
-			if chosenSlot and values.hoveredItem >= 1 and slots[chosenSlot] and slots[chosenSlot].items[values.hoveredItem] then
-				name = slots[chosenSlot].items[values.hoveredItem].label
-			elseif values.hoveredSlot >= 1 and slots[values.hoveredSlot] then
-				name = slotNames[slots[values.hoveredSlot].slot] or name
-			elseif values.innerClick then
-				name = "empty hands"
-			end
-			draw.SimpleText(name, F_LABEL, CX, CY - 4, Color(255, 240, 244), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-
-			local function ds(x, ww, label, val, col)
-				surface.SetDrawColor(55, 14, 24, 250)
-				surface.DrawRect(x, 16, ww, 52)
-				surface.SetDrawColor(196, 30, 58, 200)
-				surface.DrawOutlinedRect(x, 16, ww, 52)
-				draw.SimpleText(label, F_SMALL, x + 12, 24, Color(200, 150, 165))
-				draw.SimpleText(tostring(val), F_LABEL, x + ww - 12, 40, col or color_white, TEXT_ALIGN_RIGHT)
-			end
-			local ammoText = string.format("%d / %d", values.clip or 0, values.total or 0)
-			ds(24, 140, "HEALTH", values.health or 0, (values.health or 0) > 19 and Color(90, 220, 150) or Color(255, 70, 100))
-			ds(180, 120, "SUIT", values.suit or 0, Color(255, 200, 100))
-			ds(316, 150, "AMMO", ammoText, color_white)
-			ds(480, 90, "ALT", values.alt or 0, Color(200, 150, 165))
-			draw.SimpleText("point · release to select", F_SMALL, CX, H - 24, Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-			VRUtilMenuRenderEnd()
-		end)
-	end
-
-	local okOpen = pcall(function()
-		VRUtilMenuOpen("weaponmenu", W, H, nil, false, pos, ang, menuScale, true, function()
-			hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
-			open = false
-			local p = LocalPlayer()
-			if not IsValid(p) then return end
-			if innerClick then
-				local aw = p:GetActiveWeapon()
-				local activeClass = IsValid(aw) and aw:GetClass() or nil
-				if activeClass ~= "weapon_vrmod_empty" then
-					lastWeaponClass = activeClass
-					local emptyWep = p:GetWeapon("weapon_vrmod_empty")
-					if IsValid(emptyWep) then input.SelectWeapon(emptyWep) end
-				elseif activeClass == "weapon_vrmod_empty" and lastWeaponClass and lastWeaponClass ~= "weapon_vrmod_empty" then
-					local prevWep = p:GetWeapon(lastWeaponClass)
-					if IsValid(prevWep) then input.SelectWeapon(prevWep) end
-				end
-				return
-			end
-			local sel = slots[chosenSlot or prev.hoveredSlot]
-			local chosen = sel and sel.items[prev.hoveredItem]
-			if chosen and IsValid(chosen.wep) then input.SelectWeapon(chosen.wep) end
-		end)
+		local sel = slots[chosenSlot or prev.hoveredSlot]
+		local chosen = sel and sel.items[prev.hoveredItem]
+		if chosen and IsValid(chosen.wep) then input.SelectWeapon(chosen.wep) end
 	end)
 
-	if not okOpen or not (g_VR.menus and g_VR.menus.weaponmenu) then
+	if not (g_VR.menus and g_VR.menus.weaponmenu) then
 		open = false
 		return
 	end
-	g_VR.menus.weaponmenu.scale = menuScale
-	g_VR.menus.weaponmenu.cubeMenu = true
 
-	-- Paint immediately so RT is never invisible transparent
-	paintMenu({
-		hoveredSlot = -1, hoveredItem = -1, innerClick = false,
-		health = ply:Health(), suit = ply:Armor(),
-		clip = 0, total = 0, alt = 0,
-	})
+	-- Keep open-time scale; do not force attachment (opened with world/hand pos already set)
+	g_VR.menus.weaponmenu.cubeMenu = true
+	if g_VR.menus.weaponmenu.scale and g_VR.menus.weaponmenu.scale < 0.02 then
+		g_VR.menus.weaponmenu.scale = 0.025
+	end
+
+	local CX, CY = 256, 256
+	local INNER_R = 60
+	local OUTER_R = 140
+	local SLOT_MIN_DIST = 40
+	local SLOT_MAX_DIST = INNER_R + 20
+	local ICON_RADIUS_FACTOR = 0.9
+	local PETAL_HOVER_RADIUS = ICON_SIZE * 0.75
+	local SLICE_SEGMENTS = 64
+
+	local function paintWeapon(values)
+		if not isfunction(VRUtilMenuRenderStart) then return end
+		VRUtilMenuRenderStart("weaponmenu")
+		surface.SetDrawColor(0, 0, 0, 200)
+		do
+			local poly = {}
+			for i = 0, 32 do
+				local a = math.rad(i / 32 * 360)
+				poly[#poly + 1] = {
+					x = CX + math.cos(a) * (OUTER_R + 20),
+					y = CY + math.sin(a) * (OUTER_R + 20)
+				}
+			end
+			surface.DrawPoly(poly)
+		end
+
+		surface.SetDrawColor(0, 0, 0, 230)
+		do
+			local poly = {}
+			for i = 0, 64 do
+				local a = math.rad(i / 64 * 360)
+				poly[#poly + 1] = {
+					x = CX + math.cos(a) * INNER_R,
+					y = CY + math.sin(a) * INNER_R
+				}
+			end
+			surface.DrawPoly(poly)
+		end
+
+		if #slots > 0 then
+			local sliceAngle = 360 / #slots
+			for i, slot in ipairs(slots) do
+				local sa, ea = (i - 1) * sliceAngle, i * sliceAngle
+				local col = values.hoveredSlot == i and Color(0, 0, 0, 230) or Color(0, 0, 0, 200)
+				drawSlice(CX, CY, INNER_R, INNER_R + 20, sa, ea, SLICE_SEGMENTS, col)
+				local mid = (sa + ea) / 2
+				local lx = CX + math.cos(math.rad(mid)) * (INNER_R + 10)
+				local ly = CY + math.sin(math.rad(mid)) * (INNER_R + 10)
+				local tcol = values.hoveredSlot == i and Color(255, 255, 255) or Color(255, 255, 0)
+				draw.SimpleText(slotNames[slot.slot] or "?", "vrmod_font_mid", lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			end
+		end
+
+		if chosenSlot and slots[chosenSlot] then
+			local sel = slots[chosenSlot]
+			local itemCount = #sel.items
+			local arc = math.min(90, itemCount * 20)
+			local startAng = (chosenSlot - 1) * 360 / math.max(1, #slots) - arc / 2
+			local iconR = OUTER_R * ICON_RADIUS_FACTOR
+			for i, item in ipairs(sel.items) do
+				local a = startAng + (itemCount == 1 and 0 or (i - 1) * arc / math.max(1, itemCount - 1))
+				local rad = math.rad(a)
+				local rx = CX + math.cos(rad) * iconR
+				local ry = CY + math.sin(rad) * iconR
+				DrawIconLayered(rx, ry, ICON_SIZE, RenderWeaponToMaterial(item.class), 10, 0, 0.01)
+			end
+		end
+
+		local name = "Select Slot"
+		if chosenSlot and values.hoveredItem >= 1 and slots[chosenSlot] and slots[chosenSlot].items[values.hoveredItem] then
+			name = slots[chosenSlot].items[values.hoveredItem].label
+		elseif values.hoveredSlot >= 1 and slots[values.hoveredSlot] then
+			name = slotNames[slots[values.hoveredSlot].slot] or name
+		end
+
+		draw.SimpleText(name, "vrmod_font_normal", CX, CY, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		local function ds(x, w, label, val, col)
+			draw.RoundedBox(6, x, 20, w, 45, Color(0, 0, 0, 128))
+			draw.SimpleText(label, "vrmod_font_small", x + 10, 50, col)
+			draw.SimpleText(val, "vrmod_font_mid", x + w - 10, 55, col, TEXT_ALIGN_RIGHT)
+		end
+
+		local ammoText = string.format("%d / %d", values.clip or 0, values.total or 0)
+		local ammoCol = Color(255, (values.clip == 0 and values.total == 0) and 0 or 250, 0, 255)
+		ds(20, 120, "HEALTH", values.health, Color(255, (values.health or 0) > 19 and 250 or 0, 0, 255))
+		ds(160, 110, "SUIT", values.suit, Color(255, 250, 0))
+		ds(290, 130, "AMMO", ammoText, ammoCol)
+		ds(440, 70, "ALT", values.alt, Color(255, 250, 0))
+		VRUtilMenuRenderEnd()
+	end
+
+	-- Immediate paint so RT is never blank before laser focus
+	do
+		local seed = {
+			hoveredSlot = -1, hoveredItem = -1,
+			health = IsValid(ply) and ply:Health() or 0,
+			suit = IsValid(ply) and ply:Armor() or 0,
+			clip = 0, total = 0, alt = 0,
+		}
+		if IsValid(ply) then
+			seed.clip, seed.total, seed.alt = GetWeaponAmmo(ply:GetActiveWeapon(), ply)
+		end
+		paintWeapon(seed)
+		prev = seed
+	end
 
 	hook.Add("PreRender", "vrutil_hook_renderweaponselect", function()
-		if not open then return end
-		if not g_VR.menus or not g_VR.menus.weaponmenu then
+		if not open or not (g_VR.menus and g_VR.menus.weaponmenu) then
 			open = false
 			hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 			return
 		end
-		g_VR.menus.weaponmenu.scale = menuScale
 
-		local values = { hoveredSlot = -1, hoveredItem = -1, innerClick = false }
-		local p = LocalPlayer()
-		if IsValid(p) then
-			values.health, values.suit = p:Health(), p:Armor()
-			values.clip, values.total, values.alt = GetWeaponAmmo(p:GetActiveWeapon(), p)
+		local values = {
+			hoveredSlot = prev.hoveredSlot or -1,
+			hoveredItem = prev.hoveredItem or -1
+		}
+
+		if IsValid(ply) then
+			values.health, values.suit = ply:Health(), ply:Armor()
+			values.clip, values.total, values.alt = GetWeaponAmmo(ply:GetActiveWeapon(), ply)
 		else
 			values.health, values.suit, values.clip, values.total, values.alt = 0, 0, 0, 0, 0
 		end
 
-		-- Only ray-test when focused; still paint always
-		if g_VR.menuFocus == "weaponmenu" then
-			local dx = (g_VR.menuCursorX or 0) - CX
-			local dy = (g_VR.menuCursorY or 0) - CY
+		-- Ray-test only when focused; still always paint while open
+		if g_VR.menuFocus == "weaponmenu" and #slots > 0 then
+			values.hoveredSlot, values.hoveredItem = -1, -1
+			local dx, dy = (g_VR.menuCursorX or 0) - CX, (g_VR.menuCursorY or 0) - CY
 			local dist = math.sqrt(dx * dx + dy * dy)
 			local angDeg = math.deg(math.atan2(dy, dx))
 			if angDeg < 0 then angDeg = angDeg + 360 end
-			local SLOT_MIN, SLOT_MAX = 50, INNER_R + 28
-			if #slots > 0 and dist > SLOT_MIN and dist < SLOT_MAX then
-				local idx = math.floor(angDeg / (360 / #slots)) + 1
+
+			if dist > SLOT_MIN_DIST and dist < SLOT_MAX_DIST then
+				local segSize = 360 / #slots
+				local idx = math.floor(angDeg / segSize) + 1
 				if idx >= 1 and idx <= #slots then
 					values.hoveredSlot = idx
 					chosenSlot = idx
 				end
 			end
-			values.innerClick = dist <= INNER_R
-			innerClick = values.innerClick
+
+			innerClick = dist <= INNER_R
 			if chosenSlot and slots[chosenSlot] then
 				local sel = slots[chosenSlot]
 				local itemCount = #sel.items
-				local arc = math.min(100, itemCount * 22)
-				local startAngle = (chosenSlot - 1) * 360 / math.max(1, #slots) - arc / 2
-				local iconR = OUTER_R * 0.88
-				local hoverR2 = (ICON_SIZE * 0.9) ^ 2
-				for i = 1, itemCount do
+				local arc = math.min(90, itemCount * 20)
+				local startAngle = (chosenSlot - 1) * 360 / #slots - arc / 2
+				local iconR = OUTER_R * ICON_RADIUS_FACTOR
+				local hoverR2 = PETAL_HOVER_RADIUS * PETAL_HOVER_RADIUS
+				for i, item in ipairs(sel.items) do
 					local a = startAngle + (itemCount == 1 and 0 or (i - 1) * arc / math.max(1, itemCount - 1))
 					local rad = math.rad(a)
 					local rx = CX + math.cos(rad) * iconR
@@ -412,11 +416,9 @@ function VRUtilWeaponMenuOpen()
 			end
 		end
 
-		prev.hoveredSlot = values.hoveredSlot
-		prev.hoveredItem = values.hoveredItem
-		prev.health, prev.suit = values.health, values.suit
-		prev.clip, prev.total, prev.alt = values.clip, values.total, values.alt
-		paintMenu(values)
+		prev = values
+		-- ALWAYS paint while open (blank RT = unsummonable menu)
+		paintWeapon(values)
 	end)
 end
 
@@ -427,10 +429,6 @@ function VRUtilWeaponMenuClose()
 		VRUtilMenuClose("weaponmenu")
 	end
 end
-
-concommand.Add("vrmod_weaponmenu", function()
-	if g_VR and g_VR.active then VRUtilWeaponMenuOpen() end
-end)
 
 hook.Add("VRMod_Exit", "vrmod_weaponmenu_exit", function()
 	open = false

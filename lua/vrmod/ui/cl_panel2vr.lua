@@ -37,14 +37,21 @@ W.Theme = {
 -- Placement presets (HL:A-inspired)
 -- attachment: true = local to left hand, false = world origin relative
 W.Place = {
-	-- Wrist / off-hand clipboard (Alyx wrist menu energy)
+	-- Left hand — same family as quickmenu / heightmenu (NOT world-float)
 	wrist = {
 		attachment = true,
-		pos = Vector(4, 3, 8),
+		pos = Vector(6, 4, 8),
 		ang = Angle(0, -90, 55),
-		scale = 0.028,
+		scale = 0.035,
 	},
-	-- Floating mid-air in front of HMD (world, refreshed each open)
+	-- Alias used by MakePopup intercept for settings / generic derma
+	popup = {
+		attachment = true,
+		pos = Vector(6, 4, 8),
+		ang = Angle(0, -90, 55),
+		scale = 0.035,
+	},
+	-- Floating mid-air in front of HMD (spawn/context workbench only)
 	float = {
 		attachment = false,
 		pos = nil, -- computed
@@ -57,13 +64,6 @@ W.Place = {
 		pos = nil,
 		ang = nil,
 		scale = 0.018,
-	},
-	-- Compact popup
-	popup = {
-		attachment = true,
-		pos = Vector(8, 6, 6),
-		ang = Angle(0, -90, 50),
-		scale = 0.03,
 	},
 }
 
@@ -204,8 +204,7 @@ function W.ManifestPanel(panel, opts)
 	end
 
 	local kind = opts.kind or detectKind(panel)
-	-- VRMod desktop settings frame → Glorious Crimson Cube when in VR
-	-- (skip if caller forced kind="panel" for paint fallback)
+	-- VRMod settings Derma → Cube UI on left hand (removes Derma frame)
 	if opts.kind ~= "panel" and IsValid(panel) and panel.GetTitle then
 		local title = tostring(panel:GetTitle() or "")
 		if title:find("VRMod", 1, true) and tryNative("settings", panel, opts) then
@@ -221,12 +220,19 @@ function W.ManifestPanel(panel, opts)
 	preparePanelForVR(panel, kind)
 
 	local uid = opts.uid or uidFor(panel, opts.hint or kind)
-	local placeName = opts.place or ((kind == "spawnmenu" or kind == "contextmenu") and "workbench") or "popup"
+	-- Settings / generic derma → left HAND. Spawn/context stay workbench float.
+	local placeName = opts.place
+		or ((kind == "spawnmenu" or kind == "contextmenu") and "workbench")
+		or "popup"
 	local place = W.ResolvePlace(placeName, opts.placeOverride)
 
 	local pw, ph = panel:GetSize()
 	if not pw or pw < 32 then pw = 512 end
 	if not ph or ph < 32 then ph = 512 end
+	-- Settings frame is small (420x505) — keep readable RT
+	if kind == "settings" then
+		pw, ph = math.max(pw, 420), math.max(ph, 505)
+	end
 	local w, h = clampSize(opts.width or pw, opts.height or ph)
 
 	panel:SetPaintedManually(true)
@@ -241,18 +247,26 @@ function W.ManifestPanel(panel, opts)
 		if opts.onClose then opts.onClose(panel) end
 	end)
 
+	-- Keep hand scale (cl_ui must not crush attached menus)
+	if g_VR.menus and g_VR.menus[uid] then
+		g_VR.menus[uid].scale = place.scale
+		g_VR.menus[uid].cubeMenu = place.attachment and true or nil
+		g_VR.menus[uid].attachment = place.attachment
+	end
+
 	bound[uid] = {
 		panel = panel,
 		kind = kind,
 		place = placeName,
 		html = (kind == "html"),
+		alwaysPaint = (kind == "settings" or kind == "html" or kind == "spawnmenu" or kind == "contextmenu"),
 	}
 
 	if isfunction(VRUtilMenuRenderPanel) then
 		VRUtilMenuRenderPanel(uid)
 	end
 
-	log("manifest %s uid=%s %dx%d place=%s", kind, uid, w, h, placeName)
+	log("manifest %s uid=%s %dx%d place=%s attach=%s", kind, uid, w, h, placeName, tostring(place.attachment))
 	return uid
 end
 
@@ -263,7 +277,9 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 	if not isfunction(VRUtilMenuOpen) then return nil end
 
 	uid = uid or ("native_" .. seq)
-	local place = W.ResolvePlace(opts.place or "float", opts.placeOverride)
+	-- Default wrist (left hand). Callers must opt into float explicitly.
+	local placeName = opts.place or "wrist"
+	local place = W.ResolvePlace(placeName, opts.placeOverride)
 	local w, h = clampSize(width or 512, height or 512)
 	local dirty = true
 
@@ -273,10 +289,22 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 		if opts.onClose then opts.onClose() end
 	end)
 
+	if g_VR.menus and g_VR.menus[uid] then
+		g_VR.menus[uid].scale = place.scale or 0.035
+		g_VR.menus[uid].cubeMenu = true
+		g_VR.menus[uid].attachment = place.attachment and true or false
+	end
+
 	hook.Add("PreRender", "panel2vr_native_" .. uid, function()
 		if not VRUtilIsMenuOpen or not VRUtilIsMenuOpen(uid) then
 			hook.Remove("PreRender", "panel2vr_native_" .. uid)
 			return
+		end
+		local m = g_VR.menus and g_VR.menus[uid]
+		if m and place.attachment then
+			m.scale = place.scale or 0.035
+			m.cubeMenu = true
+			m.attachment = true
 		end
 		if not dirty and not opts.alwaysRedraw then return end
 		dirty = false
@@ -285,7 +313,14 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 		VRUtilMenuRenderEnd()
 	end)
 
-	bound[uid] = { kind = "native", place = opts.place or "float", dirty = function() dirty = true end }
+	-- Immediate first paint so RT is never blank
+	if drawFn and isfunction(VRUtilMenuRenderStart) then
+		VRUtilMenuRenderStart(uid)
+		drawFn(w, h, false)
+		VRUtilMenuRenderEnd()
+	end
+
+	bound[uid] = { kind = "native", place = placeName, dirty = function() dirty = true end }
 	dirty = true
 	return uid, function() dirty = true end
 end
@@ -396,14 +431,18 @@ function W.InstallHooks()
 		end
 	end)
 
-	-- Continuous re-paint for live HTML / animated derma
+	-- Continuous re-paint: settings always, others when focused / alwaysPaint
 	hook.Add("Think", "panel2vr_repaint", function()
 		if not W.IsVR() then return end
 		for uid, info in pairs(bound) do
 			if info.panel and IsValid(info.panel) and isfunction(VRUtilMenuRenderPanel) then
-				-- HTML needs frequent repaint; others on focus is enough but cheap enough always
-				if info.html or g_VR.menuFocus == uid or info.kind == "spawnmenu" or info.kind == "contextmenu" then
+				if info.alwaysPaint or info.html or g_VR.menuFocus == uid then
 					VRUtilMenuRenderPanel(uid)
+				end
+				-- Hold hand scale for attached surfaces
+				local m = g_VR.menus and g_VR.menus[uid]
+				if m and m.cubeMenu and m.scale and m.scale < 0.03 then
+					m.scale = 0.035
 				end
 			elseif info.panel and not IsValid(info.panel) then
 				W.Close(uid)
@@ -418,15 +457,16 @@ function W.InstallHooks()
 	log("hooks installed (MakePopup + spawn/context + repaint)")
 end
 
--- Public: force-open settings path (desktop derma vs cube)
+-- Public: interactive Cube settings in VR (cubeui → VRUtilMenuOpen faces); Derma on desktop
 function W.OpenSettings()
 	if W.IsVR() and isfunction(vrmod.CubeSettings_Open) then
 		vrmod.CubeSettings_Open()
-		return
+		return nil
 	end
 	if isfunction(VRUtilOpenMenu) then
-		VRUtilOpenMenu()
+		return VRUtilOpenMenu()
 	end
+	return nil
 end
 
 -- Install after UI subsystem is ready

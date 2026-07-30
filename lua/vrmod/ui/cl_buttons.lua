@@ -26,7 +26,7 @@ local function InitializeMenuItems()
     vrmod.AddInGameMenuItem("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end, true)
     vrmod.AddInGameMenuItem("Numpad", 3, 0, function() LocalPlayer():ConCommand("vrmod_numpad") end, true)
     vrmod.AddInGameMenuItem("Mirror", 4, 0, function() VRUtilOpenHeightMenu() end, true)
-    -- In VR: Glorious Crimson Cube (native). Desktop/non-VR: Derma Derma pane.
+    -- VR: Glorious Crimson Cube on left hand. Desktop: Derma.
     vrmod.AddInGameMenuItem("Settings", 5, 0, function()
         if vrmod.panel2vr and vrmod.panel2vr.OpenSettings then
             vrmod.panel2vr.OpenSettings()

@@ -94,17 +94,28 @@ if CLIENT then
 			end
 
 			local pos, ang = v.pos, v.ang
-			-- Cube menus keep large scales; plain panels default 0.02
-			local cubeUI = v.cubeMenu or v.uid == "heightmenu" or v.uid == "miscmenu" or v.uid == "weaponmenu" or v.uid == "cube_settings"
-			if not cubeUI then
-				v.scale = 0.02
-			elseif not v.scale or v.scale < 0.03 then
-				v.scale = (v.uid == "weaponmenu" or v.uid == "miscmenu") and 0.038 or 0.04
+			-- CubeUI faces / height / cubeMenu keep scale; plain world panels default 0.02
+			local uid = v.uid or ""
+			local keepScale = v.cubeMenu or v.cubeui
+				or uid == "heightmenu"
+				or uid == "cube_settings"
+				or string.StartWith(uid, "cubeui_")
+			if not keepScale then
+				if v.attachment then
+					if not v.scale or v.scale < 0.03 then v.scale = 0.035 end
+				else
+					v.scale = 0.02
+				end
+			elseif not v.scale or v.scale < 0.028 then
+				v.scale = string.StartWith(uid, "cubeui_") and 0.028 or 0.04
 			end
 			if v.attachment then
 				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
 				if hand and hand.pos and hand.ang then
 					pos, ang = LocalToWorld(pos, ang, hand.pos, hand.ang)
+				else
+					-- no left hand yet — skip draw rather than park menu off to the side
+					continue
 				end
 			else
 				pos, ang = LocalToWorld(pos, ang, g_VR.origin, g_VR.originAngle)
@@ -134,9 +145,11 @@ if CLIENT then
 			cam.End3D2D()
 			cam.IgnoreZ(false)
 			if v.cursorEnabled then
+				local rh = g_VR.tracking and g_VR.tracking.pose_righthand
+				if not rh or not rh.pos or not rh.ang then continue end
 				local cursorWorldPos = Vector(0, 0, 0)
-				local start = g_VR.tracking.pose_righthand.pos
-				local dir = g_VR.tracking.pose_righthand.ang:Forward()
+				local start = rh.pos
+				local dir = rh.ang:Forward()
 				local dist = nil
 				local normal = ang:Up()
 				local A = normal:Dot(dir)
@@ -172,11 +185,14 @@ if CLIENT then
 		end
 
 		local focus = g_VR.menuFocus
-		if focus and menus[focus] then
+		if focus and menus[focus] and menuFocusCursorWorldPos then
 			g_VR.menuCursorX = menus[focus].lastCursorX
 			g_VR.menuCursorY = menus[focus].lastCursorY
-			render.SetMaterial(mat_beam)
-			render.DrawBeam(g_VR.tracking.pose_righthand.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(255, 255, 255, 255))
+			local rh = g_VR.tracking and g_VR.tracking.pose_righthand
+			if rh and rh.pos then
+				render.SetMaterial(mat_beam)
+				render.DrawBeam(rh.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(255, 255, 255, 255))
+			end
 		end
 
 		render.DepthRange(0, 1)
@@ -226,16 +242,17 @@ if CLIENT then
 		end
 		menus[uid].mat = mat
 
-		if panel then
-			panel:SetPaintedManually(true)
-			VRUtilMenuRenderPanel(uid)
-		end
-
+		-- Clear once, then paint panel (never clear after paint — that blanked hand menus)
 		render.PushRenderTarget(menus[uid].rt)
 		render.OverrideAlphaWriteEnable(true, true)
 		render.Clear(0, 0, 0, 0, true, true)
 		render.OverrideAlphaWriteEnable(false)
 		render.PopRenderTarget()
+
+		if panel then
+			panel:SetPaintedManually(true)
+			VRUtilMenuRenderPanel(uid)
+		end
 		menusExist = true
 	end
 
