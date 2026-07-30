@@ -387,45 +387,53 @@ function vrmod_fbt.CalculateBonePositions(ply)
 	end
 end
 
--- Track active calibration session
+-- Track active calibration session (uses shared vrmod.avatar util — same as height cal)
 vrmod_fbt.activeCalibration = vrmod_fbt.activeCalibration or {}
 function vrmod_fbt.Calibrate()
 	local ply = LocalPlayer()
 	-- Cleanup previous calibration if it exists
-	if vrmod_fbt.activeCalibration.model then
+	if vrmod_fbt.activeCalibration.session or vrmod_fbt.activeCalibration.model then
 		vrmod.logger.Info("Resetting previous FBT calibration...")
-		vrmod_fbt.activeCalibration.model:Remove()
+		if vrmod.avatar then vrmod.avatar.Close("fbt_cal") end
+		if IsValid(vrmod_fbt.activeCalibration.model) then
+			vrmod_fbt.activeCalibration.model:Remove()
+		end
 		ply.RenderOverride = nil
 		hook.Remove("PostDrawTranslucentRenderables", "fbt_showtrackers")
 		hook.Remove("VRMod_Input", "fbt_cal_input")
 		vrmod_fbt.activeCalibration = {}
 	end
 
-	-- Create new calibration session
-	local calibrationModel = ClientsideModel(ply.vrmod_pm or ply:GetModel())
-	vrmod_fbt.activeCalibration.model = calibrationModel
-	ply.RenderOverride = function() end
-	calibrationModel:SetPos(Vector(g_VR.tracking.hmd.pos.x, g_VR.tracking.hmd.pos.y, ply:GetPos().z))
-	calibrationModel:SetAngles(Angle(0, g_VR.tracking.hmd.ang.yaw, 0))
-	-- Show tracker boxes
-	hook.Add("PostDrawTranslucentRenderables", "fbt_showtrackers", function(depth, sky)
-		if depth or sky or not g_VR.tracking.pose_waist or not g_VR.tracking.pose_leftfoot or not g_VR.tracking.pose_rightfoot then return end
-		render.SetColorMaterial()
-		render.DrawBox(g_VR.tracking.pose_waist.pos, g_VR.tracking.pose_waist.ang, Vector(-1, -1, -1), Vector(1, 1, 1))
-		render.DrawBox(g_VR.tracking.pose_leftfoot.pos, g_VR.tracking.pose_leftfoot.ang, Vector(-1, -1, -1), Vector(1, 1, 1))
-		render.DrawBox(g_VR.tracking.pose_rightfoot.pos, g_VR.tracking.pose_rightfoot.ang, Vector(-1, -1, -1), Vector(1, 1, 1))
-	end)
+	-- Shared avatar editor: world-aligned idle PM + tracker boxes (concept-synced with height twin)
+	local session
+	if vrmod.avatar and vrmod.avatar.OpenFBTCal then
+		session = vrmod.avatar.OpenFBTCal()
+	end
+	if not session or not session:IsValid() then
+		vrmod.logger.Err("FBT Calibrate: avatar util unavailable")
+		return
+	end
+	vrmod_fbt.activeCalibration.session = session
+	vrmod_fbt.activeCalibration.model = session:GetEntity()
 
 	-- Input hook for finalizing calibration
 	hook.Add("VRMod_Input", "fbt_cal_input", function(action, pressed)
 		if action ~= "boolean_reload" or not pressed then return end
 		if vrmod_fbt.Init(ply) == false then return end
 		local boneids = vrmod_fbt.characterInfo[ply:SteamID()].boneids
+		local calibrationModel = session:GetEntity()
+		if not IsValid(calibrationModel) then return end
 		calibrationModel:SetupBones()
 		net.Start("vrmod_fbt_cal")
 		net.WriteBool(false)
 		local function sendBone(bone, tracker)
-			local pos, ang = WorldToLocal(calibrationModel:GetBoneMatrix(bone):GetTranslation(), calibrationModel:GetAngles(), tracker.pos, tracker.ang)
+			if not tracker or not tracker.pos then return end
+			local pos, ang = WorldToLocal(
+				calibrationModel:GetBoneMatrix(bone):GetTranslation(),
+				calibrationModel:GetAngles(),
+				tracker.pos,
+				tracker.ang or Angle()
+			)
 			net.WriteVector(pos)
 			net.WriteAngle(ang)
 		end
@@ -435,13 +443,12 @@ function vrmod_fbt.Calibrate()
 		sendBone(boneids.leftFoot, g_VR.tracking.pose_leftfoot)
 		sendBone(boneids.rightFoot, g_VR.tracking.pose_rightfoot)
 		net.SendToServer()
-		-- Cleanup calibration session
-		calibrationModel:Remove()
+		-- Cleanup via shared util
+		if vrmod.avatar then vrmod.avatar.Close("fbt_cal") end
 		ply.RenderOverride = nil
-		hook.Remove("PostDrawTranslucentRenderables", "fbt_showtrackers")
 		hook.Remove("VRMod_Input", "fbt_cal_input")
 		vrmod_fbt.activeCalibration = {}
-		vrmod.logger.Info("FBT calibration completed")
+		vrmod.logger.Info("FBT calibration completed (avatar util)")
 	end)
 end
 
