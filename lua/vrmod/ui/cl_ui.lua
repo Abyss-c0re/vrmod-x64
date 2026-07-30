@@ -94,11 +94,12 @@ if CLIENT then
 			end
 
 			local pos, ang = v.pos, v.ang
-			-- heightmenu keeps its own scale (large / reachable); others default 0.02
-			if v.uid ~= "heightmenu" then
+			-- Cube menus keep large scales; plain panels default 0.02
+			local cubeUI = v.cubeMenu or v.uid == "heightmenu" or v.uid == "miscmenu" or v.uid == "weaponmenu" or v.uid == "cube_settings"
+			if not cubeUI then
 				v.scale = 0.02
 			elseif not v.scale or v.scale < 0.03 then
-				v.scale = 0.04
+				v.scale = (v.uid == "weaponmenu" or v.uid == "miscmenu") and 0.038 or 0.04
 			end
 			if v.attachment then
 				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand

@@ -129,14 +129,14 @@ local function drawSlice(cx, cy, innerR, outerR, startDeg, endDeg, segCount, col
 	surface.DrawPoly(poly)
 end
 
-local function DrawIconLayered(x, y, size, material, repeats, alphaStep, scaleStep)
+local function DrawIconLayered(x, y, size, material, hovered)
 	surface.SetMaterial(material)
-	for i = 1, repeats do
-		local scale = 1 + (i - 1) * scaleStep
-		local alpha = 255 - (i - 1) * alphaStep
-		surface.SetDrawColor(255, 255, 0, math.max(0, alpha))
-		surface.DrawTexturedRect(x - (size * scale) / 2, y - (size * scale) / 2, size * scale, size * scale)
+	if hovered then
+		surface.SetDrawColor(255, 90, 110, 255)
+	else
+		surface.SetDrawColor(255, 200, 210, 230)
 	end
+	surface.DrawTexturedRect(x - size / 2, y - size / 2, size, size)
 end
 
 -- =============================================
