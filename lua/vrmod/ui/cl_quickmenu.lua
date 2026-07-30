@@ -107,8 +107,11 @@ function g_VR.MenuOpen()
 		surface.DrawRect(0, 0, SIZE, 5)
 		surface.DrawOutlinedRect(0, 0, SIZE, SIZE, 2)
 
-		draw.SimpleText("CUBE", "CubeTitle", PAD, 18, T.crimson, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-		draw.SimpleText("quick · point · release to act", "CubeSmall", PAD, 48, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		local fTitle = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeTitle")) or "DermaLarge"
+		local fSmall = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefault"
+		local fLabel = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeLabel")) or "DermaDefaultBold"
+		draw.SimpleText("CUBE", fTitle, PAD, 18, T.crimson, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		draw.SimpleText("quick · point · release to act", fSmall, PAD, 48, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 
 		-- cube glyph
 		surface.SetDrawColor(T.crimson)

@@ -376,9 +376,13 @@ function VRUtilWeaponMenuOpen()
 				local lx = CX + math.cos(math.rad(mid)) * (INNER_R + 13)
 				local ly = CY + math.sin(math.rad(mid)) * (INNER_R + 13)
 				local tcol = values.hoveredSlot == i and T.crimsonHot or T.muted
-				draw.SimpleText(slotNames[slot.slot] or "?", "CubeSmall", lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				local fSmall = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefault"
+				draw.SimpleText(slotNames[slot.slot] or "?", fSmall, lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 			end
 		end
+
+		local fLabel = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeLabel")) or "DermaDefaultBold"
+		local fSmall = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefault"
 
 		-- petals
 		if chosenSlot and slots[chosenSlot] then
@@ -410,15 +414,15 @@ function VRUtilWeaponMenuOpen()
 		elseif innerClick then
 			name = "empty hands"
 		end
-		draw.SimpleText(name, "CubeLabel", CX, CY - 4, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText(name, fLabel, CX, CY - 4, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 		local function ds(x, w, label, val, col)
 			surface.SetDrawColor(T.btn)
 			surface.DrawRect(x, 16, w, 52)
 			surface.SetDrawColor(T.crimsonDim or T.crimson)
 			surface.DrawOutlinedRect(x, 16, w, 52)
-			draw.SimpleText(label, "CubeSmall", x + 12, 24, T.muted)
-			draw.SimpleText(tostring(val), "CubeLabel", x + w - 12, 40, col or T.text, TEXT_ALIGN_RIGHT)
+			draw.SimpleText(label, fSmall, x + 12, 24, T.muted)
+			draw.SimpleText(tostring(val), fLabel, x + w - 12, 40, col or T.text, TEXT_ALIGN_RIGHT)
 		end
 
 		local ammoText = string.format("%d / %d", prev.clip, prev.total)
@@ -428,7 +432,7 @@ function VRUtilWeaponMenuOpen()
 		ds(316, 150, "AMMO", ammoText, ammoCol)
 		ds(480, 90, "ALT", prev.alt, T.muted)
 
-		draw.SimpleText("point · release to select", "CubeSmall", CX, H - 24, T.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText("point · release to select", fSmall, CX, H - 24, T.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		VRUtilMenuRenderEnd()
 	end)
 end
