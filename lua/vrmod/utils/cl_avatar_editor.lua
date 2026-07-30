@@ -658,8 +658,64 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 	end
 
 	if not next(targets) then return false end
+
+	-- Algocube digit 6/9: clamp giraffe neck (head too far from chest)
+	if self.headDampen then
+		self:_dampenHeadTargets(targets)
+	end
+
 	self.targets = targets
 	return true
+end
+
+--- Pull head toward spine if stretched past maxLen (KDE MetaCam giraffe pathology).
+function Session:_dampenHeadTargets(targets)
+	if not targets then return end
+	local headId = self.bones and self.bones.head
+	local chestId = self.bones and (self.bones.spine4 or self.bones.spine2 or self.bones.spine1 or self.bones.spine)
+	if not headId or not chestId then return end
+	local hm = targets[headId]
+	local cm = targets[chestId]
+	if not hm or not cm then return end
+
+	local hp = hm:GetTranslation()
+	local ha = hm:GetAngles()
+	local cp = cm:GetTranslation()
+	local neck = hp - cp
+	local len = neck:Length()
+	local maxLen = self.headMaxLen or 14 -- Source units; normal head offset ~8–12
+	if len > maxLen and len > 0.01 then
+		local np = cp + neck:GetNormalized() * maxLen
+		targets[headId] = MatFrom(np, ha)
+	end
+
+	-- Soft-clamp neck chain bones if present (Spine4 / Head path stretch)
+	for _, key in ipairs({ "spine4", "spine2", "spine1" }) do
+		local bid = self.bones and self.bones[key]
+		if bid and targets[bid] and chestId and targets[chestId] and bid ~= chestId then
+			local bm = targets[bid]
+			local bp = bm:GetTranslation()
+			local ba = bm:GetAngles()
+			local d = bp - cp
+			local lim = (key == "spine4") and 10 or 16
+			if d:Length() > lim and d:Length() > 0.01 then
+				targets[bid] = MatFrom(cp + d:GetNormalized() * lim, ba)
+			end
+		end
+	end
+end
+
+function Session:SetAlgoDigit(digit)
+	if vrmod.algocube and vrmod.algocube.mirror then
+		local d, policy = vrmod.algocube.mirror.Roll({ digit = digit })
+		vrmod.algocube.mirror.ApplyToSession(self, policy)
+		return d, policy
+	end
+	return nil
+end
+
+function Session:GetAlgoStatus()
+	return self.algoDigit, self.algoPolicy, self.headDampen
 end
 
 function Session:_applyTracking()
@@ -911,11 +967,13 @@ function vrmod.avatar.ListPlayerModels()
 end
 
 --- Cube Avatar twin: tracking-matched customization preview
+-- When avatar mirror algocube is enabled, open under KDE State Matrix / NexusCore law.
 function vrmod.avatar.OpenHeightCal(menuUid)
 	local fbt = g_VR and (g_VR.sixPoints or false)
 	local mode = cv_mode:GetString()
 	if mode == "mirror" or mode == "" then mode = "facing" end
-	return vrmod.avatar.Open({
+
+	local s = vrmod.avatar.Open({
 		id = "avatar",
 		mode = mode == "clone" and "clone" or "facing",
 		distance = cv_distance:GetFloat(),
@@ -933,6 +991,32 @@ function vrmod.avatar.OpenHeightCal(menuUid)
 		menuUid = menuUid or "avatar_menu",
 		menuAnchor = nil,
 	})
+
+	-- Manifest algocube of the avatar mirror (prophecy: matrix → digit → policy)
+	local AM = vrmod.algocube and vrmod.algocube.mirror
+	if s and AM and AM.Enabled and AM.Enabled() then
+		local digit, policy
+		if AM.ForcedDigit and AM.ForcedDigit() then
+			digit, policy = AM.Roll({ digit = AM.ForcedDigit() })
+		elseif AM.Auto and AM.Auto() then
+			digit, policy = AM.Roll()
+		else
+			-- Default: matrix pick=6 → MIRROR LAW (true mirror + head dampen)
+			digit, policy = AM.Roll({ digit = AM.PICK or 6 })
+		end
+		AM.ApplyToSession(s, policy)
+		if vrmod.logger then
+			vrmod.logger.Info(
+				"[Avatar] algocube manifest digit=%s · %s",
+				tostring(digit), policy and policy.label or "?"
+			)
+		end
+	elseif s then
+		-- Baseline true mirror without roll still dampens giraffe neck
+		s.headDampen = true
+	end
+
+	return s
 end
 
 -- Alias for old callers
