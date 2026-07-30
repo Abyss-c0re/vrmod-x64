@@ -179,86 +179,90 @@ function Session:_applyTracking()
 
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
 	self.ent:SetPos(self.standPos)
+	self.standAng = self.standAng or Angle()
 	self.ent:SetAngles(self.standAng)
+	-- Keep idle sequence alive (height twin = human-looking PM, not bone soup)
+	if self.ent.FrameAdvance then
+		self.ent:FrameAdvance(FrameTime())
+	end
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
+	-- Idle-only (height cal default): no SetBoneWorld — world matrix hacks
+	-- stretch head/arms off the neck (giraffe / cursed twin).
+	local anyBone = follow.hmd or follow.hands or follow.waist or follow.feet
+	if not anyBone then
+		if self.menuAnchor and g_VR.menus and g_VR.menus[self.menuUid] then
+			local mp, ma = self.menuAnchor(self.standPos, self.standAng, self)
+			if mp then g_VR.menus[self.menuUid].pos = mp end
+			if ma then g_VR.menus[self.menuUid].ang = ma end
+		end
+		return
+	end
+
 	local map = function(pos, ang)
 		if self.mode == "world" then
-			-- Absolute world poses (avatar coincides with player body frame)
 			return pos, ang
 		end
 		return self:_map(pos, ang, playerFeet, playerYaw)
 	end
 
-	-- Head
+	-- Safe mode: only FBT world mode may write full bone chains.
+	-- Partial head/hand world overrides without a full IK solve = cursed mesh.
+	if self.mode ~= "world" or self.safeBoneDrive then
+		-- Optional: soft head look (angles only) — never teleport head bone in world space
+		if follow.hmd and b.head and self.ent.ManipulateBoneAngles then
+			local targetYaw = math.NormalizeAngle((hmd.ang and hmd.ang.yaw or yaw) - yaw)
+			local pitch = math.Clamp(hmd.ang and hmd.ang.pitch or 0, -35, 35)
+			self.ent:ManipulateBoneAngles(b.head, Angle(0, math.Clamp(targetYaw * 0.35, -40, 40), math.Clamp(-pitch * 0.25, -20, 20)))
+		end
+		if self.menuAnchor and g_VR.menus and g_VR.menus[self.menuUid] then
+			local mp, ma = self.menuAnchor(self.standPos, self.standAng, self)
+			if mp then g_VR.menus[self.menuUid].pos = mp end
+			if ma then g_VR.menus[self.menuUid].ang = ma end
+		end
+		return
+	end
+
+	-- World / FBT advanced: full bone drive (only when explicitly requested)
 	if follow.hmd and b.head then
 		local hp, ha = map(hmd.pos + hmd.ang:Forward() * -2, hmd.ang)
 		SetBoneWorld(self.ent, b.head, hp, ha)
 	end
 
-	-- Hands (mirror mode swaps visual sides)
 	local left = tr.pose_lefthand
 	local right = tr.pose_righthand
 	if follow.hands then
-		if self.mode == "mirror" then
-			if left and left.pos and b.rHand then
-				local p, a = map(left.pos, left.ang or Angle())
-				SetBoneWorld(self.ent, b.rHand, p, a)
-				AimLimb(self.ent, b.rUpper, b.rFore, p)
-			end
-			if right and right.pos and b.lHand then
-				local p, a = map(right.pos, right.ang or Angle())
-				SetBoneWorld(self.ent, b.lHand, p, a)
-				AimLimb(self.ent, b.lUpper, b.lFore, p)
-			end
-		else
-			if left and left.pos and b.lHand then
-				local p, a = map(left.pos, left.ang or Angle())
-				SetBoneWorld(self.ent, b.lHand, p, a)
-				AimLimb(self.ent, b.lUpper, b.lFore, p)
-			end
-			if right and right.pos and b.rHand then
-				local p, a = map(right.pos, right.ang or Angle())
-				SetBoneWorld(self.ent, b.rHand, p, a)
-				AimLimb(self.ent, b.rUpper, b.rFore, p)
-			end
+		if left and left.pos and b.lHand then
+			local p, a = map(left.pos, left.ang or Angle())
+			SetBoneWorld(self.ent, b.lHand, p, a)
+			AimLimb(self.ent, b.lUpper, b.lFore, p)
+		end
+		if right and right.pos and b.rHand then
+			local p, a = map(right.pos, right.ang or Angle())
+			SetBoneWorld(self.ent, b.rHand, p, a)
+			AimLimb(self.ent, b.rUpper, b.rFore, p)
 		end
 	end
 
-	-- FBT waist → pelvis
 	local waist = tr.pose_waist
 	if follow.waist and waist and waist.pos and b.pelvis then
 		local p, a = map(waist.pos, waist.ang or Angle())
 		SetBoneWorld(self.ent, b.pelvis, p, a)
 	end
 
-	-- FBT feet
 	local lfoot = tr.pose_leftfoot
 	local rfoot = tr.pose_rightfoot
 	if follow.feet then
-		if self.mode == "mirror" then
-			if lfoot and lfoot.pos and b.rFoot then
-				local p, a = map(lfoot.pos, lfoot.ang or Angle())
-				SetBoneWorld(self.ent, b.rFoot, p, a)
-				AimLeg(self.ent, b.rThigh, b.rCalf, p)
-			end
-			if rfoot and rfoot.pos and b.lFoot then
-				local p, a = map(rfoot.pos, rfoot.ang or Angle())
-				SetBoneWorld(self.ent, b.lFoot, p, a)
-				AimLeg(self.ent, b.lThigh, b.lCalf, p)
-			end
-		else
-			if lfoot and lfoot.pos and b.lFoot then
-				local p, a = map(lfoot.pos, lfoot.ang or Angle())
-				SetBoneWorld(self.ent, b.lFoot, p, a)
-				AimLeg(self.ent, b.lThigh, b.lCalf, p)
-			end
-			if rfoot and rfoot.pos and b.rFoot then
-				local p, a = map(rfoot.pos, rfoot.ang or Angle())
-				SetBoneWorld(self.ent, b.rFoot, p, a)
-				AimLeg(self.ent, b.rThigh, b.rCalf, p)
-			end
+		if lfoot and lfoot.pos and b.lFoot then
+			local p, a = map(lfoot.pos, lfoot.ang or Angle())
+			SetBoneWorld(self.ent, b.lFoot, p, a)
+			AimLeg(self.ent, b.lThigh, b.lCalf, p)
+		end
+		if rfoot and rfoot.pos and b.rFoot then
+			local p, a = map(rfoot.pos, rfoot.ang or Angle())
+			SetBoneWorld(self.ent, b.rFoot, p, a)
+			AimLeg(self.ent, b.rThigh, b.rCalf, p)
 		end
 	end
 
