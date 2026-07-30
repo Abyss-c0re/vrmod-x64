@@ -71,7 +71,19 @@ function vrmod.Experience_Reset()
 		file.Delete(EXP_FILE)
 	end
 	RunConsoleCommand("vrmod_experience_done", "0")
-	toast("Cube Experience reset — next VR start will guide you", 3)
+	RunConsoleCommand("vrmod_experience_force", "1")
+	RunConsoleCommand("vrmod_experience", "1")
+	-- If already in VR: restart the full guide now (vision → posture)
+	if g_VR and g_VR.active and g_VR.threePoints then
+		toast("Restarting Cube Experience guide…", 2)
+		timer.Simple(0.15, function()
+			if g_VR and g_VR.active then
+				vrmod.Experience_Start()
+			end
+		end)
+	else
+		toast("Cube Experience reset — start VR to run the guide", 3)
+	end
 end
 
 local function stopPanelHooks()

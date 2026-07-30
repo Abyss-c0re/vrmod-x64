@@ -505,8 +505,9 @@ function VRUtilOpenMenu()
 		local reset = vgui.Create("DButton", t)
 		reset:SetPos(20, y + 10)
 		reset:SetSize(200, 30)
-		reset:SetText("Reset")
+		reset:SetText("Reset + restart guide")
 		reset.DoClick = function()
+			-- Vision defaults
 			RunConsoleCommand("vrmod_postprocess", "0")
 			RunConsoleCommand("vrmod_skybox", "0")
 			RunConsoleCommand("vrmod_renderoffset", "1")
@@ -519,6 +520,13 @@ function VRUtilOpenMenu()
 			RunConsoleCommand("vrmod_scalefactor", "1.0")
 			RunConsoleCommand("vrmod_verticaloffset", "0")
 			RunConsoleCommand("vrmod_horizontaloffset", "0")
+			-- Restart Cube Experience (vision → posture/autoheight)
+			if vrmod.Experience_Reset then
+				vrmod.Experience_Reset()
+			else
+				RunConsoleCommand("vrmod_experience_reset")
+			end
+			notification.AddLegacy("[VRMod] Defaults restored · guide restarting", NOTIFY_GENERIC, 3)
 		end
 
 		y = y + 50
