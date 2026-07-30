@@ -396,13 +396,14 @@ function vrmod.avatar.IsOpen(id)
 	return s and s:IsValid()
 end
 
---- Height-cal preset: mirror twin with head+hands
+--- Height-cal preset: idle PM twin (looks human). No bone-world stretch.
 function vrmod.avatar.OpenHeightCal(menuUid)
 	return vrmod.avatar.Open({
 		id = "height",
 		mode = "mirror",
 		distance = 48,
-		follow = { hmd = true, hands = true, waist = false, feet = false },
+		idleOnly = true, -- critical: SetBoneWorld head = giraffe
+		follow = { hmd = false, hands = false, waist = false, feet = false },
 		menuUid = menuUid or "heightmenu",
 		menuAnchor = function(standPos, standAng)
 			return standPos + Vector(0, 0, 52) + standAng:Right() * -18,
