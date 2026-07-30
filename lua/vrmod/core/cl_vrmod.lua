@@ -267,6 +267,25 @@ if CLIENT then
 		hook.Call("VRMod_Tracking")
 	end
 
+	--- Write pose into an existing tracking table field (preserve Vector/Angle identity for consumers)
+	local function WritePose(dst, pos, ang)
+		if not dst then return end
+		if pos then
+			if dst.pos and dst.pos.Set then
+				dst.pos:Set(pos)
+			else
+				dst.pos = pos
+			end
+		end
+		if ang then
+			if dst.ang and dst.ang.Set then
+				dst.ang:Set(ang)
+			else
+				dst.ang = ang
+			end
+		end
+	end
+
 	--- Late pose modifiers: wall/weapon collisions write final g_VR.tracking hands.
 	local function ApplyPoseModifiers()
 		local left = g_VR.tracking and g_VR.tracking.pose_lefthand
@@ -278,16 +297,47 @@ if CLIENT then
 			vrmod.utils.CollisionsPreCheck(left.pos, right.pos)
 		end
 		local lp, la, rp, ra = vrmod.utils.UpdateHandCollisions(left.pos, left.ang, right.pos, right.ang)
-		-- Only write back real vectors (collision must not nil-out the SoT)
-		if lp then left.pos = lp end
-		if la then left.ang = la end
-		if rp then right.pos = rp end
-		if ra then right.ang = ra end
+		-- Write back in-place so gun/prop/API sharing .pos/.ang see blocked pose
+		WritePose(left, lp, la)
+		WritePose(right, rp, ra)
 		-- Optional extra modifiers
 		hook.Call("VRMod_TrackingModified", nil, g_VR.tracking, g_VR.rawTracking)
-		-- Viewmodel is a pure slave of final right-hand tracking (no independent push)
-		if g_VR.tracking.pose_righthand and vrmod.utils.UpdateViewModelPos then
-			vrmod.utils.UpdateViewModelPos(g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang)
+		-- Viewmodel + muzzle slave final right hand (blocked pose — no wall cheat)
+		if right and vrmod.utils.UpdateViewModelPos then
+			vrmod.utils.UpdateViewModelPos(right.pos, right.ang)
+		end
+		if vrmod.utils.UpdateViewModel then
+			vrmod.utils.UpdateViewModel()
+		end
+		-- Extra: muzzle tip must not live inside a wall (long guns / ArcVR)
+		if right and right.pos and g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Pos then
+			local mpos = g_VR.viewModelMuzzle.Pos
+			local tr = util.TraceLine({
+				start = right.pos,
+				endpos = mpos,
+				mask = MASK_SOLID_BRUSHONLY,
+				filter = LocalPlayer()
+			})
+			-- Hit between hand and muzzle ⇒ tip is on far side of brush — pull back
+			if tr.Hit and not tr.StartSolid and tr.Fraction < 0.995 then
+				local n = tr.HitNormal
+				if not n or n:LengthSqr() < 0.01 then n = Vector(0, 0, 1) end
+				local pad = 0.75
+				local cvp = GetConVar("vrmod_hand_collision_push")
+				if cvp then pad = math.max(0.05, cvp:GetFloat()) end
+				-- Move hand by the same delta that brings tip to surface + pad
+				local tipTarget = tr.HitPos + n * pad
+				local pull = tipTarget - mpos
+				if pull:LengthSqr() > 0.0001 then
+					WritePose(right, right.pos + pull, right.ang)
+					if vrmod.utils.UpdateViewModelPos then
+						vrmod.utils.UpdateViewModelPos(right.pos, right.ang)
+					end
+					if vrmod.utils.UpdateViewModel then
+						vrmod.utils.UpdateViewModel()
+					end
+				end
+			end
 		end
 	end
 
@@ -466,7 +516,7 @@ if CLIENT then
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
 	end
 
-	-- Live update: sliders used to do nothing until full VR restart
+	-- Live update: UV bounds only (offsets/scale factor)
 	local function BindBorderConvarCallbacks()
 		local names = {
 			"vrmod_horizontaloffset",
@@ -480,6 +530,45 @@ if CLIENT then
 				if not g_VR.active then return end
 				ApplySubmitBounds()
 			end, "vrmod_submit_bounds")
+		end
+	end
+
+	-- Soft-reload projection/FOV/viewscale without full VR restart (rendering profile)
+	local function SoftRefreshDisplayParams()
+		if not g_VR.active then return end
+		local dp = ComputeDisplayParams()
+		if not dp then return end
+		leftCalc = dp.leftCalc or leftCalc
+		rightCalc = dp.rightCalc or rightCalc
+		hfovLeft = dp.hfovL or hfovLeft
+		hfovRight = dp.hfovR or hfovRight
+		aspectLeft = dp.aspL or aspectLeft
+		aspectRight = dp.aspR or aspectRight
+		ipd = dp.ipd or ipd
+		eyez = dp.eyez or eyez
+		g_VR.desktopView = convars.vrmod_desktopview:GetInt()
+		if g_VR.rtWidth and g_VR.rtHeight then
+			cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
+		end
+		ApplySubmitBounds()
+		if vrmod.logger then
+			vrmod.logger.Info("Soft-refreshed display params (FOV/viewscale/desktop)")
+		end
+	end
+
+	local function BindRenderProfileCallbacks()
+		local names = {
+			"vrmod_fovscale_x",
+			"vrmod_fovscale_y",
+			"vrmod_viewscale",
+			"vrmod_desktopview",
+		}
+		for _, name in ipairs(names) do
+			cvars.RemoveChangeCallback(name, "vrmod_render_profile")
+			cvars.AddChangeCallback(name, function()
+				if not g_VR.active then return end
+				SoftRefreshDisplayParams()
+			end, "vrmod_render_profile")
 		end
 	end
 
@@ -514,6 +603,7 @@ if CLIENT then
 		VRMOD_ShareTextureFinish()
 		ApplySubmitBounds()
 		BindBorderConvarCallbacks()
+		BindRenderProfileCallbacks()
 	end
 
 	-- 4) Action manifest & input initialization

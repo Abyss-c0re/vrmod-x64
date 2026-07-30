@@ -680,6 +680,9 @@ local wepWall = {
     hasFree = false
 }
 
+--- Push-out clearance *beyond* the hull surface (from vrmod_hand_collision_push).
+--- This is the full pad applied along hit normal at rest — not "added on top of radius"
+--- twice (old code used radius+push which made the slider feel dead).
 local function GetWallPushPad()
     local cv = cv_hand_push
     if not cv then return 0.75 end
@@ -717,7 +720,12 @@ local function ShouldReleaseWallLock(safePos, _desiredPos)
 	return false
 end
 
---- Sweep weapon collision box; returns handPos/handAng corrected by the sample delta.
+--- Default gun hull when model AABB cache is not ready (long enough to block barrel cheat)
+local DEFAULT_GUN_MINS = Vector(-2, -2.5, -2)
+local DEFAULT_GUN_MAXS = Vector(20, 2.5, 2.5) -- extends along local forward (X)
+
+--- Sweep weapon collision box + barrel tip; returns handPos/handAng corrected by sample delta.
+--- Cube law: guns do not pass through walls — hand and viewmodel share one blocked pose.
 local function ApplyWeaponWallToHand(handPos, handAng, ply)
     if not IsValid(ply) or not IsVec(handPos) or handAng == nil then return handPos, handAng end
     local wep = ply:GetActiveWeapon()
@@ -728,28 +736,40 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
     end
 
     local radius, reach, mins, maxs, _, isMelee = vrmod.utils.GetCachedWeaponParams(wep, ply, "right")
-    mins = mins or vrmod.DEFAULT_MINS
-    maxs = maxs or vrmod.DEFAULT_MAXS
-    radius = radius or vrmod.DEFAULT_RADIUS
-    reach = reach or vrmod.DEFAULT_REACH
-    if not isnumber(reach) then
-        reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2
+    if not mins or not maxs then
+        -- Cache miss: still block with a long default gun box (no free pass for ArcVR / uncached)
+        mins = DEFAULT_GUN_MINS
+        maxs = DEFAULT_GUN_MAXS
+        radius = radius or 4
+        reach = reach or 22
+        isMelee = false
+    else
+        radius = radius or vrmod.DEFAULT_RADIUS
+        reach = reach or vrmod.DEFAULT_REACH
+        if not isnumber(reach) then
+            reach = math.max(math.abs(maxs.x), math.abs(maxs.y), math.abs(maxs.z)) * 2
+        end
     end
 
+    -- Box center in front of palm (barrel direction)
     local desired = vrmod.utils.AdjustCollisionsBox(handPos, handAng, isMelee)
     if not IsVec(desired) then return handPos, handAng end
-    local pad = GetWallPushPad()
+    local pad = math.max(0.05, GetWallPushPad())
     local startPos = (wepWall.hasFree and IsVec(wepWall.lastFree) and wepWall.lastFree) or desired
 
-    local tr = util.TraceHull({
-        start = startPos,
-        endpos = desired,
-        angles = handAng,
-        mins = mins,
-        maxs = maxs,
-        mask = MASK_SOLID_BRUSHONLY,
-        filter = ply
-    })
+    local function hullSweep(from, to)
+        return util.TraceHull({
+            start = from,
+            endpos = to,
+            angles = handAng,
+            mins = mins,
+            maxs = maxs,
+            mask = MASK_SOLID_BRUSHONLY,
+            filter = ply
+        })
+    end
+
+    local tr = hullSweep(startPos, desired)
 
     local clipped = false
     local safe = desired
@@ -757,59 +777,69 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
 
     if tr.StartSolid or tr.AllSolid then
         clipped = true
-        normal = (tr.HitNormal and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
-        if wepWall.hasFree then
-            safe = wepWall.lastFree
+        normal = (IsVec(tr.HitNormal) and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
+        if wepWall.hasFree and IsVec(wepWall.lastFree) then
+            safe = Vector(wepWall.lastFree)
         else
-            local push = desired
-            for _ = 1, 5 do
-                local t2 = util.TraceHull({
-                    start = push,
-                    endpos = push + normal * 8,
-                    angles = handAng,
-                    mins = mins,
-                    maxs = maxs,
-                    mask = MASK_SOLID_BRUSHONLY,
-                    filter = ply
-                })
+            local push = Vector(desired)
+            for _ = 1, 10 do
+                local t2 = hullSweep(push, push + normal * math.max(8, radius * 3))
                 if not t2.StartSolid then
                     if t2.Hit then
                         safe = WallRestPos(t2.HitPos, t2.HitNormal, pad, desired)
-                        normal = (t2.HitNormal and t2.HitNormal.x and t2.HitNormal:LengthSqr() > 0.01) and t2.HitNormal or normal
+                        normal = (IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01) and t2.HitNormal or normal
                     else
-                        safe = (t2.EndPos and t2.EndPos.x) and t2.EndPos or desired
+                        safe = (IsVec(t2.EndPos) and t2.EndPos) or push
                     end
                     break
                 end
-                if t2.HitNormal and t2.HitNormal.x and t2.HitNormal:LengthSqr() > 0.01 then
+                if IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01 then
                     normal = t2.HitNormal
                 end
-                push = push + normal * 2
+                push = push + normal * math.max(2, radius)
             end
         end
     elseif tr.Hit then
         clipped = true
-        normal = (tr.HitNormal and tr.HitNormal.x and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
+        normal = (IsVec(tr.HitNormal) and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
         safe = WallRestPos(tr.HitPos, normal, pad, desired)
     else
-        if not wepWall.lastFree then
-            wepWall.lastFree = Vector()
+        -- Free path for box center — still test barrel tip (cheat path for long guns)
+        local tipLen = math.max(reach, math.abs(maxs.x), 16)
+        local tipDesired = handPos + handAng:Forward() * tipLen + handAng:Up() * 2
+        local tipStart = (wepWall.hasFree and IsVec(wepWall.lastFree)) and (wepWall.lastFree + handAng:Forward() * (tipLen * 0.3)) or handPos
+        local tipTr = util.TraceLine({
+            start = tipStart,
+            endpos = tipDesired,
+            mask = MASK_SOLID_BRUSHONLY,
+            filter = ply
+        })
+        if tipTr.Hit then
+            clipped = true
+            normal = (IsVec(tipTr.HitNormal) and tipTr.HitNormal:LengthSqr() > 0.01) and tipTr.HitNormal or ZERO_UP
+            -- Pull so tip rests outside wall: delta along tip = rest - tipDesired projected to hand
+            local tipSafe = tipTr.HitPos - handAng:Forward() * 1.5 + normal * pad
+            -- Map tip correction onto box-center sample space
+            local tipDelta = tipSafe - tipDesired
+            safe = desired + tipDelta
+        else
+            if not wepWall.lastFree then
+                wepWall.lastFree = Vector()
+            end
+            wepWall.lastFree:Set(desired)
+            wepWall.hasFree = true
         end
-        wepWall.lastFree:Set(desired)
-        wepWall.hasFree = true
     end
 
-    if not safe or safe.x == nil then
+    if not IsVec(safe) then
         safe = desired
         clipped = false
     end
 
-    -- Absurd teleport only — never drop solid wall contact just because
-    -- the gun is pressed deep into geometry (that's intended correction)
+    -- Absurd teleport only
     if clipped and ShouldReleaseWallLock(safe, desired) then
         wepWall.hasFree = false
-        -- keep safe if it's a real correction; only abandon if safe == nonsense
-        if not IsVec(safe) or safe == desired then
+        if not IsVec(safe) or safe:DistToSqr(desired) < 0.01 then
             clipped = false
             safe = desired
             table.Empty(vrmod.collisionBoxes)
@@ -817,7 +847,7 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
         end
     end
 
-    local shape = {
+    vrmod.collisionBoxes = {{
         pos = desired,
         radius = radius,
         mins = mins,
@@ -828,18 +858,18 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
         isClipped = clipped,
         hitNormal = normal,
         hitWorld = clipped
-    }
-    vrmod.collisionBoxes = {shape}
+    }}
 
-    if clipped and handPos and handPos.x and safe and desired then
-        -- Same delta on hand tracking so gun (parented to hand) cannot fly free
+    if clipped then
+        -- Same delta on hand so gun (slave of hand) cannot stay through wall
         local delta = safe - desired
         if delta:LengthSqr() > 0.0001 then
             handPos = handPos + delta
             if DebugEnabled() then
-                vrmod.logger.Debug("Weapon wall: hand delta %s", tostring(delta))
+                vrmod.logger.Debug("Weapon wall block: hand delta %s", tostring(delta))
             end
         end
+        -- Do not advance lastFree while blocked
     end
 
     return handPos, handAng
@@ -887,7 +917,8 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 	end
 
 	local mins, maxs = SetSymmetricHull(radius)
-	local pad = radius + GetWallPushPad()
+	-- Hull already has radius; slider is pure extra push-out past the surface
+	local pad = GetWallPushPad()
 	local st = handWall[handKey]
 	if not st then
 		return desiredSample, false, nil
@@ -976,7 +1007,9 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		if not IsVec(n) or n:LengthSqr() < 0.01 then
 			n = ZERO_UP
 		end
-		return WallRestPos(tr.HitPos, n, pad, startPos), true, n
+		-- vrmod_hand_collision_push is the full extra clearance past the surface
+		local restPad = math.max(0.05, pad)
+		return WallRestPos(tr.HitPos, n, restPad, startPos), true, n
 	end
 
 	return desiredSample, false, nil
@@ -1026,9 +1059,12 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         return passthrough()
     end
 
+    -- Client cvar + NW (UI "wall collisions" must work even if REPLICATED set is delayed)
+    local cvCol = GetConVar("vrmod_collisions")
+    local colOn = (not cvCol or cvCol:GetBool()) and ply:GetNWBool("vrmod_server_enforce_collision", true)
     if not IsValid(ply)
         or not g_VR.active
-        or not ply:GetNWBool("vrmod_server_enforce_collision", true)
+        or not colOn
         or ply:GetMoveType() == MOVETYPE_NOCLIP
         or not ply:Alive()
         or not vrmod.IsPlayerInVR(ply)

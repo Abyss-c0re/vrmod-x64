@@ -259,16 +259,32 @@ function VRUtilOpenMenu()
 			cb:AddChoice("none")
 			cb:AddChoice("left eye")
 			cb:AddChoice("right eye")
+			cb._silent = false
 			function cb:OnSelect(index)
+				if self._silent then return end
+				-- index is 1..3 matching convar 1=none 2=left 3=right
+				if index < 1 then index = 1 end
+				if index > 3 then index = 3 end
 				convars.vrmod_desktopview:SetInt(index)
 			end
 
 			function cb:Think()
-				local v = convars.vrmod_desktopview:GetInt()
+				local v = math.Clamp(convars.vrmod_desktopview:GetInt() or 3, 1, 3)
 				if self.ConvarVal ~= v then
 					self.ConvarVal = v
+					self._silent = true
 					self:ChooseOptionID(v)
+					self._silent = false
 				end
+			end
+
+			-- Initial selection without fighting Think
+			do
+				local v = math.Clamp(convars.vrmod_desktopview:GetInt() or 3, 1, 3)
+				cb.ConvarVal = v
+				cb._silent = true
+				cb:ChooseOptionID(v)
+				cb._silent = false
 			end
 
 			y = y + 40
@@ -503,6 +519,7 @@ function VRUtilOpenMenu()
 		AddCB("Disable pickup prop physics (Server)", "vrmod_pickup_no_phys")
 		AddCB("Enable wall collisions (Client)", "vrmod_collisions")
 		AddCB("Enable prop collisions (Server)", "vrmod_collison_proxy")
+		-- note: wall push slider is vrmod_hand_collision_push (units past surface)
 		AddCB("Flashlight on the left hand (Client)", "vrmod_flashlight_attachment")
 		AddCB("Drop weapon on grip release (Client)", "vrmod_weapondrop_enable")
 		AddCB("Manual item pickup (Client)", "vrmod_manualpickups")

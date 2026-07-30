@@ -1,5 +1,7 @@
+-- Shared: clients must be able to toggle wall correction (push/block) without waiting on NW
+CreateConVar("vrmod_collisions", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY + FCVAR_REPLICATED, "Enable VR hand collision correction")
+
 if SERVER then
-    CreateConVar("vrmod_collisions", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY + FCVAR_REPLICATED, "Enable VR hand collision correction")
     util.AddNetworkString("vrmod_sync_model_params")
     net.Receive("vrmod_sync_model_params", function(len, ply)
         local modelPath = net.ReadString()

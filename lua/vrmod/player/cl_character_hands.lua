@@ -54,8 +54,32 @@ if CLIENT then
 					return
 				end
 
+				-- Prefer live post-collision tracking for local player (gun/hands stay locked when blocked)
 				local netFrame = g_VR.net[steamid] and g_VR.net[steamid].lerpedFrame
-				if netFrame then
+				local useTrack = (ply == LocalPlayer()) and g_VR.tracking and g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand
+				if useTrack then
+					boneinfo[leftHand].overridePos = g_VR.tracking.pose_lefthand.pos
+					boneinfo[leftHand].overrideAng = g_VR.tracking.pose_lefthand.ang
+					boneinfo[rightHand].overridePos = g_VR.tracking.pose_righthand.pos
+					boneinfo[rightHand].overrideAng = g_VR.tracking.pose_righthand.ang + Angle(0, 0, 180)
+					-- fingers from input / netFrame
+					local curls = g_VR.input and g_VR.input.skeleton_lefthand and g_VR.input.skeleton_lefthand.fingerCurls
+					for k, v in pairs(fingerboneids) do
+						if not boneinfo[v] then continue end
+						local fi = math.floor((k - 1) / 3 + 1)
+						local curl = 0
+						if curls and k <= 15 then
+							curl = curls[fi] or 0
+						elseif netFrame then
+							curl = netFrame["finger" .. fi] or 0
+						end
+						if k > 15 and g_VR.input and g_VR.input.skeleton_righthand and g_VR.input.skeleton_righthand.fingerCurls then
+							curl = g_VR.input.skeleton_righthand.fingerCurls[fi] or curl
+						end
+						boneinfo[v].offsetAng = LerpAngle(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+					end
+					hands:SetPos(LocalPlayer():GetPos())
+				elseif netFrame then
 					boneinfo[leftHand].overridePos, boneinfo[leftHand].overrideAng = netFrame.lefthandPos, netFrame.lefthandAng
 					boneinfo[rightHand].overridePos, boneinfo[rightHand].overrideAng = netFrame.righthandPos, netFrame.righthandAng + Angle(0, 0, 180)
 					for k, v in pairs(fingerboneids) do
