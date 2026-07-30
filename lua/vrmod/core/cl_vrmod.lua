@@ -152,7 +152,7 @@ if CLIENT then
 		local viewscale = convars.vrmod_viewscale:GetFloat()
 		local fovX, fovY = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
 		local di = VRMOD_GetDisplayInfo(1, 10)
-		-- Per-eye recommended from module (already 4096-safe), then supersample
+		-- Raw HMD recommended per-eye from module, then supersample, then one 4096 clamp
 		local eyeW = tonumber(di.RecommendedWidth) or 1024
 		local eyeH = tonumber(di.RecommendedHeight) or 1024
 		local ss = 1.0
@@ -170,6 +170,10 @@ if CLIENT then
 			eyeH = math.max(16, math.floor(eyeH * scale))
 			sbsW = eyeW * 2
 		end
+		-- Even dimensions help some GPU / blit paths
+		eyeW = math.max(16, math.floor(eyeW / 2) * 2)
+		eyeH = math.max(16, math.floor(eyeH / 2) * 2)
+		sbsW = eyeW * 2
 		local rawW, rawH = sbsW, eyeH
 
 		local leftProj = vrmod.utils.AdjustFOV(di.ProjectionLeft, fovX, fovY)
@@ -851,9 +855,9 @@ if CLIENT then
 		-- Pass supersampled eye size so module OUT matches engine RT (optional args; old modules ignore)
 		VRMOD_ShareTextureBegin(eyeW, eyeH)
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
-		-- safe fallback for constants
+		-- Filtered RT (no UNFILTERABLE) — sharper when desktop/mirror samples; SS provides crisp VR
 		local depthMode = MATERIAL_RT_DEPTH_SEPARATE or 0
-		local rtFlags = CREATERENDERTARGETFLAGS_UNFILTERABLE_OK or 0
+		local rtFlags = 0
 		local imgFormat = IMAGE_FORMAT_RGBA8888
 		g_VR.rt = GetRenderTargetEx(rtName, g_VR.rtWidth, g_VR.rtHeight, RT_SIZE_LITERAL or 0, depthMode, 0, rtFlags, imgFormat)
 		local matName = "vrmod_rt_mat_" .. tostring(SysTime())
