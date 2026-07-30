@@ -6,6 +6,12 @@
 --   "clone"  — stand offset with same facing (third-person twin)
 --   "world"  — body at feet under HMD, same yaw as player (FBT T-pose cal)
 -- Follow flags map g_VR.tracking → ValveBiped bones (HMD/hands/waist/feet).
+--
+-- CREDITS (limb / body drive when not idle-only):
+--   Pescorr — [VRMOD] VR Ragdoll Puppeteer
+--   https://steamcommunity.com/sharedfiles/filedetails/?id=3695733221
+--   2-bone IK, pelvis-from-HMD, arm/leg chain lengths (see docs/CREDITS.md)
+--   Original VRMod character systems — Catse
 -- =============================================================================
 if SERVER then return end
 

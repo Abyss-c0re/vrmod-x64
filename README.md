@@ -68,6 +68,19 @@ This build focuses on **optimization** by merging essential features from semi-o
    - Place it in:
      `./GarrysMod/garrysmod/addons/vrmod`
 
+## Credits
+
+Full list: **[docs/CREDITS.md](docs/CREDITS.md)**
+
+| | |
+|--|--|
+| **Catse** | Original VRMod |
+| **Pescorr** | Semi-official VRMod · **[VR Ragdoll Puppeteer](https://steamcommunity.com/sharedfiles/filedetails/?id=3695733221)** (2-bone IK / body drive algorithm used for avatar & puppet work) |
+| **Arctic** | ArcVR |
+| **Abyss-c0re** | This fork (Linux x64, Cube Experience, module path) |
+
+Special thanks: Grocel, V vix, func_dumbass, plagueEMT, sponsors & the Workshop.
+
 ## License
 
 **CUBECHAIN LICENSE** (ProjectNexus station law) — energy must flow. We no longer contain.
