@@ -26,13 +26,20 @@ local function InitializeMenuItems()
     vrmod.AddInGameMenuItem("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end, true)
     vrmod.AddInGameMenuItem("Numpad", 3, 0, function() LocalPlayer():ConCommand("vrmod_numpad") end, true)
     vrmod.AddInGameMenuItem("Mirror", 4, 0, function() VRUtilOpenHeightMenu() end, true)
+    -- In VR: Glorious Crimson Cube (native). Desktop/non-VR: Derma web pane.
     vrmod.AddInGameMenuItem("Settings", 5, 0, function()
-        local frame = VRUtilOpenMenu()
-        hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
-            hook.Remove("VRMod_OpenQuickMenu", "closesettings")
-            if IsValid(frame) then frame:Remove() end
-            return false
-        end)
+        if vrmod.web2vr and vrmod.web2vr.OpenSettings then
+            vrmod.web2vr.OpenSettings()
+        elseif vrmod.CubeSettings_Open then
+            vrmod.CubeSettings_Open()
+        else
+            local frame = VRUtilOpenMenu()
+            hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
+                hook.Remove("VRMod_OpenQuickMenu", "closesettings")
+                if IsValid(frame) then frame:Remove() end
+                return false
+            end)
+        end
     end, true)
 
     -- Row 2

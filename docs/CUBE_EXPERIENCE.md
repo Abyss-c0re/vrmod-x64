@@ -44,3 +44,11 @@ vrmod_border_calibrate   -- vision only
 - `mat_queue_mode` untouched  
 - No dual-truth pose forks  
 - Overlay never becomes a black wall of the Real  
+
+## Settings & menus in VR
+
+After first-run, everyday UI uses **web2vr** (see [`CUBE_WEB2VR.md`](CUBE_WEB2VR.md)):
+
+- **Desktop / non-VR** — Derma “web panes” (`VRUtilOpenMenu`)
+- **VR Settings** — **Glorious Crimson Cube** (`vrmod_cube_settings` / Quickmenu → Settings)
+- **Spawn / Context / any MakePopup** — intercepted live into 3D laser surfaces
