@@ -661,8 +661,16 @@ if CLIENT then
 		local rtH = g_VR.rtHeight
 		local rtHalfW = math.floor(rtW / 2)
 
-		SyncEyeView(viewLeft, g_VR.eyePosLeft, hfovLeft, aspectLeft, 0, 0, rtHalfW, rtH, baseAngles, znear, dopost)
-		SyncEyeView(viewRight, g_VR.eyePosRight, hfovRight, aspectRight, rtHalfW, 0, rtHalfW, rtH, baseAngles, znear, dopost)
+		-- Optional eye swap (PSVR2 / inverted-stereo reports): content for logical L/R
+		-- still uses correct IPD/FOV, but is written into the opposite SBS half.
+		local swapEyes = convars.vrmod_swap_eyes and convars.vrmod_swap_eyes:GetBool()
+		local leftX, rightX = 0, rtHalfW
+		if swapEyes then
+			leftX, rightX = rtHalfW, 0
+		end
+
+		SyncEyeView(viewLeft, g_VR.eyePosLeft, hfovLeft, aspectLeft, leftX, 0, rtHalfW, rtH, baseAngles, znear, dopost)
+		SyncEyeView(viewRight, g_VR.eyePosRight, hfovRight, aspectRight, rightX, 0, rtHalfW, rtH, baseAngles, znear, dopost)
 
 		renderingEyes = true
 		local okEyes, errEyes = pcall(function()
@@ -674,26 +682,26 @@ if CLIENT then
 
 			render.Clear(0, 0, 0, 255, true, true)
 
-			-- LEFT
+			-- LEFT eye content → leftX half of SBS
 			view.origin = g_VR.eyePosLeft
 			view.angles = baseAngles
 			view.fov = hfovLeft
 			view.aspectratio = aspectLeft
-			view.x, view.y, view.w, view.h = 0, 0, rtHalfW, rtH
+			view.x, view.y, view.w, view.h = leftX, 0, rtHalfW, rtH
 			g_VR.stereoEye = "left"
-			render.SetScissorRect(0, 0, rtHalfW, rtH, true)
+			render.SetScissorRect(leftX, 0, leftX + rtHalfW, rtH, true)
 			hook.Call("VRMod_PreRender", nil, "left")
 			SafeRenderView(viewLeft)
 
 			render.ClearDepth(true)
 
-			-- RIGHT
+			-- RIGHT eye content → rightX half of SBS
 			view.origin = g_VR.eyePosRight
 			view.fov = hfovRight
 			view.aspectratio = aspectRight
-			view.x, view.y, view.w, view.h = rtHalfW, 0, rtHalfW, rtH
+			view.x, view.y, view.w, view.h = rightX, 0, rtHalfW, rtH
 			g_VR.stereoEye = "right"
-			render.SetScissorRect(rtHalfW, 0, rtW, rtH, true)
+			render.SetScissorRect(rightX, 0, rightX + rtHalfW, rtH, true)
 			hook.Call("VRMod_PreRender", nil, "right")
 			SafeRenderView(viewRight)
 
@@ -1000,7 +1008,8 @@ if CLIENT then
 	end
 
 	local function SetupModelAndPlayerHooks()
-		overrideConvar("viewmodel_fov", GetConVar("fov_desired"):GetString())
+		-- Do not touch viewmodel_fov — GMod x64 blocks it ("Command is blocked!")
+		-- and VR never draws the HL2 viewmodel FOV path as desktop does.
 		hook.Add("CalcViewModelView", "vrutil_hook_calcviewmodelview", function(_, vm, _, _, _, _) return g_VR.viewModelPos, g_VR.viewModelAng end)
 		local blockViewModelDraw = true
 		g_VR.allowPlayerDraw = false

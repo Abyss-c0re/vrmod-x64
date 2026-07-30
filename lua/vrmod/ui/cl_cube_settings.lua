@@ -68,8 +68,10 @@ categories = {
 			{ kind = "slider", label = "FOV scale Y", cvar = "vrmod_fovscale_y", min = 0.5, max = 1.5, decimals = 2 },
 			{ kind = "bool", label = "Post-process", cvar = "vrmod_postprocess" },
 			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },
+			{ kind = "bool", label = "Swap eyes (if inverted)", cvar = "vrmod_swap_eyes",
+				help = "If world looks inside-out / crossed, toggle this." },
 			{ kind = "action", label = "Border calibrate", cmd = "vrmod_border_calibrate" },
-			{ kind = "action", label = "Reset vision + guide", cmd = "vrmod_reset" }, -- settings reset may differ; use safe cmds
+			{ kind = "action", label = "Restart Cube Experience", cmd = "vrmod_experience_reset" },
 		},
 	},
 	{

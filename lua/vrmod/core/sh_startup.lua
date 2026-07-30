@@ -62,6 +62,8 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_supersample", nil, "1.5", FCVAR_ARCHIVE, "VR render supersample 0.5–2.0 (restart VR)", 0.5, 2.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_scalefactor", nil, "1", FCVAR_ARCHIVE, "Submit UV scale factor (border crop)", 0.05, 4.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_eyescale", nil, "0.5")
+    -- Workshop: inverted stereo / "seeing double" (PSVR2 etc.) — swap SBS halves without dual pose truth
+    vrmod.AddCallbackedConvar("vrmod_swap_eyes", nil, "0", FCVAR_ARCHIVE, "Swap left/right eye submit halves", nil, nil, tobool)
     vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV vertical offset", -1.0, 1.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset", -1.0, 1.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
