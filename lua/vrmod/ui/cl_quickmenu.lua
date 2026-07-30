@@ -130,13 +130,13 @@ function g_VR.MenuOpen()
 			else
 				surface.SetDrawColor(hoveredItem == i and 100 or 40, 20, 30, 230)
 				surface.DrawRect(x, y, BTN_W, BTN_H)
-				draw.SimpleText(tostring(label or ""), "CubeLabel", x + BTN_W * 0.5, y + BTN_H * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				draw.SimpleText(tostring(label or ""), fLabel, x + BTN_W * 0.5, y + BTN_H * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 			end
 		end
 
 		if hoveredItem > 0 and g_VR.menuItems[items[hoveredItem].index] then
 			local name = g_VR.menuItems[items[hoveredItem].index].name
-			draw.SimpleText(tostring(name), "CubeLabel", SIZE * 0.5, SIZE - 28, T.crimsonHot or T.crimson, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			draw.SimpleText(tostring(name), fLabel, SIZE * 0.5, SIZE - 28, T.crimsonHot or T.crimson, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
 
 		VRUtilMenuRenderEnd()
