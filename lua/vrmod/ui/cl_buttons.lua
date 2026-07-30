@@ -1,6 +1,16 @@
 if SERVER then return end
 local function InitializeMenuItems()
     g_VR.menuItems = {}
+    -- Drop legacy "Mirror" entries so restore Think cannot resurrect them
+    g_VR.menuBackup = g_VR.menuBackup or {}
+    for id, data in pairs(g_VR.menuBackup) do
+        if data and (data.name == "Mirror" or data.name == "mirror") then
+            g_VR.menuBackup[id] = nil
+        end
+    end
+    if vrmod.RemoveInGameMenuItem then
+        vrmod.RemoveInGameMenuItem("Mirror", nil, true)
+    end
 
     -- Row 1
     vrmod.AddInGameMenuItem("Spawn Menu", 0, 0, function()
@@ -25,13 +35,19 @@ local function InitializeMenuItems()
 
     vrmod.AddInGameMenuItem("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end, true)
     vrmod.AddInGameMenuItem("Numpad", 3, 0, function() LocalPlayer():ConCommand("vrmod_numpad") end, true)
+    -- Defer open one tick: quickmenu closeFunc must finish first or open is eaten
     vrmod.AddInGameMenuItem("Avatar", 4, 0, function()
-        if vrmod.AvatarMenu_Open then
-            vrmod.AvatarMenu_Open()
-        elseif VRUtilOpenHeightMenu then
-            VRUtilOpenHeightMenu()
-        end
-    end, true)
+        timer.Simple(0, function()
+            if not g_VR or not g_VR.active then return end
+            if vrmod.AvatarMenu_Open then
+                vrmod.AvatarMenu_Open()
+            elseif VRUtilOpenHeightMenu then
+                VRUtilOpenHeightMenu()
+            else
+                RunConsoleCommand("vrmod_avatar")
+            end
+        end)
+    end, true, "customize twin")
     -- VR: Glorious Crimson Cube on left hand. Desktop: Derma.
     vrmod.AddInGameMenuItem("Settings", 5, 0, function()
         if vrmod.panel2vr and vrmod.panel2vr.OpenSettings then

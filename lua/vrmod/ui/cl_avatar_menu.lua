@@ -15,6 +15,8 @@ local bodyScroll = 0
 local avatarSession = nil
 local modelList = {}
 local buttons = {}
+local statusMsg = ""
+local statusUntil = 0
 
 local W, H = 512, 600
 local livePos, liveAng, liveScale = Vector(2.5, 3, 4), Angle(0, -90, 55), 0.025
@@ -122,7 +124,7 @@ local function rebuildButtons()
 		buttons[#buttons + 1] = { x = PAD + (bw + 8) * 2, y = y0 + 50, w = bw, h = 48, kind = "h_minus" }
 		buttons[#buttons + 1] = { x = PAD, y = y0 + 110, w = (W - PAD * 2 - 8) / 2, h = 48, kind = "h_seated" }
 		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 110, w = (W - PAD * 2 - 8) / 2, h = 48, kind = "h_offset" }
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 170, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "mode_mirror" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 170, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "mode_facing" }
 		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 170, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "mode_clone" }
 		buttons[#buttons + 1] = { x = PAD, y = y0 + 226, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_minus" }
 		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 226, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_plus" }
@@ -141,7 +143,8 @@ local function rebuildButtons()
 		end
 		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0, w = 36, h = 40, kind = "model_up" }
 		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0 + 200, w = 36, h = 40, kind = "model_dn" }
-		buttons[#buttons + 1] = { x = PAD, y = H - 70, w = W - PAD * 2, h = 44, kind = "model_player" }
+		buttons[#buttons + 1] = { x = PAD, y = H - 120, w = W - PAD * 2, h = 40, kind = "model_player" }
+		buttons[#buttons + 1] = { x = PAD, y = H - 70, w = W - PAD * 2, h = 48, kind = "model_save" }
 	elseif tab == 3 then
 		local s = sess()
 		local ent = s and s:GetEntity()
@@ -160,16 +163,20 @@ local function rebuildButtons()
 					}
 				end
 			end
-			buttons[#buttons + 1] = { x = PAD, y = H - 120, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "skin_prev" }
-			buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = H - 120, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "skin_next" }
+			buttons[#buttons + 1] = { x = PAD, y = H - 120, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "skin_prev" }
+			buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = H - 120, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "skin_next" }
+			buttons[#buttons + 1] = { x = PAD, y = H - 70, w = W - PAD * 2, h = 48, kind = "model_save" }
 		end
 		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0, w = 36, h = 36, kind = "body_up" }
 		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0 + 160, w = 36, h = 36, kind = "body_dn" }
 	elseif tab == 4 then
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 20, w = W - PAD * 2, h = 48, kind = "toggle_head" }
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 80, w = W - PAD * 2, h = 48, kind = "toggle_hands" }
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 140, w = W - PAD * 2, h = 48, kind = "toggle_trackers" }
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 200, w = W - PAD * 2, h = 48, kind = "restart_twin" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 8, w = W - PAD * 2, h = 40, kind = "toggle_head" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 54, w = W - PAD * 2, h = 40, kind = "toggle_hands" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 100, w = W - PAD * 2, h = 40, kind = "toggle_trackers" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 146, w = W - PAD * 2, h = 40, kind = "toggle_laser_pick" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 192, w = W - PAD * 2, h = 40, kind = "clear_hidden_bones" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 238, w = W - PAD * 2, h = 40, kind = "restart_twin" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 284, w = W - PAD * 2, h = 40, kind = "model_save" }
 	end
 end
 
@@ -229,8 +236,9 @@ local function paint()
 			drawBtn(PAD + (bw + 8) * 2, y0 + 50, bw, 48, "-", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD, y0 + 110, (W - PAD * 2 - 8) / 2, 48, seated() and "SEATED ON" or "SEATED OFF", false, seated())
 			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 110, (W - PAD * 2 - 8) / 2, 48, "OFFSET", false, false)
-			local mode = s and s.mode or "mirror"
-			drawBtn(PAD, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "MIRROR", false, mode == "mirror")
+			local mode = s and s.mode or "facing"
+			if mode == "mirror" then mode = "facing" end
+			drawBtn(PAD, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "FACING", false, mode == "facing")
 			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "CLONE", false, mode == "clone")
 			local dist = s and s.distance or 40
 			drawBtn(PAD, y0 + 226, (W - PAD * 2 - 8) / 2, 40, "DIST −", false, false)
@@ -251,7 +259,8 @@ local function paint()
 			end
 			drawBtn(W - PAD - 40, y0 + 14, 36, 40, "▲", false, false)
 			drawBtn(W - PAD - 40, y0 + 214, 36, 40, "▼", false, false)
-			drawBtn(PAD, H - 70, W - PAD * 2, 44, "USE MY PLAYER MODEL", false, false)
+			drawBtn(PAD, H - 120, W - PAD * 2, 40, "USE MY PLAYER MODEL", false, false)
+			drawBtn(PAD, H - 70, W - PAD * 2, 48, "SAVE TO PLAYER", false, false)
 		elseif tab == 3 then
 			local ent = s and s:GetEntity()
 			if not IsValid(ent) then
@@ -276,20 +285,36 @@ local function paint()
 				end
 				local sk = ent:GetSkin() or 0
 				local nsk = ent:SkinCount() or 1
-				drawBtn(PAD, H - 120, (W - PAD * 2 - 8) / 2, 44, "SKIN −", false, false)
-				drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, H - 120, (W - PAD * 2 - 8) / 2, 44, string.format("SKIN %d/%d", sk, math.max(0, nsk - 1)), false, false)
+				drawBtn(PAD, H - 120, (W - PAD * 2 - 8) / 2, 40, "SKIN −", false, false)
+				drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, H - 120, (W - PAD * 2 - 8) / 2, 40, string.format("SKIN %d/%d", sk, math.max(0, nsk - 1)), false, false)
+				drawBtn(PAD, H - 70, W - PAD * 2, 48, "SAVE TO PLAYER", false, false)
 			end
 		elseif tab == 4 then
 			local s2 = sess()
 			local hh = s2 and s2.hideHead
 			local hh2 = s2 and s2.hideHands
 			local tr = s2 and s2.showHandTrackers
-			draw.SimpleText("bone visibility · tracking", "DermaDefault", PAD, y0 - 2, Theme.muted)
-			drawBtn(PAD, y0 + 20, W - PAD * 2, 48, hh and "HEAD HIDDEN" or "HIDE HEAD", false, hh)
-			drawBtn(PAD, y0 + 80, W - PAD * 2, 48, hh2 and "HANDS HIDDEN" or "HIDE HANDS", false, hh2)
-			drawBtn(PAD, y0 + 140, W - PAD * 2, 48, tr and "HAND TRACKERS ON" or "HAND TRACKERS", false, tr)
-			drawBtn(PAD, y0 + 200, W - PAD * 2, 48, "RESTART TWIN", false, false)
-			draw.SimpleText("pose from g_VR.tracking · HMD + hands (+ FBT)", "DermaDefault", W * 0.5, H - 48, Theme.muted, TEXT_ALIGN_CENTER)
+			local lp = s2 and s2.laserPickBones
+			local hoverName = s2 and s2.hoverBoneName
+			local nHide = 0
+			if s2 and s2.customHidden then
+				for _ in pairs(s2.customHidden) do nHide = nHide + 1 end
+			end
+			draw.SimpleText("point laser at twin bone · trigger = hide/show", "DermaDefault", PAD, y0 - 4, Theme.muted)
+			drawBtn(PAD, y0 + 8, W - PAD * 2, 40, hh and "HEAD HIDDEN" or "HIDE HEAD", false, hh)
+			drawBtn(PAD, y0 + 54, W - PAD * 2, 40, hh2 and "HANDS HIDDEN" or "HIDE HANDS", false, hh2)
+			drawBtn(PAD, y0 + 100, W - PAD * 2, 40, tr and "HAND TRACKERS ON" or "HAND TRACKERS", false, tr)
+			drawBtn(PAD, y0 + 146, W - PAD * 2, 40, lp and "LASER PICK ON" or "LASER PICK OFF", false, lp)
+			drawBtn(PAD, y0 + 192, W - PAD * 2, 40, "CLEAR HIDDEN (" .. nHide .. ")", false, false)
+			drawBtn(PAD, y0 + 238, W - PAD * 2, 40, "RESTART TWIN", false, false)
+			drawBtn(PAD, y0 + 284, W - PAD * 2, 40, "SAVE TO PLAYER", false, false)
+			if hoverName then
+				draw.SimpleText("aim: " .. hoverName, "DermaDefaultBold", W * 0.5, H - 36, Theme.hot, TEXT_ALIGN_CENTER)
+			end
+		end
+
+		if statusMsg ~= "" and CurTime() < statusUntil then
+			draw.SimpleText(statusMsg, "DermaDefaultBold", W * 0.5, H - 22, Theme.ok, TEXT_ALIGN_CENTER)
 		end
 
 		if focused and mx >= 0 then
@@ -302,6 +327,18 @@ local function paint()
 	if not okPaint and vrmod.logger then
 		vrmod.logger.Debug("avatar paint: %s", tostring(errPaint))
 	end
+end
+
+local function doSave()
+	local s = sess()
+	if not s or not s.ApplyToPlayer then
+		statusMsg = "no twin to save"
+		statusUntil = CurTime() + 3
+		return
+	end
+	local ok, info = s:ApplyToPlayer()
+	statusMsg = ok and ("SAVED · " .. tostring(info)) or ("save failed · " .. tostring(info))
+	statusUntil = CurTime() + 4
 end
 
 local function activate(mx, my)
@@ -332,9 +369,9 @@ local function activate(mx, my)
 			end
 		elseif k == "h_offset" then
 			vrmod.AutoSeatedOffset()
-		elseif k == "mode_mirror" then
+		elseif k == "mode_facing" or k == "mode_mirror" then
 			local s = sess()
-			if s and s.SetMode then s:SetMode("mirror") end
+			if s and s.SetMode then s:SetMode("facing") end
 		elseif k == "mode_clone" then
 			local s = sess()
 			if s and s.SetMode then s:SetMode("clone") end
@@ -355,8 +392,10 @@ local function activate(mx, my)
 			local s = sess()
 			local ply = LocalPlayer()
 			if s and s.SetModel and IsValid(ply) then
-				s:SetModel(ply:GetModel())
+				s:SetModel(ply.vrmod_pm or ply:GetModel())
 			end
+		elseif k == "model_save" then
+			doSave()
 		elseif k == "bg_prev" then
 			local s = sess()
 			if s and s.CycleBodygroup then s:CycleBodygroup(btn.bg, -1) end
@@ -391,6 +430,16 @@ local function activate(mx, my)
 		elseif k == "toggle_trackers" then
 			local s = sess()
 			if s then s.showHandTrackers = not s.showHandTrackers end
+		elseif k == "toggle_laser_pick" then
+			local s = sess()
+			if s then s.laserPickBones = not s.laserPickBones end
+		elseif k == "clear_hidden_bones" then
+			local s = sess()
+			if s and s.ClearCustomHidden then
+				s:ClearCustomHidden()
+				statusMsg = "cleared custom hidden bones"
+				statusUntil = CurTime() + 3
+			end
 		elseif k == "restart_twin" then
 			StartTwin()
 		end
@@ -421,21 +470,31 @@ function vrmod.AvatarMenu_Close()
 end
 
 function vrmod.AvatarMenu_Open()
-	if not (g_VR and g_VR.active) then return end
-	-- threePoints optional: still allow open if tracking later
+	if not (g_VR and g_VR.active) then
+		if vrmod.logger then vrmod.logger.Warn("[Avatar] not in VR") end
+		return
+	end
 	if open then
 		vrmod.AvatarMenu_Close()
 		return
 	end
-	if not isfunction(VRUtilMenuOpen) then return end
+	if not isfunction(VRUtilMenuOpen) then
+		if vrmod.logger then vrmod.logger.Warn("[Avatar] VRUtilMenuOpen missing") end
+		return
+	end
 
-	-- Kill zombie heightmenu hooks/UI from previous lua state
+	-- Close competing hand menus so focus/laser works
+	if g_VR.menus then
+		for _, uid in ipairs({ "miscmenu", "heightmenu", "cube_settings", "cubeui_main" }) do
+			if g_VR.menus[uid] and isfunction(VRUtilMenuClose) then
+				g_VR.menus[uid].closeFunc = nil
+				VRUtilMenuClose(uid)
+			end
+		end
+	end
 	hook.Remove("VRMod_Input", "vrmodheightmenuinput")
 	hook.Remove("PreRender", "vrmodheightmenuplace")
-	if g_VR.menus and g_VR.menus.heightmenu and isfunction(VRUtilMenuClose) then
-		g_VR.menus.heightmenu.closeFunc = nil
-		VRUtilMenuClose("heightmenu")
-	end
+	hook.Remove("PreRender", "vrutil_hook_renderigm")
 
 	open = true
 	tab = 1
@@ -493,12 +552,27 @@ function vrmod.AvatarMenu_Open()
 		end
 		if not pressed then return end
 		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
-		-- Accept click only while laser-locked on this surface
-		if g_VR.menuFocus ~= UID then return end
-		local cx = g_VR.menuCursorX
-		local cy = g_VR.menuCursorY
-		if not cx or not cy then return end
-		activate(cx, cy)
+
+		-- 1) UI panel clicks when laser is on the hand menu
+		if g_VR.menuFocus == UID then
+			local cx, cy = g_VR.menuCursorX, g_VR.menuCursorY
+			if cx and cy then activate(cx, cy) end
+			return
+		end
+
+		-- 2) Laser pick bone on twin (when not pointing at the menu)
+		local s = sess()
+		if s and s.laserPickBones and s.ToggleCustomBone then
+			s:UpdateLaserHover()
+			local id = s.hoverBoneId
+			if id then
+				local ok, name, hidden = s:ToggleCustomBone(id)
+				if ok then
+					statusMsg = (hidden and "HID " or "SHOW ") .. tostring(name)
+					statusUntil = CurTime() + 2.5
+				end
+			end
+		end
 	end)
 
 	local t0 = CurTime()

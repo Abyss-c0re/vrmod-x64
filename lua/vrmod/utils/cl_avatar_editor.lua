@@ -44,7 +44,30 @@ local cv_body = CreateClientConVar("vrmod_avatar_bodygroups", "", true, FCVAR_AR
 local cv_hide_head = CreateClientConVar("vrmod_avatar_hide_head", "0", true, FCVAR_ARCHIVE)
 local cv_hide_hands = CreateClientConVar("vrmod_avatar_hide_hands", "0", true, FCVAR_ARCHIVE)
 local cv_distance = CreateClientConVar("vrmod_avatar_distance", "40", true, FCVAR_ARCHIVE)
-local cv_mode = CreateClientConVar("vrmod_avatar_mode", "mirror", true, FCVAR_ARCHIVE) -- mirror|clone
+-- facing = stand in front facing you (MapClone, no L/R flip — flip made mesh "inside out")
+-- clone  = stand in front same yaw as player
+local cv_mode = CreateClientConVar("vrmod_avatar_mode", "facing", true, FCVAR_ARCHIVE)
+-- Semicolon-separated bone names hidden via laser pick
+local cv_hidden_bones = CreateClientConVar("vrmod_avatar_hidden_bones", "", true, FCVAR_ARCHIVE)
+
+local function ParseHiddenBones(str)
+	local t = {}
+	if not str or str == "" then return t end
+	for name in string.gmatch(str, "[^;]+") do
+		name = string.Trim(name)
+		if name ~= "" then t[name] = true end
+	end
+	return t
+end
+
+local function EncodeHiddenBones(map)
+	local parts = {}
+	for name in pairs(map or {}) do
+		parts[#parts + 1] = name
+	end
+	table.sort(parts)
+	return table.concat(parts, ";")
+end
 
 local function CopyLooks(dst, src)
 	if not IsValid(dst) or not IsValid(src) then return end
@@ -92,14 +115,8 @@ local function AngleBetween(fromPos, toPos)
 	return dir:Angle()
 end
 
-local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
-	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
-	relPos.y = -relPos.y
-	relAng.y = -relAng.y
-	relAng.r = -relAng.r
-	return LocalToWorld(relPos, relAng, avatarFeet, avatarYaw)
-end
-
+-- Map player-space pose into avatar stand space WITHOUT axis flips.
+-- (Old MapMirror flipped Y/roll and inverted the mesh / "inside out".)
 local function MapClone(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 	return LocalToWorld(relPos, relAng, avatarFeet, avatarYaw)
@@ -210,12 +227,7 @@ function Session:SetModel(path)
 	self.ent:SetModel(path)
 	self.model = path
 	cv_model:SetString(path)
-	local ply = LocalPlayer()
-	if IsValid(ply) then
-		ply.vrmod_pm = path
-		CopyLooks(self.ent, ply)
-	end
-	-- re-apply stored bodygroups/skin after model change
+	-- keep twin bodygroups/skin from convars (don't CopyLooks — that reverts to live PM)
 	self.ent:SetSkin(cv_skin:GetInt())
 	ApplyBodygroups(self.ent, ParseBodygroups(cv_body:GetString()))
 	self.ent:SetupBones()
@@ -223,6 +235,69 @@ function Session:SetModel(path)
 	self:_measureArms()
 	self:_applyHideBones()
 	return true
+end
+
+--- Resolve playermodel name for a .mdl path
+function Session:ModelName()
+	local path = self.model or (IsValid(self.ent) and self.ent:GetModel()) or ""
+	if path == "" then return nil end
+	if player_manager and player_manager.TranslateToPlayerModelName then
+		local n = player_manager.TranslateToPlayerModelName(path)
+		if n and n ~= "" and n ~= "unknown" then return n end
+	end
+	if player_manager and player_manager.AllValidModels then
+		for name, p in pairs(player_manager.AllValidModels()) do
+			if p == path then return name end
+		end
+	end
+	return nil
+end
+
+--- Persist twin customization onto the REAL player (convars + sandbox PM cmds)
+function Session:ApplyToPlayer()
+	if not self:IsValid() then return false, "no twin" end
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return false, "no player" end
+
+	local path = self.ent:GetModel()
+	local skin = self.ent:GetSkin() or 0
+	cv_model:SetString(path or "")
+	cv_skin:SetInt(skin)
+	cv_body:SetString(EncodeBodygroups(self.ent))
+	ply.vrmod_pm = path
+
+	local name = self:ModelName()
+	if name then
+		RunConsoleCommand("cl_playermodel", name)
+	end
+	RunConsoleCommand("cl_playerskin", tostring(skin))
+
+	-- GMod bodygroup string: space-separated values per group index
+	local parts = {}
+	for i = 0, (self.ent:GetNumBodyGroups() or 1) - 1 do
+		parts[#parts + 1] = tostring(self.ent:GetBodygroup(i) or 0)
+	end
+	if #parts > 0 then
+		RunConsoleCommand("cl_playerbodygroups", table.concat(parts, " "))
+	end
+
+	-- Immediate client model (some gamemodes honor this)
+	pcall(function()
+		if path and path ~= "" then ply:SetModel(path) end
+		ply:SetSkin(skin)
+		for i = 0, (self.ent:GetNumBodyGroups() or 1) - 1 do
+			ply:SetBodygroup(i, self.ent:GetBodygroup(i) or 0)
+		end
+	end)
+
+	-- Keep custom hidden bones archived (already in cv_hidden_bones)
+	cv_hidden_bones:SetString(EncodeHiddenBones(self.customHidden))
+
+	if vrmod.logger then
+		vrmod.logger.Info("[Avatar] saved PM=%s skin=%d body=%s hidden=%s",
+			tostring(name or path), skin, cv_body:GetString(), cv_hidden_bones:GetString())
+	end
+	return true, name or path
 end
 
 function Session:SetSkin(idx)
@@ -263,24 +338,122 @@ function Session:_applyHideBones()
 	local function scaleBone(id, v)
 		if id then e:ManipulateBoneScale(id, v) end
 	end
-	scaleBone(b.head, self.hideHead and VEC_TINY or VEC_ONE)
+
+	-- Reset all bone scales first (custom hide may have changed many)
+	local n = e:GetBoneCount() or 0
+	for i = 0, n - 1 do
+		e:ManipulateBoneScale(i, VEC_ONE)
+	end
+
+	if self.hideHead then scaleBone(b.head, VEC_TINY) end
 	if self.hideHands then
 		scaleBone(b.lHand, VEC_TINY)
 		scaleBone(b.rHand, VEC_TINY)
 		scaleBone(b.lFore, VEC_TINY)
 		scaleBone(b.rFore, VEC_TINY)
-	else
-		scaleBone(b.lHand, VEC_ONE)
-		scaleBone(b.rHand, VEC_ONE)
-		scaleBone(b.lFore, VEC_ONE)
-		scaleBone(b.rFore, VEC_ONE)
+	end
+
+	-- Custom laser-picked bones (by name, re-lookup after model change)
+	self.customHidden = self.customHidden or {}
+	for name in pairs(self.customHidden) do
+		local id = e:LookupBone(name)
+		if (not id or id < 0) and string.match(name, "^#(%d+)$") then
+			id = tonumber(string.match(name, "^#(%d+)$"))
+		end
+		if id and id >= 0 then
+			e:ManipulateBoneScale(id, VEC_TINY)
+		end
 	end
 end
 
+function Session:_saveCustomHidden()
+	cv_hidden_bones:SetString(EncodeHiddenBones(self.customHidden))
+end
+
+--- Closest bone to a world ray (right-hand laser). Returns boneId, name, hitPos, distToBone
+function Session:RayPickBone(origin, dir, maxDist, maxRadius)
+	if not self:IsValid() or not origin or not dir then return nil end
+	maxDist = maxDist or 250
+	maxRadius = maxRadius or 6 -- units: how close ray must pass to bone
+	dir = dir:GetNormalized()
+	self.ent:SetupBones()
+
+	local bestId, bestName, bestHit, bestD = nil, nil, nil, maxRadius
+	local n = self.ent:GetBoneCount() or 0
+	for i = 0, n - 1 do
+		local m = self.ent:GetBoneMatrix(i)
+		if not m then continue end
+		local p = m:GetTranslation()
+		local toP = p - origin
+		local along = toP:Dot(dir)
+		if along < 2 or along > maxDist then continue end
+		local closest = origin + dir * along
+		local d = closest:Distance(p)
+		if d < bestD then
+			bestD = d
+			bestId = i
+			bestHit = closest
+			bestName = self.ent:GetBoneName(i)
+			if not bestName or bestName == "" then bestName = "#" .. i end
+		end
+	end
+	return bestId, bestName, bestHit, bestD
+end
+
+--- Toggle hide for a bone (by id). Persists name in vrmod_avatar_hidden_bones.
+function Session:ToggleCustomBone(boneId)
+	if not self:IsValid() or not boneId or boneId < 0 then return false, nil, false end
+	local name = self.ent:GetBoneName(boneId)
+	if not name or name == "" then name = "#" .. boneId end
+	self.customHidden = self.customHidden or {}
+	local nowHidden
+	if self.customHidden[name] then
+		self.customHidden[name] = nil
+		nowHidden = false
+	else
+		self.customHidden[name] = true
+		nowHidden = true
+	end
+	self:_saveCustomHidden()
+	self:_applyHideBones()
+	return true, name, nowHidden
+end
+
+function Session:ClearCustomHidden()
+	self.customHidden = {}
+	self:_saveCustomHidden()
+	self:_applyHideBones()
+end
+
+function Session:IsBoneCustomHidden(boneId)
+	if not self:IsValid() or not boneId then return false end
+	local name = self.ent:GetBoneName(boneId)
+	if not name or name == "" then name = "#" .. boneId end
+	return self.customHidden and self.customHidden[name] and true or false
+end
+
+function Session:GetHoverBone()
+	return self.hoverBoneId, self.hoverBoneName, self.hoverBonePos
+end
+
+--- Update hover from RH laser each frame (call while Avatar menu open)
+function Session:UpdateLaserHover()
+	self.hoverBoneId, self.hoverBoneName, self.hoverBonePos = nil, nil, nil
+	if not self:IsValid() or not g_VR.tracking then return end
+	local rh = g_VR.tracking.pose_righthand
+	if not rh or not rh.pos or not rh.ang then return end
+	local id, name, hit = self:RayPickBone(rh.pos, rh.ang:Forward(), 250, 7)
+	self.hoverBoneId = id
+	self.hoverBoneName = name
+	self.hoverBonePos = hit
+end
+
 function Session:SetMode(mode)
-	if mode ~= "mirror" and mode ~= "clone" then return end
+	-- accept legacy "mirror" as "facing"
+	if mode == "mirror" then mode = "facing" end
+	if mode ~= "facing" and mode ~= "clone" and mode ~= "world" then return end
 	self.mode = mode
-	cv_mode:SetString(mode)
+	cv_mode:SetString(mode == "world" and "facing" or mode)
 end
 
 function Session:SetDistance(d)
@@ -312,21 +485,23 @@ end
 
 function Session:_computeStand(hmd, playerFeet, playerYaw, yaw)
 	local dist = self.distance or cv_distance:GetFloat()
-	local mode = self.mode or "mirror"
+	local mode = self.mode or "facing"
+	if mode == "mirror" then mode = "facing" end
 	if mode == "world" then
 		return playerFeet, Angle(0, yaw, 0)
 	elseif mode == "clone" then
+		-- same facing as player (looks over twin's shoulder from behind-ish)
 		return playerFeet + playerYaw:Forward() * dist, Angle(0, yaw, 0)
 	end
+	-- facing: twin in front looking at you (no bone-axis flip)
 	return playerFeet + playerYaw:Forward() * dist, Angle(0, yaw + 180, 0)
 end
 
 function Session:_map(pos, ang, playerFeet, playerYaw)
 	if self.mode == "world" then
 		return pos, ang
-	elseif self.mode == "mirror" then
-		return MapMirror(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 	end
+	-- Always MapClone — face-to-face uses stand yaw only, not inverted bones
 	return MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 end
 
@@ -337,122 +512,61 @@ local function MatFrom(pos, ang)
 	return m
 end
 
---- Build target matrices from g_VR.tracking (Pescorr algorithm, correct Valve head angles)
-function Session:_solveTracking(hmd, playerFeet, playerYaw)
-	local tr = g_VR.tracking
-	local left, right = tr.pose_lefthand, tr.pose_righthand
-	if not left or not left.pos or not right or not right.pos then return end
+--- Copy the LIVE VR player's posed bones (cl_character IK) into twin space.
+--- This matches g_VR movement without home-grown bone angles that invert meshes.
+function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return false end
 
-	local hmdPos = Vector(hmd.pos)
-	local hmdAng = Angle(hmd.ang.p, hmd.ang.y, hmd.ang.r)
-	local lhPos = Vector(left.pos)
-	local lhAng = left.ang and Angle(left.ang.p, left.ang.y, left.ang.r) or Angle()
-	local rhPos = Vector(right.pos)
-	local rhAng = right.ang and Angle(right.ang.p, right.ang.y, right.ang.r) or Angle()
+	-- Force a bone solve even if floating-hands hid the body this frame
+	local prevAllow = g_VR.allowPlayerDraw
+	g_VR.allowPlayerDraw = true
+	local okSetup = pcall(function()
+		ply:InvalidateBoneCache()
+		ply:SetupBones()
+	end)
+	g_VR.allowPlayerDraw = prevAllow
+	if not okSetup then return false end
 
-	local pelvisOff = self.pelvisOffset or DEFAULT_PELVIS_OFFSET
-	local shoulderW = self.shoulderWidth or DEFAULT_SHOULDER_W
-	local upperLen = self.upperArmLen or 12
-	local foreLen = self.forearmLen or 12
-	local upperLeg = self.upperLegLen or 16
-	local lowerLeg = self.lowerLegLen or 16
-	local fbt = self:_fbtLive()
-	local follow = self.follow
-
-	-- Pescorr: ValveBiped head orientation from HMD
-	local headPos = hmdPos
-	local headAng = Angle(hmdAng.p - 90, hmdAng.y, hmdAng.r + 90)
-
-	local pelvisPos = hmdPos - Vector(0, 0, pelvisOff)
-	local pelvisAng = Angle(0, hmdAng.y, 0)
-	local waist = tr.pose_waist
-	if fbt and follow.waist ~= false and waist and waist.pos then
-		pelvisPos = Vector(waist.pos)
-		pelvisAng = Angle(0, (waist.ang and waist.ang.y) or hmdAng.y, 0)
-	end
-
-	local spinePos = LerpVector(0.4, pelvisPos, headPos)
-	local spineAng = Angle(hmdAng.p * 0.3, hmdAng.y, 0)
-	local spineRight = spineAng:Right()
-	local shoulderL = spinePos - spineRight * shoulderW
-	local shoulderR = spinePos + spineRight * shoulderW
-	local bodyFwd = spineAng:Forward()
-	local hintBack = (-bodyFwd + Vector(0, 0, -0.3)):GetNormalized()
-	local elbowL = SolveTwoBoneIK(shoulderL, lhPos, upperLen, foreLen, hintBack)
-	local elbowR = SolveTwoBoneIK(shoulderR, rhPos, upperLen, foreLen, hintBack)
-
-	local map = function(p, a)
-		return self:_map(p, a, playerFeet, playerYaw)
-	end
-	local mirror = (self.mode == "mirror")
-	local b = self.bones
 	local targets = {}
+	local n = ply:GetBoneCount() or 0
+	if n < 1 then return false end
 
-	local function set(id, pos, ang)
-		if id then targets[id] = MatFrom(pos, ang) end
-	end
+	-- Same skeleton path: copy every bone by index
+	local sameSkel = (self.ent:GetModel() == ply:GetModel())
+		or (self.ent:GetModel() == (ply.vrmod_pm or ""))
+		or (self.model == ply:GetModel())
 
-	local pPelvis, aPelvis = map(pelvisPos, pelvisAng)
-	local pSpine, aSpine = map(spinePos, spineAng)
-	local pHead, aHead = map(headPos, headAng)
-	if follow.hmd ~= false then
-		set(b.pelvis, pPelvis, aPelvis)
-		if b.chest then set(b.chest, pSpine, aSpine) end
-		if b.spine and b.spine ~= b.chest then set(b.spine, pSpine, aSpine) end
-		set(b.head, pHead, aHead)
-	end
-
-	if follow.hands ~= false then
-		local function arm(sh, el, handP, handA, uId, fId, hId, flip)
-			local pS = map(sh, Angle())
-			local pE = map(el, Angle())
-			local pH, aH = map(handP, handA)
-			if flip then aH = aH + Angle(0, 0, 180) end
-			set(uId, pS, AngleBetween(pS, pE))
-			set(fId, pE, AngleBetween(pE, pH))
-			set(hId, pH, aH)
-		end
-		if mirror then
-			-- visual swap so mirror reads as your reflection
-			arm(shoulderL, elbowL, lhPos, lhAng, b.rUpper, b.rFore, b.rHand, true)
-			arm(shoulderR, elbowR, rhPos, rhAng, b.lUpper, b.lFore, b.lHand, false)
-		else
-			arm(shoulderL, elbowL, lhPos, lhAng, b.lUpper, b.lFore, b.lHand, false)
-			arm(shoulderR, elbowR, rhPos, rhAng, b.rUpper, b.rFore, b.rHand, true)
-		end
-	end
-
-	if fbt and follow.feet ~= false then
-		local lfoot, rfoot = tr.pose_leftfoot, tr.pose_rightfoot
-		if lfoot and lfoot.pos and rfoot and rfoot.pos then
-			local lfPos, rfPos = Vector(lfoot.pos), Vector(rfoot.pos)
-			local lfAng = lfoot.ang and Angle(lfoot.ang.p, lfoot.ang.y, lfoot.ang.r) or Angle()
-			local rfAng = rfoot.ang and Angle(rfoot.ang.p, rfoot.ang.y, rfoot.ang.r) or Angle()
-			local hipRight = pelvisAng:Right()
-			local kneeHint = -pelvisAng:Forward()
-			local hipL = pelvisPos - hipRight * shoulderW - Vector(0, 0, 2)
-			local hipR = pelvisPos + hipRight * shoulderW - Vector(0, 0, 2)
-			local kneeL = SolveTwoBoneIK(hipL, lfPos, upperLeg, lowerLeg, kneeHint)
-			local kneeR = SolveTwoBoneIK(hipR, rfPos, upperLeg, lowerLeg, kneeHint)
-			local function leg(hip, knee, foot, footAng, tId, cId, fId)
-				local pH = map(hip, Angle())
-				local pK = map(knee, Angle())
-				local pF, aF = map(foot, footAng)
-				set(tId, pH, AngleBetween(pH, pK))
-				set(cId, pK, AngleBetween(pK, pF))
-				set(fId, pF, aF)
+	if sameSkel then
+		for i = 0, n - 1 do
+			local m = ply:GetBoneMatrix(i)
+			if m then
+				local pos, ang = m:GetTranslation(), m:GetAngles()
+				local np, na = MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
+				targets[i] = MatFrom(np, na)
 			end
-			if mirror then
-				leg(hipL, kneeL, lfPos, lfAng, b.rThigh, b.rCalf, b.rFoot)
-				leg(hipR, kneeR, rfPos, rfAng, b.lThigh, b.lCalf, b.lFoot)
-			else
-				leg(hipL, kneeL, lfPos, lfAng, b.lThigh, b.lCalf, b.lFoot)
-				leg(hipR, kneeR, rfPos, rfAng, b.rThigh, b.rCalf, b.rFoot)
+		end
+	else
+		-- Different PM: map ValveBiped names that exist on both
+		for name, twinId in pairs(self.bones) do
+			local boneName = BONES[name]
+			if twinId and boneName then
+				local plyId = ply:LookupBone(boneName)
+				if plyId and plyId >= 0 then
+					local m = ply:GetBoneMatrix(plyId)
+					if m then
+						local pos, ang = m:GetTranslation(), m:GetAngles()
+						local np, na = MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
+						targets[twinId] = MatFrom(np, na)
+					end
+				end
 			end
 		end
 	end
 
+	if not next(targets) then return false end
 	self.targets = targets
+	return true
 end
 
 function Session:_applyTracking()
@@ -472,30 +586,58 @@ function Session:_applyTracking()
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
-	if not self.idleOnly then
-		local follow = self.follow
-		if follow.hmd or follow.hands or follow.waist or follow.feet then
-			self:_solveTracking(hmd, playerFeet, playerYaw)
-		end
+	if self.idleOnly then
+		self.targets = {}
+		return
+	end
+
+	-- Primary: mirror the real VR body (already solved by cl_character)
+	if not self:_copyFromLocalPlayer(playerFeet, playerYaw) then
+		self.targets = {}
 	end
 end
 
 function Session:_drawTrackers()
 	if not g_VR.tracking then return end
 	local fbt = self:_fbtLive()
-	if not self.showTrackers and not (fbt and self.showFBTTrackers) then return end
 	render.SetColorMaterial()
 	local function box(pose, col)
 		if not pose or not pose.pos then return end
 		render.DrawBox(pose.pos, pose.ang or Angle(), Vector(-2, -2, -2), Vector(2, 2, 2), col or color_white)
 	end
-	local tr = g_VR.tracking
-	box(tr.pose_waist, Color(80, 200, 80))
-	box(tr.pose_leftfoot, Color(80, 160, 255))
-	box(tr.pose_rightfoot, Color(255, 160, 80))
-	if self.showHandTrackers then
-		box(tr.pose_lefthand, Color(200, 200, 255))
-		box(tr.pose_righthand, Color(255, 200, 200))
+	if self.showTrackers or (fbt and self.showFBTTrackers) then
+		local tr = g_VR.tracking
+		box(tr.pose_waist, Color(80, 200, 80))
+		box(tr.pose_leftfoot, Color(80, 160, 255))
+		box(tr.pose_rightfoot, Color(255, 160, 80))
+		if self.showHandTrackers then
+			box(tr.pose_lefthand, Color(200, 200, 255))
+			box(tr.pose_righthand, Color(255, 200, 200))
+		end
+	end
+
+	-- Laser bone pick: small markers + highlight hover
+	if self.laserPickBones then
+		self.ent:SetupBones()
+		local n = self.ent:GetBoneCount() or 0
+		for i = 0, n - 1 do
+			local m = self.ent:GetBoneMatrix(i)
+			if not m then continue end
+			local p = m:GetTranslation()
+			local hidden = self:IsBoneCustomHidden(i)
+			local hover = (self.hoverBoneId == i)
+			local col = hover and Color(255, 70, 100, 255)
+				or (hidden and Color(80, 80, 90, 120) or Color(255, 200, 80, 180))
+			local s = hover and 2.2 or (hidden and 0.8 or 1.2)
+			render.DrawWireframeSphere(p, s, 6, 6, col, true)
+		end
+		-- Beam to hover
+		if self.hoverBonePos and g_VR.tracking.pose_righthand then
+			local rh = g_VR.tracking.pose_righthand
+			if rh.pos then
+				render.DrawLine(rh.pos, self.hoverBonePos, Color(255, 70, 100), true)
+			end
+		end
 	end
 end
 
@@ -539,12 +681,15 @@ function vrmod.avatar.Open(opts)
 		follow = { hmd = false, hands = false, waist = false, feet = false }
 	end
 
+	local mode0 = opts.mode or cv_mode:GetString() or "facing"
+	if mode0 == "mirror" then mode0 = "facing" end
+
 	local s = setmetatable({
 		id = id,
 		active = true,
 		ent = ent,
 		model = mdl,
-		mode = opts.mode or cv_mode:GetString() or "mirror",
+		mode = mode0,
 		distance = opts.distance or cv_distance:GetFloat(),
 		follow = follow,
 		idleOnly = idleOnly,
@@ -556,6 +701,11 @@ function vrmod.avatar.Open(opts)
 		showHandTrackers = opts.showHandTrackers or false,
 		hideHead = opts.hideHead ~= nil and opts.hideHead or cv_hide_head:GetBool(),
 		hideHands = opts.hideHands ~= nil and opts.hideHands or cv_hide_hands:GetBool(),
+		customHidden = ParseHiddenBones(cv_hidden_bones:GetString()),
+		laserPickBones = opts.laserPickBones ~= false, -- default on for Avatar menu
+		hoverBoneId = nil,
+		hoverBoneName = nil,
+		hoverBonePos = nil,
 		menuUid = opts.menuUid,
 		menuAnchor = opts.menuAnchor,
 		onClose = opts.onClose,
@@ -593,8 +743,10 @@ function vrmod.avatar.Open(opts)
 
 	hook.Add("Think", s.thinkId, function()
 		if not s.active then return end
-		-- keep hide scales sticky
 		s:_applyHideBones()
+		if s.laserPickBones then
+			s:UpdateLaserHover()
+		end
 	end)
 
 	hook.Add("PostDrawTranslucentRenderables", s.hookId, function(depth, sky)
@@ -604,6 +756,7 @@ function vrmod.avatar.Open(opts)
 
 		s:_applyTracking()
 		s.ent:SetupBones() -- triggers BuildBonePositions → apply targets
+		s:_applyHideBones() -- after bone solve so scales stick
 		s.ent:DrawModel()
 		s:_drawTrackers()
 		if s.onDraw then pcall(s.onDraw, s) end
@@ -657,9 +810,11 @@ end
 --- Cube Avatar twin: tracking-matched customization preview
 function vrmod.avatar.OpenHeightCal(menuUid)
 	local fbt = g_VR and (g_VR.sixPoints or false)
+	local mode = cv_mode:GetString()
+	if mode == "mirror" or mode == "" then mode = "facing" end
 	return vrmod.avatar.Open({
 		id = "avatar",
-		mode = cv_mode:GetString() == "clone" and "clone" or "mirror",
+		mode = mode == "clone" and "clone" or "facing",
 		distance = cv_distance:GetFloat(),
 		idleOnly = false,
 		forceFBT = nil,

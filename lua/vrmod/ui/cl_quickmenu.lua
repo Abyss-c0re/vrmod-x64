@@ -48,9 +48,20 @@ function g_VR.MenuOpen()
 	VRUtilMenuOpen("miscmenu", qmW, qmH, nil, true, qmPos, qmAng, qmScale, true, function()
 		hook.Remove("PreRender", "vrutil_hook_renderigm")
 		open = false
-		if items[prevHoveredItem] and g_VR.menuItems and g_VR.menuItems[items[prevHoveredItem].index] then
-			local fn = g_VR.menuItems[items[prevHoveredItem].index].func
-			if isfunction(fn) then fn() end
+		local sel = prevHoveredItem
+		-- Run after miscmenu is fully closed so nested VRUtilMenuOpen works (Avatar/Settings)
+		if sel > 0 and items[sel] and g_VR.menuItems and g_VR.menuItems[items[sel].index] then
+			local fn = g_VR.menuItems[items[sel].index].func
+			if isfunction(fn) then
+				timer.Simple(0, function()
+					if g_VR and g_VR.active then
+						local ok, err = pcall(fn)
+						if not ok and vrmod.logger then
+							vrmod.logger.Warn("quickmenu item: %s", tostring(err))
+						end
+					end
+				end)
+			end
 		end
 	end)
 	if g_VR.menus and g_VR.menus.miscmenu then
