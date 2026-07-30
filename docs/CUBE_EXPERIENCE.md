@@ -45,6 +45,10 @@ vrmod_border_calibrate   -- vision only
 - No dual-truth pose forks  
 - Overlay never becomes a black wall of the Real  
 
+## Synthesis
+
+Master map: [`CUBE_SYNTHESIS.md`](CUBE_SYNTHESIS.md).
+
 ## Settings & menus in VR
 
 After first-run, everyday UI uses **panel2vr** (see [`CUBE_PANEL2VR.md`](CUBE_PANEL2VR.md)):

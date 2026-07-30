@@ -335,8 +335,12 @@ if CLIENT then
 	local function UpdateTracking()
 		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local maxPosDeltaSqr = 100
-		VRMOD_UpdatePosesAndActions()
-		local rawPoses = VRMOD_GetPoses()
+		-- Frame order (OpenVR): WaitGetPoses → render → Submit. Never invert.
+		if isfunction(VRMOD_UpdatePosesAndActions) then
+			pcall(VRMOD_UpdatePosesAndActions)
+		end
+		local rawPoses = (isfunction(VRMOD_GetPoses) and VRMOD_GetPoses()) or {}
+		if not istable(rawPoses) then rawPoses = {} end
 		g_VR.rawTracking = g_VR.rawTracking or {}
 
 		for k, v in pairs(rawPoses) do
