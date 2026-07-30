@@ -675,34 +675,69 @@ local function ClampBoneDist(targets, parentId, childId, maxLen)
 	end
 end
 
+--- READ-ONLY snapshot of the same frame the game already built this tick.
+-- NEVER call VRUtilNetUpdateLocalPly here — that overwrites g_VR.net.lerpedFrame
+-- mid-frame and makes real player hands feel "blocked" / desynced.
+local function ReadLocalVRFrame()
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return nil end
+	local sid = ply:SteamID()
+	local tab = g_VR.net and g_VR.net[sid]
+	local src = tab and tab.lerpedFrame
+	if src and (src.lefthandPos or src.righthandPos or src.hmdPos) then
+		return vrmod.utils and vrmod.utils.CopyFrame and vrmod.utils.CopyFrame(src) or src
+	end
+	-- Ephemeral fallback from tracking (do not write into g_VR.net)
+	local tr = g_VR.tracking
+	if not tr or not tr.hmd or not tr.hmd.pos then return nil end
+	local frame = {
+		characterYaw = g_VR.characterYaw or (tr.hmd.ang and tr.hmd.ang.yaw) or 0,
+		hmdPos = Vector(tr.hmd.pos.x, tr.hmd.pos.y, tr.hmd.pos.z),
+		hmdAng = tr.hmd.ang and Angle(tr.hmd.ang.p, tr.hmd.ang.y, tr.hmd.ang.r) or Angle(),
+	}
+	if tr.pose_lefthand and tr.pose_lefthand.pos then
+		local p, a = tr.pose_lefthand.pos, tr.pose_lefthand.ang or Angle()
+		frame.lefthandPos = Vector(p.x, p.y, p.z)
+		frame.lefthandAng = Angle(a.p, a.y, a.r)
+	end
+	if tr.pose_righthand and tr.pose_righthand.pos then
+		local p, a = tr.pose_righthand.pos, tr.pose_righthand.ang or Angle()
+		frame.righthandPos = Vector(p.x, p.y, p.z)
+		frame.righthandAng = Angle(a.p, a.y, a.r)
+	end
+	if g_VR.input then
+		local lf = g_VR.input.skeleton_lefthand and g_VR.input.skeleton_lefthand.fingerCurls
+		local rf = g_VR.input.skeleton_righthand and g_VR.input.skeleton_righthand.fingerCurls
+		for i = 1, 5 do
+			frame["finger" .. i] = lf and lf[i] or 0
+			frame["finger" .. (i + 5)] = rf and rf[i] or 0
+		end
+	end
+	return frame
+end
+
 --- Net frame SoT → rotate/mirror → same character IK (vrmod.frameik).
 function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	if not vrmod.frameik then return false end
 	if not self.ik then
-		self.ik = vrmod.frameik.Init(self.ent)
+		local ok, ik = pcall(vrmod.frameik.Init, self.ent)
+		self.ik = ok and ik or nil
 	end
 	if not self.ik then return false end
 
-	-- Same absolute frame the game posts each tick (buildClientFrame)
-	local src
-	if isfunction(VRUtilNetUpdateLocalPly) then
-		src = VRUtilNetUpdateLocalPly(false)
-	end
-	if not src then
-		local ply = LocalPlayer()
-		local sid = IsValid(ply) and ply:SteamID()
-		src = sid and g_VR.net and g_VR.net[sid] and g_VR.net[sid].lerpedFrame
-	end
+	local src = ReadLocalVRFrame()
 	if not src or (not src.lefthandPos and not src.righthandPos) then
 		return false
 	end
 
 	local mode = self.mode or "facing"
 	if mode == "mirror" then mode = "facing" end
-	local twinFrame = vrmod.frameik.TransformFrame(
+
+	local okT, twinFrame = pcall(
+		vrmod.frameik.TransformFrame,
 		src, mode, playerFeet, playerYaw, self.standPos, self.standAng or playerYaw
 	)
-	if not twinFrame then return false end
+	if not okT or not twinFrame then return false end
 
 	-- Place twin root for clavicle GetBoneMatrix during Apply
 	self.ent:SetPos(self.standPos)
@@ -710,9 +745,8 @@ function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
-	if not vrmod.frameik.Apply(self.ent, self.ik, twinFrame) then
-		return false
-	end
+	local okA = pcall(vrmod.frameik.Apply, self.ent, self.ik, twinFrame)
+	if not okA then return false end
 	self.targets = self.ik.targets or {}
 	return next(self.targets) ~= nil
 end
@@ -732,14 +766,16 @@ function Session:_applyTracking()
 
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
 
+	-- Always park twin in world (visible even if IK fails)
+	self.ent:SetPos(self.standPos)
+	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
+
 	if self.idleOnly then
-		self.ent:SetPos(self.standPos)
-		self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 		self.targets = {}
 		return
 	end
 
-	-- Net frame → transform → character IK. Nothing else.
+	-- Net frame (read-only) → transform → character IK
 	if not self:_applyFromNetFrame(playerFeet, playerYaw) then
 		self.targets = {}
 	end
@@ -905,13 +941,22 @@ function vrmod.avatar.Open(opts)
 	hook.Add("PostDrawTranslucentRenderables", s.hookId, function(depth, sky)
 		if depth or sky or not s.active or not IsValid(s.ent) then return end
 		if not g_VR.active or not g_VR.tracking then return end
-		if EyePos() ~= g_VR.eyePosLeft and EyePos() ~= g_VR.eyePosRight then return end
+		-- Prefer stereo eyes; still draw once for desktop/debug if no eye match
+		local ep = EyePos()
+		local stereo = (g_VR.eyePosLeft and ep == g_VR.eyePosLeft)
+			or (g_VR.eyePosRight and ep == g_VR.eyePosRight)
+		if not stereo and g_VR.eyePosLeft and g_VR.eyePosRight then
+			return
+		end
 
-		s:_applyTracking()
-		s.ent:SetupBones() -- triggers BuildBonePositions → apply targets
-		s:_applyHideBones() -- after bone solve so scales stick
+		-- Never let IK errors kill the twin draw
+		pcall(function() s:_applyTracking() end)
+		pcall(function()
+			s.ent:SetupBones() -- BuildBonePositions → targets
+			s:_applyHideBones()
+		end)
 		s.ent:DrawModel()
-		s:_drawTrackers()
+		pcall(function() s:_drawTrackers() end)
 		if s.onDraw then pcall(s.onDraw, s) end
 	end)
 

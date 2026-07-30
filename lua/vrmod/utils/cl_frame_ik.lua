@@ -243,6 +243,10 @@ function F.Apply(ent, state, frame)
 		)
 		local targetVec = targetPos - upperarmPos
 		local targetVecLen = targetVec:Length()
+		if targetVecLen < 0.01 then
+			targetVec = plyAng:Forward() * 0.01
+			targetVecLen = 0.01
+		end
 		local targetVecAng = targetVec:Angle()
 		local upperarmTargetAng = Angle(targetVecAng.pitch, targetVecAng.yaw, targetVecAng.roll)
 		if not isLeft then upperarmTargetAng:RotateAroundAxis(targetVec, 180) end
@@ -254,7 +258,8 @@ function F.Apply(ent, state, frame)
 		local totalArmLen = state.upperArmLen + state.lowerArmLen
 		local armStretchScale = 1
 		local effUpper, effLower = state.upperArmLen, state.lowerArmLen
-		if convars.armStretcher and targetVecLen > totalArmLen * 0.98 then
+		local stretchOn = convars and (convars.armStretcher == true or convars.armStretcher == 1)
+		if stretchOn and targetVecLen > totalArmLen * 0.98 then
 			armStretchScale = targetVecLen / (totalArmLen * 0.98)
 			effUpper = state.upperArmLen * armStretchScale
 			effLower = state.lowerArmLen * armStretchScale
@@ -269,7 +274,8 @@ function F.Apply(ent, state, frame)
 
 		local test = (targetPos.z - upperarmPos.z + 20) * 1.5
 		if test < 0 then test = 0 end
-		upperarmTargetAng:RotateAroundAxis(targetVec:GetNormalized(), (isLeft and 1 or -1) * (30 + test))
+		local tvn = targetVec / targetVecLen
+		upperarmTargetAng:RotateAroundAxis(tvn, (isLeft and 1 or -1) * (30 + test))
 
 		local forearmTargetAng = Angle(upperarmTargetAng.pitch, upperarmTargetAng.yaw, upperarmTargetAng.roll)
 		local a23 = 180 - a1 - math.deg(math.acos(math.Clamp(
