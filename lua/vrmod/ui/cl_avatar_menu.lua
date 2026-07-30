@@ -128,9 +128,6 @@ local function rebuildButtons()
 		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 170, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "mode_clone" }
 		buttons[#buttons + 1] = { x = PAD, y = y0 + 226, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_minus" }
 		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 226, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_plus" }
-		-- Avatar Mirror Algocube (KDE State Matrix / NexusCore prophecy)
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 276, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "algo_roll" }
-		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 276, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "algo_law" }
 	elseif tab == 2 then
 		-- Model list (scrollable window)
 		local vis = 8
@@ -246,20 +243,6 @@ local function paint()
 			local dist = s and s.distance or 40
 			drawBtn(PAD, y0 + 226, (W - PAD * 2 - 8) / 2, 40, "DIST −", false, false)
 			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 226, (W - PAD * 2 - 8) / 2, 40, string.format("DIST %.0f", dist), false, false)
-			-- Algocube status (matrix pick=6 default)
-			local ad = s and s.algoDigit
-			local ap = s and s.algoPolicy
-			local AM = vrmod.algocube and vrmod.algocube.mirror
-			if ad == nil and AM then ad = AM.PICK or 6 end
-			local alabel = (ap and ap.label) or "MIRROR LAW"
-			local damp = (s and s.headDampen) and "·dampen" or ""
-			drawBtn(PAD, y0 + 276, (W - PAD * 2 - 8) / 2, 40, "ALGO ROLL", false, false)
-			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 276, (W - PAD * 2 - 8) / 2, 40,
-				string.format("d%d %s", ad or 6, damp), false, true)
-			draw.SimpleText(
-				string.format("algocube · bp 7645758194 · pick6 · %s", alabel),
-				"DermaDefault", W * 0.5, y0 + 322, Theme.muted, TEXT_ALIGN_CENTER
-			)
 		elseif tab == 2 then
 			draw.SimpleText("select playermodel · twin updates live", "DermaDefault", PAD, y0 - 2, Theme.muted)
 			local vis = 8
@@ -398,33 +381,6 @@ local function activate(mx, my)
 		elseif k == "dist_plus" then
 			local s = sess()
 			if s and s.SetDistance then s:SetDistance((s.distance or 40) + 4) end
-		elseif k == "algo_roll" then
-			local s = sess()
-			local AM = vrmod.algocube and vrmod.algocube.mirror
-			if AM and AM.Roll then
-				if AM.ClearForced then AM.ClearForced() end
-				local d, p = AM.Roll() -- live tracking ⊕ matrix SoT
-				if s and AM.ApplyToSession then AM.ApplyToSession(s, p) end
-				statusMsg = string.format("ALGO d%d · %s · %s", d, p.label, p.law)
-				statusUntil = CurTime() + 4
-			else
-				statusMsg = "algocube missing"
-				statusUntil = CurTime() + 3
-			end
-		elseif k == "algo_law" then
-			-- Snap back to matrix pick=6 (Commander override / MIRROR LAW)
-			local s = sess()
-			local AM = vrmod.algocube and vrmod.algocube.mirror
-			if AM and AM.SetDigit then
-				local d, p = AM.SetDigit(AM.PICK or 6)
-				if s and AM.ApplyToSession then AM.ApplyToSession(s, p) end
-				statusMsg = string.format("LAW d%d · %s", d, p.label)
-				statusUntil = CurTime() + 4
-			elseif s and s.SetAlgoDigit then
-				s:SetAlgoDigit(6)
-				statusMsg = "LAW d6"
-				statusUntil = CurTime() + 4
-			end
 		elseif k == "model" and modelList[btn.index] then
 			local s = sess()
 			if s and s.SetModel then s:SetModel(modelList[btn.index].path) end

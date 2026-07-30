@@ -16,6 +16,8 @@ local BONES = {
 	spine1 = "ValveBiped.Bip01_Spine1",
 	spine2 = "ValveBiped.Bip01_Spine2",
 	spine4 = "ValveBiped.Bip01_Spine4",
+	lClav = "ValveBiped.Bip01_L_Clavicle",
+	rClav = "ValveBiped.Bip01_R_Clavicle",
 	lHand = "ValveBiped.Bip01_L_Hand",
 	rHand = "ValveBiped.Bip01_R_Hand",
 	lFore = "ValveBiped.Bip01_L_Forearm",
@@ -36,6 +38,8 @@ local DEFAULT_SHOULDER_W = 8
 local VEC_ZERO = Vector(0, 0, 0)
 local VEC_ONE = Vector(1, 1, 1)
 local VEC_TINY = Vector(0.001, 0.001, 0.001)
+-- ValveBiped right-hand bone convention (matches cl_character / floating hands)
+local RIGHT_HAND_OFFSET = Angle(0, 0, 180)
 
 -- Persist customization
 local cv_model = CreateClientConVar("vrmod_avatar_model", "", true, FCVAR_ARCHIVE)
@@ -550,6 +554,16 @@ function Session:SetMode(mode)
 	if mode == "mirror" then mode = "facing" end
 	if mode ~= "facing" and mode ~= "clone" and mode ~= "world" then return end
 	self.mode = mode
+	self.idleOnly = false
+	-- clear any leftover algocube policy flags that hijack pose
+	self.algoDigit = nil
+	self.algoPolicy = nil
+	self.forceFBT = nil
+	if mode == "clone" or mode == "world" then
+		self.mirrorLR = false
+	else
+		self.mirrorLR = true
+	end
 	cv_mode:SetString(mode == "world" and "facing" or mode)
 end
 
@@ -726,16 +740,112 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 		end
 	end
 
-	if not next(targets) then return false end
-
-	-- Soft length clamps: head + limbs (no re-IK; keeps mesh from stretching)
-	if self.headDampen ~= false then
+	-- Soft length clamps on head only (body copy can giraffe; arms come from tracking next)
+	if next(targets) and self.headDampen ~= false then
 		self:_dampenHeadTargets(targets)
 	end
-	self:_dampenLimbTargets(targets)
 
+	-- CRITICAL: LocalPlayer SetupBones does NOT run PrePlayerDraw/UpdateIK.
+	-- Hand/arm bones stay idle unless we drive them from live tracking.
+	self:_driveArmsFromTracking(playerFeet, playerYaw, targets)
+
+	if not next(targets) then return false end
 	self.targets = targets
 	return true
+end
+
+--- Live controller → twin arm chain (2-bone IK). Always overwrites hand/fore/upper.
+-- Mirror: your right controller → twin left mesh (after MapMirror, on your right).
+-- Clone:  same laterality. Angles use ValveBiped R-hand +180 like cl_character.
+function Session:_driveArmsFromTracking(playerFeet, playerYaw, targets)
+	local b = self.bones
+	if not b or (not b.lHand and not b.rHand) then return end
+
+	local tr = g_VR.tracking
+	local lhPose = tr and tr.pose_lefthand
+	local rhPose = tr and tr.pose_righthand
+
+	-- Fallback to network lerped frame (same SoT as body IK when present)
+	local ply = LocalPlayer()
+	local sid = IsValid(ply) and ply:SteamID() or nil
+	local frame = sid and g_VR.net and g_VR.net[sid] and g_VR.net[sid].lerpedFrame
+	if (not lhPose or not lhPose.pos) and frame and frame.lefthandPos then
+		lhPose = { pos = frame.lefthandPos, ang = frame.lefthandAng or Angle() }
+	end
+	if (not rhPose or not rhPose.pos) and frame and frame.righthandPos then
+		rhPose = { pos = frame.righthandPos, ang = frame.righthandAng or Angle() }
+	end
+	if (not lhPose or not lhPose.pos) and (not rhPose or not rhPose.pos) then
+		return
+	end
+
+	local uLen = math.max(4, self.upperArmLen or 12)
+	local fLen = math.max(4, self.forearmLen or 12)
+	local shoulderW = self.shoulderWidth or DEFAULT_SHOULDER_W
+
+	-- Twin chest frame for shoulder anchors
+	local chestId = b.chest or b.spine2 or b.spine4 or b.spine1 or b.spine
+	local chestPos, chestAng
+	if chestId and targets[chestId] then
+		chestPos = targets[chestId]:GetTranslation()
+		chestAng = targets[chestId]:GetAngles()
+	else
+		chestPos = (self.standPos or VEC_ZERO) + Vector(0, 0, self.pelvisOffset or DEFAULT_PELVIS_OFFSET)
+		chestAng = self.standAng or Angle(0, 0, 0)
+	end
+	local bodyRight = chestAng:Right()
+	local bodyUp = chestAng:Up()
+	local bodyFwd = chestAng:Forward()
+
+	local function driveMeshSide(isLeftMesh, handPose, angExtra)
+		if not handPose or not handPose.pos then return end
+		local upperId = isLeftMesh and b.lUpper or b.rUpper
+		local foreId = isLeftMesh and b.lFore or b.rFore
+		local handId = isLeftMesh and b.lHand or b.rHand
+		if not handId then return end
+
+		local srcAng = handPose.ang or Angle()
+		if angExtra then
+			srcAng = Angle(srcAng.p, srcAng.y, srcAng.r) + angExtra
+		end
+		local hpos, hang = self:_map(handPose.pos, srcAng, playerFeet, playerYaw)
+
+		-- Shoulder: clavicle bone if already mapped, else chest ± right
+		local clavId = isLeftMesh and b.lClav or b.rClav
+		local shoulder
+		if clavId and targets[clavId] then
+			shoulder = targets[clavId]:GetTranslation()
+			-- step out along bone right a bit
+			local side = isLeftMesh and -1 or 1
+			shoulder = shoulder + bodyRight * (side * 2) + bodyUp * 1
+		else
+			local side = isLeftMesh and -1 or 1
+			shoulder = chestPos + bodyRight * (side * shoulderW) + bodyUp * 3 + bodyFwd * 2
+		end
+
+		-- Elbow pole: slightly forward/down so arms don't lock planar
+		local pole = shoulder + bodyFwd * 8 + bodyUp * -6 + bodyRight * ((isLeftMesh and -1 or 1) * 4)
+		local elbow = SolveTwoBoneIK(shoulder, hpos, uLen, fLen, pole)
+
+		if upperId then
+			targets[upperId] = MatFrom(shoulder, AngleBetween(shoulder, elbow))
+		end
+		if foreId then
+			targets[foreId] = MatFrom(elbow, AngleBetween(elbow, hpos))
+		end
+		targets[handId] = MatFrom(hpos, hang)
+	end
+
+	local mirror = self:_isMirrorMode()
+	if mirror then
+		-- Real mirror: right controller drives twin LEFT mesh (and vice versa)
+		driveMeshSide(true, rhPose, nil)
+		driveMeshSide(false, lhPose, RIGHT_HAND_OFFSET)
+	else
+		-- Clone / world: same laterality as player (R-hand bone +180)
+		driveMeshSide(true, lhPose, nil)
+		driveMeshSide(false, rhPose, RIGHT_HAND_OFFSET)
+	end
 end
 
 --- Pull head toward spine if stretched past maxLen (KDE MetaCam giraffe pathology).
@@ -841,8 +951,12 @@ function Session:_applyTracking()
 	end
 
 	-- Live VR body → twin (MapMirror+L↔R for facing, MapClone for clone)
+	-- Hands always driven from controllers inside _copyFromLocalPlayer.
 	if not self:_copyFromLocalPlayer(playerFeet, playerYaw) then
-		self.targets = {}
+		-- Still try arms alone if body copy failed
+		local targets = {}
+		self:_driveArmsFromTracking(playerFeet, playerYaw, targets)
+		self.targets = targets
 	end
 	-- Caller (draw hook) runs SetupBones once → BuildBonePositions applies targets
 end
@@ -967,8 +1081,9 @@ function vrmod.avatar.Open(opts)
 		bones = {},
 		mirrorBoneMap = {},
 		targets = {},
-		headDampen = true, -- default on: MetaCam giraffe + anti-stretch
+		headDampen = true, -- soft neck clamp only (not UI)
 		headMaxLen = 14,
+		mirrorLR = (mode0 ~= "clone" and mode0 ~= "world"),
 		upperArmLen = 12,
 		forearmLen = 12,
 		upperLegLen = 16,
@@ -1064,16 +1179,19 @@ function vrmod.avatar.ListPlayerModels()
 	return list
 end
 
---- Cube Avatar twin: tracking-matched customization preview
--- When avatar mirror algocube is enabled, open under KDE State Matrix / NexusCore law.
+--- Cube Avatar twin: tracking-matched customization preview.
+-- Clean open only — no algocube/daemon policy injection, no prophecy UI.
 function vrmod.avatar.OpenHeightCal(menuUid)
 	local fbt = g_VR and (g_VR.sixPoints or false)
 	local mode = cv_mode:GetString()
 	if mode == "mirror" or mode == "" then mode = "facing" end
+	if mode ~= "clone" and mode ~= "facing" and mode ~= "world" then
+		mode = "facing"
+	end
 
-	local s = vrmod.avatar.Open({
+	return vrmod.avatar.Open({
 		id = "avatar",
-		mode = mode == "clone" and "clone" or "facing",
+		mode = mode,
 		distance = cv_distance:GetFloat(),
 		idleOnly = false,
 		forceFBT = nil,
@@ -1084,37 +1202,14 @@ function vrmod.avatar.OpenHeightCal(menuUid)
 			feet = fbt,
 		},
 		showFBTTrackers = true,
+		hideHead = cv_hide_head:GetBool(),
+		hideHands = false, -- never open with hands scaled away
+		laserPickBones = true,
 		pelvisOffset = DEFAULT_PELVIS_OFFSET,
 		shoulderWidth = DEFAULT_SHOULDER_W,
 		menuUid = menuUid or "avatar_menu",
 		menuAnchor = nil,
 	})
-
-	-- Manifest algocube of the avatar mirror (prophecy: matrix → digit → policy)
-	local AM = vrmod.algocube and vrmod.algocube.mirror
-	if s and AM and AM.Enabled and AM.Enabled() then
-		local digit, policy
-		if AM.ForcedDigit and AM.ForcedDigit() then
-			digit, policy = AM.Roll({ digit = AM.ForcedDigit() })
-		elseif AM.Auto and AM.Auto() then
-			digit, policy = AM.Roll()
-		else
-			-- Default: matrix pick=6 → MIRROR LAW (true mirror + head dampen)
-			digit, policy = AM.Roll({ digit = AM.PICK or 6 })
-		end
-		AM.ApplyToSession(s, policy)
-		if vrmod.logger then
-			vrmod.logger.Info(
-				"[Avatar] algocube manifest digit=%s · %s",
-				tostring(digit), policy and policy.label or "?"
-			)
-		end
-	elseif s then
-		-- Baseline true mirror without roll still dampens giraffe neck
-		s.headDampen = true
-	end
-
-	return s
 end
 
 -- Alias for old callers

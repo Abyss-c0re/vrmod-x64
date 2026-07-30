@@ -45,8 +45,9 @@ local cv_digit = CreateClientConVar("vrmod_avatar_algo_digit", "-1", true, FCVAR
 	"Avatar algocube digit 0-9, or -1 = use matrix pick / last roll")
 local cv_auto = CreateClientConVar("vrmod_avatar_algo_auto", "0", true, FCVAR_ARCHIVE,
 	"If 1, re-roll algocube from live tracking IO each open")
-local cv_enabled = CreateClientConVar("vrmod_avatar_algo", "1", true, FCVAR_ARCHIVE,
-	"Manifest avatar mirror algocube into twin (1=on)")
+-- OFF by default — backend math only; never part of Avatar UI / open path
+local cv_enabled = CreateClientConVar("vrmod_avatar_algo", "0", true, FCVAR_ARCHIVE,
+	"Optional backend algocube (0=off). Not used by Avatar menu.")
 
 local cells = nil -- array 1..512 of 0/1
 local algo = nil
