@@ -42,12 +42,14 @@ if CLIENT then
 		if not menus[uid] or not menus[uid].panel or not menus[uid].panel:IsValid() then return end
 		render.PushRenderTarget(menus[uid].rt)
 		cam.Start2D()
+		render.OverrideAlphaWriteEnable(true, true)
 		render.Clear(0, 0, 0, 0, true, true)
 		local oldclip = DisableClipping(false)
 		render.SetWriteDepthToDestAlpha(false)
 		menus[uid].panel:PaintManual()
 		render.SetWriteDepthToDestAlpha(true)
 		DisableClipping(oldclip)
+		render.OverrideAlphaWriteEnable(false)
 		cam.End2D()
 		render.PopRenderTarget()
 	end
@@ -55,11 +57,13 @@ if CLIENT then
 	function VRUtilMenuRenderStart(uid)
 		render.PushRenderTarget(menus[uid].rt)
 		cam.Start2D()
+		render.OverrideAlphaWriteEnable(true, true)
 		render.Clear(0, 0, 0, 0, true, true)
 		render.SetWriteDepthToDestAlpha(true)
 	end
 
 	function VRUtilMenuRenderEnd()
+		render.OverrideAlphaWriteEnable(false)
 		cam.End2D()
 		render.PopRenderTarget()
 	end
@@ -99,11 +103,21 @@ if CLIENT then
 				end
 			end
 
+			if v.mat and not v.mat:IsError() then
+				v.mat:SetTexture("$basetexture", v.rt)
+			end
 			cam.IgnoreZ(true)
 			cam.Start3D2D(pos, ang, v.scale)
+			local blendOn = false
+			if render.OverrideBlend then
+				blendOn = pcall(function()
+					render.OverrideBlend(true, BLEND_SRC_ALPHA, BLEND_ONE_MINUS_SRC_ALPHA, BLENDFUNC_ADD)
+				end)
+			end
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(v.mat)
 			surface.DrawTexturedRect(0, 0, v.width, v.height)
+			if blendOn then pcall(function() render.OverrideBlend(false) end) end
 			--debug outline
 			if uioutline:GetBool() then
 				surface.SetDrawColor(255, 0, 0, 255)
@@ -161,8 +175,20 @@ if CLIENT then
 		render.DepthRange(0, 1)
 	end
 
+	local function CreateMenuRT(uid, width, height)
+		local fmt = IMAGE_FORMAT_BGRA8888 or IMAGE_FORMAT_RGBA8888 or IMAGE_FORMAT_ARGB8888
+		if isfunction(GetRenderTargetEx) and fmt then
+			local ok, rtEx = pcall(GetRenderTargetEx, "vrmod_rt_ui_" .. uid, width, height,
+				RT_SIZE_NO_CHANGE or 0, MATERIAL_RT_DEPTH_NONE or 0,
+				bit.bor(TEXTUREFLAGS_CLAMPS or 4, TEXTUREFLAGS_CLAMPT or 8), 0, fmt)
+			if ok and rtEx then return rtEx end
+		end
+		return GetRenderTarget("vrmod_rt_ui_" .. uid, width, height, false)
+	end
+
 	function VRUtilMenuOpen(uid, width, height, panel, attachment, pos, ang, scale, cursorEnabled, closeFunc)
 		VRUtilMenuClose(uid)
+		local rt = CreateMenuRT(uid, width, height)
 		menus[uid] = {
 			uid = uid,
 			panel = panel,
@@ -172,7 +198,7 @@ if CLIENT then
 			ang = ang,
 			scale = scale,
 			cursorEnabled = cursorEnabled,
-			rt = GetRenderTarget("vrmod_rt_ui_" .. uid, width, height, false),
+			rt = rt,
 			width = width,
 			height = height,
 			lastCursorX = 0,
@@ -180,11 +206,18 @@ if CLIENT then
 		}
 
 		menuOrder[#menuOrder + 1] = menus[uid]
-		local mat = Material("!vrmod_mat_ui_" .. uid)
-		menus[uid].mat = not mat:IsError() and mat or CreateMaterial("vrmod_mat_ui_" .. uid, "UnlitGeneric", {
-			["$basetexture"] = menus[uid].rt:GetName(),
-			["$translucent"] = 1
+		local mat = CreateMaterial("vrmod_mat_ui_" .. uid, "UnlitGeneric", {
+			["$basetexture"] = rt:GetName(),
+			["$translucent"] = 1,
+			["$vertexalpha"] = 1,
+			["$vertexcolor"] = 1,
+			["$nolod"] = 1,
 		})
+		if mat and not mat:IsError() then
+			mat:SetTexture("$basetexture", rt)
+			mat:SetInt("$translucent", 1)
+		end
+		menus[uid].mat = mat
 
 		if panel then
 			panel:SetPaintedManually(true)
@@ -192,7 +225,9 @@ if CLIENT then
 		end
 
 		render.PushRenderTarget(menus[uid].rt)
-		render.Clear(0, 0, 0, 0)
+		render.OverrideAlphaWriteEnable(true, true)
+		render.Clear(0, 0, 0, 0, true, true)
+		render.OverrideAlphaWriteEnable(false)
 		render.PopRenderTarget()
 		menusExist = true
 	end

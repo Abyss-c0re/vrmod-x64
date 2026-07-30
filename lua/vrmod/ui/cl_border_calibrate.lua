@@ -115,7 +115,7 @@ end
 local function nextStep()
 	Cal.step = Cal.step + 1
 	if Cal.step > #Cal.steps then
-		vrmod.BorderCal_Stop()
+		vrmod.BorderCal_Stop(true)
 		return
 	end
 	local st = Cal.steps[Cal.step]
@@ -127,7 +127,11 @@ local function nextStep()
 	toast(st.title, 2)
 end
 
-function vrmod.BorderCal_Stop()
+function vrmod.BorderCal_IsActive()
+	return Cal.active and true or false
+end
+
+function vrmod.BorderCal_Stop(completed)
 	if not Cal.active then return end
 	Cal.active = false
 	hook.Remove("VRMod_Input", "vrmod_border_cal")
@@ -135,7 +139,9 @@ function vrmod.BorderCal_Stop()
 	hook.Remove("PostDrawTranslucentRenderables", "vrmod_border_cal_3d")
 	hook.Remove("Think", "vrmod_border_cal_keys")
 	hook.Remove("PlayerButtonDown", "vrmod_border_cal_keys")
-	toast("Border cal ended", 2)
+	toast(completed and "Vision locked in" or "Border cal ended", 2)
+	-- completed=true when user finished the path (saved profile); false on cancel
+	hook.Run("VRMod_BorderCalEnded", completed and true or false)
 end
 
 function vrmod.BorderCal_Start()
@@ -178,7 +184,7 @@ function vrmod.BorderCal_Start()
 
 		if st.id == "done" then
 			if action == "boolean_primaryfire" or action == "boolean_use" or action == "boolean_changeweapon" then
-				vrmod.BorderCal_Stop()
+				vrmod.BorderCal_Stop(true)
 			end
 			return
 		end
@@ -301,7 +307,10 @@ end)
 
 hook.Add("VRMod_Start", "vrmod_border_profile_autoload", function()
 	timer.Simple(1.0, function()
-		if g_VR and g_VR.active and file.Exists(PROFILE, "DATA") then
+		if not g_VR or not g_VR.active then return end
+		-- First-run experience owns vision cal; do not preload over the guided baseline
+		if vrmod.Experience_ShouldRun and vrmod.Experience_ShouldRun() then return end
+		if file.Exists(PROFILE, "DATA") then
 			vrmod.BorderCal_LoadProfile()
 		end
 	end)
