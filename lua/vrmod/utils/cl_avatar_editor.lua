@@ -257,6 +257,41 @@ function Session:_cacheBones()
 		self.bones[k] = Lookup(e, name)
 	end
 	self.bones.chest = self.bones.spine2 or self.bones.spine4 or self.bones.spine1 or self.bones.spine
+	self:_buildMirrorBoneMap()
+end
+
+local function IsValidBoneName(name)
+	if not name or name == "" then return false end
+	if name == "__INVALIDBONE__" then return false end
+	if string.StartWith(name, "ValveBiped") or string.find(name, "Bip01", 1, true) then
+		return true
+	end
+	-- allow non-Valve names that still L/R swap
+	return true
+end
+
+--- Cache player bone id → twin bone id for mirror mode (L↔R). Avoids per-frame LookupBone.
+function Session:_buildMirrorBoneMap()
+	self.mirrorBoneMap = {} -- [playerBoneId] = twinBoneId (same skel path)
+	local e = self.ent
+	if not IsValid(e) then return end
+	local n = e:GetBoneCount() or 0
+	for i = 0, n - 1 do
+		local bn = e:GetBoneName(i)
+		if IsValidBoneName(bn) then
+			local mn = MirrorBoneName(bn)
+			if mn ~= bn then
+				local tid = e:LookupBone(mn)
+				if tid and tid >= 0 then
+					self.mirrorBoneMap[i] = tid
+				else
+					self.mirrorBoneMap[i] = i -- no pair → keep (center-like)
+				end
+			else
+				self.mirrorBoneMap[i] = i -- spine/head/pelvis
+			end
+		end
+	end
 end
 
 function Session:_measureArms()
@@ -583,9 +618,16 @@ local function MatFrom(pos, ang)
 	return m
 end
 
---- Resolve twin bone id for a player bone name (L↔R swap in mirror mode).
-function Session:_twinBoneFor(playerBoneName, fallbackId)
-	if not self:_isMirrorMode() or not playerBoneName then
+--- Resolve twin bone id for a player bone (L↔R swap in mirror mode).
+-- Prefer cached mirrorBoneMap (same skeleton); fall back to name swap.
+function Session:_twinBoneFor(playerBoneId, playerBoneName, fallbackId)
+	if not self:_isMirrorMode() then
+		return fallbackId
+	end
+	if self.mirrorBoneMap and playerBoneId ~= nil and self.mirrorBoneMap[playerBoneId] ~= nil then
+		return self.mirrorBoneMap[playerBoneId]
+	end
+	if not playerBoneName or not IsValidBoneName(playerBoneName) then
 		return fallbackId
 	end
 	local mirrorName = MirrorBoneName(playerBoneName)
@@ -597,9 +639,28 @@ function Session:_twinBoneFor(playerBoneName, fallbackId)
 	return fallbackId
 end
 
+--- Clamp child bone distance from parent in target map (stops stretch without re-IK).
+local function ClampBoneDist(targets, parentId, childId, maxLen)
+	if not parentId or not childId or not targets[parentId] or not targets[childId] then return end
+	if maxLen < 1 then return end
+	local pm = targets[parentId]
+	local cm = targets[childId]
+	local pp = pm:GetTranslation()
+	local cp = cm:GetTranslation()
+	local ca = cm:GetAngles()
+	local d = cp - pp
+	local len = d:Length()
+	if len > maxLen * 1.15 and len > 0.01 then -- 15% slack before clamp
+		targets[childId] = MatFrom(pp + d:GetNormalized() * maxLen, ca)
+	end
+end
+
 --- Copy the LIVE VR player's posed bones into twin space via _map (mirror or clone).
--- Mirror mode: MapMirror transform + write onto opposite L/R limb bones so the
--- skinned mesh stays coherent (your right hand → twin's left arm mesh on your right).
+-- True mirror (no twisted/stretched limbs) requires ALL of:
+--   1) MapMirror spatial flip (sagittal X)
+--   2) L↔R bone id remap when writing targets
+--   3) Apply only inside BuildBonePositions (see Open)
+--   4) Shared characterYaw frame in _applyTracking
 function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return false end
@@ -627,15 +688,23 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 		or (self.model == ply:GetModel())
 	local doMirror = self:_isMirrorMode()
 
+	-- Rebuild map if twin model bone count changed / first frame
+	if doMirror and sameSkel and (not self.mirrorBoneMap or not next(self.mirrorBoneMap)) then
+		self:_buildMirrorBoneMap()
+	end
+
 	if sameSkel then
 		for i = 0, n - 1 do
 			local m = ply:GetBoneMatrix(i)
 			if m then
+				local bn = ply:GetBoneName(i)
+				if not IsValidBoneName(bn) then continue end
 				local pos, ang = m:GetTranslation(), m:GetAngles()
 				local np, na = map(pos, ang)
-				local bn = ply:GetBoneName(i)
-				local twinId = self:_twinBoneFor(bn, i)
-				targets[twinId] = MatFrom(np, na)
+				local twinId = self:_twinBoneFor(i, bn, i)
+				if twinId ~= nil then
+					targets[twinId] = MatFrom(np, na)
+				end
 			end
 		end
 	else
@@ -659,10 +728,11 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 
 	if not next(targets) then return false end
 
-	-- Algocube digit 6/9: clamp giraffe neck (head too far from chest)
-	if self.headDampen then
+	-- Soft length clamps: head + limbs (no re-IK; keeps mesh from stretching)
+	if self.headDampen ~= false then
 		self:_dampenHeadTargets(targets)
 	end
+	self:_dampenLimbTargets(targets)
 
 	self.targets = targets
 	return true
@@ -705,6 +775,25 @@ function Session:_dampenHeadTargets(targets)
 	end
 end
 
+--- Clamp arm/leg segment lengths to rest-pose measure (anti-stretch after map).
+function Session:_dampenLimbTargets(targets)
+	if not targets or not self.bones then return end
+	local b = self.bones
+	local uA = self.upperArmLen or 12
+	local fA = self.forearmLen or 12
+	local uL = self.upperLegLen or 16
+	local lL = self.lowerLegLen or 16
+	-- Both sides (mirror may have swapped content but lengths are symmetric)
+	ClampBoneDist(targets, b.rUpper, b.rFore, uA)
+	ClampBoneDist(targets, b.rFore, b.rHand, fA)
+	ClampBoneDist(targets, b.lUpper, b.lFore, uA)
+	ClampBoneDist(targets, b.lFore, b.lHand, fA)
+	ClampBoneDist(targets, b.rThigh, b.rCalf, uL)
+	ClampBoneDist(targets, b.rCalf, b.rFoot, lL)
+	ClampBoneDist(targets, b.lThigh, b.lCalf, uL)
+	ClampBoneDist(targets, b.lCalf, b.lFoot, lL)
+end
+
 function Session:SetAlgoDigit(digit)
 	if vrmod.algocube and vrmod.algocube.mirror then
 		local d, policy = vrmod.algocube.mirror.Roll({ digit = digit })
@@ -723,6 +812,7 @@ function Session:_applyTracking()
 	if not hmd then return end
 
 	-- Prefer characterYaw so bone matrices and map share the same body frame
+	-- (mismatch here is a primary cause of "twisted" twins vs live IK)
 	local cyaw = g_VR.characterYaw
 	if isnumber(cyaw) then
 		yaw = cyaw
@@ -740,20 +830,21 @@ function Session:_applyTracking()
 	end
 
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
+	-- Place twin root only — do NOT SetupBones before targets are filled
+	-- (early SetupBones would thrash with stale matrices)
 	self.ent:SetPos(self.standPos)
 	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
-	self.ent:InvalidateBoneCache()
-	self.ent:SetupBones()
 
 	if self.idleOnly then
 		self.targets = {}
 		return
 	end
 
-	-- Live VR body → twin (MapMirror for facing, MapClone for clone)
+	-- Live VR body → twin (MapMirror+L↔R for facing, MapClone for clone)
 	if not self:_copyFromLocalPlayer(playerFeet, playerYaw) then
 		self.targets = {}
 	end
+	-- Caller (draw hook) runs SetupBones once → BuildBonePositions applies targets
 end
 
 function Session:_drawTrackers()
@@ -874,7 +965,10 @@ function vrmod.avatar.Open(opts)
 		standPos = Vector(),
 		standAng = Angle(),
 		bones = {},
+		mirrorBoneMap = {},
 		targets = {},
+		headDampen = true, -- default on: MetaCam giraffe + anti-stretch
+		headMaxLen = 14,
 		upperArmLen = 12,
 		forearmLen = 12,
 		upperLegLen = 16,
@@ -886,12 +980,16 @@ function vrmod.avatar.Open(opts)
 	s:_applyHideBones()
 	sessions[id] = s
 
-	-- Apply solved matrices in BuildBonePositions (stable vs free SetBoneMatrix thrash)
+	-- Apply solved matrices ONLY in BuildBonePositions (stable vs free thrash).
+	-- Free SetBoneMatrix outside this callback is a known stretch/twist failure mode.
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
 		if not s.active or not s.targets then return end
 		for boneId, mat in pairs(s.targets) do
-			if boneId and mat and e:GetBoneMatrix(boneId) then
-				e:SetBoneMatrix(boneId, mat)
+			if boneId and mat then
+				local cur = e:GetBoneMatrix(boneId)
+				if cur then
+					e:SetBoneMatrix(boneId, mat)
+				end
 			end
 		end
 	end)
