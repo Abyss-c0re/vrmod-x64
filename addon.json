@@ -3,12 +3,18 @@
     "type": "tool",
     "tags": ["realism"],
     "ignore": [
-        ".git",
+        ".git/*",
+        ".git*",
+        ".grok/*",
+        ".workshop_id",
         "LICENSE",
         "README.md",
+        "docs/*",
+        "scripts/*",
+        "state/*",
         "models/**/*.sw.vtx",
         "materials/**/*.sw.vtx",
         "**/*.sw.vtx",
-        ".vscode/settings.json"
+        ".vscode/*"
     ]
 }
