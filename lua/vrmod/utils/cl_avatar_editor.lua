@@ -115,11 +115,56 @@ local function AngleBetween(fromPos, toPos)
 	return dir:Angle()
 end
 
--- Map player-space pose into avatar stand space WITHOUT axis flips.
--- (Old MapMirror flipped Y/roll and inverted the mesh / "inside out".)
+-- Clone: same laterality (your right → twin's right in twin space)
 local function MapClone(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 	return LocalToWorld(relPos, relAng, avatarFeet, avatarYaw)
+end
+
+-- Reconstruct Angle from orthonormal right-handed basis (forward, up)
+local function AngleFromBasis(forward, up)
+	forward = forward:GetNormalized()
+	-- Orthonormalize up against forward
+	local right = forward:Cross(up)
+	if right:LengthSqr() < 1e-6 then
+		right = forward:Cross(Vector(0, 0, 1))
+		if right:LengthSqr() < 1e-6 then right = forward:Cross(Vector(0, 1, 0)) end
+	end
+	right:Normalize()
+	up = right:Cross(forward)
+	up:Normalize()
+	-- Source Angle from forward, then roll so local Up matches
+	local ang = forward:Angle()
+	local curUp = ang:Up()
+	local curRight = ang:Right()
+	local roll = math.deg(math.atan2(curRight:Dot(up), curUp:Dot(up)))
+	ang.r = roll
+	return ang
+end
+
+--- True mirror: left-right reflection in the player's sagittal plane, then into twin space.
+-- WorldToLocal with playerYaw: X=Right, Y=Forward, Z=Up.
+-- Flip X on position; reflect bone basis across YZ and restore right-handed frame
+-- so the mesh is NOT inside-out (Householder + re-handedness).
+local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
+	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
+
+	-- Position: your right (+X) becomes left (−X) in player frame
+	relPos.x = -relPos.x
+
+	-- Orientation: reflect Forward/Right/Up across the sagittal plane (YZ)
+	local f = relAng:Forward()
+	local r = relAng:Right()
+	local u = relAng:Up()
+	f = Vector(-f.x, f.y, f.z)
+	r = Vector(-r.x, r.y, r.z)
+	u = Vector(-u.x, u.y, u.z)
+	-- Reflection reverses chirality → flip Right so bone matrices stay right-handed
+	r = -r
+	-- Rebuild from reflected forward + up (up may need re-ortho)
+	local nang = AngleFromBasis(f, u)
+
+	return LocalToWorld(relPos, nang, avatarFeet, avatarYaw)
 end
 
 local function ParseBodygroups(str)
@@ -500,9 +545,12 @@ end
 function Session:_map(pos, ang, playerFeet, playerYaw)
 	if self.mode == "world" then
 		return pos, ang
+	elseif self.mode == "clone" then
+		-- Same laterality (debug / over-shoulder view)
+		return MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 	end
-	-- Always MapClone — face-to-face uses stand yaw only, not inverted bones
-	return MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
+	-- facing / mirror: proper left-right mirror with rotated bone matrices
+	return MapMirror(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 end
 
 local function MatFrom(pos, ang)
@@ -512,8 +560,7 @@ local function MatFrom(pos, ang)
 	return m
 end
 
---- Copy the LIVE VR player's posed bones (cl_character IK) into twin space.
---- This matches g_VR movement without home-grown bone angles that invert meshes.
+--- Copy the LIVE VR player's posed bones into twin space via _map (mirror or clone).
 function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return false end
@@ -528,11 +575,14 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 	g_VR.allowPlayerDraw = prevAllow
 	if not okSetup then return false end
 
+	local map = function(p, a)
+		return self:_map(p, a, playerFeet, playerYaw)
+	end
+
 	local targets = {}
 	local n = ply:GetBoneCount() or 0
 	if n < 1 then return false end
 
-	-- Same skeleton path: copy every bone by index
 	local sameSkel = (self.ent:GetModel() == ply:GetModel())
 		or (self.ent:GetModel() == (ply.vrmod_pm or ""))
 		or (self.model == ply:GetModel())
@@ -542,12 +592,11 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 			local m = ply:GetBoneMatrix(i)
 			if m then
 				local pos, ang = m:GetTranslation(), m:GetAngles()
-				local np, na = MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
+				local np, na = map(pos, ang)
 				targets[i] = MatFrom(np, na)
 			end
 		end
 	else
-		-- Different PM: map ValveBiped names that exist on both
 		for name, twinId in pairs(self.bones) do
 			local boneName = BONES[name]
 			if twinId and boneName then
@@ -556,7 +605,7 @@ function Session:_copyFromLocalPlayer(playerFeet, playerYaw)
 					local m = ply:GetBoneMatrix(plyId)
 					if m then
 						local pos, ang = m:GetTranslation(), m:GetAngles()
-						local np, na = MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
+						local np, na = map(pos, ang)
 						targets[twinId] = MatFrom(np, na)
 					end
 				end
@@ -572,6 +621,16 @@ end
 function Session:_applyTracking()
 	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
 	if not hmd then return end
+
+	-- Prefer characterYaw so bone matrices and map share the same body frame
+	local cyaw = g_VR.characterYaw
+	if isnumber(cyaw) then
+		yaw = cyaw
+		playerYaw = Angle(0, yaw, 0)
+	end
+	-- Feet under HMD on playspace floor (matches character root)
+	local originZ = (g_VR.origin and g_VR.origin.z) or playerFeet.z
+	playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
 
 	local fbt = self:_fbtLive()
 	if fbt and not self.idleOnly then
@@ -591,7 +650,7 @@ function Session:_applyTracking()
 		return
 	end
 
-	-- Primary: mirror the real VR body (already solved by cl_character)
+	-- Live VR body → twin (MapMirror for facing, MapClone for clone)
 	if not self:_copyFromLocalPlayer(playerFeet, playerYaw) then
 		self.targets = {}
 	end

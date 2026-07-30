@@ -229,7 +229,7 @@ local function paint()
 		if tab == 1 then
 			local sc = g_VR.scale or 1
 			draw.SimpleText(string.format("world scale  %.2f", sc), "DermaLarge", W * 0.5, y0 + 8, Theme.text, TEXT_ALIGN_CENTER)
-			draw.SimpleText("match IRL height · twin follows g_VR.tracking", "DermaDefault", W * 0.5, y0 + 32, Theme.muted, TEXT_ALIGN_CENTER)
+			draw.SimpleText("MIRROR = your left↔right · like a real mirror", "DermaDefault", W * 0.5, y0 + 32, Theme.muted, TEXT_ALIGN_CENTER)
 			local bw = (W - PAD * 2 - 16) / 3
 			drawBtn(PAD, y0 + 50, bw, 48, "+", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD + bw + 8, y0 + 50, bw, 48, "AUTO", focused and my >= y0 + 50 and my <= y0 + 98, false)
@@ -238,7 +238,7 @@ local function paint()
 			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 110, (W - PAD * 2 - 8) / 2, 48, "OFFSET", false, false)
 			local mode = s and s.mode or "facing"
 			if mode == "mirror" then mode = "facing" end
-			drawBtn(PAD, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "FACING", false, mode == "facing")
+			drawBtn(PAD, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "MIRROR", false, mode == "facing")
 			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "CLONE", false, mode == "clone")
 			local dist = s and s.distance or 40
 			drawBtn(PAD, y0 + 226, (W - PAD * 2 - 8) / 2, 40, "DIST −", false, false)

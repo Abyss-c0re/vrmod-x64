@@ -392,17 +392,29 @@ if CLIENT then
 		g_VR.rawTracking = g_VR.rawTracking or {}
 
 		for k, v in pairs(rawPoses) do
+			if not v or not v.pos then continue end
 			local lastPos = lastPosePos[k]
 			local currentPos = v.pos
-			if lastPos then
-				local delta = vrmod.utils.SubVec(currentPos, lastPos)
-				local deltaLenSqr = vrmod.utils.LengthSqr(delta)
-				if deltaLenSqr > maxPosDeltaSqr then
-					local deltaLen = math.sqrt(deltaLenSqr)
-					local clampedDelta = vrmod.utils.MulVec(delta, maxPosDeltaSqr / deltaLen)
-					currentPos = vrmod.utils.AddVec(lastPos, clampedDelta)
-					vrmod.logger.Warn("Pose %s exceeded max delta, clamped.", k)
-				end
+			-- Clamp teleport spikes (defensive: never let missing utils kill the frame)
+			if lastPos and currentPos then
+				local okClamp, newPos = pcall(function()
+					local delta = vrmod.utils.SubVec(currentPos, lastPos)
+					local deltaLenSqr = vrmod.utils.LengthSqr(delta)
+					if deltaLenSqr > maxPosDeltaSqr then
+						local deltaLen = math.sqrt(deltaLenSqr)
+						local scale = maxPosDeltaSqr / math.max(deltaLen, 0.0001)
+						local clampedDelta = (vrmod.utils.MulVec and vrmod.utils.MulVec(delta, scale))
+							or Vector(delta.x * scale, delta.y * scale, delta.z * scale)
+						local out = (vrmod.utils.AddVec and vrmod.utils.AddVec(lastPos, clampedDelta))
+							or (lastPos + clampedDelta)
+						if vrmod.logger then
+							vrmod.logger.Warn("Pose %s exceeded max delta, clamped.", k)
+						end
+						return out
+					end
+					return currentPos
+				end)
+				if okClamp and newPos then currentPos = newPos end
 			end
 
 			lastPosePos[k] = currentPos

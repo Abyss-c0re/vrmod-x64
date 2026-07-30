@@ -14,11 +14,21 @@ function vrmod.utils.AngAlmostEqual(a1, a2, threshold)
 end
 
 function vrmod.utils.LengthSqr(v)
+    if not v then return 0 end
     return v.x * v.x + v.y * v.y + v.z * v.z
 end
 
 function vrmod.utils.SubVec(a, b)
     return Vector(a.x - b.x, a.y - b.y, a.z - b.z)
+end
+
+function vrmod.utils.AddVec(a, b)
+    return Vector(a.x + b.x, a.y + b.y, a.z + b.z)
+end
+
+function vrmod.utils.MulVec(v, s)
+    s = s or 1
+    return Vector(v.x * s, v.y * s, v.z * s)
 end
 
 function vrmod.utils.SmoothVector(current, target, smoothingFactor)
