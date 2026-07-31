@@ -597,8 +597,7 @@ function Session:_map(pos, ang, playerFeet, playerYaw)
 		-- Same laterality (debug / over-shoulder view)
 		return MapClone(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 	end
-	-- facing / mirror: sagittal flip; L↔R bone IDs remapped in _copyFromLocalPlayer
-	return MapMirror(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
+	return MapMirrorWorld(pos, ang, playerFeet, playerYaw, self.standPos, self.standAng)
 end
 
 local function MatFrom(pos, ang)

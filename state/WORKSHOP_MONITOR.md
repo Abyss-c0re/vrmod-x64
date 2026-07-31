@@ -1,25 +1,33 @@
 # Workshop monitor — 3442302711
 
-**Interval:** 30m (scheduled task)  
-**Law:** commit every fix · workshop only after smoke · mat_queue=1
+**Fire:** 2026-07-31 ~16:41 local (+03)  
+**Law:** commit every fix · workshop only after smoke · mat_queue=1 · cube_is_source_of_truth · no dual-truth pose
 
-## Seed scan (2026-07-31)
+## Sources
+- Comments: **1250** (+1) — Benzo ~15m: “Flashing graphics… scaling nice”
+- Bugs ctp=24: still 348; last user #348 WhangaTy (focus flicker)
 
-### Hot comments
-| Report | Status |
-|--------|--------|
-| Hands stuck / tied together / PM glitch | **Fixed** `8514387` — identity heal + raw unstick + frame clones |
-| Black rectangle + hands tied (Quest 2) | Same glue path + black UI was prior PROPHECY (additive HUD) |
-| Flicker / skybox when focused | **Fixed** mat_queue=1 pin (local; confirm smoke before WS) |
-| DrawModel nil cl_character | **Fixed** `a26a750` |
-| Avatar menu / twin mirror | In progress charik SoT — local only |
-| Glide steer/throttle | Earlier fix in tree — confirm still OK vs Glide updates |
-| Flying away / no buttons | Needs repro (locomotion / focus) |
-| VR black / desktop OK | Module/runtime / share texture — not pure Lua |
-| Fisheye / one eye | Border / stereo submit — separate track |
+## Hot / actionable
 
-### Deploy
-Local addons rsync'd. **No workshop** until headset smoke.
+| Report | Source | Verdict |
+|--------|--------|---------|
+| Flashing / flicker graphics | **NEW** Benzo 15m; #348 WhangaTy | **Already fixed** mat_queue=1 pin `2bfbfc6` — needs smoke then workshop |
+| Hands stuck / PM glitch | Galaxynex (+ screenshot pending); Cookie black rect | **Already fixed** `8514387` — needs smoke then workshop |
+| DrawModel nil crash | prior | **Already fixed** `a26a750` — needs smoke |
+| Avatar menu / twin | author WIP | Local ahead 21 + dirty `cl_avatar_editor.lua` — **not workshop** |
+| Hand collision / Glide / fly / black VR | older | Hold / module / ignore |
 
-### Next loop
-Re-fetch comments + bugs thread; implement only new actionable Lua bugs.
+## Actions this fire
+- Re-fetched comments + bugs last page.
+- **No new Lua fix** — Benzo flashing = known mat_queue path already in git.
+- Desktop rsync refreshed; Steam addons symlink live.
+- **No gmpublish.**
+
+## Pending smoke (before workshop)
+1. Hands L/R independent  
+2. mat_queue_mode=1 under focus (no flash/skybox)  
+3. Avatar twin stable (WIP)  
+4. Optional: quick-menu calibration
+
+## Next loop
+Galaxynex screenshot if posted; only code new Lua beyond known fixes.
