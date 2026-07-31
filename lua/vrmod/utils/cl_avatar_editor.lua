@@ -1,10 +1,11 @@
 -- =============================================================================
 -- vrmod.avatar — Cube player customization twin
 --
--- SoT = working VR playermodel bone matrices (snap). No re-IK.
+-- SoT = working VR playermodel bone matrices (snap from cl_character after IK).
+-- Twin NEVER re-IK. Twin NEVER publishes pose snaps (that poisons the SoT).
 --
---   CLONE:  LocalToWorld( WorldToLocal(bone) ) into twin — same yaw. DONE.
---   MIRROR: same, but flip local Y (Right) and face twin at yaw+180. DONE.
+--   CLONE:  same bone names, same angles, position += (stand - feet). No flip.
+--   MIRROR: MapMirrorWorld (Y flip + yaw+180). Separate branch only.
 --
 -- X=Forward Y=Right Z=Up. Never mix paths. Never VRUtilNetUpdateLocalPly.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
@@ -689,19 +690,22 @@ end
 -- { frame = n, characterYaw, feet, bones = { {name, pos, ang}, ... } }
 g_VR.avatarPoseSnap = g_VR.avatarPoseSnap or nil
 
---- Call from cl_character after DrawModel — never from twin.
+--- Call from cl_character / VR draw AFTER player IK + bone apply — NEVER from twin.
+-- Twin-side publish captures unposed bones and corkscrews CLONE.
 function vrmod.avatar.PublishPlayerPose(ply, frame)
 	if not IsValid(ply) then return end
 	local n = ply:GetBoneCount() or 0
 	if n < 4 then return end
 
 	local yaw = (frame and frame.characterYaw) or g_VR.characterYaw or 0
+	-- Prefer render yaw if set this frame
 	local ra = ply:GetRenderAngles()
 	if ra and math.abs(math.AngleDifference(ra.yaw, yaw)) < 90 then
 		yaw = ra.yaw
 	end
 
 	local originZ = (g_VR.origin and g_VR.origin.z) or ply:GetPos().z
+	-- Character root under the body (pelvis XY), not HMD — legs depend on this
 	local fx, fy = ply:GetPos().x, ply:GetPos().y
 	local pelvis = ply:LookupBone("ValveBiped.Bip01_Pelvis")
 	if isnumber(pelvis) and pelvis >= 0 then
@@ -734,36 +738,37 @@ function vrmod.avatar.PublishPlayerPose(ply, frame)
 	}
 end
 
---- Build twin bone targets from pose snap.
--- CLONE and MIRROR are SEPARATE. Clone never runs the Y-flip.
+--- Apply published VR pose to twin.
+-- CLONE path is pure: same bone names, same angles, position offset only.
+-- MIRROR is a separate branch (MapMirrorWorld). Never share code that flips into clone.
 function Session:_applyPoseSnap(playerFeet, playerYaw)
 	if not IsValid(self.ent) then return false end
 
-	local ply = LocalPlayer()
 	local snap = g_VR.avatarPoseSnap
-	if (not snap or not snap.bones or #snap.bones < 4) and IsValid(ply) then
-		pcall(vrmod.avatar.PublishPlayerPose, ply, ReadLocalVRFrame())
-		snap = g_VR.avatarPoseSnap
-	end
+	-- NO twin-side PublishPlayerPose. Unposed GetBoneMatrix poisons CLONE.
 	if not snap or not snap.bones or #snap.bones < 4 then return false end
-	if snap.frame and FrameNumber() - snap.frame > 90 then return false end
+	-- Strict freshness (ad9dfc8). Loose windows keep dead/wrong snaps alive.
+	if snap.frame and FrameNumber() - snap.frame > 3 then return false end
 
 	local mode = self.mode or "facing"
 	if mode == "mirror" then mode = "facing" end
+	local isClone = (mode == "clone")
+	local isWorld = (mode == "world")
+	local isFacing = (not isClone and not isWorld)
 
 	local srcFeet = snap.feet or playerFeet
 	local srcYaw = Angle(0, snap.characterYaw or (playerYaw and playerYaw.yaw) or 0, 0)
 	local dist = self.distance or cv_distance:GetFloat()
 
 	local standPos, standAng
-	if mode == "world" then
+	if isWorld then
 		standPos, standAng = srcFeet, srcYaw
-	elseif mode == "clone" then
-		-- CLONE ONLY: same facing, rigid copy — no flip, no +180
+	elseif isClone then
+		-- CLONE: same facing, stand in front — pure rigid copy
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw, 0)
 	else
-		-- MIRROR ONLY: face player, Y-flip in source local
+		-- MIRROR only: face player
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw + 180, 0)
 	end
@@ -772,19 +777,28 @@ function Session:_applyPoseSnap(playerFeet, playerYaw)
 	self.ent:SetPos(standPos)
 	self.ent:SetAngles(standAng)
 
+	-- CLONE with same yaw = pure world translate (no WorldToLocal angle path).
+	-- Any angle remapping risks corkscrew; do not touch bone orientations.
+	local cloneOff = nil
+	if isClone then
+		cloneOff = standPos - srcFeet
+	end
+
 	local targets = {}
 	local copied = 0
 	for _, b in ipairs(snap.bones) do
 		if not b.pos or not b.ang or not b.name then continue end
 		local npos, nang
-		if mode == "world" then
+		if isWorld then
 			npos, nang = b.pos, b.ang
-		elseif mode == "clone" then
-			npos, nang = MapClone(b.pos, b.ang, srcFeet, srcYaw, standPos, standAng)
+		elseif isClone then
+			npos = Vector(b.pos.x + cloneOff.x, b.pos.y + cloneOff.y, b.pos.z + cloneOff.z)
+			nang = Angle(b.ang.p, b.ang.y, b.ang.r)
 		else
-			-- facing / mirror — ONLY place that flips
+			-- facing / mirror ONLY — Y-flip lives exclusively here
 			npos, nang = MapMirrorWorld(b.pos, b.ang, srcFeet, srcYaw, standPos, standAng)
 		end
+		-- CLONE/WORLD: same bone name (your right = twin right). No L↔R.
 		local tid = self.ent:LookupBone(b.name)
 		if not tid or tid < 0 then continue end
 		local mat = Matrix()
@@ -816,8 +830,9 @@ function Session:_applyTracking()
 		playerYaw = Angle(0, yaw, 0)
 	end
 
+	-- Prefer snap feet (pelvis/floor) when fresh — matches bone snapshot root
 	local snap = g_VR.avatarPoseSnap
-	if snap and snap.feet and snap.frame and FrameNumber() - snap.frame <= 90 then
+	if snap and snap.feet and snap.frame and FrameNumber() - snap.frame <= 3 then
 		playerFeet = Vector(snap.feet.x, snap.feet.y, snap.feet.z)
 		if snap.characterYaw then
 			yaw = snap.characterYaw
@@ -833,23 +848,20 @@ function Session:_applyTracking()
 		end
 	end
 
+	-- Tentative stand (overwritten inside _applyPoseSnap from snap)
+	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
+	self.ent:SetPos(self.standPos)
+	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
+
 	if self.idleOnly then
-		self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
-		self.ent:SetPos(self.standPos)
-		self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 		self.targets = {}
 		return
 	end
 
-	local ok = false
 	local okP, res = pcall(function()
 		return self:_applyPoseSnap(playerFeet, playerYaw)
 	end)
-	ok = okP and res
-	if not ok then
-		self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
-		self.ent:SetPos(self.standPos)
-		self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
+	if not (okP and res) then
 		self.targets = {}
 	end
 end
@@ -994,11 +1006,11 @@ function vrmod.avatar.Open(opts)
 	s:_applyHideBones()
 	sessions[id] = s
 
-	-- Apply twin targets (always SetBoneMatrix — do not require GetBoneMatrix first)
+	-- Apply twin targets only (mirrored/cloned player matrices — no re-IK)
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
 		if not s.active or not s.targets then return end
 		for boneId, mat in pairs(s.targets) do
-			if boneId and mat then
+			if boneId and mat and e:GetBoneMatrix(boneId) then
 				e:SetBoneMatrix(boneId, mat)
 			end
 		end
@@ -1016,11 +1028,10 @@ function vrmod.avatar.Open(opts)
 		end
 	end)
 
-	-- Draw after player body snap (player hook is PostDrawTranslucent; we use a later name
-	-- and also re-apply on PreDrawEffects so motion is not one frame stuck).
 	hook.Add("PostDrawTranslucentRenderables", s.hookId, function(depth, sky)
 		if depth or sky or not s.active or not IsValid(s.ent) then return end
 		if not g_VR.active or not g_VR.tracking then return end
+		-- Prefer stereo eyes; still draw once for desktop/debug if no eye match
 		local ep = EyePos()
 		local stereo = (g_VR.eyePosLeft and ep == g_VR.eyePosLeft)
 			or (g_VR.eyePosRight and ep == g_VR.eyePosRight)
@@ -1028,10 +1039,10 @@ function vrmod.avatar.Open(opts)
 			return
 		end
 
+		-- Never let apply errors kill the twin draw
 		pcall(function() s:_applyTracking() end)
 		pcall(function()
-			s.ent:InvalidateBoneCache()
-			s.ent:SetupBones()
+			s.ent:SetupBones() -- BuildBonePositions → targets
 			s:_applyHideBones()
 		end)
 		pcall(function() s:_drawModel() end)
