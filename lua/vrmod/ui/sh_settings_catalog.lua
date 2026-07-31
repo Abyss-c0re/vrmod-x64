@@ -253,17 +253,30 @@ function vrmod.SettingsGetColor(cvar, fallback)
 	return vrmod.SettingsParseColor(c and c:GetString() or nil, fallback)
 end
 
+-- Client must never ConVar:Set* on FCVAR_REPLICATED (engine error).
+local function ClientCanSetConVar(cv)
+	if not cv then return false end
+	local flags = cv:GetFlags()
+	if not flags then return true end
+	-- FCVAR_REPLICATED = 8192
+	local REPLICATED = FCVAR_REPLICATED or 8192
+	if bit.band(flags, REPLICATED) ~= 0 then return false end
+	return true
+end
+
+local function SafeClientSet(cv, setter)
+	if not cv or not ClientCanSetConVar(cv) then return false end
+	local ok = pcall(setter, cv)
+	return ok
+end
+
 function vrmod.SettingsSetColor(cvar, col)
 	if not cvar or not col then return end
 	local s = vrmod.SettingsFormatColor(col)
-	-- SetString fires cvars.AddChangeCallback (RunConsoleCommand often does not for string cvars)
 	local cv = GetConVar(cvar)
-	if cv then
-		cv:SetString(s)
-	else
+	if not SafeClientSet(cv, function(c) c:SetString(s) end) then
 		RunConsoleCommand(cvar, s)
 	end
-	-- Force apply even if callback was missing / value unchanged
 	if CLIENT then
 		if cvar == "vrmod_beam_color" and vrmod.ApplyBeamColor then
 			vrmod.ApplyBeamColor(s)
@@ -273,20 +286,19 @@ function vrmod.SettingsSetColor(cvar, col)
 	end
 end
 
---- Reliable bool/float/int write.
--- Use SetInt/SetString — SetBool is flaky on some client convars in GMod.
--- Always update + force RefreshHUD for vrmod_hud.
+--- Bool/float/int write — Set* only when convar is client-owned; else RunConsoleCommand.
 function vrmod.SettingsSetBool(cvar, v)
 	if not cvar then return end
 	local on = v and true or false
+	local str = on and "1" or "0"
 	local cv = GetConVar(cvar)
-	if cv then
-		cv:SetInt(on and 1 or 0)
+	if not SafeClientSet(cv, function(c) c:SetInt(on and 1 or 0) end) then
+		RunConsoleCommand(cvar, str)
+	else
+		-- Ensure change callbacks that only listen to console still fire
+		RunConsoleCommand(cvar, str)
 	end
-	-- Belt: also push as console command (some systems only listen here)
-	RunConsoleCommand(cvar, on and "1" or "0")
 	if CLIENT and cvar == "vrmod_hud" then
-		-- Immediate rebind — do not wait for callback
 		if vrmod.RefreshHUD then vrmod.RefreshHUD() end
 		timer.Simple(0, function()
 			if vrmod.RefreshHUD then vrmod.RefreshHUD() end
@@ -298,16 +310,22 @@ function vrmod.SettingsSetFloat(cvar, v)
 	if not cvar then return end
 	local n = tonumber(v) or 0
 	local cv = GetConVar(cvar)
-	if cv then cv:SetFloat(n) end
-	RunConsoleCommand(cvar, tostring(n))
+	if not SafeClientSet(cv, function(c) c:SetFloat(n) end) then
+		RunConsoleCommand(cvar, tostring(n))
+	else
+		RunConsoleCommand(cvar, tostring(n))
+	end
 end
 
 function vrmod.SettingsSetInt(cvar, v)
 	if not cvar then return end
 	local n = math.floor(tonumber(v) or 0)
 	local cv = GetConVar(cvar)
-	if cv then cv:SetInt(n) end
-	RunConsoleCommand(cvar, tostring(n))
+	if not SafeClientSet(cv, function(c) c:SetInt(n) end) then
+		RunConsoleCommand(cvar, tostring(n))
+	else
+		RunConsoleCommand(cvar, tostring(n))
+	end
 end
 
 --- Shared action handlers (VR + desktop). Host may wrap close.
