@@ -84,15 +84,34 @@ local function getInt(name, default)
 end
 
 local function setBool(name, v)
-	RunConsoleCommand(name, v and "1" or "0")
+	-- Must use SetBool so cvars.AddChangeCallback + HUD rebind fire
+	if vrmod.SettingsSetBool then
+		vrmod.SettingsSetBool(name, v)
+	else
+		local c = GetConVar(name)
+		if c then c:SetBool(v and true or false) else RunConsoleCommand(name, v and "1" or "0") end
+	end
+	if name == "vrmod_hud" and vrmod.RefreshHUD then
+		vrmod.RefreshHUD()
+	end
 end
 
 local function setFloat(name, v)
-	RunConsoleCommand(name, tostring(v))
+	if vrmod.SettingsSetFloat then
+		vrmod.SettingsSetFloat(name, v)
+	else
+		local c = GetConVar(name)
+		if c then c:SetFloat(tonumber(v) or 0) else RunConsoleCommand(name, tostring(v)) end
+	end
 end
 
 local function setInt(name, v)
-	RunConsoleCommand(name, tostring(math.floor(v + 0.5)))
+	if vrmod.SettingsSetInt then
+		vrmod.SettingsSetInt(name, v)
+	else
+		local c = GetConVar(name)
+		if c then c:SetInt(math.floor(tonumber(v) or 0)) else RunConsoleCommand(name, tostring(math.floor(tonumber(v) or 0))) end
+	end
 end
 
 local function closeCtx()
@@ -377,7 +396,11 @@ local function paint()
 					local bx = W - PAD - 52
 					surface.SetDrawColor(on and Theme.ok or Theme.off)
 					surface.DrawRect(bx, y + 8, 40, 28)
-					draw.SimpleText(on and "ON" or "OFF", "DermaDefaultBold", bx + 20, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					local label = on and "ON" or "OFF"
+					if row.cvar == "vrmod_hud" and on and vrmod.IsHUDActive and not vrmod.IsHUDActive() then
+						label = "…" -- convar on, wait for rebind
+					end
+					draw.SimpleText(label, "DermaDefaultBold", bx + 20, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "slider" then
 					local val = getFloat(row.cvar, row.min or 0)
 					local t = 0

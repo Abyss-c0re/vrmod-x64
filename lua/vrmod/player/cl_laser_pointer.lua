@@ -22,9 +22,16 @@ if CLIENT then
     local GlowSprite = Material("sprites/glow04_noz")
     -- Update laserColor from convar string
     local function UpdateLaserColor(colorString)
-        local r, g, b, a = string.match(colorString, "(%d+),(%d+),(%d+),(%d+)")
+        if not colorString or colorString == "" then return end
+        local r, g, b, a = string.match(tostring(colorString), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
         if not (r and g and b and a) then return end
         laserColor = Color(tonumber(r), tonumber(g), tonumber(b), tonumber(a))
+    end
+
+    -- Public so settings UI can force-apply (see live color without re-enter VR)
+    vrmod.ApplyLaserColor = UpdateLaserColor
+    vrmod.GetLaserColor = function()
+        return Color(laserColor.r, laserColor.g, laserColor.b, laserColor.a)
     end
 
     -- ConVar listener for dynamic updates

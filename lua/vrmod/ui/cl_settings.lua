@@ -33,8 +33,19 @@ local function AddRowToForm(parent, row, y)
 		local cb = vgui.Create("DCheckBoxLabel", parent)
 		cb:SetDark(true)
 		cb:SetText(row.label or row.cvar)
-		cb:SetConVar(row.cvar)
 		cb:SetPos(20, y)
+		local cv = GetConVar(row.cvar)
+		if cv then cb:SetValue(cv:GetBool() and 1 or 0) end
+		-- Don't only SetConVar: force SetBool + HUD refresh so toggle always sticks
+		function cb:OnChange(val)
+			if vrmod.SettingsSetBool then
+				vrmod.SettingsSetBool(row.cvar, val)
+			elseif cv then
+				cv:SetBool(val)
+			else
+				RunConsoleCommand(row.cvar, val and "1" or "0")
+			end
+		end
 		cb:SizeToContents()
 		return y + 22
 	end

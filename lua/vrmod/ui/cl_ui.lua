@@ -20,7 +20,8 @@ if CLIENT then
 	})
 
 	local function UpdateBeamColor(colorString)
-		local r, g, b, a = string.match(colorString, "(%d+),(%d+),(%d+),(%d+)")
+		if not colorString or colorString == "" then return end
+		local r, g, b, a = string.match(tostring(colorString), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
 		r, g, b, a = tonumber(r), tonumber(g), tonumber(b), tonumber(a)
 		if not (r and g and b and a) then return end
 		mat_beam:SetVector("$color", Vector(r / 255, g / 255, b / 255))
@@ -30,6 +31,9 @@ if CLIENT then
 		render.PopRenderTarget()
 	end
 
+	-- Public so settings UI can force-apply without relying on cvar callback
+	vrmod.ApplyBeamColor = UpdateBeamColor
+
 	vrmod.AddCallbackedConvar("vrmod_test_ui_testver", nil, 0, nil, "", 0, 1, tonumber)
 	vrmod.AddCallbackedConvar("vrmod_beam_color", nil, "255,0,0,255", nil, "", nil, nil, nil, function(newValue) UpdateBeamColor(newValue) end)
 	g_VR.menus = {}
@@ -37,7 +41,12 @@ if CLIENT then
 	local menuOrder = {}
 	local menusExist = false
 	local prevFocusPanel = nil
-	UpdateBeamColor(convarValues.vrmod_beam_color)
+	local beamInit = convarValues.vrmod_beam_color
+	if not beamInit or beamInit == "" then
+		local cv = GetConVar("vrmod_beam_color")
+		beamInit = cv and cv:GetString() or "255,0,0,255"
+	end
+	UpdateBeamColor(beamInit)
 	-- Wipe menu RT completely (alpha 0). Prevents ghosted pixels / uncleared HUD-style trails
 	-- when panel paint is sparse (workshop bugs #349 weapon wheel + hand menus).
 	local function ClearMenuRT(w, h)

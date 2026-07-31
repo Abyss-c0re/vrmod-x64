@@ -252,7 +252,59 @@ end
 
 function vrmod.SettingsSetColor(cvar, col)
 	if not cvar or not col then return end
-	RunConsoleCommand(cvar, vrmod.SettingsFormatColor(col))
+	local s = vrmod.SettingsFormatColor(col)
+	-- SetString fires cvars.AddChangeCallback (RunConsoleCommand often does not for string cvars)
+	local cv = GetConVar(cvar)
+	if cv then
+		cv:SetString(s)
+	else
+		RunConsoleCommand(cvar, s)
+	end
+	-- Force apply even if callback was missing / value unchanged
+	if CLIENT then
+		if cvar == "vrmod_beam_color" and vrmod.ApplyBeamColor then
+			vrmod.ApplyBeamColor(s)
+		elseif cvar == "vrmod_laser_color" and vrmod.ApplyLaserColor then
+			vrmod.ApplyLaserColor(s)
+		end
+	end
+end
+
+--- Reliable bool/float/int write (Set* fires change callbacks; RunConsoleCommand often does not)
+function vrmod.SettingsSetBool(cvar, v)
+	if not cvar then return end
+	local cv = GetConVar(cvar)
+	if cv then
+		cv:SetBool(v and true or false)
+	else
+		RunConsoleCommand(cvar, v and "1" or "0")
+	end
+	if CLIENT and cvar == "vrmod_hud" and vrmod.RefreshHUD then
+		-- ensure HUD rebinds even if callback race
+		timer.Simple(0, function()
+			if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+		end)
+	end
+end
+
+function vrmod.SettingsSetFloat(cvar, v)
+	if not cvar then return end
+	local cv = GetConVar(cvar)
+	if cv then
+		cv:SetFloat(tonumber(v) or 0)
+	else
+		RunConsoleCommand(cvar, tostring(v))
+	end
+end
+
+function vrmod.SettingsSetInt(cvar, v)
+	if not cvar then return end
+	local cv = GetConVar(cvar)
+	if cv then
+		cv:SetInt(math.floor(tonumber(v) or 0))
+	else
+		RunConsoleCommand(cvar, tostring(math.floor(tonumber(v) or 0)))
+	end
 end
 
 --- Shared action handlers (VR + desktop). Host may wrap close.

@@ -1,17 +1,16 @@
 if SERVER then return end
 
 -- =============================================================================
--- VR HUD — Cube seamless Real ↔ GMod
--- Law: HUD is overlay energy on the Real. It must never occlude with a black plate.
--- Root: UnlitGeneric samples black RGB from the HUD RT as an opaque world mesh.
--- Fix: additive composite (black adds nothing) + alpha RT canvas + keep HUD ON.
--- mat_queue_mode: untouched (session law).
+-- VR HUD — curved world overlay
+--
+-- Clear each frame to black (additive mat: black adds no light → no black slab).
+-- Do NOT alpha-0 wipe with OverrideBlend (that killed RenderHUD paint / #349 over-fix).
+-- Toggle: vrmod_hud via ConVar:SetBool → callback → AddHUD/RemoveHUD.
 -- =============================================================================
 
-local vrScrH = CreateClientConVar("vrmod_ScrH_hud", ScrH(), true, FCVAR_ARCHIVE)
-local vrScrW = CreateClientConVar("vrmod_ScrW_hud", ScrW(), true, FCVAR_ARCHIVE)
+local vrScrH = CreateClientConVar("vrmod_ScrH_hud", tostring(ScrH()), true, FCVAR_ARCHIVE)
+local vrScrW = CreateClientConVar("vrmod_ScrW_hud", tostring(ScrW()), true, FCVAR_ARCHIVE)
 
--- Source IMAGE_FORMAT enum (do not rely on globals existing)
 local IMG_BGRA8888 = (IMAGE_FORMAT_BGRA8888 ~= nil and IMAGE_FORMAT_BGRA8888) or 12
 local IMG_RGBA8888 = (IMAGE_FORMAT_RGBA8888 ~= nil and IMAGE_FORMAT_RGBA8888) or 0
 
@@ -22,7 +21,7 @@ local function CurvedPlane(w, h, segments, degrees, matrix)
 	local verts = {}
 	local startAng = (math.pi - degrees) / 2
 	local segLen = 0.5 * math.tan(degrees / segments)
-	local scale = w / (segLen * segments)
+	local scale = w / math.max(segLen * segments, 0.001)
 	local zoffset = math.sin(startAng) * 0.5 * scale
 	for i = 0, segments - 1 do
 		local fraction = i / segments
@@ -60,8 +59,6 @@ local function CreateHudRT()
 end
 
 local function CreateHudMaterial(rt)
-	-- $additive: black RT pixels add ZERO light → no floating black slab.
-	-- Colored/white HUD paint still composites onto the Real. HUD stays enabled.
 	local mat = CreateMaterial("vrmod_hud_add", "UnlitGeneric", {
 		["$basetexture"] = rt:GetName(),
 		["$additive"] = 1,
@@ -82,35 +79,71 @@ local rt = CreateHudRT()
 local mat = CreateHudMaterial(rt)
 local hudMeshes = {}
 local hudMesh = nil
-local orig = nil
-local convars, convarValues = vrmod.GetConvars()
+local menuSystemBeforeHud = nil
+local hudActive = false
+local _, convarValues = vrmod.GetConvars()
+
+local function CVarFloat(name, default)
+	local cv = GetConVar(name)
+	if cv then return cv:GetFloat() end
+	local v = convarValues and convarValues[name]
+	if v ~= nil then return tonumber(v) or default end
+	return default
+end
+
+local function CVarString(name, default)
+	local cv = GetConVar(name)
+	if cv then return cv:GetString() end
+	local v = convarValues and convarValues[name]
+	if v ~= nil then return tostring(v) end
+	return default
+end
+
+local function HudWanted()
+	local cv = GetConVar("vrmod_hud")
+	if cv then return cv:GetBool() end
+	return convarValues and convarValues.vrmod_hud and true or false
+end
 
 local function RemoveHUD()
-	hook.Remove("VRMod_PreRender", "hud")
+	hook.Remove("VRMod_PreRender", "vrmod_hud_rt")
 	hook.Remove("HUDShouldDraw", "vrmod_hud")
-	if orig then
-		VRUtilRenderMenuSystem = orig
+	if menuSystemBeforeHud and VRUtilRenderMenuSystem ~= menuSystemBeforeHud then
+		-- Only unwrap if we still own the wrapper
+		VRUtilRenderMenuSystem = menuSystemBeforeHud
 	end
+	hudActive = false
 end
 
 local function AddHUD()
 	RemoveHUD()
-	if not g_VR.active or not convarValues.vrmod_hud then return end
+	if not g_VR or not g_VR.active then return end
+	if not HudWanted() then return end
 
 	rt = CreateHudRT()
 	mat = CreateHudMaterial(rt)
-	if not mat or mat:IsError() then return end
+	if not mat or mat:IsError() then
+		if vrmod.logger then vrmod.logger.Warn("VR HUD: material failed") end
+		return
+	end
+
+	local scale = CVarFloat("vrmod_hudscale", 0.05)
+	local curve = CVarFloat("vrmod_hudcurve", 60)
+	local dist = CVarFloat("vrmod_huddistance", 60)
+	local scrW = math.max(64, vrScrW:GetInt())
+	local scrH = math.max(64, vrScrH:GetInt())
 
 	local mtx = Matrix()
-	mtx:Translate(Vector(0, 0, vrScrH:GetInt() * convarValues.vrmod_hudscale / 2))
+	mtx:Translate(Vector(0, 0, scrH * scale / 2))
 	mtx:Rotate(Angle(0, -90, -90))
-	local meshName = tostring(convarValues.vrmod_hudscale) .. "_" .. tostring(convarValues.vrmod_hudcurve)
-	hudMeshes[meshName] = hudMeshes[meshName]
-		or CurvedPlane(vrScrW:GetInt() * convarValues.vrmod_hudscale, vrScrH:GetInt() * convarValues.vrmod_hudscale, 10, convarValues.vrmod_hudcurve, mtx)
+	local meshName = string.format("%.4f_%.2f_%d_%d", scale, curve, scrW, scrH)
+	if not hudMeshes[meshName] then
+		hudMeshes[meshName] = CurvedPlane(scrW * scale, scrH * scale, 10, curve, mtx)
+	end
 	hudMesh = hudMeshes[meshName]
 
 	local blacklist = {}
-	for _, v in ipairs(string.Explode(",", convarValues.vrmod_hudblacklist or "")) do
+	for _, v in ipairs(string.Explode(",", CVarString("vrmod_hudblacklist", ""))) do
 		if #v > 0 then blacklist[v] = true end
 	end
 	if next(blacklist) then
@@ -119,40 +152,27 @@ local function AddHUD()
 		end)
 	end
 
-	hook.Add("VRMod_PreRender", "hud", function(eye)
-		if not g_VR.threePoints then return end
+	-- Rasterize once per stereo pair (left eye only)
+	hook.Add("VRMod_PreRender", "vrmod_hud_rt", function(eye)
+		if not g_VR.active then return end
 		if eye == "right" then return end
 		if not g_VR.tracking or not g_VR.tracking.hmd then return end
+		if not HudWanted() then return end
 
 		hook.Call("VRMod_PreRenderHUD", nil, eye)
 
-		-- Re-pin additive each frame (some addons/engines strip $additive → black slab)
 		if mat and not mat:IsError() then
 			mat:SetTexture("$basetexture", rt)
 			mat:SetInt("$additive", 1)
 		end
 
-		local w, h = vrScrW:GetInt(), vrScrH:GetInt()
+		local w, h = math.max(64, vrScrW:GetInt()), math.max(64, vrScrH:GetInt())
 		render.PushRenderTarget(rt)
 		render.OverrideAlphaWriteEnable(true, true)
-		-- Full wipe: RGB black ($additive = no light) + alpha 0 so nothing ghosts.
-		-- Hitmarkers / damage indicators must not pile across frames (workshop #349).
-		if render.ClearDepth then render.ClearDepth() end
-		render.Clear(0, 0, 0, 0, true, true)
-		-- Belt-and-suspenders: some RT formats skip Clear; force zero write
-		cam.Start2D()
-		if render.OverrideBlend then
-			pcall(function()
-				render.OverrideBlend(true, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD)
-			end)
-		end
-		surface.SetDrawColor(0, 0, 0, 0)
-		surface.DrawRect(0, 0, w, h)
-		if render.OverrideBlend then pcall(function() render.OverrideBlend(false) end) end
-		cam.End2D()
-
-		-- Optional dim plate (additive grey). Default 0 = pure transparent overlay.
-		local bgA = math.Clamp(tonumber(convarValues.vrmod_hudtestalpha) or 0, 0, 255)
+		-- Proven clear: black plate + full alpha. Additive mat → black is invisible in world.
+		-- Clears every frame so hitmarkers cannot pile (real fix for #349 ghosting).
+		local bgA = math.Clamp(CVarFloat("vrmod_hudtestalpha", 0), 0, 255)
+		render.Clear(0, 0, 0, bgA > 0 and 255 or 255, true, true)
 		if bgA > 0 then
 			cam.Start2D()
 			local g = math.floor(bgA * 0.35)
@@ -169,14 +189,18 @@ local function AddHUD()
 		render.OverrideAlphaWriteEnable(false)
 		render.PopRenderTarget()
 
+		-- Place mesh in front of HMD for this frame's draw
 		mtx:Identity()
-		mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * convarValues.vrmod_huddistance)
+		mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * CVarFloat("vrmod_huddistance", 60))
 		mtx:Rotate(g_VR.tracking.hmd.ang)
 	end)
 
-	orig = orig or VRUtilRenderMenuSystem
+	if not menuSystemBeforeHud then
+		menuSystemBeforeHud = VRUtilRenderMenuSystem
+	end
+	local base = menuSystemBeforeHud
 	VRUtilRenderMenuSystem = function()
-		if hudMesh and mat and not mat:IsError() and g_VR.tracking and g_VR.tracking.hmd then
+		if hudMesh and mat and not mat:IsError() and g_VR.tracking and g_VR.tracking.hmd and HudWanted() then
 			render.SetMaterial(mat)
 			cam.PushModelMatrix(mtx)
 			render.DepthRange(0, 0.01)
@@ -184,23 +208,47 @@ local function AddHUD()
 			render.DepthRange(0, 1)
 			cam.PopModelMatrix()
 		end
-		if orig then orig() end
+		if base then base() end
 	end
+
+	hudActive = true
 end
 
-vrmod.AddCallbackedConvar("vrmod_hud", nil, 1, nil, nil, nil, nil, tobool, AddHUD)
-vrmod.AddCallbackedConvar("vrmod_hudblacklist", nil, "", nil, nil, nil, nil, nil, AddHUD)
-vrmod.AddCallbackedConvar("vrmod_hudcurve", nil, "60", nil, nil, nil, nil, tonumber, AddHUD)
-vrmod.AddCallbackedConvar("vrmod_hudscale", nil, "0.05", nil, nil, nil, nil, tonumber, AddHUD)
-vrmod.AddCallbackedConvar("vrmod_huddistance", nil, "60", nil, nil, nil, nil, tonumber)
-vrmod.AddCallbackedConvar("vrmod_hudtestalpha", nil, "0", nil, nil, nil, nil, tonumber)
+local function toboolStrict(val)
+	if val == true or val == 1 then return true end
+	if val == false or val == 0 or val == nil then return false end
+	local s = tostring(val):lower()
+	if s == "0" or s == "false" or s == "no" or s == "" then return false end
+	return true
+end
 
-hook.Add("VRMod_Start", "hud", function(ply)
-	if ply ~= LocalPlayer() then return end
+vrmod.AddCallbackedConvar("vrmod_hud", nil, "1", FCVAR_ARCHIVE, "Draw VR world HUD", nil, nil, toboolStrict, function()
 	AddHUD()
 end)
+vrmod.AddCallbackedConvar("vrmod_hudblacklist", nil, "", FCVAR_ARCHIVE, nil, nil, nil, nil, AddHUD)
+vrmod.AddCallbackedConvar("vrmod_hudcurve", nil, "60", FCVAR_ARCHIVE, nil, nil, nil, tonumber, AddHUD)
+vrmod.AddCallbackedConvar("vrmod_hudscale", nil, "0.05", FCVAR_ARCHIVE, nil, nil, nil, tonumber, AddHUD)
+vrmod.AddCallbackedConvar("vrmod_huddistance", nil, "60", FCVAR_ARCHIVE, nil, nil, nil, tonumber)
+vrmod.AddCallbackedConvar("vrmod_hudtestalpha", nil, "0", FCVAR_ARCHIVE, nil, nil, nil, tonumber)
 
-hook.Add("VRMod_Exit", "hud", function(ply)
+function vrmod.RefreshHUD()
+	AddHUD()
+end
+
+function vrmod.IsHUDActive()
+	return hudActive and HudWanted()
+end
+
+hook.Add("VRMod_Start", "vrmod_hud", function(ply)
+	if ply ~= LocalPlayer() then return end
+	-- After tracking/UI ready
+	timer.Simple(0, function()
+		if g_VR and g_VR.active then AddHUD() end
+	end)
+end)
+
+hook.Add("VRMod_Exit", "vrmod_hud", function(ply)
 	if ply ~= LocalPlayer() then return end
 	RemoveHUD()
+	menuSystemBeforeHud = nil
 end)
