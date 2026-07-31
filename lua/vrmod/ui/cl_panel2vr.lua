@@ -185,7 +185,8 @@ end
 local function preparePanelForVR(panel, kind)
 	if not IsValid(panel) then return end
 	if kind == "spawnmenu" or kind == "contextmenu" then
-		local tw, th = 960, 720
+		-- Fit MAX_RT (1024): avoid cut-off workbench (workshop #349)
+		local tw, th = 1024, 768
 		if panel.SetSize then panel:SetSize(tw, th) end
 		if panel.SetPos then panel:SetPos(0, 0) end
 		if panel.InvalidateLayout then panel:InvalidateLayout(true) end

@@ -97,7 +97,9 @@ function RenderWeaponToMaterial(className)
 		["$basetexture"] = rt:GetName(),
 		["$color"] = "[10 10 0]",
 		["$vertexcolor"] = 1,
-		["$vertexalpha"] = 1
+		["$vertexalpha"] = 1,
+		["$translucent"] = 1,
+		["$nolod"] = 1,
 	})
 
 	iconMaterials[className] = mat

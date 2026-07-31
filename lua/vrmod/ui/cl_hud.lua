@@ -126,13 +126,30 @@ local function AddHUD()
 
 		hook.Call("VRMod_PreRenderHUD", nil, eye)
 
-		mat:SetTexture("$basetexture", rt)
+		-- Re-pin additive each frame (some addons/engines strip $additive → black slab)
+		if mat and not mat:IsError() then
+			mat:SetTexture("$basetexture", rt)
+			mat:SetInt("$additive", 1)
+		end
 
 		local w, h = vrScrW:GetInt(), vrScrH:GetInt()
 		render.PushRenderTarget(rt)
 		render.OverrideAlphaWriteEnable(true, true)
-		-- Black clear: with $additive this is "no light", not an occluder of the Real
-		render.Clear(0, 0, 0, 255, true, true)
+		-- Full wipe: RGB black ($additive = no light) + alpha 0 so nothing ghosts.
+		-- Hitmarkers / damage indicators must not pile across frames (workshop #349).
+		if render.ClearDepth then render.ClearDepth() end
+		render.Clear(0, 0, 0, 0, true, true)
+		-- Belt-and-suspenders: some RT formats skip Clear; force zero write
+		cam.Start2D()
+		if render.OverrideBlend then
+			pcall(function()
+				render.OverrideBlend(true, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD)
+			end)
+		end
+		surface.SetDrawColor(0, 0, 0, 0)
+		surface.DrawRect(0, 0, w, h)
+		if render.OverrideBlend then pcall(function() render.OverrideBlend(false) end) end
+		cam.End2D()
 
 		-- Optional dim plate (additive grey). Default 0 = pure transparent overlay.
 		local bgA = math.Clamp(tonumber(convarValues.vrmod_hudtestalpha) or 0, 0, 255)

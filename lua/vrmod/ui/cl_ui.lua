@@ -38,13 +38,28 @@ if CLIENT then
 	local menusExist = false
 	local prevFocusPanel = nil
 	UpdateBeamColor(convarValues.vrmod_beam_color)
+	-- Wipe menu RT completely (alpha 0). Prevents ghosted pixels / uncleared HUD-style trails
+	-- when panel paint is sparse (workshop bugs #349 weapon wheel + hand menus).
+	local function ClearMenuRT(w, h)
+		render.OverrideAlphaWriteEnable(true, true)
+		if render.ClearDepth then render.ClearDepth() end
+		render.Clear(0, 0, 0, 0, true, true)
+		if render.OverrideBlend then
+			pcall(function()
+				render.OverrideBlend(true, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD)
+			end)
+		end
+		surface.SetDrawColor(0, 0, 0, 0)
+		surface.DrawRect(0, 0, w or 2048, h or 2048)
+		if render.OverrideBlend then pcall(function() render.OverrideBlend(false) end) end
+	end
+
 	function VRUtilMenuRenderPanel(uid)
 		local menu = menus[uid]
 		if not menu or not menu.rt or not menu.panel or not menu.panel:IsValid() then return end
 		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
-		render.OverrideAlphaWriteEnable(true, true)
-		render.Clear(0, 0, 0, 0, true, true)
+		ClearMenuRT(menu.width, menu.height)
 		local oldclip = DisableClipping(false)
 		render.SetWriteDepthToDestAlpha(false)
 		menu.panel:PaintManual()
@@ -60,8 +75,7 @@ if CLIENT then
 		if not menu or not menu.rt then return false end
 		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
-		render.OverrideAlphaWriteEnable(true, true)
-		render.Clear(0, 0, 0, 0, true, true)
+		ClearMenuRT(menu.width, menu.height)
 		render.SetWriteDepthToDestAlpha(true)
 		return true
 	end
@@ -258,18 +272,22 @@ if CLIENT then
 			["$vertexalpha"] = 1,
 			["$vertexcolor"] = 1,
 			["$nolod"] = 1,
+			["$nocull"] = 1,
+			["$ignorez"] = 1,
 		})
 		if mat and not mat:IsError() then
 			mat:SetTexture("$basetexture", rt)
 			mat:SetInt("$translucent", 1)
+			mat:SetInt("$vertexalpha", 1)
 		end
 		menus[uid].mat = mat
 
 		-- Clear once, then paint panel (never clear after paint — that blanked hand menus)
 		render.PushRenderTarget(menus[uid].rt)
-		render.OverrideAlphaWriteEnable(true, true)
-		render.Clear(0, 0, 0, 0, true, true)
+		cam.Start2D()
+		ClearMenuRT(width, height)
 		render.OverrideAlphaWriteEnable(false)
+		cam.End2D()
 		render.PopRenderTarget()
 
 		if panel then
