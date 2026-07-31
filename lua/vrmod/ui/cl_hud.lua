@@ -1,19 +1,20 @@
 if SERVER then return end
 
 -- =============================================================================
--- VR HUD — project vitals (HP / armor / ammo). No center crosshair in VR.
+-- VR HUD — one plate, vitals only (no loose copy of the desktop HUD)
 --
--- Mesh-only empty plate = capture failed. render.RenderHUD often no-ops inside
--- nested stereo RTs. Law:
---   1) PushRT → SetViewPort → Start2D → clear → paint essentials ALWAYS
---   2) Also try RenderHUD + HUDPaint (sandbox / SWEP chrome when engine allows)
---   3) Draw via VRUtilRenderMenuSystem wrap + stereoEye backup
---   4) Translucent mat: painted pixels opaque; empty alpha 0 = no black slab
--- mat_queue_mode: untouched
+-- Capture: PaintVitals only by default.
+--   vrmod_hud_engine 1 also runs RenderHUD (optional; often empty / noisy in VR).
+-- Draw: ONE path — PostDrawTranslucent while g_VR.stereoEye is set.
+--   (No VRUtilRenderMenuSystem wrap — that doubled the plate with menus.)
+-- Theme: Settings → Theme colors on HEALTH/ARMOR/AMMO text.
+-- No center crosshair. No decorative rails. mat_queue untouched.
 -- =============================================================================
 
 local vrScrH = CreateClientConVar("vrmod_ScrH_hud", "0", true, FCVAR_ARCHIVE)
 local vrScrW = CreateClientConVar("vrmod_ScrW_hud", "0", true, FCVAR_ARCHIVE)
+local cv_engine = CreateClientConVar("vrmod_hud_engine", "0", true, FCVAR_ARCHIVE,
+	"1 = also capture engine RenderHUD (can look like a second loose HUD panel)")
 
 local function HudRes()
 	local w = vrScrW:GetInt()
@@ -57,7 +58,7 @@ end
 
 local rtW, rtH = HudRes()
 local rt = GetRenderTarget("vrmod_hud_paint", rtW, rtH, false)
-local mat = CreateMaterial("vrmod_hud_mesh_paint_v1", "UnlitGeneric", {
+local mat = CreateMaterial("vrmod_hud_mesh_paint_v2", "UnlitGeneric", {
 	["$basetexture"] = rt:GetName(),
 	["$translucent"] = 1,
 	["$vertexalpha"] = 1,
@@ -75,8 +76,6 @@ end
 local hudMeshes = {}
 local hudMesh = nil
 local mtx = Matrix()
-local origMenuSystem = nil
-local wrapped = false
 local hudBound = false
 local captureN = 0
 local _, convarValues = vrmod.GetConvars()
@@ -102,7 +101,7 @@ local function CVString(name, default)
 	return default
 end
 
---- Vitals match Settings → Theme (same palette as menus). No center crosshair.
+--- Theme-matched vitals only (one layer — not a full desktop HUD clone)
 local function PaintVitals(w, h)
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return end
@@ -159,8 +158,6 @@ end
 local function CaptureHudRT(w, h)
 	render.PushRenderTarget(rt)
 	render.OverrideAlphaWriteEnable(true, true)
-
-	-- Transparent wipe (no black slab). Painted text uses a=255 so it shows.
 	render.Clear(0, 0, 0, 0, true, true)
 
 	local oldX, oldY, oldW, oldH = 0, 0, ScrW(), ScrH()
@@ -171,7 +168,6 @@ local function CaptureHudRT(w, h)
 
 	cam.Start2D()
 
-	-- Optional dim plate for readability
 	local bgA = math.Clamp(CVFloat("vrmod_hudtestalpha", 0), 0, 255)
 	if bgA > 0 then
 		surface.SetDrawColor(0, 0, 0, bgA)
@@ -179,10 +175,10 @@ local function CaptureHudRT(w, h)
 	end
 
 	g_VR._renderingHudRT = true
-	-- Engine / SWEP HUD when it works
-	pcall(render.RenderHUD, 0, 0, w, h)
-	pcall(function() hook.Run("HUDPaint") end)
-	-- Always project vitals (user-visible guarantee)
+	-- Optional engine HUD only if explicitly enabled (avoids loose desktop HUD copy)
+	if cv_engine:GetBool() then
+		pcall(render.RenderHUD, 0, 0, w, h)
+	end
 	pcall(PaintVitals, w, h)
 	g_VR._renderingHudRT = false
 
@@ -213,11 +209,16 @@ end
 local function Unbind()
 	hook.Remove("VRMod_PreRender", "vrmod_hud_capture")
 	hook.Remove("VRMod_PreRender", "hud")
+	hook.Remove("VRMod_PreRender", "vrmod_hud_rt")
 	hook.Remove("PostDrawTranslucentRenderables", "vrmod_hud_draw")
 	hook.Remove("HUDShouldDraw", "vrmod_hud")
-	if wrapped and origMenuSystem then
-		VRUtilRenderMenuSystem = origMenuSystem
-		wrapped = false
+	hook.Remove("HUDShouldDraw", "vrmod_hud_bl")
+	-- Unwrap if an older bind left a wrap (kill double plate)
+	if isfunction(VRUtilRenderMenuSystem) and VRUtilRenderMenuSystem._vrmodHudWrapped then
+		local base = VRUtilRenderMenuSystem._vrmodHudBase
+		if isfunction(base) then
+			VRUtilRenderMenuSystem = base
+		end
 	end
 	hudBound = false
 end
@@ -239,9 +240,7 @@ local function Bind()
 		mat:SetTexture("$basetexture", rt)
 	end
 
-	local scale = CVFloat("vrmod_hudscale", 0.05)
-	-- Do NOT multiply global UI scale into HUD plate (that shrank readable vitals)
-	scale = math.Clamp(scale, 0.02, 0.12)
+	local scale = math.Clamp(CVFloat("vrmod_hudscale", 0.05), 0.02, 0.12)
 	local curve = CVFloat("vrmod_hudcurve", 60)
 	local meshName = string.format("%.4f_%.1f_%d_%d", scale, curve, w, h)
 
@@ -258,11 +257,12 @@ local function Bind()
 		if #v > 0 then blacklist[v] = true end
 	end
 	if next(blacklist) then
-		hook.Add("HUDShouldDraw", "vrmod_hud", function(name)
+		hook.Add("HUDShouldDraw", "vrmod_hud_bl", function(name)
 			if blacklist[name] then return false end
 		end)
 	end
 
+	-- Capture once per frame (left eye)
 	hook.Add("VRMod_PreRender", "vrmod_hud_capture", function(eye)
 		if eye == "right" then return end
 		if not g_VR.active or not CVBool("vrmod_hud", true) then return end
@@ -283,38 +283,20 @@ local function Bind()
 		mtx:Identity()
 		mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * CVFloat("vrmod_huddistance", 60))
 		mtx:Rotate(g_VR.tracking.hmd.ang)
-		g_VR._hudDrawnEye = nil
 
 		hook.Call("VRMod_PostRenderHUD", nil, eye)
 	end)
 
-	-- Path A: each stereo eye (cl_vrmod calls this)
-	if isfunction(VRUtilRenderMenuSystem) then
-		if not wrapped then
-			origMenuSystem = VRUtilRenderMenuSystem
-			wrapped = true
-		end
-		local base = origMenuSystem
-		VRUtilRenderMenuSystem = function()
-			pcall(function()
-				DrawHudMesh()
-				if g_VR then g_VR._hudDrawnEye = g_VR.stereoEye end
-			end)
-			if base then base() end
-		end
-	end
-
-	-- Path B: backup
+	-- SINGLE draw path (both eyes) — no menu-system wrap (that stacked a second plate)
 	hook.Add("PostDrawTranslucentRenderables", "vrmod_hud_draw", function(depth, sky)
 		if depth or sky then return end
 		if not g_VR or not g_VR.active or not g_VR.stereoEye then return end
-		if g_VR._hudDrawnEye == g_VR.stereoEye then return end
 		pcall(DrawHudMesh)
-	end, 100)
+	end, 50)
 
 	hudBound = true
 	if vrmod.logger then
-		vrmod.logger.Info("[vrmod_hud] bound vitals paint rt=%dx%d", rtW, rtH)
+		vrmod.logger.Info("[vrmod_hud] single-plate vitals rt=%dx%d engine=%s", rtW, rtH, cv_engine:GetBool())
 	end
 end
 
@@ -333,7 +315,7 @@ vrmod.AddCallbackedConvar("vrmod_hudblacklist", nil, "", FCVAR_ARCHIVE, nil, nil
 vrmod.AddCallbackedConvar("vrmod_hudcurve", nil, "60", FCVAR_ARCHIVE, nil, nil, nil, tonumber, Bind)
 vrmod.AddCallbackedConvar("vrmod_hudscale", nil, "0.05", FCVAR_ARCHIVE, nil, nil, nil, tonumber, Bind)
 vrmod.AddCallbackedConvar("vrmod_huddistance", nil, "60", FCVAR_ARCHIVE, nil, nil, nil, tonumber)
-vrmod.AddCallbackedConvar("vrmod_hudtestalpha", nil, "0", FCVAR_ARCHIVE, "Dim plate 0-255 (0=transparent)", nil, nil, tonumber)
+vrmod.AddCallbackedConvar("vrmod_hudtestalpha", nil, "0", FCVAR_ARCHIVE, "Dim plate 0-255 (0=clear)", nil, nil, tonumber)
 
 function vrmod.RefreshHUD()
 	Bind()
@@ -352,16 +334,12 @@ end)
 hook.Add("VRMod_Exit", "vrmod_hud", function(ply)
 	if ply ~= LocalPlayer() then return end
 	Unbind()
-	origMenuSystem = nil
 end)
 
 concommand.Add("vrmod_hud_status", function()
 	vrmod.logger.Info(
-		"[vrmod_hud] bound=%s captures=%s rt=%sx%s mesh=%s mat=%s dist=%.0f",
-		hudBound, captureN, rtW, rtH,
-		hudMesh and "ok" or "nil",
-		mat and (mat:IsError() and "ERR" or "ok") or "nil",
-		CVFloat("vrmod_huddistance", 60)
+		"[vrmod_hud] bound=%s captures=%s rt=%sx%s engine=%s single_draw=1",
+		hudBound, captureN, rtW, rtH, cv_engine:GetBool()
 	)
 end)
 
@@ -369,8 +347,10 @@ concommand.Add("vrmod_hud_rebind", function()
 	RunConsoleCommand("vrmod_hud", "1")
 	local c = GetConVar("vrmod_hud")
 	if c then pcall(function() c:SetInt(1) end) end
+	-- Force off engine HUD clone unless user wants it
+	if not cv_engine:GetBool() then cv_engine:SetInt(0) end
 	Bind()
-	vrmod.logger.Info("[vrmod_hud] rebound — vitals always painted")
+	vrmod.logger.Info("[vrmod_hud] rebound — one plate, vitals only")
 end)
 
 concommand.Add("vrmod_hud_on", function()
