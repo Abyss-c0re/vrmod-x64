@@ -89,20 +89,41 @@ if CLIENT then
 	end
 
 	-- 0) Helper functions
-	-- Only ConVar:SetString — never RunConsoleCommand (GMod blacklists many engine cvars
+	-- Only ConVar setters — never RunConsoleCommand (GMod blacklists many engine cvars
 	-- and prints "Command is blocked!" even when pcall'd).
+	-- mat_queue_mode must be "1" for VR flicker fix (queued single-thread). Not 0, not 2, not -1.
 	local function setConvarValue(name, value)
 		local cv = GetConVar(name)
 		if not cv then return false end
 		value = tostring(value)
 		local ok = pcall(function()
-			cv:SetString(value)
+			-- Prefer SetInt for numeric engine cvars (mat_queue_mode is an int)
+			local n = tonumber(value)
+			if n ~= nil and cv.SetInt then
+				cv:SetInt(n)
+			else
+				cv:SetString(value)
+			end
 		end)
+		if not ok then
+			-- Fallback SetString only
+			ok = pcall(function() cv:SetString(value) end)
+		end
 		if not ok then
 			vrmod.logger.Debug("Could not set convar: " .. name)
 			return false
 		end
 		return true
+	end
+
+	local function convarMatches(cv, want)
+		if not cv then return false end
+		want = tostring(want)
+		if cv:GetString() == want then return true end
+		local wn, gn = tonumber(want), tonumber(cv:GetString())
+		if wn ~= nil and gn ~= nil and wn == gn then return true end
+		if cv.GetInt and wn ~= nil and cv:GetInt() == wn then return true end
+		return false
 	end
 
 	local function overrideConvar(name, value)
@@ -125,7 +146,7 @@ if CLIENT then
 			end
 		end
 		convarOverrides = {}
-		-- Re-assert pinned VR cvars after restore (mat_queue_mode must stay "1")
+		-- Re-assert pinned VR cvars after restore (mat_queue_mode must stay 1)
 		for name, _ in pairs(NEVER_RESTORE_CONVARS) do
 			local pinned = PERFORMANCE_CONVARS[name]
 			if pinned ~= nil then
@@ -135,13 +156,14 @@ if CLIENT then
 	end
 
 	-- While VR is active, force pinned cvars every frame if something else changes them.
+	-- Flicker / skybox flash / HUD tearing → mat_queue_mode must be 1 the whole session.
 	local function EnsurePinnedConvars()
 		if not g_VR.active then return end
 		for name, _ in pairs(NEVER_RESTORE_CONVARS) do
 			local want = PERFORMANCE_CONVARS[name]
 			if want ~= nil then
 				local cv = GetConVar(name)
-				if cv and cv:GetString() ~= tostring(want) then
+				if cv and not convarMatches(cv, want) then
 					setConvarValue(name, want)
 				end
 			end
