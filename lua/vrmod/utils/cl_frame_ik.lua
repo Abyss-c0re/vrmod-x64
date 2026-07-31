@@ -258,11 +258,20 @@ function F.Apply(ent, state, frame)
 		local totalArmLen = state.upperArmLen + state.lowerArmLen
 		local armStretchScale = 1
 		local effUpper, effLower = state.upperArmLen, state.lowerArmLen
-		local stretchOn = convars and (convars.armStretcher == true or convars.armStretcher == 1)
+		-- noStretch: twin / mirror path must never rubber-band arm bones
+		local stretchOn = (not state.noStretch)
+			and convars
+			and (convars.armStretcher == true or convars.armStretcher == 1)
 		if stretchOn and targetVecLen > totalArmLen * 0.98 then
 			armStretchScale = targetVecLen / (totalArmLen * 0.98)
 			effUpper = state.upperArmLen * armStretchScale
 			effLower = state.lowerArmLen * armStretchScale
+		end
+		-- Cap reach instead of stretching when twin: keep elbow solvable
+		if state.noStretch and targetVecLen > totalArmLen * 0.98 then
+			targetVecLen = totalArmLen * 0.98
+			targetVec = targetVec:GetNormalized() * targetVecLen
+			targetPos = upperarmPos + targetVec
 		end
 		state[prefix .. "armStretchScale"] = armStretchScale
 
@@ -357,10 +366,24 @@ function F.Apply(ent, state, frame)
 		end
 	end
 
-	-- Head from HMD (same offset as cl_character BoneCallback)
-	if frame.hmdAng and bones.b_head and bones.b_head >= 0 and boneinfo[bones.b_head] then
+	-- Head orientation only — match cl_character BoneCallback:
+	-- SetAngles on the *existing* head matrix after SetupBones.
+	-- Never invent translation (parent.up*6 / ent+Z64 = giraffe neck).
+	-- Note: head is NOT in boneinfo (only clavicle arm trees are); use state.headTargetAng.
+	if frame.hmdAng and bones.b_head and bones.b_head >= 0 then
 		local _, targetAng = LocalToWorld(ZERO_VEC, Angle(-80, 0, 90), ZERO_VEC, frame.hmdAng)
-		boneinfo[bones.b_head].overrideAng = targetAng
+		if state.headDampen then
+			local maxP = state.headMaxPitch or 55
+			local p = targetAng.p
+			if p > maxP then
+				targetAng = Angle(maxP, targetAng.y, targetAng.r)
+			elseif p < -maxP then
+				targetAng = Angle(-maxP, targetAng.y, targetAng.r)
+			end
+		end
+		state.headTargetAng = targetAng
+	else
+		state.headTargetAng = nil
 	end
 
 	-- Build world matrices along arm trees
@@ -397,31 +420,29 @@ function F.Apply(ent, state, frame)
 		mat:Identity()
 		mat:SetTranslation(wpos)
 		mat:SetAngles(wang)
-		if state.L_armStretchScale ~= 1 and (bd.name == "ValveBiped.Bip01_L_UpperArm" or bd.name == "ValveBiped.Bip01_L_Forearm") then
-			mat:Scale(Vector(state.L_armStretchScale, 1, 1))
-		end
-		if state.R_armStretchScale ~= 1 and (bd.name == "ValveBiped.Bip01_R_UpperArm" or bd.name == "ValveBiped.Bip01_R_Forearm") then
-			mat:Scale(Vector(state.R_armStretchScale, 1, 1))
+		-- Twin / noStretch: never scale arm bones (rubber-band stretch)
+		if not state.noStretch then
+			if state.L_armStretchScale ~= 1 and (bd.name == "ValveBiped.Bip01_L_UpperArm" or bd.name == "ValveBiped.Bip01_L_Forearm") then
+				mat:Scale(Vector(state.L_armStretchScale, 1, 1))
+			end
+			if state.R_armStretchScale ~= 1 and (bd.name == "ValveBiped.Bip01_R_UpperArm" or bd.name == "ValveBiped.Bip01_R_Forearm") then
+				mat:Scale(Vector(state.R_armStretchScale, 1, 1))
+			end
 		end
 		bd.pos = wpos
 		bd.ang = wang
 		targets[bone] = mat
 	end
 
-	-- Head matrix: keep translation from current bone if present, set ang
-	if bones.b_head and bones.b_head >= 0 and boneinfo[bones.b_head] and boneinfo[bones.b_head].overrideAng then
+	-- Head: angle-only on live SetupBones translation (cl_character path)
+	if bones.b_head and bones.b_head >= 0 and state.headTargetAng then
 		local hm = ent:GetBoneMatrix(bones.b_head)
-		local hpos = hm and hm:GetTranslation() or (ent:GetPos() + Vector(0, 0, 64))
-		-- Prefer neck chain if parent posed
-		local parent = boneinfo[bones.b_head] and boneinfo[ent:GetBoneParent(bones.b_head)]
-		if parent and parent.pos then
-			hpos = parent.pos + parent.ang:Up() * 6
+		if hm then
+			local mat = Matrix()
+			mat:SetTranslation(hm:GetTranslation())
+			mat:SetAngles(state.headTargetAng)
+			targets[bones.b_head] = mat
 		end
-		local mat = boneinfo[bones.b_head].targetMatrix
-		mat:Identity()
-		mat:SetTranslation(hpos)
-		mat:SetAngles(boneinfo[bones.b_head].overrideAng)
-		targets[bones.b_head] = mat
 	end
 
 	state.targets = targets

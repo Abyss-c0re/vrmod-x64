@@ -716,7 +716,48 @@ local function ReadLocalVRFrame()
 	return frame
 end
 
+--- Soft post-IK clamps: no giraffe neck, no arm rubber-band stretch.
+function Session:_softenTargets()
+	local t = self.targets
+	if not t then return end
+	local b = self.bones
+	if self.headDampen and b and b.head and t[b.head] then
+		local hm = t[b.head]
+		local parentId = self.ent:GetBoneParent(b.head)
+		if parentId and parentId >= 0 then
+			local pm = t[parentId] or self.ent:GetBoneMatrix(parentId)
+			if pm then
+				local maxLen = self.headMaxLen or 14
+				ClampBoneDist(t, parentId, b.head, maxLen)
+				-- If parent was not in targets, clamp against live matrix position
+				if not t[parentId] then
+					local pp = pm:GetTranslation()
+					local cm = t[b.head]
+					local cp = cm:GetTranslation()
+					local ca = cm:GetAngles()
+					local d = cp - pp
+					local len = d:Length()
+					if len > maxLen * 1.15 and len > 0.01 then
+						t[b.head] = MatFrom(pp + d:GetNormalized() * maxLen, ca)
+					end
+				end
+			end
+		end
+	end
+	-- Limb rest-length clamps (upper→fore→hand) when bones are in targets
+	if b then
+		local uLen = (self.upperArmLen or 12) * 1.15
+		local fLen = (self.forearmLen or 12) * 1.15
+		if b.lUpper and b.lFore then ClampBoneDist(t, b.lUpper, b.lFore, uLen) end
+		if b.lFore and b.lHand then ClampBoneDist(t, b.lFore, b.lHand, fLen) end
+		if b.rUpper and b.rFore then ClampBoneDist(t, b.rUpper, b.rFore, uLen) end
+		if b.rFore and b.rHand then ClampBoneDist(t, b.rFore, b.rHand, fLen) end
+	end
+end
+
 --- Net frame SoT → rotate/mirror → same character IK (vrmod.frameik).
+-- facing/mirror: TransformFrame does sagittal MapPose + L↔R hand/foot/finger
+-- swap BEFORE ProcessArm — never write mirrored R onto twin R (cursed limbs).
 function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	if not vrmod.frameik then return false end
 	if not self.ik then
@@ -745,9 +786,15 @@ function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
+	-- Twin policy: no rubber-band stretch, soft head pitch dampen
+	self.ik.noStretch = true
+	self.ik.headDampen = self.headDampen ~= false
+	self.ik.headMaxPitch = self.headMaxPitch or 55
+
 	local okA = pcall(vrmod.frameik.Apply, self.ent, self.ik, twinFrame)
 	if not okA then return false end
 	self.targets = self.ik.targets or {}
+	self:_softenTargets()
 	return next(self.targets) ~= nil
 end
 
