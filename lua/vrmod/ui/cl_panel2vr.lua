@@ -52,19 +52,27 @@ W.Place = {
 		ang = Angle(0, -90, 55),
 		scale = 0.035,
 	},
-	-- Floating mid-air in front of HMD (spawn/context workbench only)
+	-- Floating mid-air in front of HMD (opt-in only)
 	float = {
 		attachment = false,
 		pos = nil, -- computed
 		ang = nil,
 		scale = 0.022,
 	},
-	-- Large workbench (spawn menu)
+	-- Spawn / context: FOLLOW LEFT HAND (same SoT as quickmenu / settings)
+	-- Not world-float — edge-on strip was broken workbench pose.
 	workbench = {
-		attachment = false,
-		pos = nil,
-		ang = nil,
-		scale = 0.018,
+		attachment = true,
+		pos = Vector(8, 5, 12),
+		ang = Angle(0, -90, 55),
+		scale = 0.022,
+	},
+	-- Alias: explicit hand large shell
+	hand = {
+		attachment = true,
+		pos = Vector(8, 5, 12),
+		ang = Angle(0, -90, 55),
+		scale = 0.022,
 	},
 }
 
@@ -98,7 +106,18 @@ function W.RegisterNative(key, openFn)
 	W.NativeAdapters[string.lower(key)] = openFn
 end
 
-local function uidFor(panel, hint)
+-- Stable uids so re-open replaces the same VR surface (no stacked ghosts)
+local STABLE_UID = {
+	spawnmenu = "p2v_spawnmenu",
+	contextmenu = "p2v_contextmenu",
+}
+
+local function uidFor(panel, hint, kind)
+	if kind and STABLE_UID[kind] then
+		local uid = STABLE_UID[kind]
+		if IsValid(panel) then panelUids[panel] = uid end
+		return uid
+	end
 	if IsValid(panel) and panelUids[panel] then return panelUids[panel] end
 	seq = seq + 1
 	local name = hint or (IsValid(panel) and panel:GetName()) or "surface"
@@ -136,9 +155,18 @@ function W.ResolvePlace(placeName, override)
 			base[k] = v
 		end
 	end
-	if not base.attachment and (not base.pos or not base.ang) then
-		local dist = (placeName == "workbench") and 36 or 28
-		base.pos, base.ang = W.ComputeFloatPose(dist, (placeName == "workbench") and -6 or -4)
+	-- Hand-follow shells (spawn/context): optional VRUtilHandMenuPose like quickmenu
+	if base.attachment and (placeName == "workbench" or placeName == "hand") then
+		if isfunction(VRUtilHandMenuPose) then
+			local hp, ha, hs = VRUtilHandMenuPose(1024, 768, base.scale or 0.022, base.pos, base.ang)
+			if hp then base.pos = hp end
+			if ha then base.ang = ha end
+			if hs then base.scale = hs end
+		end
+		base.attachment = true
+	elseif not base.attachment and (not base.pos or not base.ang) then
+		-- True world-float only (place = float)
+		base.pos, base.ang = W.ComputeFloatPose(28, -4)
 		base.attachment = false
 	end
 	return base
@@ -182,15 +210,82 @@ local function tryNative(kind, panel, opts)
 	return false
 end
 
+--- Walk all DHorizontalDividers — desktop cookies misplace the props tree (left)
+--- and crush Tools (right) on a 1024 VR surface.
+local function fitSandboxLayout(panel, tw, th)
+	if not IsValid(panel) then return end
+	tw = math.max(tonumber(tw) or 1024, 640)
+	th = math.max(tonumber(th) or 768, 480)
+
+	local function walk(p, depth)
+		if not IsValid(p) or (depth or 0) > 24 then return end
+		local cls = string.lower(tostring(p.ClassName or p:GetClassName() or ""))
+		local name = string.lower(tostring(p:GetName() or ""))
+
+		-- Root: Creation | Tools
+		if p == panel.HorizontalDivider or (cls:find("dhorizontaldivider", 1, true) and depth <= 1) then
+			if p.SetRightMin then p:SetRightMin(math.floor(tw * 0.30)) end
+			if p.SetLeftMin then p:SetLeftMin(math.floor(tw * 0.40)) end
+			if p.SetLeftWidth then p:SetLeftWidth(math.floor(tw * 0.62)) end
+			if p.SetDividerWidth then p:SetDividerWidth(4) end
+		end
+
+		-- Inner content: ContentSidebar (tree) | icon grid
+		-- Cookie SpawnMenuCreationMenuDiv often leaves tree off-frame / wrong width
+		if cls:find("dhorizontaldivider", 1, true) and depth >= 2 then
+			if p.SetLeftMin then p:SetLeftMin(140) end
+			if p.SetRightMin then p:SetRightMin(280) end
+			if p.SetLeftWidth then p:SetLeftWidth(200) end -- tree column
+			if p.SetDividerWidth then p:SetDividerWidth(4) end
+		end
+
+		-- DTree / ContentSidebar: translucent Cube glass, not solid grey brick
+		if cls:find("dtree", 1, true) or name:find("contentsidebar", 1, true) then
+			if p.SetBackgroundColor then
+				p:SetBackgroundColor(Color(22, 10, 16, 160))
+			end
+			if p.SetPaintBackground then p:SetPaintBackground(true) end
+		end
+
+		-- Desktop-only chrome that sits wrong on hand panel
+		if name:find("tooltoggle", 1, true) or (p.GetImage and tostring(p:GetImage() or ""):find("spawnmenu_toggle", 1, true)) then
+			if p.SetVisible then p:SetVisible(false) end
+		end
+
+		for _, ch in ipairs(p:GetChildren() or {}) do
+			walk(ch, (depth or 0) + 1)
+		end
+	end
+
+	walk(panel, 0)
+end
+
 --- Prepare oversized sandbox shells for VR (readable RT, not ScrW×ScrH)
 local function preparePanelForVR(panel, kind)
 	if not IsValid(panel) then return end
 	if kind == "spawnmenu" or kind == "contextmenu" then
-		-- Fit MAX_RT (1024): avoid cut-off workbench (workshop #349)
 		local tw, th = 1024, 768
 		if panel.SetSize then panel:SetSize(tw, th) end
 		if panel.SetPos then panel:SetPos(0, 0) end
+		-- Kill desktop border emptiness (spawnmenu_border uses ScrW)
+		if panel.DockPadding then panel:DockPadding(0, 0, 0, 0) end
+		fitSandboxLayout(panel, tw, th)
 		if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+		timer.Simple(0, function()
+			if IsValid(panel) then fitSandboxLayout(panel, tw, th) end
+		end)
+		timer.Simple(0.05, function()
+			if IsValid(panel) then fitSandboxLayout(panel, tw, th) end
+		end)
+		if vrmod.cube and W.IsVR() then
+			if kind == "spawnmenu" and vrmod.cube.ThemeSpawnMenu then
+				vrmod.cube.ThemeSpawnMenu(panel)
+			elseif kind == "contextmenu" and vrmod.cube.ThemeContextMenu then
+				vrmod.cube.ThemeContextMenu(panel)
+			elseif vrmod.cube.ApplyDermaSkin then
+				vrmod.cube.ApplyDermaSkin(panel)
+			end
+		end
 	end
 end
 
@@ -221,11 +316,19 @@ function W.ManifestPanel(panel, opts)
 
 	preparePanelForVR(panel, kind)
 
-	local uid = opts.uid or uidFor(panel, opts.hint or kind)
+	local uid = opts.uid or uidFor(panel, opts.hint or kind, kind)
+	-- Drop any other bound shells of same kind (prevents multi-stack)
+	for buid, info in pairs(bound) do
+		if info.kind == kind and buid ~= uid then
+			W.Close(buid)
+		end
+	end
 	-- Settings / generic derma → left HAND. Spawn/context stay workbench float.
+	-- Spawn/context follow left hand — same attachment path as quickmenu
 	local placeName = opts.place
-		or ((kind == "spawnmenu" or kind == "contextmenu") and "workbench")
+		or ((kind == "spawnmenu" or kind == "contextmenu") and "hand")
 		or "popup"
+	if placeName == "workbench" then placeName = "hand" end -- legacy alias
 	local place = W.ResolvePlace(placeName, opts.placeOverride)
 
 	local pw, ph = panel:GetSize()
@@ -235,10 +338,16 @@ function W.ManifestPanel(panel, opts)
 	if kind == "settings" then
 		pw, ph = math.max(pw, 420), math.max(ph, 505)
 	end
+	if kind == "spawnmenu" or kind == "contextmenu" then
+		pw, ph = 1024, 768
+	end
 	local w, h = clampSize(opts.width or pw, opts.height or ph)
 
-	panel:SetPaintedManually(true)
+	-- Force visible BEFORE VR surface — cl_ui used to drop !IsVisible panels
+	if panel.SetVisible then panel:SetVisible(true) end
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
+	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
+	panel:SetPaintedManually(true)
 
 	VRUtilMenuOpen(uid, w, h, panel, place.attachment, place.pos, place.ang, place.scale, true, function()
 		if IsValid(panel) then
@@ -249,11 +358,26 @@ function W.ManifestPanel(panel, opts)
 		if opts.onClose then opts.onClose(panel) end
 	end)
 
-	-- Keep hand scale (cl_ui must not crush attached menus)
+	-- Hand-follow: same flags as quickmenu (attachment + cubeMenu + grabbable)
 	if g_VR.menus and g_VR.menus[uid] then
-		g_VR.menus[uid].scale = place.scale
-		g_VR.menus[uid].cubeMenu = place.attachment and true or nil
-		g_VR.menus[uid].attachment = place.attachment
+		local isShell = (kind == "spawnmenu" or kind == "contextmenu")
+		local sc = place.scale or 0.022
+		if isShell then sc = math.max(sc, 0.02) end
+		g_VR.menus[uid].scale = sc
+		g_VR.menus[uid].baseScale = sc
+		g_VR.menus[uid]._lastAssignedScale = sc
+		g_VR.menus[uid].cubeMenu = true
+		g_VR.menus[uid].grabbable = true
+		-- Shells must be closeable: never keepAlive (was blocking SetVisible false)
+		g_VR.menus[uid].keepAlive = false
+		g_VR.menus[uid].allowHiddenPanel = false
+		-- Follow left hand unless user free-grabbed
+		if not g_VR.menus[uid].freeFloat and not g_VR.menus[uid].grabHand then
+			g_VR.menus[uid].attachment = true
+			g_VR.menus[uid].freeFloat = false
+			if place.pos then g_VR.menus[uid].pos = place.pos end
+			if place.ang then g_VR.menus[uid].ang = place.ang end
+		end
 	end
 
 	bound[uid] = {
@@ -294,7 +418,10 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 	if g_VR.menus and g_VR.menus[uid] then
 		g_VR.menus[uid].scale = place.scale or 0.035
 		g_VR.menus[uid].cubeMenu = true
-		g_VR.menus[uid].attachment = place.attachment and true or false
+		g_VR.menus[uid].grabbable = true
+		if not g_VR.menus[uid].freeFloat and not g_VR.menus[uid].grabHand then
+			g_VR.menus[uid].attachment = place.attachment and true or false
+		end
 	end
 
 	hook.Add("PreRender", "panel2vr_native_" .. uid, function()
@@ -303,7 +430,7 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 			return
 		end
 		local m = g_VR.menus and g_VR.menus[uid]
-		if m and place.attachment then
+		if m and place.attachment and not m.freeFloat and not m.grabHand then
 			m.scale = place.scale or 0.035
 			m.cubeMenu = true
 			m.attachment = true
@@ -388,8 +515,16 @@ function W.InstallHooks()
 		if not shouldIntercept(panel) then return end
 		-- Defer one frame so layout finishes (sandbox menus size after Open)
 		timer.Simple(0, function()
-			if not IsValid(panel) or not shouldIntercept(panel) then return end
-			W.ManifestPanel(panel, { place = "popup" })
+			if not IsValid(panel) or not W.IsVR() then return end
+			if W.IsBound(panel) then return end -- OnSpawnMenuOpen / explicit path already owned it
+			local kind = detectKind(panel)
+			-- Spawn/context: left-hand follow (same as quickmenu)
+			local place = (kind == "spawnmenu" or kind == "contextmenu") and "hand" or "popup"
+			W.ManifestPanel(panel, {
+				kind = kind,
+				place = place,
+				hint = kind,
+			})
 		end)
 	end
 
@@ -397,39 +532,53 @@ function W.InstallHooks()
 	-- they already called MakePopup before VR, or use non-standard popup paths.
 	hook.Add("OnSpawnMenuOpen", "panel2vr_spawn", function()
 		if not W.IsVR() then return end
+		-- Single deferred manifest (OpenSandboxShell may already own it)
 		timer.Simple(0, function()
-			if IsValid(g_SpawnMenu) then
-				W.ManifestPanel(g_SpawnMenu, {
-					kind = "spawnmenu",
-					place = "workbench",
-					hint = "spawnmenu",
-				})
+			if not IsValid(g_SpawnMenu) or not W.IsVR() then return end
+			if W.IsBound(g_SpawnMenu) then return end
+			if vrmod.cube and vrmod.cube.ThemeSpawnMenu then
+				vrmod.cube.ThemeSpawnMenu(g_SpawnMenu)
 			end
+			W.ManifestPanel(g_SpawnMenu, {
+				kind = "spawnmenu",
+				place = "hand",
+				hint = "spawnmenu",
+				uid = STABLE_UID.spawnmenu,
+			})
 		end)
 	end)
 
 	hook.Add("OnSpawnMenuClose", "panel2vr_spawn", function()
+		-- Always tear down VR surface on sandbox close
+		W.Close(STABLE_UID.spawnmenu)
 		if IsValid(g_SpawnMenu) and panelUids[g_SpawnMenu] then
 			W.Close(panelUids[g_SpawnMenu])
+			panelUids[g_SpawnMenu] = nil
 		end
 	end)
 
 	hook.Add("OnContextMenuOpen", "panel2vr_ctx", function()
 		if not W.IsVR() then return end
 		timer.Simple(0, function()
-			if IsValid(g_ContextMenu) then
-				W.ManifestPanel(g_ContextMenu, {
-					kind = "contextmenu",
-					place = "workbench",
-					hint = "contextmenu",
-				})
+			if not IsValid(g_ContextMenu) or not W.IsVR() then return end
+			if W.IsBound(g_ContextMenu) then return end
+			if vrmod.cube and vrmod.cube.ThemeContextMenu then
+				vrmod.cube.ThemeContextMenu(g_ContextMenu)
 			end
+			W.ManifestPanel(g_ContextMenu, {
+				kind = "contextmenu",
+				place = "hand",
+				hint = "contextmenu",
+				uid = STABLE_UID.contextmenu,
+			})
 		end)
 	end)
 
 	hook.Add("OnContextMenuClose", "panel2vr_ctx", function()
+		W.Close(STABLE_UID.contextmenu)
 		if IsValid(g_ContextMenu) and panelUids[g_ContextMenu] then
 			W.Close(panelUids[g_ContextMenu])
+			panelUids[g_ContextMenu] = nil
 		end
 	end)
 
@@ -438,13 +587,35 @@ function W.InstallHooks()
 		if not W.IsVR() then return end
 		for uid, info in pairs(bound) do
 			if info.panel and IsValid(info.panel) and isfunction(VRUtilMenuRenderPanel) then
+				-- NEVER force SetVisible(true) here — that made spawn uncloseable
+				if info.kind == "spawnmenu" or info.kind == "contextmenu" then
+					if info.panel.IsVisible and not info.panel:IsVisible() then
+						-- Sandbox closed → drop VR surface
+						W.Close(uid)
+						continue
+					end
+					if info.panel.SetPaintedManually then info.panel:SetPaintedManually(true) end
+				end
 				if info.alwaysPaint or info.html or g_VR.menuFocus == uid then
 					VRUtilMenuRenderPanel(uid)
 				end
-				-- Hold hand scale for attached surfaces
 				local m = g_VR.menus and g_VR.menus[uid]
-				if m and m.cubeMenu and m.scale and m.scale < 0.03 then
-					m.scale = 0.035
+				if m then
+					if info.kind == "spawnmenu" or info.kind == "contextmenu" then
+						m.cubeMenu = true
+						m.grabbable = true
+						-- allow close: do not keepAlive when panel wants hidden
+						m.keepAlive = false
+						m.allowHiddenPanel = false
+						if not m.freeFloat and not m.grabHand then
+							m.attachment = true
+							local place = W.Place.hand or W.Place.popup
+							if place.pos then m.pos = place.pos end
+							if place.ang then m.ang = place.ang end
+						end
+					elseif m.cubeMenu and m.scale and m.scale < 0.03 and m.attachment then
+						m.scale = 0.035
+					end
 				end
 			elseif info.panel and not IsValid(info.panel) then
 				W.Close(uid)
@@ -473,6 +644,169 @@ function W.OpenSettings()
 	end
 	return nil
 end
+
+function W.IsShellOpen(which)
+	local isCtx = (which == "context" or which == "contextmenu")
+	local panel = isCtx and g_ContextMenu or g_SpawnMenu
+	local uid = isCtx and STABLE_UID.contextmenu or STABLE_UID.spawnmenu
+	if bound[uid] then return true end
+	if IsValid(panel) and panel.IsVisible and panel:IsVisible() and W.IsBound(panel) then
+		return true
+	end
+	return false
+end
+
+--- Hard close — one surface, no ghosts
+function W.CloseSandboxShell(which)
+	local isCtx = (which == "context" or which == "contextmenu")
+	local panel = isCtx and g_ContextMenu or g_SpawnMenu
+	local uid = isCtx and STABLE_UID.contextmenu or STABLE_UID.spawnmenu
+	local kind = isCtx and "contextmenu" or "spawnmenu"
+
+	if IsValid(panel) then
+		if panel.SetHangOpen then panel:SetHangOpen(false) end
+		if panel.Close then pcall(function() panel:Close() end) end
+		if panel.SetVisible then panel:SetVisible(false) end
+		if panel.SetPaintedManually then panel:SetPaintedManually(false) end
+	end
+	W.Close(uid)
+	if IsValid(panel) and panelUids[panel] then
+		W.Close(panelUids[panel])
+		panelUids[panel] = nil
+	end
+	for buid, info in pairs(bound) do
+		if info.kind == kind then W.Close(buid) end
+	end
+	log("CloseSandboxShell %s", kind)
+	return true
+end
+
+--- Toggle spawn/context — never stack a second copy
+function W.OpenSandboxShell(which)
+	which = which or "spawn"
+	if not W.IsVR() then return false end
+	local isCtx = (which == "context" or which == "contextmenu")
+	local panel = isCtx and g_ContextMenu or g_SpawnMenu
+	local kind = isCtx and "contextmenu" or "spawnmenu"
+	local uidStable = isCtx and STABLE_UID.contextmenu or STABLE_UID.spawnmenu
+
+	-- Already open → CLOSE (toggle)
+	if W.IsShellOpen(which) then
+		return W.CloseSandboxShell(which)
+	end
+
+	if not IsValid(panel) then
+		log("%s panel missing — try spawnmenu_reload / sandbox", kind)
+		if isCtx then
+			LocalPlayer():ConCommand("+menu_context")
+		else
+			LocalPlayer():ConCommand("+menu")
+		end
+		timer.Simple(0.15, function()
+			panel = isCtx and g_ContextMenu or g_SpawnMenu
+			if not IsValid(panel) then
+				if isCtx then LocalPlayer():ConCommand("-menu_context") else LocalPlayer():ConCommand("-menu") end
+				log("%s still missing after +menu", kind)
+				return
+			end
+			-- Only open if still closed (avoid double from hooks)
+			if not W.IsShellOpen(which) then
+				W.OpenSandboxShell(which)
+			end
+		end)
+		return false
+	end
+
+	-- Ensure no ghost surfaces of this kind
+	W.Close(uidStable)
+	for buid, info in pairs(bound) do
+		if info.kind == kind then W.Close(buid) end
+	end
+
+	if panel.SetHangOpen then panel:SetHangOpen(false) end
+	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
+	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
+
+	if panel.Open then
+		-- Don't thrash Close/Open if already visible — just manifest once
+		if not panel:IsVisible() then
+			panel:Open()
+		else
+			if panel.MakePopup then panel:MakePopup() end
+			panel:SetVisible(true)
+		end
+	elseif panel.MakePopup then
+		panel:MakePopup()
+		panel:SetVisible(true)
+	else
+		panel:SetVisible(true)
+	end
+
+	if vrmod.cube then
+		if isCtx and vrmod.cube.ThemeContextMenu then
+			vrmod.cube.ThemeContextMenu(panel)
+		elseif (not isCtx) and vrmod.cube.ThemeSpawnMenu then
+			vrmod.cube.ThemeSpawnMenu(panel)
+		end
+	end
+
+	local uid = W.ManifestPanel(panel, {
+		kind = kind,
+		place = "hand",
+		hint = kind,
+		uid = uidStable,
+	})
+
+	if uid and isfunction(VRUtilMenuRenderPanel) then
+		VRUtilMenuRenderPanel(uid)
+	end
+
+	log("OpenSandboxShell %s uid=%s vis=%s", kind, tostring(uid), tostring(panel:IsVisible()))
+	return uid ~= nil
+end
+
+function W.OpenSpawnMenu()
+	return W.OpenSandboxShell("spawn")
+end
+
+function W.OpenContextMenu()
+	return W.OpenSandboxShell("context")
+end
+
+function W.CloseSpawnMenu()
+	return W.CloseSandboxShell("spawn")
+end
+
+function W.CloseContextMenu()
+	return W.CloseSandboxShell("context")
+end
+
+function vrmod.OpenSpawnMenuVR()
+	return W.OpenSpawnMenu()
+end
+function vrmod.OpenContextMenuVR()
+	return W.OpenContextMenu()
+end
+function vrmod.CloseSpawnMenuVR()
+	return W.CloseSpawnMenu()
+end
+
+concommand.Add("vrmod_spawnmenu", function()
+	if not W.IsVR() then
+		print("[panel2vr] vrmod_spawnmenu is VR-only")
+		return
+	end
+	local ok = W.OpenSpawnMenu()
+	print("[panel2vr] spawn toggle:", tostring(ok), "open=", tostring(W.IsShellOpen("spawn")))
+end)
+concommand.Add("vrmod_spawnmenu_close", function()
+	W.CloseSpawnMenu()
+	print("[panel2vr] spawn forced closed")
+end)
+concommand.Add("vrmod_contextmenu", function()
+	if not W.IsVR() then return end
+	W.OpenContextMenu()
+end)
 
 -- Install after UI subsystem is ready
 hook.Add("InitPostEntity", "panel2vr_install", function()
