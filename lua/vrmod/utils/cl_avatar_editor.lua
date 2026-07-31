@@ -173,28 +173,35 @@ local function MirrorBoneName(name)
 	return name
 end
 
--- Lateral limb bones (arms/legs/fingers) vs center chain (pelvis/spine/neck/head)
-local function IsLateralBoneName(name)
+-- Distal limbs use full Euler flip. Clavicles stay on the CENTER formula —
+-- treating clavicles as lateral (because of _L_/_R_) twisted the torso vs spine.
+local function IsDistalLimbBone(name)
 	if not name then return false end
+	-- Never distal: axial skeleton
+	if string.find(name, "Clavicle", 1, true) then return false end
+	if string.find(name, "Spine", 1, true) or string.find(name, "Pelvis", 1, true) then return false end
+	if string.find(name, "Neck", 1, true) or string.find(name, "Head", 1, true) then return false end
+	-- Distal free limbs (hands/legs good with full flip)
+	if string.find(name, "Hand", 1, true) or string.find(name, "Finger", 1, true) then return true end
+	if string.find(name, "Wrist", 1, true) or string.find(name, "Ulna", 1, true) then return true end
+	if string.find(name, "Forearm", 1, true) or string.find(name, "UpperArm", 1, true) then return true end
+	if string.find(name, "Foot", 1, true) or string.find(name, "Toe", 1, true) then return true end
+	if string.find(name, "Calf", 1, true) or string.find(name, "Thigh", 1, true) then return true end
 	if string.find(name, "_L_", 1, true) or string.find(name, "_R_", 1, true) then return true end
-	if string.find(name, "Left", 1, true) or string.find(name, "Right", 1, true) then return true end
-	if string.find(name, "Finger", 1, true) then return true end
 	return false
 end
 
 --- True mirror: left-right reflection in the player's sagittal plane → twin space.
--- Source WorldToLocal(playerYaw): X=Forward, Y=Right, Z=Up. Flip Y only.
--- Limbs:  Euler (p, -y, -r) — gloves/arms/legs stay untwisted.
--- Center: Euler (p, -y,  r) — only yaw flips; negating roll twisted torso/head.
+-- X=Forward, Y=Right, Z=Up. Position always flips Y.
+-- Distal limbs: (p, -y, -r). Axial + clavicle: (p, -y, +r) so chest/head stay upright.
 local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw, boneName)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 
 	relPos.y = -relPos.y
 	local nang
-	if IsLateralBoneName(boneName) then
+	if IsDistalLimbBone(boneName) then
 		nang = Angle(relAng.p, -relAng.y, -relAng.r)
 	else
-		-- Pelvis / spine / neck / head / attachments
 		nang = Angle(relAng.p, -relAng.y, relAng.r)
 	end
 
@@ -839,7 +846,7 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 		if isWorld then
 			npos, nang = pos, ang
 		elseif isFacing then
-			npos, nang = MapMirror(pos, ang, srcFeet, srcYaw, standPos, standAng)
+			npos, nang = MapMirror(pos, ang, srcFeet, srcYaw, standPos, standAng, name)
 		else
 			npos, nang = MapClone(pos, ang, srcFeet, srcYaw, standPos, standAng)
 		end
