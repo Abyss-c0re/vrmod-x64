@@ -504,11 +504,17 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 	end)
 
 	if g_VR.menus and g_VR.menus[uid] then
-		g_VR.menus[uid].scale = place.scale or 0.035
-		g_VR.menus[uid].cubeMenu = true
-		g_VR.menus[uid].grabbable = true
-		if not g_VR.menus[uid].freeFloat and not g_VR.menus[uid].grabHand then
-			g_VR.menus[uid].attachment = place.attachment and true or false
+		local m = g_VR.menus[uid]
+		if not m.scaleLocked then
+			local sc = place.scale or 0.035
+			m.scale = sc
+			m.baseScale = sc
+			m._lastAssignedScale = sc
+		end
+		m.cubeMenu = true
+		m.grabbable = true
+		if not m.freeFloat and not m.grabHand then
+			m.attachment = place.attachment and true or false
 		end
 	end
 
@@ -519,7 +525,9 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 		end
 		local m = g_VR.menus and g_VR.menus[uid]
 		if m and place.attachment and not m.freeFloat and not m.grabHand then
-			m.scale = place.scale or 0.035
+			if not m.scaleLocked then
+				m.scale = place.scale or 0.035
+			end
 			m.cubeMenu = true
 			m.attachment = true
 		end
@@ -695,8 +703,9 @@ function W.InstallHooks()
 						if not m.freeFloat and not m.grabHand and not g_VR.menuResizeActive then
 							m.attachment = true
 						end
-					elseif m.cubeMenu and m.scale and m.scale < 0.03 and m.attachment then
+					elseif m.cubeMenu and not m.scaleLocked and m.scale and m.scale < 0.03 and m.attachment then
 						m.scale = 0.035
+						m.baseScale = 0.035
 					end
 				end
 			elseif info.panel and not IsValid(info.panel) then

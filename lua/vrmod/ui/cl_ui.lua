@@ -170,14 +170,25 @@ if CLIENT then
 		file.Write(LAYOUT_FILE, util.TableToJSON(layoutCache, true) or "{}")
 	end
 
+	local function LockMenuScale(menu, sc)
+		if not menu then return end
+		sc = math.Clamp(tonumber(sc) or menu.baseScale or menu.scale or 0.03, SCALE_MIN, SCALE_MAX)
+		menu.scale = sc
+		menu.baseScale = sc
+		menu._lastAssignedScale = sc
+		menu.scaleLocked = true -- paint hooks must not overwrite user size
+	end
+
 	--- Persist pose + scale for a menu uid (origin-relative pos/ang when free-floating).
 	function vrmod.SaveMenuLayout(uid)
 		if not uid or uid == false then return false end
 		local menu = menus[uid]
 		if not menu then return false end
+		local sc = menu.baseScale or menu.scale or 0.03
 		local all = ReadLayouts()
 		local entry = {
-			scale = menu.baseScale or menu.scale or 0.03,
+			scale = sc,
+			scaleLocked = menu.scaleLocked and true or false,
 			freeFloat = (menu.freeFloat or not menu.attachment) and true or false,
 			width = menu.width,
 			height = menu.height,
@@ -191,7 +202,7 @@ if CLIENT then
 		all[tostring(uid)] = entry
 		WriteLayouts(all)
 		if vrmod.logger then
-			vrmod.logger.Debug("[UI] Saved layout uid=%s scale=%.4f float=%s",
+			vrmod.logger.Info("[UI] Saved layout uid=%s scale=%.4f float=%s",
 				tostring(uid), entry.scale, tostring(entry.freeFloat))
 		end
 		return true
@@ -205,11 +216,10 @@ if CLIENT then
 		if not e then return false end
 		local applied = false
 		if e.scale and tonumber(e.scale) and tonumber(e.scale) > 0 then
-			local sc = math.Clamp(tonumber(e.scale), SCALE_MIN, SCALE_MAX)
-			menu.scale = sc
-			menu.baseScale = sc
-			menu._lastAssignedScale = sc
+			LockMenuScale(menu, tonumber(e.scale))
 			applied = true
+		elseif e.scaleLocked then
+			menu.scaleLocked = true
 		end
 		-- freeFloat==false means user reattached: keep open-time attachment, only scale above
 		if e.freeFloat and e.pos and e.ang then
@@ -310,7 +320,7 @@ if CLIENT then
 		local uid = resizeState.uid
 		local menu = menus[uid]
 		if menu then
-			-- Keep free-float if already floating; scale already live on menu
+			LockMenuScale(menu, menu.baseScale or menu.scale)
 			vrmod.SaveMenuLayout(uid)
 		end
 		resizeState = nil
@@ -341,36 +351,51 @@ if CLIENT then
 		return true
 	end
 
-	--- Apply continuous corner-resize from laser plane hit (panel-local px).
-	local function UpdateResizeFromCursor(menu, cursorX, cursorY)
-		if not resizeState or not menu or resizeState.uid ~= menu.uid then return end
-		if not cursorX or not cursorY then return end
-		local diag = math.sqrt(cursorX * cursorX + cursorY * cursorY)
-		local startDiag = resizeState.startDiag or 1
-		if startDiag < 8 then startDiag = 8 end
-		local ratio = diag / startDiag
-		local ns = (resizeState.startScale or 0.03) * ratio
-		ns = math.Clamp(ns, SCALE_MIN, SCALE_MAX)
-		menu.scale = ns
-		menu.baseScale = ns
-		menu._lastAssignedScale = ns
+	--- Resize from grip-hand distance to panel origin (stereo-safe; no per-eye laser).
+	local function UpdateResizeFromHand()
+		if not resizeState then return end
+		local menu = menus[resizeState.uid]
+		if not menu then return end
+		local hand = HandPose(resizeState.hand)
+		if not hand or not hand.pos then return end
+		local origin = resizeState.origin
+		if not origin then return end
+		local dist = hand.pos:Distance(origin)
+		local startDist = resizeState.startDist or 1
+		if startDist < 2 then startDist = 2 end
+		local ns = (resizeState.startScale or 0.03) * (dist / startDist)
+		LockMenuScale(menu, ns)
 	end
 
-	--- Once per stereo frame: freeze world pose + scale for both eyes (no L/R desync).
-	--- Also advance live resize from last laser sample.
-	local function SnapshotMenuDrawState()
-		if resizeState then
-			local m = menus[resizeState.uid]
-			if m and m.lastCursorX and m.lastCursorY then
-				UpdateResizeFromCursor(m, m.lastCursorX, m.lastCursorY)
+	local function ResolveDrawPose(v)
+		local pos, ang
+		if v.grabHand and v.grabPos and v.grabAng then
+			local hand = HandPose(v.grabHand)
+			if hand and hand.pos and hand.ang then
+				pos, ang = LocalToWorld(v.grabPos, v.grabAng, hand.pos, hand.ang)
+			end
+		elseif v.freeFloat or not v.attachment then
+			pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
+		else
+			local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
+			if hand and hand.pos and hand.ang then
+				pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
 			end
 		end
+		local drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
+		return pos, ang, drawScale
+	end
+
+	--- Once per stereo frame: solve resize, then freeze pose/scale for BOTH eyes.
+	local function SnapshotMenuDrawState()
+		UpdateResizeFromHand()
+		local sf = g_VR.stereoFrame or 0
 		for _, v in ipairs(menuOrder) do
-			local wPos, wAng = ResolveMenuWorldPose(v)
-			v._snapPos = wPos
-			v._snapAng = wAng
-			v._snapScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
-			v._snapFrame = g_VR.stereoFrame or 0
+			local pos, ang, drawScale = ResolveDrawPose(v)
+			v._snapPos = pos
+			v._snapAng = ang
+			v._snapScale = drawScale
+			v._snapFrame = sf
 		end
 	end
 
@@ -432,26 +457,29 @@ if CLIENT then
 
 		-- Corner grip → resize (scale); body grip → free-move
 		if resizeOn and CursorInResizeCorner(menu, cx, cy) then
-			local diag = math.sqrt(cx * cx + cy * cy)
-			if diag < 8 then diag = math.sqrt(menu.width * menu.width + menu.height * menu.height) end
+			-- Detach to free-float so resize stays put while scaling
+			local wPos, wAng = ResolveMenuWorldPose(menu)
+			if not menu.freeFloat and wPos and wAng then
+				local origin = g_VR.origin or Vector()
+				local originAng = g_VR.originAngle or Angle()
+				menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
+				menu.freeFloat = true
+				menu.attachment = false
+				wPos, wAng = ResolveMenuWorldPose(menu)
+			end
+			local hand = HandPose(handName)
+			if not wPos or not hand or not hand.pos then return false end
+			local startDist = hand.pos:Distance(wPos)
+			if startDist < 2 then startDist = 2 end
 			resizeState = {
 				uid = uid,
 				hand = handName,
 				startScale = menu.baseScale or menu.scale or 0.03,
-				startDiag = diag,
+				origin = Vector(wPos), -- panel TL world (fixed while resizing)
+				startDist = startDist,
 			}
+			menu.scaleLocked = true
 			g_VR.menuResizeActive = true
-			-- Detach to free-float so resize stays put while scaling
-			if not menu.freeFloat then
-				local wPos, wAng = ResolveMenuWorldPose(menu)
-				if wPos and wAng then
-					local origin = g_VR.origin or Vector()
-					local originAng = g_VR.originAngle or Angle()
-					menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
-					menu.freeFloat = true
-					menu.attachment = false
-				end
-			end
 			MarkConsumed(handName, pressed)
 			if vrmod.logger then
 				vrmod.logger.Debug("[UI] Panel resize start uid=%s hand=%s scale=%.4f",
@@ -480,9 +508,14 @@ if CLIENT then
 	end
 
 	--- Call from menus that re-apply hand pose each paint. Skips when free-floating / grabbed / resizing.
+	--- Never overwrites scale when user locked size (resize / saved layout).
 	function vrmod.MenuApplyHandAnchor(menu, scale, pos, ang)
 		if not menu then return end
-		if scale then menu.scale = scale end
+		if scale and not menu.scaleLocked then
+			menu.scale = scale
+			menu.baseScale = scale
+			menu._lastAssignedScale = scale
+		end
 		menu.cubeMenu = true
 		menu.grabbable = menu.grabbable ~= false
 		if menu.grabHand or menu.freeFloat or (resizeState and resizeState.uid == menu.uid) then return end
@@ -578,44 +611,35 @@ if CLIENT then
 				end
 				v.baseScale = base
 			end
-			-- Callers that re-assign .scale (cube_settings paint) update baseScale
-			if v.scale and v.scale > 0 and math.abs(v.scale - (v._lastAssignedScale or -1)) > 1e-6 then
+			-- Callers that re-assign .scale update baseScale only if user has not locked size
+			if not v.scaleLocked and v.scale and v.scale > 0
+				and math.abs(v.scale - (v._lastAssignedScale or -1)) > 1e-6 then
 				v.baseScale = v.scale
 				v._lastAssignedScale = v.scale
+			elseif v.scaleLocked and v.baseScale then
+				-- Keep paint hooks from drifting RT scale
+				v.scale = v.baseScale
+				v._lastAssignedScale = v.baseScale
 			end
-			-- Prefer PreStereo snapshot so both eyes draw identical pose/scale
-			local pos, ang, drawScale = v._snapPos, v._snapAng, v._snapScale
-			if not pos or not ang or not drawScale or drawScale <= 0
-				or (v._snapFrame or -1) ~= (g_VR.stereoFrame or 0) then
-				-- Fallback if snapshot missed this frame
-				drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
-				if v.grabHand and v.grabPos and v.grabAng then
-					local hand = HandPose(v.grabHand)
-					if hand and hand.pos and hand.ang then
-						pos, ang = LocalToWorld(v.grabPos, v.grabAng, hand.pos, hand.ang)
-					else
-						continue
-					end
-				elseif v.freeFloat then
-					pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
-				elseif v.attachment then
-					local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
-					if hand and hand.pos and hand.ang then
-						pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
-					else
-						continue
-					end
-				else
-					pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin, g_VR.originAngle)
-				end
+
+			-- Stereo-stable: first eye freezes pose/scale for the frame; second reuses it.
+			local sf = g_VR.stereoFrame or 0
+			local pos, ang, drawScale
+			if v._snapFrame == sf and v._snapPos and v._snapAng and v._snapScale and v._snapScale > 0 then
+				pos, ang, drawScale = v._snapPos, v._snapAng, v._snapScale
+			else
+				pos, ang, drawScale = ResolveDrawPose(v)
+				if not pos or not ang then continue end
+				v._snapPos, v._snapAng, v._snapScale = pos, ang, drawScale
+				v._snapFrame = sf
 			end
-			if not pos or not ang then continue end
+			if not pos or not ang or not drawScale then continue end
 
 			if v.mat and not v.mat:IsError() then
 				v.mat:SetTexture("$basetexture", v.rt)
 			end
 
-			-- Laser plane hit (focus + next-frame resize sample; does NOT mutate scale here)
+			-- Laser plane hit (focus only — resize uses hand distance, not laser)
 			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
 			local resizingThis = resizeState and resizeState.uid == k
 			if v.cursorEnabled then
@@ -637,11 +661,6 @@ if CLIENT then
 					end
 				end
 			end
-			-- Store cursor for PreStereo resize solve (same both eyes → no desync)
-			if resizingThis and hitCursorX and hitCursorY then
-				v.lastCursorX = hitCursorX
-				v.lastCursorY = hitCursorY
-			end
 
 			cam.IgnoreZ(true)
 			cam.Start3D2D(pos, ang, drawScale)
@@ -660,24 +679,11 @@ if CLIENT then
 				surface.DrawOutlinedRect(0, 0, v.width, v.height)
 			end
 
-			-- Subtle resize grip: only when laser near BR corner or actively resizing
-			local inC = hitCursorX and hitCursorY and CursorInResizeCorner(v, hitCursorX, hitCursorY)
-			local showCorner = cv_menu_resize:GetBool() and v.grabbable ~= false
-				and (resizingThis or inC)
-			if showCorner then
-				local a = resizingThis and 220 or 160
-				local r, g, b = 196, 40, 70 -- Cube crimson accent
-				if resizingThis then r, g, b = 255, 120, 150 end
-				surface.SetDrawColor(r, g, b, a)
-				-- Small diagonal grip lines only (no opaque fill)
-				local ox, oy = v.width - 6, v.height - 6
-				for i = 0, 2 do
-					local o = 8 + i * 7
-					surface.DrawLine(ox - o, oy, ox, oy - o)
-				end
-				surface.SetDrawColor(r, g, b, math.min(255, a + 30))
-				surface.DrawLine(v.width - 28, v.height - 2, v.width - 2, v.height - 2)
-				surface.DrawLine(v.width - 2, v.height - 28, v.width - 2, v.height - 2)
+			-- Nearly invisible grip: only while actively resizing (hit zone still works)
+			if resizingThis then
+				surface.SetDrawColor(255, 255, 255, 50)
+				surface.DrawLine(v.width - 14, v.height - 3, v.width - 3, v.height - 3)
+				surface.DrawLine(v.width - 3, v.height - 14, v.width - 3, v.height - 3)
 			end
 
 			cam.End3D2D()

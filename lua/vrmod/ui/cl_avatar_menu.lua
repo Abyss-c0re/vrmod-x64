@@ -207,7 +207,8 @@ local function paint()
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng)
 	elseif not m.freeFloat and not m.grabHand then
-		m.scale, m.pos, m.ang = liveScale, livePos, liveAng
+		if not m.scaleLocked then m.scale = liveScale end
+		m.pos, m.ang = livePos, liveAng
 		m.cubeMenu, m.attachment = true, true
 	end
 
@@ -576,11 +577,12 @@ function vrmod.AvatarMenu_Open()
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
 	else
-		g_VR.menus[UID].scale = liveScale
-		g_VR.menus[UID].pos = livePos
-		g_VR.menus[UID].ang = liveAng
-		g_VR.menus[UID].cubeMenu = true
-		g_VR.menus[UID].attachment = true
+		local am = g_VR.menus[UID]
+		if not am.scaleLocked then am.scale = liveScale end
+		am.pos = livePos
+		am.ang = liveAng
+		am.cubeMenu = true
+		am.attachment = true
 	end
 
 	paint()
@@ -597,11 +599,12 @@ function vrmod.AvatarMenu_Open()
 		if vrmod.MenuApplyHandAnchor then
 			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
 		elseif not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
-			g_VR.menus[UID].scale = liveScale
-			g_VR.menus[UID].pos = livePos
-			g_VR.menus[UID].ang = liveAng
-			g_VR.menus[UID].attachment = true
-			g_VR.menus[UID].cubeMenu = true
+			local am = g_VR.menus[UID]
+			if not am.scaleLocked then am.scale = liveScale end
+			am.pos = livePos
+			am.ang = liveAng
+			am.attachment = true
+			am.cubeMenu = true
 		end
 		paint()
 	end)

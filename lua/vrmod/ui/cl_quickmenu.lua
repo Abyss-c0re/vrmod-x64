@@ -67,11 +67,16 @@ function g_VR.MenuOpen()
 	end)
 
 	if g_VR.menus and g_VR.menus.miscmenu then
-		g_VR.menus.miscmenu.scale = qmScale
-		g_VR.menus.miscmenu.cubeMenu = true
-		g_VR.menus.miscmenu.grabbable = true
-		if not g_VR.menus.miscmenu.freeFloat and not g_VR.menus.miscmenu.grabHand then
-			g_VR.menus.miscmenu.attachment = true
+		local mm = g_VR.menus.miscmenu
+		if not mm.scaleLocked then
+			mm.scale = qmScale
+			mm.baseScale = qmScale
+			mm._lastAssignedScale = qmScale
+		end
+		mm.cubeMenu = true
+		mm.grabbable = true
+		if not mm.freeFloat and not mm.grabHand then
+			mm.attachment = true
 		end
 	end
 
@@ -80,11 +85,18 @@ function g_VR.MenuOpen()
 		return
 	end
 
-	g_VR.menus.miscmenu.scale = 0.03
-	g_VR.menus.miscmenu.cubeMenu = true
-	g_VR.menus.miscmenu.grabbable = true
-	if not g_VR.menus.miscmenu.freeFloat then
-		g_VR.menus.miscmenu.attachment = true
+	do
+		local mm = g_VR.menus.miscmenu
+		if not mm.scaleLocked then
+			mm.scale = 0.03
+			mm.baseScale = 0.03
+			mm._lastAssignedScale = 0.03
+		end
+		mm.cubeMenu = true
+		mm.grabbable = true
+		if not mm.freeFloat then
+			mm.attachment = true
+		end
 	end
 
 	local function layoutMetrics()
@@ -277,7 +289,12 @@ function g_VR.MenuOpen()
 			hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
 			return
 		end
-		g_VR.menus.miscmenu.scale = 0.03
+		local mm = g_VR.menus.miscmenu
+		if not mm.scaleLocked then
+			mm.scale = 0.03
+			mm.baseScale = 0.03
+			mm._lastAssignedScale = 0.03
+		end
 		g_VR.menus.miscmenu.cubeMenu = true
 
 		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()

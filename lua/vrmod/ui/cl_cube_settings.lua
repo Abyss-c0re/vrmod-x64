@@ -362,7 +362,7 @@ local function paint()
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng)
 	elseif not m.freeFloat and not m.grabHand then
-		m.scale = liveScale
+		if not m.scaleLocked then m.scale = liveScale end
 		m.pos = livePos
 		m.ang = liveAng
 		m.cubeMenu = true
@@ -496,10 +496,21 @@ local function paint()
 					surface.DrawRect(bx, y + 8, 40, 28)
 					surface.SetDrawColor(Theme().hot)
 					surface.DrawOutlinedRect(bx, y + 8, 40, 28, 2)
-					draw.SimpleText("▸", "DermaLarge", bx - 16, y + ROW_H * 0.5, Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					local Cchev = vrmod.cube
+					if Cchev and Cchev.DrawChevron then
+						Cchev.DrawChevron(bx - 14, y + ROW_H * 0.5, 10, "right", Theme().hot)
+					else
+						draw.SimpleText(">", "DermaLarge", bx - 16, y + ROW_H * 0.5, Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					end
 				elseif row.kind == "action" then
-					draw.SimpleText(selected and "●" or "▸", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5,
-						selected and Theme().ok or Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					local Cchev = vrmod.cube
+					if selected then
+						draw.SimpleText("*", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5, Theme().ok, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					elseif Cchev and Cchev.DrawChevron then
+						Cchev.DrawChevron(W - PAD - 18, y + ROW_H * 0.5, 9, "right", Theme().hot)
+					else
+						draw.SimpleText(">", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5, Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					end
 				end
 			end
 		end
@@ -677,11 +688,12 @@ function vrmod.CubeSettings_Open()
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
 	else
-		g_VR.menus[UID].scale = liveScale
-		g_VR.menus[UID].pos = livePos
-		g_VR.menus[UID].ang = liveAng
-		g_VR.menus[UID].cubeMenu = true
-		g_VR.menus[UID].attachment = true
+		local sm = g_VR.menus[UID]
+		if not sm.scaleLocked then sm.scale = liveScale end
+		sm.pos = livePos
+		sm.ang = liveAng
+		sm.cubeMenu = true
+		sm.attachment = true
 	end
 
 	paint()
