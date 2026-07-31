@@ -458,8 +458,11 @@ function W.InstallHooks()
 	log("hooks installed (MakePopup + spawn/context + repaint)")
 end
 
--- Public: interactive Cube settings in VR (cubeui → VRUtilMenuOpen faces); Derma on desktop
+-- Public: same settings catalog in VR (hand) and desktop (Derma)
 function W.OpenSettings()
+	if isfunction(vrmod.Settings_Open) then
+		return vrmod.Settings_Open()
+	end
 	if W.IsVR() and isfunction(vrmod.CubeSettings_Open) then
 		vrmod.CubeSettings_Open()
 		return nil

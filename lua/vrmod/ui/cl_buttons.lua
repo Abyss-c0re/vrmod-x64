@@ -48,20 +48,17 @@ local function InitializeMenuItems()
             end
         end)
     end, true, "customize twin")
-    -- VR: Glorious Crimson Cube on left hand. Desktop: Derma.
+    -- Same catalog for VR (hand Cube) and desktop (Derma) via Settings_Open
     vrmod.AddInGameMenuItem("Settings", 5, 0, function()
-        if vrmod.panel2vr and vrmod.panel2vr.OpenSettings then
-            vrmod.panel2vr.OpenSettings()
-        elseif vrmod.CubeSettings_Open then
-            vrmod.CubeSettings_Open()
-        else
-            local frame = VRUtilOpenMenu()
-            hook.Add("VRMod_OpenQuickMenu", "closesettings", function()
-                hook.Remove("VRMod_OpenQuickMenu", "closesettings")
-                if IsValid(frame) then frame:Remove() end
-                return false
-            end)
-        end
+        timer.Simple(0, function()
+            if vrmod.Settings_Open then
+                vrmod.Settings_Open()
+            elseif vrmod.panel2vr and vrmod.panel2vr.OpenSettings then
+                vrmod.panel2vr.OpenSettings()
+            elseif VRUtilOpenMenu then
+                VRUtilOpenMenu()
+            end
+        end)
     end, true)
 
     -- Row 2

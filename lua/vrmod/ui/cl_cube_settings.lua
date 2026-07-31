@@ -1,9 +1,8 @@
 if SERVER then return end
 -- =============================================================================
--- Cube Settings — heightmenu-proven VRMod path (CLICKABLE)
---
--- SoT: VRUtilMenuOpen left hand + PreRender paint + VRMod_Input hit boxes
--- Same contract as cl_heightadjust (that one works). No multi-plane cube.
+-- Cube Settings (VR hand panel)
+-- Data SoT: vrmod.SettingsCatalog (shared with desktop Derma menu)
+-- Path: VRUtilMenuOpen + PreRender paint + VRMod_Input hit boxes
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -11,12 +10,19 @@ vrmod = vrmod or {}
 local UID = "cube_settings"
 local open = false
 local category = 1
+local rowScroll = 0
 local liveScale = 0.025
 local livePos, liveAng = Vector(2.5, 3, 4), Angle(0, -90, 55)
 
-local W, H = 512, 560
+local W, H = 560, 640
+local HEADER = 56
+local TAB_H = 36
+local PAD = 12
+local ROW_H = 44
+local FOOTER = 52
+local VISIBLE_ROWS = 8
+
 local function WristPose()
-	-- Recompute at open (cl_ui may load after this file)
 	if isfunction(VRUtilHandMenuPose) then
 		return VRUtilHandMenuPose(W, H, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
 	end
@@ -36,6 +42,10 @@ local Theme = {
 	off = Color(70, 20, 30, 255),
 }
 
+local function Catalog()
+	return vrmod.SettingsCatalog or {}
+end
+
 local function getBool(name, default)
 	local c = GetConVar(name)
 	if c then return c:GetBool() end
@@ -48,6 +58,12 @@ local function getFloat(name, default)
 	return default
 end
 
+local function getInt(name, default)
+	local c = GetConVar(name)
+	if c then return c:GetInt() end
+	return default
+end
+
 local function setBool(name, v)
 	RunConsoleCommand(name, v and "1" or "0")
 end
@@ -56,122 +72,97 @@ local function setFloat(name, v)
 	RunConsoleCommand(name, tostring(v))
 end
 
-local categories = {
-	{
-		title = "Vision",
-		rows = {
-			{ kind = "slider", label = "Supersample", cvar = "vrmod_supersample", min = 0.5, max = 2.0, decimals = 2 },
-			{ kind = "slider", label = "Scale factor", cvar = "vrmod_scalefactor", min = 0.05, max = 4.0, decimals = 2 },
-			{ kind = "slider", label = "View scale", cvar = "vrmod_viewscale", min = 0.1, max = 2.0, decimals = 2 },
-			{ kind = "slider", label = "FOV X", cvar = "vrmod_fovscale_x", min = 0.5, max = 1.5, decimals = 2 },
-			{ kind = "slider", label = "FOV Y", cvar = "vrmod_fovscale_y", min = 0.5, max = 1.5, decimals = 2 },
-			{ kind = "bool", label = "Post-process", cvar = "vrmod_postprocess" },
-			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },
-			{ kind = "bool", label = "Swap eyes", cvar = "vrmod_swap_eyes" },
-			{ kind = "action", label = "Border calibrate", cmd = "vrmod_border_calibrate" },
-		},
-	},
-	{
-		title = "Controls",
-		rows = {
-			{ kind = "bool", label = "Smooth turning", cvar = "vrmod_smoothturn" },
-			{ kind = "slider", label = "Turn rate", cvar = "vrmod_smoothturnrate", min = 1, max = 1000, decimals = 0 },
-			{ kind = "bool", label = "Teleport", cvar = "vrmod_allow_teleport_client" },
-			{ kind = "bool", label = "Teleport L hand", cvar = "vrmod_teleport_use_left" },
-			{ kind = "bool", label = "Floating hands", cvar = "vrmod_floatinghands" },
-			{ kind = "bool", label = "Laser pointer", cvar = "vrmod_laserpointer" },
-			{ kind = "action", label = "Edit actions", cmd = "vrmod_actioneditor" },
-		},
-	},
-	{
-		title = "Posture",
-		rows = {
-			{ kind = "bool", label = "Avatar menu on start", cvar = "vrmod_heightmenu" },
-			{ kind = "bool", label = "Seated", cvar = "vrmod_seated" },
-			{ kind = "action", label = "Open Avatar", action = function()
-				if vrmod.AvatarMenu_Open then vrmod.AvatarMenu_Open()
-				elseif VRUtilOpenHeightMenu then VRUtilOpenHeightMenu() end
-			end },
-			{ kind = "action", label = "Auto height", action = function()
-				if vrmod.AutoScaleHeight then vrmod.AutoScaleHeight() end
-			end },
-			{ kind = "action", label = "Auto seated", action = function()
-				if vrmod.AutoSeatedOffset then vrmod.AutoSeatedOffset() end
-			end },
-		},
-	},
-	{
-		title = "World",
-		rows = {
-			{ kind = "bool", label = "Climbing", cvar = "vrmod_climbing" },
-			{ kind = "bool", label = "Doors", cvar = "vrmod_doors" },
-			{ kind = "bool", label = "Autostart", cvar = "vrmod_autostart" },
-			{ kind = "action", label = "UI reset", cmd = "vrmod_vgui_reset" },
-		},
-	},
-	{
-		title = "Session",
-		rows = {
-			{ kind = "action", label = "Restart VR", action = function()
-				vrmod.CubeSettings_Close()
-				if g_VR and g_VR.active then
-					VRUtilClientExit()
-					timer.Simple(1, function() VRUtilClientStart() end)
-				end
-			end },
-			{ kind = "action", label = "Exit VR", action = function()
-				vrmod.CubeSettings_Close()
-				RunConsoleCommand("vrmod_exit")
-			end },
-			{ kind = "action", label = "CLOSE", action = function()
-				vrmod.CubeSettings_Close()
-			end },
-		},
-	},
-}
+local function setInt(name, v)
+	RunConsoleCommand(name, tostring(math.floor(v + 0.5)))
+end
 
--- Hit boxes rebuilt every paint (heightmenu style)
+local function closeCtx()
+	return {
+		close = function()
+			vrmod.CubeSettings_Close()
+		end,
+	}
+end
+
+local function runRowAction(row)
+	if row.cmd then
+		RunConsoleCommand(row.cmd)
+		return
+	end
+	if row.action_id and vrmod.SettingsRunAction then
+		vrmod.SettingsRunAction(row.action_id, closeCtx())
+	end
+end
+
 local buttons = {}
 
-local HEADER = 56
-local TAB_H = 40
-local PAD = 16
-local ROW_H = 48
+local function catRows()
+	local cats = Catalog()
+	local cat = cats[category]
+	return (cat and cat.rows) or {}
+end
+
+local function maxScroll()
+	return math.max(0, #catRows() - VISIBLE_ROWS)
+end
 
 local function rebuildButtons()
 	buttons = {}
-	-- Close X
-	buttons[#buttons + 1] = {
-		x = W - 56, y = 8, w = 44, h = 40,
-		kind = "close",
-	}
-	-- Tabs
-	local n = #categories
-	local tabW = (W - PAD * 2) / n
+	local cats = Catalog()
+	-- Close
+	buttons[#buttons + 1] = { x = W - 52, y = 8, w = 40, h = 36, kind = "close" }
+	-- Tabs (scrollable strip if many)
+	local n = #cats
+	if n < 1 then return end
+	local tabW = math.max(48, (W - PAD * 2) / math.min(n, 6))
+	local tabStart = 1
+	-- show all tabs in 2 rows if many
+	local tabsPerRow = math.min(n, 5)
+	tabW = (W - PAD * 2) / tabsPerRow
 	for i = 1, n do
+		local col = (i - 1) % tabsPerRow
+		local row = math.floor((i - 1) / tabsPerRow)
 		buttons[#buttons + 1] = {
-			x = PAD + (i - 1) * tabW,
-			y = HEADER,
-			w = tabW - 4,
+			x = PAD + col * tabW,
+			y = HEADER + row * (TAB_H + 2),
+			w = tabW - 3,
 			h = TAB_H,
 			kind = "tab",
 			index = i,
 		}
 	end
-	-- Rows
-	local cat = categories[category]
-	if not cat then return end
-	local y0 = HEADER + TAB_H + 16
-	for i, row in ipairs(cat.rows) do
-		local y = y0 + (i - 1) * (ROW_H + 6)
-		if y + ROW_H > H - 40 then break end
+	local tabRows = math.ceil(n / tabsPerRow)
+	local y0 = HEADER + tabRows * (TAB_H + 2) + 8
+	-- Scroll controls
+	buttons[#buttons + 1] = {
+		x = PAD, y = H - FOOTER + 8, w = 70, h = 32,
+		kind = "scroll", dir = -1,
+	}
+	buttons[#buttons + 1] = {
+		x = PAD + 78, y = H - FOOTER + 8, w = 70, h = 32,
+		kind = "scroll", dir = 1,
+	}
+	-- Visible rows
+	local rows = catRows()
+	for i = 1, VISIBLE_ROWS do
+		local ri = rowScroll + i
+		local row = rows[ri]
+		if not row then break end
+		local y = y0 + (i - 1) * (ROW_H + 4)
+		if y + ROW_H > H - FOOTER then break end
 		buttons[#buttons + 1] = {
 			x = PAD, y = y, w = W - PAD * 2, h = ROW_H,
 			kind = "row",
-			index = i,
+			index = ri,
 			row = row,
 		}
 	end
+end
+
+local function tabRowsCount()
+	local n = #Catalog()
+	local tabsPerRow = math.min(math.max(n, 1), 5)
+	return math.ceil(n / tabsPerRow)
 end
 
 local function paint()
@@ -191,8 +182,8 @@ local function paint()
 
 	rebuildButtons()
 
-	if not isfunction(VRUtilMenuRenderStart) or VRUtilMenuRenderStart(UID) == false then return end
-	local okP, errP = pcall(function()
+	if VRUtilMenuRenderStart(UID) == false then return end
+	pcall(function()
 		surface.SetDrawColor(Theme.bg)
 		surface.DrawRect(0, 0, W, H)
 		surface.SetDrawColor(Theme.headerDim)
@@ -200,70 +191,103 @@ local function paint()
 		surface.SetDrawColor(Theme.header)
 		surface.DrawRect(0, HEADER - 4, W, 4)
 
-		draw.SimpleText("CUBE", "DermaLarge", PAD, 12, Theme.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-		draw.SimpleText(focused and "LASER LOCK · trigger" or "point laser here", "DermaDefault", PAD, 36, focused and Theme.ok or Theme.muted)
+		draw.SimpleText("SETTINGS", "DermaLarge", PAD, 10, Theme.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		draw.SimpleText(focused and "LASER · trigger" or "point laser · VR + desktop share catalog", "DermaDefault", PAD, 36, focused and Theme.ok or Theme.muted)
 
-		-- Close
-		local cx = W - 56
-		local closeHot = focused and mx >= cx and mx <= cx + 44 and my >= 8 and my <= 48
+		local cx = W - 52
+		local closeHot = focused and mx >= cx and mx <= cx + 40 and my >= 8 and my <= 44
 		surface.SetDrawColor(closeHot and Theme.hot or Theme.header)
-		surface.DrawRect(cx, 8, 44, 40)
-		draw.SimpleText("X", "DermaLarge", cx + 22, 28, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		surface.DrawRect(cx, 8, 40, 36)
+		draw.SimpleText("X", "DermaLarge", cx + 20, 26, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
-		-- Tabs
-		local n = #categories
-		local tabW = (W - PAD * 2) / n
-		for i, cat in ipairs(categories) do
-			local x = PAD + (i - 1) * tabW
-			local hot = focused and mx >= x and mx < x + tabW - 4 and my >= HEADER and my < HEADER + TAB_H
+		local cats = Catalog()
+		local n = #cats
+		local tabsPerRow = math.min(math.max(n, 1), 5)
+		local tabW = (W - PAD * 2) / tabsPerRow
+		for i, cat in ipairs(cats) do
+			local col = (i - 1) % tabsPerRow
+			local trow = math.floor((i - 1) / tabsPerRow)
+			local x = PAD + col * tabW
+			local y = HEADER + trow * (TAB_H + 2)
+			local hot = focused and mx >= x and mx < x + tabW - 3 and my >= y and my < y + TAB_H
 			local on = (i == category)
 			surface.SetDrawColor(on and Theme.header or (hot and Theme.rowHot or Theme.row))
-			surface.DrawRect(x, HEADER, tabW - 4, TAB_H)
-			draw.SimpleText(cat.title, "DermaDefaultBold", x + (tabW - 4) * 0.5, HEADER + TAB_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			surface.DrawRect(x, y, tabW - 3, TAB_H)
+			draw.SimpleText(cat.title or "?", "DermaDefaultBold", x + (tabW - 3) * 0.5, y + TAB_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
 
-		local cat = categories[category]
-		if cat then
-			for i, row in ipairs(cat.rows) do
-				local y = HEADER + TAB_H + 16 + (i - 1) * (ROW_H + 6)
-				if y + ROW_H > H - 40 then break end
-				local hot = focused and mx >= PAD and mx <= W - PAD and my >= y and my < y + ROW_H
+		local y0 = HEADER + tabRowsCount() * (TAB_H + 2) + 8
+		local rows = catRows()
+		for i = 1, VISIBLE_ROWS do
+			local ri = rowScroll + i
+			local row = rows[ri]
+			if not row then break end
+			local y = y0 + (i - 1) * (ROW_H + 4)
+			if y + ROW_H > H - FOOTER then break end
+			local hot = focused and mx >= PAD and mx <= W - PAD and my >= y and my < y + ROW_H
+
+			if row.kind == "header" then
+				draw.SimpleText(row.label or "", "DermaDefaultBold", PAD + 4, y + ROW_H * 0.5, Theme.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+			elseif row.kind == "help" then
+				draw.SimpleText(row.label or "", "DermaDefault", PAD + 8, y + ROW_H * 0.5, Theme.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+			else
 				surface.SetDrawColor(hot and Theme.rowHot or Theme.row)
 				surface.DrawRect(PAD, y, W - PAD * 2, ROW_H)
 				if hot then
 					surface.SetDrawColor(Theme.hot)
-					surface.DrawRect(PAD, y, 5, ROW_H)
+					surface.DrawRect(PAD, y, 4, ROW_H)
 				end
-				draw.SimpleText(row.label, "DermaDefaultBold", PAD + 14, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				draw.SimpleText(row.label or "?", "DermaDefaultBold", PAD + 12, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 
 				if row.kind == "bool" then
 					local on = getBool(row.cvar, false)
-					local bx = W - PAD - 56
+					local bx = W - PAD - 52
 					surface.SetDrawColor(on and Theme.ok or Theme.off)
-					surface.DrawRect(bx, y + 10, 44, 28)
-					draw.SimpleText(on and "ON" or "OFF", "DermaDefaultBold", bx + 22, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					surface.DrawRect(bx, y + 8, 40, 28)
+					draw.SimpleText(on and "ON" or "OFF", "DermaDefaultBold", bx + 20, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "slider" then
 					local val = getFloat(row.cvar, row.min or 0)
 					local t = 0
 					if row.max and row.min and row.max > row.min then
 						t = math.Clamp((val - row.min) / (row.max - row.min), 0, 1)
 					end
-					local x0, x1 = PAD + 160, W - PAD - 14
+					local x0, x1 = PAD + 170, W - PAD - 12
 					local ty = y + ROW_H * 0.5
 					surface.SetDrawColor(Theme.headerDim)
 					surface.DrawRect(x0, ty - 4, x1 - x0, 8)
 					surface.SetDrawColor(Theme.header)
 					surface.DrawRect(x0, ty - 4, (x1 - x0) * t, 8)
 					surface.SetDrawColor(Theme.hot)
-					surface.DrawRect(x0 + (x1 - x0) * t - 6, ty - 12, 12, 24)
-					draw.SimpleText(string.format("%." .. (row.decimals or 2) .. "f", val), "DermaDefault", x0 - 8, ty, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+					surface.DrawRect(x0 + (x1 - x0) * t - 5, ty - 10, 10, 20)
+					draw.SimpleText(string.format("%." .. (row.decimals or 2) .. "f", val), "DermaDefault", x0 - 6, ty, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+				elseif row.kind == "combo" then
+					local cur = getInt(row.cvar, 0)
+					local text = tostring(cur)
+					if row.choices then
+						for _, ch in ipairs(row.choices) do
+							if ch.value == cur then text = ch.text break end
+						end
+					end
+					local bx = W - PAD - 120
+					surface.SetDrawColor(Theme.headerDim)
+					surface.DrawRect(bx, y + 8, 108, 28)
+					draw.SimpleText(text .. " ▸", "DermaDefaultBold", bx + 54, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "action" then
-					draw.SimpleText("▸", "DermaLarge", W - PAD - 24, y + ROW_H * 0.5, Theme.hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText("▸", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5, Theme.hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				end
 			end
 		end
 
-		draw.SimpleText("secondary = close", "DermaDefault", W * 0.5, H - 20, Theme.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		-- Footer scroll
+		local sHotL = focused and mx >= PAD and mx <= PAD + 70 and my >= H - FOOTER + 8 and my <= H - FOOTER + 40
+		local sHotR = focused and mx >= PAD + 78 and mx <= PAD + 148 and my >= H - FOOTER + 8 and my <= H - FOOTER + 40
+		surface.SetDrawColor(sHotL and Theme.rowHot or Theme.row)
+		surface.DrawRect(PAD, H - FOOTER + 8, 70, 32)
+		surface.SetDrawColor(sHotR and Theme.rowHot or Theme.row)
+		surface.DrawRect(PAD + 78, H - FOOTER + 8, 70, 32)
+		draw.SimpleText("▲", "DermaDefaultBold", PAD + 35, H - FOOTER + 24, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText("▼", "DermaDefaultBold", PAD + 113, H - FOOTER + 24, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText(string.format("%d–%d / %d", rowScroll + 1, math.min(rowScroll + VISIBLE_ROWS, #rows), #rows), "DermaDefault", W - PAD, H - FOOTER + 24, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 
 		if focused and mx >= 0 and my >= 0 then
 			surface.SetDrawColor(Theme.hot)
@@ -274,6 +298,17 @@ local function paint()
 	if isfunction(VRUtilMenuRenderEnd) then VRUtilMenuRenderEnd() end
 end
 
+local function cycleCombo(row)
+	if not row.choices or #row.choices < 1 then return end
+	local cur = getInt(row.cvar, row.choices[1].value)
+	local idx = 1
+	for i, ch in ipairs(row.choices) do
+		if ch.value == cur then idx = i break end
+	end
+	idx = idx % #row.choices + 1
+	setInt(row.cvar, row.choices[idx].value)
+end
+
 local function activateAt(mx, my)
 	for _, btn in ipairs(buttons) do
 		if mx >= btn.x and mx <= btn.x + btn.w and my >= btn.y and my <= btn.y + btn.h then
@@ -282,21 +317,27 @@ local function activateAt(mx, my)
 				return
 			elseif btn.kind == "tab" then
 				category = btn.index
+				rowScroll = 0
+				paint()
+				return
+			elseif btn.kind == "scroll" then
+				rowScroll = math.Clamp(rowScroll + (btn.dir or 0) * VISIBLE_ROWS, 0, maxScroll())
 				paint()
 				return
 			elseif btn.kind == "row" and btn.row then
 				local row = btn.row
-				if row.kind == "bool" then
+				if row.kind == "bool" and row.cvar then
 					setBool(row.cvar, not getBool(row.cvar, false))
-				elseif row.kind == "slider" then
-					local x0, x1 = PAD + 160, W - PAD - 14
+				elseif row.kind == "slider" and row.cvar then
+					local x0, x1 = PAD + 170, W - PAD - 12
 					local t = math.Clamp((mx - x0) / math.max(1, x1 - x0), 0, 1)
 					local val = (row.min or 0) + t * ((row.max or 1) - (row.min or 0))
 					if row.decimals == 0 then val = math.floor(val + 0.5) end
 					setFloat(row.cvar, val)
+				elseif row.kind == "combo" then
+					cycleCombo(row)
 				elseif row.kind == "action" then
-					if row.cmd then RunConsoleCommand(row.cmd)
-					elseif row.action then row.action() end
+					runRowAction(row)
 				end
 				paint()
 				return
@@ -324,13 +365,13 @@ function vrmod.CubeSettings_Close()
 	if isfunction(VRUtilMenuClose) then
 		VRUtilMenuClose(UID)
 	end
-	-- drop fancy cubeui if still open
 	if vrmod.cubeui and vrmod.cubeui.IsOpen and vrmod.cubeui.IsOpen() then
 		vrmod.cubeui.Close()
 	end
 end
 
 function vrmod.CubeSettings_Open()
+	-- Non-VR: full Derma from same catalog
 	if not (g_VR and g_VR.active) then
 		if VRUtilOpenMenu then VRUtilOpenMenu() end
 		return
@@ -340,12 +381,17 @@ function vrmod.CubeSettings_Open()
 		return
 	end
 	if not isfunction(VRUtilMenuOpen) then return end
+	if not vrmod.SettingsCatalog then
+		if vrmod.logger then vrmod.logger.Warn("SettingsCatalog missing") end
+		if VRUtilOpenMenu then VRUtilOpenMenu() end
+		return
+	end
 
-	-- Close competing surfaces
 	if vrmod.cubeui and vrmod.cubeui.Close then pcall(vrmod.cubeui.Close) end
 
 	open = true
 	category = 1
+	rowScroll = 0
 	livePos, liveAng, liveScale = WristPose()
 
 	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()
@@ -377,15 +423,9 @@ function vrmod.CubeSettings_Open()
 			hook.Remove("PreRender", "cube_settings_paint")
 			return
 		end
-		g_VR.menus[UID].scale = liveScale
-		g_VR.menus[UID].pos = livePos
-		g_VR.menus[UID].ang = liveAng
-		g_VR.menus[UID].cubeMenu = true
-		g_VR.menus[UID].attachment = true
 		paint()
 	end)
 
-	-- Exact heightmenu input pattern
 	hook.Add("VRMod_Input", "cube_settings_input", function(action, pressed)
 		if not open then return end
 		if pressed and (action == "boolean_secondaryfire" or action == "boolean_chat") then
@@ -410,10 +450,6 @@ function vrmod.CubeSettings_Open()
 	hook.Add("VRMod_Exit", "cube_settings_exit", function()
 		vrmod.CubeSettings_Close()
 	end)
-
-	if vrmod.logger then
-		vrmod.logger.Info("[CubeSettings] open hand panel %s (heightmenu path)", UID)
-	end
 end
 
 function vrmod.CubeSettings_IsOpen()
@@ -432,4 +468,12 @@ end)
 
 concommand.Add("vrmod_cube_settings", function()
 	vrmod.CubeSettings_Open()
+end)
+
+concommand.Add("vrmod_settings", function()
+	if vrmod.Settings_Open then
+		vrmod.Settings_Open()
+	else
+		vrmod.CubeSettings_Open()
+	end
 end)
