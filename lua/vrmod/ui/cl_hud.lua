@@ -213,13 +213,7 @@ local function Unbind()
 	hook.Remove("PostDrawTranslucentRenderables", "vrmod_hud_draw")
 	hook.Remove("HUDShouldDraw", "vrmod_hud")
 	hook.Remove("HUDShouldDraw", "vrmod_hud_bl")
-	-- Unwrap if an older bind left a wrap (kill double plate)
-	if isfunction(VRUtilRenderMenuSystem) and VRUtilRenderMenuSystem._vrmodHudWrapped then
-		local base = VRUtilRenderMenuSystem._vrmodHudBase
-		if isfunction(base) then
-			VRUtilRenderMenuSystem = base
-		end
-	end
+	-- No menu-system wrap anymore (single plate only)
 	hudBound = false
 end
 
