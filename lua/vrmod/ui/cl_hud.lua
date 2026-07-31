@@ -23,7 +23,9 @@ local cv_crosshair_src = CreateClientConVar("vrmod_hud_crosshair_src", "muzzle",
 local cv_radar = CreateClientConVar("vrmod_hud_radar", "0", true, FCVAR_ARCHIVE,
 	"1 = CS:GO-style mini radar + player blips on HUD plate", 0, 1)
 local cv_radar_3d = CreateClientConVar("vrmod_hud_radar_3d", "0", true, FCVAR_ARCHIVE,
-	"1 = 3D top-down world backdrop under radar (extra RenderView; off by default)", 0, 1)
+	"1 = 3D top-down world photo under radar (extra RenderView; optional)", 0, 1)
+local cv_radar_buildings = CreateClientConVar("vrmod_hud_radar_buildings", "1", true, FCVAR_ARCHIVE,
+	"1 = show map buildings/terrain height on radar (brush traces, safe)", 0, 1)
 local cv_radar_range = CreateClientConVar("vrmod_hud_radar_range", "1500", true, FCVAR_ARCHIVE,
 	"Radar world range (Source units)", 400, 4000)
 local cv_radar_size = CreateClientConVar("vrmod_hud_radar_size", "200", true, FCVAR_ARCHIVE,
@@ -41,6 +43,18 @@ local radarMat = CreateMaterial("vrmod_hud_radar_mat_v1", "UnlitGeneric", {
 if radarMat and not radarMat:IsError() then
 	radarMat:SetTexture("$basetexture", radarRT)
 end
+
+-- Cached top-down brush heightmap (buildings + terrain) — no nested world RenderView
+local BMAP_RES = 40
+local bmap = {
+	frame = -999,
+	origin = Vector(0, 0, 0),
+	range = 0,
+	res = BMAP_RES,
+	-- cells[i] = relative hit Z (or false if open sky)
+	cells = {},
+	wx0 = 0, wy0 = 0, step = 1,
+}
 
 local function HudRes()
 	local w = vrScrW:GetInt()
@@ -246,6 +260,115 @@ local function RadarYaw(ply)
 	return 0
 end
 
+local function WorldToRadar(localPos, yaw, range, radius)
+	-- world delta → radar local (forward = up on map, yaw-aligned like CS)
+	local c, s = math.cos(math.rad(-yaw)), math.sin(math.rad(-yaw))
+	local rx = localPos.x * c - localPos.y * s
+	local ry = localPos.x * s + localPos.y * c
+	-- screen: +X right, +Y down; map forward = -Y
+	local u = (rx / range) * radius
+	local v = (-ry / range) * radius
+	return u, v
+end
+
+------------------------------------------------------------------------
+-- Building / terrain heightmap (brush traces — shows roofs & walls)
+------------------------------------------------------------------------
+local function SampleBuildingMap(ply, range)
+	if not cv_radar_buildings:GetBool() then return end
+	if not IsValid(ply) then return end
+	range = math.Clamp(range or 1500, 400, 4000)
+	local origin = ply:GetPos()
+	local fn = FrameNumber and FrameNumber() or 0
+	-- Refresh every ~12 frames, or when player moved / range changed
+	local moved = origin:DistToSqr(bmap.origin) > (64 * 64)
+	local rangeChanged = math.abs((bmap.range or 0) - range) > 32
+	if not moved and not rangeChanged and (fn - (bmap.frame or 0)) < 12 then
+		return
+	end
+
+	local res = BMAP_RES
+	local step = (range * 2) / res
+	local wx0 = origin.x - range + step * 0.5
+	local wy0 = origin.y - range + step * 0.5
+	local skyZ = origin.z + math.Clamp(range * 0.75, 500, 2800)
+	local groundZ = origin.z - 1200
+	local cells = bmap.cells
+	local tr = {
+		mask = MASK_SOLID_BRUSHONLY,
+		collisiongroup = COLLISION_GROUP_WORLD,
+		filter = ply,
+	}
+
+	for iy = 0, res - 1 do
+		local wy = wy0 + iy * step
+		for ix = 0, res - 1 do
+			local wx = wx0 + ix * step
+			tr.start = Vector(wx, wy, skyZ)
+			tr.endpos = Vector(wx, wy, groundZ)
+			local hit = util.TraceLine(tr)
+			local idx = iy * res + ix + 1
+			if hit.Hit and not hit.HitSky then
+				-- relative height vs player (roofs / multi-story stand out)
+				cells[idx] = hit.HitPos.z - origin.z
+			else
+				cells[idx] = false
+			end
+		end
+	end
+
+	bmap.frame = fn
+	bmap.origin = Vector(origin)
+	bmap.range = range
+	bmap.res = res
+	bmap.wx0 = wx0
+	bmap.wy0 = wy0
+	bmap.step = step
+end
+
+local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
+	if not cv_radar_buildings:GetBool() then return end
+	if not bmap.cells or not bmap.step or bmap.step <= 0 then return end
+	local res = bmap.res or BMAP_RES
+	local step = bmap.step
+	local wx0, wy0 = bmap.wx0, bmap.wy0
+	local r2 = radius * radius
+	-- Cell size on radar plate
+	local cellPx = math.max(2, (radius * 2 / res) * 1.05)
+	local half = cellPx * 0.5
+
+	for iy = 0, res - 1 do
+		local wy = wy0 + iy * step - origin.y
+		for ix = 0, res - 1 do
+			local h = bmap.cells[iy * res + ix + 1]
+			if h == false or h == nil then continue end
+			local wx = wx0 + ix * step - origin.x
+			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
+			if (u * u + v * v) > r2 then continue end
+			local bx, by = cx + u, cy + v
+			-- Ground / floors: dark green-gray; elevated = building roofs (lighter slate)
+			local elev = math.Clamp((h + 24) / 220, 0, 1)
+			if elev < 0.08 then
+				-- ground / low
+				surface.SetDrawColor(18, 32, 26, 170)
+			elseif elev < 0.28 then
+				-- low structure / curb
+				surface.SetDrawColor(35, 48, 42, 190)
+			else
+				-- buildings / multi-story
+				local t = math.Clamp((elev - 0.28) / 0.72, 0, 1)
+				surface.SetDrawColor(
+					55 + t * 90,
+					58 + t * 70,
+					68 + t * 80,
+					210
+				)
+			end
+			surface.DrawRect(bx - half, by - half, cellPx, cellPx)
+		end
+	end
+end
+
 -- Guard: never nest RenderView while stereo SBS RT is active (map-wide flicker).
 -- Also restore fog / clip state — short radar zfar used to leak into eye views
 -- and clip the whole world (player “render distance” collapse).
@@ -257,7 +380,8 @@ local function CaptureRadar3D(ply, range)
 
 	local pos = ply:GetPos()
 	local yaw = RadarYaw(ply)
-	local height = math.Clamp(range * 0.85, 400, 2500)
+	-- Higher camera so building roofs read clearly
+	local height = math.Clamp(range * 1.1, 600, 3200)
 
 	-- Snapshot fog so ortho capture cannot leave short fog end on the frame
 	local fogMode, fogStart, fogEnd, fogMax, fr, fg, fb
@@ -275,6 +399,9 @@ local function CaptureRadar3D(ply, range)
 	render.PushRenderTarget(radarRT)
 	render.Clear(8, 4, 6, 220, true, true)
 	local ok = pcall(function()
+		-- Kill fog for this pass so distant roofs stay visible
+		if render.FogMode then render.FogMode(MATERIAL_FOG_NONE or 0) end
+		if render.FogMaxDensity then render.FogMaxDensity(0) end
 		-- Prefer engine RealRenderView if present (avoid portal wrappers)
 		local rv = (isfunction(render.RealRenderView) and render.RealRenderView) or render.RenderView
 		rv({
@@ -293,8 +420,8 @@ local function CaptureRadar3D(ply, range)
 			orthoright = range,
 			orthotop = -range,
 			orthobottom = range,
-			znear = 1,
-			zfar = height + range * 2,
+			znear = 8,
+			zfar = height + range * 2.5,
 		})
 	end)
 	render.PopRenderTarget()
@@ -313,17 +440,6 @@ local function CaptureRadar3D(ply, range)
 	end)
 
 	return ok
-end
-
-local function WorldToRadar(localPos, yaw, range, radius)
-	-- world delta → radar local (forward = up on map, yaw-aligned like CS)
-	local c, s = math.cos(math.rad(-yaw)), math.sin(math.rad(-yaw))
-	local rx = localPos.x * c - localPos.y * s
-	local ry = localPos.x * s + localPos.y * c
-	-- screen: +X right, +Y down; map forward = -Y
-	local u = (rx / range) * radius
-	local v = (-ry / range) * radius
-	return u, v
 end
 
 local function PaintRadar(w, h, T)
@@ -363,10 +479,16 @@ local function PaintRadar(w, h, T)
 
 	if has3d then
 		surface.SetMaterial(radarMat)
-		surface.SetDrawColor(255, 255, 255, 200)
+		surface.SetDrawColor(255, 255, 255, 180)
 		-- square map clipped visually by ring border
 		local half = radius * 0.92
 		surface.DrawTexturedRect(cx - half, cy - half, half * 2, half * 2)
+	end
+
+	-- Buildings / terrain (always when enabled — works without 3D RenderView)
+	if cv_radar_buildings:GetBool() then
+		draw.NoTexture()
+		pcall(PaintBuildingMap, cx, cy, radius, yaw, range, origin)
 	end
 
 	-- Grid rings + cross (CS-style)
@@ -577,6 +699,7 @@ local menuSystemBase = nil
 
 local function Unbind()
 	hook.Remove("VRMod_PreStereoCapture", "vrmod_radar_3d")
+	hook.Remove("VRMod_PreStereoCapture", "vrmod_radar_world")
 	hook.Remove("VRMod_PreStereo", "vrmod_hud_capture")
 	hook.Remove("VRMod_PreRender", "vrmod_hud_capture")
 	hook.Remove("VRMod_PreRender", "hud")
@@ -632,14 +755,20 @@ local function Bind()
 		end)
 	end
 
-	-- 3D radar: every stereo frame, BEFORE stereo RT is pushed (see cl_vrmod).
-	hook.Add("VRMod_PreStereoCapture", "vrmod_radar_3d", function()
+	-- Radar world data BEFORE stereo RT is pushed (see cl_vrmod).
+	-- Building heightmap is cheap traces; optional 3D photo is separate.
+	hook.Add("VRMod_PreStereoCapture", "vrmod_radar_world", function()
 		if not g_VR or not g_VR.active then return end
-		if not cv_radar:GetBool() or not cv_radar_3d:GetBool() then return end
+		if not cv_radar:GetBool() then return end
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
 		local range = math.Clamp(cv_radar_range:GetFloat(), 400, 4000)
-		pcall(CaptureRadar3D, ply, range)
+		if cv_radar_buildings:GetBool() then
+			pcall(SampleBuildingMap, ply, range)
+		end
+		if cv_radar_3d:GetBool() then
+			pcall(CaptureRadar3D, ply, range)
+		end
 	end)
 
 	-- Capture HUD RT once per stereo frame (shared for both eyes — realtime vitals/blips)
