@@ -141,16 +141,32 @@ vrmod.SettingsCatalog = {
 			{ kind = "color", label = "UI beam color (tap to edit)", cvar = "vrmod_beam_color" },
 			{ kind = "color", label = "Weapon laser color (tap to edit)", cvar = "vrmod_laser_color" },
 			{ kind = "bool", label = "Enable HUD", cvar = "vrmod_hud" },
-			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.5, max = 2.0, decimals = 2 },
+			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.75, max = 2.0, decimals = 2 },
 			{ kind = "slider", label = "HUD distance", cvar = "vrmod_huddistance", min = 1, max = 100, decimals = 0 },
 			{ kind = "slider", label = "HUD scale", cvar = "vrmod_hudscale", min = 0.01, max = 0.1, decimals = 2 },
 			{ kind = "slider", label = "HUD curve", cvar = "vrmod_hudcurve", min = -100, max = 100, decimals = 0 },
-			{ kind = "slider", label = "HUD transparency", cvar = "vrmod_hudtestalpha", min = 0, max = 255, decimals = 0 },
+			{ kind = "slider", label = "HUD dim plate (0=clear)", cvar = "vrmod_hudtestalpha", min = 0, max = 255, decimals = 0 },
 			{ kind = "bool", label = "HUD only with menu key", cvar = "vrmod_hud_visible_quickmenukey" },
 			{ kind = "bool", label = "Menu & UI red outline", cvar = "vrmod_ui_outline" },
 			{ kind = "action", label = "Force HUD on + rebind", action_id = "force_hud_on" },
 			{ kind = "action", label = "UI reset", cmd = "vrmod_vgui_reset" },
 			{ kind = "action", label = "HUD/UI defaults", action_id = "reset_hud" },
+		},
+	},
+	{
+		id = "theme",
+		title = "Theme",
+		icon = "icon16/palette.png",
+		rows = {
+			{ kind = "action", label = "Theme · classic", action_id = "cube_preset_classic" },
+			{ kind = "action", label = "Theme · void", action_id = "cube_preset_void" },
+			{ kind = "action", label = "Theme · hive", action_id = "cube_preset_hive" },
+			{ kind = "action", label = "Theme · commander", action_id = "cube_preset_commander" },
+			{ kind = "slider", label = "Glass opacity (menus)", cvar = "vrmod_cube_glass", min = 0.5, max = 1.2, decimals = 2 },
+			{ kind = "action", label = "Density · compact", action_id = "cube_density_compact" },
+			{ kind = "action", label = "Density · comfort", action_id = "cube_density_comfort" },
+			{ kind = "action", label = "Density · large", action_id = "cube_density_large" },
+			{ kind = "action", label = "Theme status", cmd = "vrmod_cube_status" },
 		},
 	},
 	{
@@ -414,6 +430,19 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		end
 		return true
 	end
+	-- Crimson Cube Experience presets / density / HUD style
+	if action_id and string.StartWith(action_id, "cube_preset_") then
+		local id = string.sub(action_id, #"cube_preset_" + 1)
+		RunConsoleCommand("vrmod_cube_preset", id)
+		if CLIENT and vrmod.cube and vrmod.cube.RefreshTheme then vrmod.cube.RefreshTheme() end
+		if CLIENT and vrmod.RefreshHUD then vrmod.RefreshHUD() end
+		return true
+	end
+	if action_id and string.StartWith(action_id, "cube_density_") then
+		RunConsoleCommand("vrmod_cube_density", string.sub(action_id, #"cube_density_" + 1))
+		return true
+	end
+
 	if action_id == "reset_hud" then
 		RunConsoleCommand("vrmod_ui_scale", "1")
 		RunConsoleCommand("vrmod_hud", "1")

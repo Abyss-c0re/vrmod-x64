@@ -266,7 +266,15 @@ function VRUtilWeaponMenuOpen()
 	local function paintWeapon(values)
 		if not isfunction(VRUtilMenuRenderStart) then return end
 		VRUtilMenuRenderStart("weaponmenu")
-		surface.SetDrawColor(0, 0, 0, 200)
+		local C = vrmod.cube
+		local T = (C and C.ThemeLive and C.ThemeLive()) or (C and C.Theme) or {}
+		local fontMid = (C and C.Font and C.Font("CubeLabel")) or "vrmod_font_mid"
+		local fontNorm = (C and C.Font and C.Font("CubeTitle")) or "vrmod_font_normal"
+		local fontSmall = (C and C.Font and C.Font("CubeSmall")) or "vrmod_font_small"
+
+		-- Crimson outer ring (not flat black)
+		local ring = T.bg or Color(12, 6, 10, 220)
+		surface.SetDrawColor(ring.r, ring.g, ring.b, ring.a or 220)
 		do
 			local poly = {}
 			for i = 0, 32 do
@@ -279,7 +287,8 @@ function VRUtilWeaponMenuOpen()
 			surface.DrawPoly(poly)
 		end
 
-		surface.SetDrawColor(0, 0, 0, 230)
+		local core = T.panel or Color(36, 12, 18, 240)
+		surface.SetDrawColor(core.r, core.g, core.b, core.a or 240)
 		do
 			local poly = {}
 			for i = 0, 64 do
@@ -294,15 +303,19 @@ function VRUtilWeaponMenuOpen()
 
 		if #slots > 0 then
 			local sliceAngle = 360 / #slots
+			local cr = T.crimson or Color(196, 30, 58)
+			local crD = T.crimsonDim or Color(120, 20, 40, 220)
 			for i, slot in ipairs(slots) do
 				local sa, ea = (i - 1) * sliceAngle, i * sliceAngle
-				local col = values.hoveredSlot == i and Color(0, 0, 0, 230) or Color(0, 0, 0, 200)
+				local col = values.hoveredSlot == i
+					and Color(cr.r, cr.g, cr.b, 200)
+					or Color(crD.r, crD.g, crD.b, 160)
 				drawSlice(CX, CY, INNER_R, INNER_R + 20, sa, ea, SLICE_SEGMENTS, col)
 				local mid = (sa + ea) / 2
 				local lx = CX + math.cos(math.rad(mid)) * (INNER_R + 10)
 				local ly = CY + math.sin(math.rad(mid)) * (INNER_R + 10)
-				local tcol = values.hoveredSlot == i and Color(255, 255, 255) or Color(255, 255, 0)
-				draw.SimpleText(slotNames[slot.slot] or "?", "vrmod_font_mid", lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				local tcol = values.hoveredSlot == i and (T.text or color_white) or (T.health or Color(255, 220, 60))
+				draw.SimpleText(slotNames[slot.slot] or "?", fontMid, lx, ly, tcol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 			end
 		end
 
@@ -328,19 +341,28 @@ function VRUtilWeaponMenuOpen()
 			name = slotNames[slots[values.hoveredSlot].slot] or name
 		end
 
-		draw.SimpleText(name, "vrmod_font_normal", CX, CY, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-		local function ds(x, w, label, val, col)
-			draw.RoundedBox(6, x, 20, w, 45, Color(0, 0, 0, 128))
-			draw.SimpleText(label, "vrmod_font_small", x + 10, 50, col)
-			draw.SimpleText(val, "vrmod_font_mid", x + w - 10, 55, col, TEXT_ALIGN_RIGHT)
+		draw.SimpleText(name, fontNorm, CX, CY, T.text or color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+		local function ds(x, bw, label, val, col)
+			if C and C.DrawSlot then
+				C.DrawSlot(x, 16, bw, 48, nil, false, false, true)
+			else
+				draw.RoundedBox(6, x, 16, bw, 48, Color(36, 12, 18, 220))
+			end
+			draw.SimpleText(label, fontSmall, x + 10, 28, T.muted or col)
+			draw.SimpleText(tostring(val), fontMid, x + bw - 10, 42, col, TEXT_ALIGN_RIGHT)
 		end
 
 		local ammoText = string.format("%d / %d", values.clip or 0, values.total or 0)
-		local ammoCol = Color(255, (values.clip == 0 and values.total == 0) and 0 or 250, 0, 255)
-		ds(20, 120, "HEALTH", values.health, Color(255, (values.health or 0) > 19 and 250 or 0, 0, 255))
-		ds(160, 110, "SUIT", values.suit, Color(255, 250, 0))
-		ds(290, 130, "AMMO", ammoText, ammoCol)
-		ds(440, 70, "ALT", values.alt, Color(255, 250, 0))
+		local hpCol = (values.health or 0) <= 25 and (T.healthLow or Color(255, 50, 50)) or (T.health or Color(255, 220, 60))
+		ds(20, 120, "HEALTH", values.health, hpCol)
+		ds(150, 100, "SUIT", values.suit, T.armor or Color(90, 170, 255))
+		ds(260, 140, "AMMO", ammoText, T.ammo or color_white)
+		ds(410, 80, "ALT", values.alt, T.warn or Color(255, 200, 100))
+
+		if C and C.DrawFooterLaw then
+			C.DrawFooterLaw(0, 492, 512, 2)
+		end
 		VRUtilMenuRenderEnd()
 	end
 

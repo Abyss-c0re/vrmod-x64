@@ -99,25 +99,36 @@ timer.Remove("vrmod_logger_flush")
 timer.Create("vrmod_logger_flush", 0.25, 0, flushLogQueue)
 hook.Add("ShutDown", "vrmod_logger_shutdown", flushLogQueue)
 -- === CORE LOG FUNCTION ===
+-- Hot-path safe: early-out before format/stack walk when both sinks are off.
+-- Console rate-limit never drops file queue (file stays non-blocking).
 local lastConsoleTime = 0
 local function Log(level, fmt, ...)
     local lvlNum = levels[level]
     if not lvlNum then return end
-    local subsystem = detectSubsystem()
+
+    local consoleOn = lvlNum <= cv_console:GetInt()
+    local fileOn = lvlNum <= cv_file:GetInt()
+    if not consoleOn and not fileOn then return end
+
+    -- DEBUG also needs subsystem debug cvar
+    local subsystem
     if lvlNum == levels.DEBUG then
+        subsystem = detectSubsystem()
         local cv = vrmod.debug_cvars[subsystem]
         if not (cv and cv:GetBool()) then return end
+    else
+        subsystem = detectSubsystem()
     end
 
-    -- Build message
+    -- Build message only after gates (string.format is the expensive part)
     local msg
-    if select("#", ...) > 0 then
+    local n = select("#", ...)
+    if n > 0 then
         local args = {...}
-        for i = 1, #args do
+        for i = 1, n do
             args[i] = tostr(args[i])
         end
-
-        if type(fmt) == "string" and fmt:find("%%") then
+        if type(fmt) == "string" and string.find(fmt, "%%", 1, true) then
             msg = string.format(fmt, unpack(args))
         else
             table.insert(args, 1, fmt)
@@ -127,26 +138,28 @@ local function Log(level, fmt, ...)
         msg = tostr(fmt)
     end
 
-    -- Console output (immediate, with optional rate limit)
-    if lvlNum <= cv_console:GetInt() then
+    -- Console (rate-limited; never blocks file path)
+    if consoleOn then
         local maxRate = cv_console_rate:GetInt()
+        local allowConsole = true
         if maxRate > 0 then
             local now = SysTime()
             if now - lastConsoleTime < 1 / maxRate then
-                return -- drop this console message to protect VR pipeline
+                allowConsole = false
+            else
+                lastConsoleTime = now
             end
-
-            lastConsoleTime = now
         end
-
-        local colLvl = levelColors[level] or color_white
-        local colSide = sideColors[side] or color_white
-        local colSub = getSubsystemColor(subsystem)
-        MsgC(colSide, "[VR][" .. side .. "]", colSub, "[" .. subsystem:upper() .. "]", colLvl, "[" .. level .. "]", color_white, msg .. "\n")
+        if allowConsole then
+            local colLvl = levelColors[level] or color_white
+            local colSide = sideColors[side] or color_white
+            local colSub = getSubsystemColor(subsystem)
+            MsgC(colSide, "[VR][" .. side .. "]", colSub, "[" .. subsystem:upper() .. "]", colLvl, "[" .. level .. "]", color_white, msg .. "\n")
+        end
     end
 
-    -- File output (non-blocking)
-    if lvlNum <= cv_file:GetInt() then
+    -- File: queued + timer flush (never file.Append on call site)
+    if fileOn then
         local line = string.format("[VR][%s][%s][%s] %s", side, subsystem:upper(), level, msg)
         queueFileLine(os.date("[%H:%M:%S] ") .. line)
     end

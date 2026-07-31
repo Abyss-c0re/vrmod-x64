@@ -5,22 +5,25 @@ if SERVER then return end
 vrmod = vrmod or {}
 vrmod.cube = vrmod.cube or {}
 
-vrmod.cube.Theme = {
-	bg = Color(12, 6, 10, 245),
-	bgGlass = Color(22, 10, 16, 230),
-	panel = Color(36, 12, 18, 240),
-	btn = Color(55, 14, 24, 250),
-	btnHover = Color(100, 22, 38, 255),
-	btnDim = Color(30, 10, 16, 220),
-	crimson = Color(196, 30, 58, 255),
-	crimsonHot = Color(255, 70, 100, 255),
-	crimsonDim = Color(120, 20, 40, 220),
-	text = Color(255, 240, 244, 255),
-	muted = Color(200, 150, 165, 230),
-	ok = Color(90, 220, 150, 255),
-	warn = Color(255, 200, 100, 255),
-	accentLine = Color(196, 30, 58, 255),
-}
+-- Static fallback only if Crimson Framework has not claimed Theme yet
+if not (vrmod.cube.RefreshTheme and vrmod.cube.Framework) then
+	vrmod.cube.Theme = {
+		bg = Color(12, 6, 10, 245),
+		bgGlass = Color(22, 10, 16, 230),
+		panel = Color(36, 12, 18, 240),
+		btn = Color(55, 14, 24, 250),
+		btnHover = Color(100, 22, 38, 255),
+		btnDim = Color(30, 10, 16, 220),
+		crimson = Color(196, 30, 58, 255),
+		crimsonHot = Color(255, 70, 100, 255),
+		crimsonDim = Color(120, 20, 40, 220),
+		text = Color(255, 240, 244, 255),
+		muted = Color(200, 150, 165, 230),
+		ok = Color(90, 220, 150, 255),
+		warn = Color(255, 200, 100, 255),
+		accentLine = Color(196, 30, 58, 255),
+	}
+end
 
 -- Fallbacks if CreateFont fails or file loads before surface is ready
 local FONT_FALLBACK = {
@@ -143,8 +146,17 @@ end
 
 -- Create ASAP + again when client is fully up
 EnsureCubeFonts()
-hook.Add("InitPostEntity", "vrmod_cube_fonts", EnsureCubeFonts)
+hook.Add("InitPostEntity", "vrmod_cube_fonts", function()
+	EnsureCubeFonts()
+	if vrmod.cube.RefreshTheme then vrmod.cube.RefreshTheme() end
+end)
 hook.Add("OnScreenSizeChanged", "vrmod_cube_fonts", function()
 	fontsReady = false
 	EnsureCubeFonts()
 end)
+
+-- Draw helpers prefer framework Theme when live
+function vrmod.cube.T()
+	if vrmod.cube.ThemeLive then return vrmod.cube.ThemeLive() end
+	return vrmod.cube.Theme
+end

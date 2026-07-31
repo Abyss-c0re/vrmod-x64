@@ -48,18 +48,24 @@ local function WristPose()
 	return Vector(2.5, 3, 4), Angle(0, -90, 55), 0.025
 end
 
-local Theme = {
-	bg = Color(12, 6, 10, 250),
-	header = Color(196, 30, 58, 255),
-	headerDim = Color(80, 12, 24, 255),
-	row = Color(40, 14, 20, 245),
-	rowHot = Color(90, 22, 36, 255),
-	text = Color(255, 240, 244, 255),
-	muted = Color(200, 150, 165, 230),
-	hot = Color(255, 70, 100, 255),
-	ok = Color(90, 220, 150, 255),
-	off = Color(70, 20, 30, 255),
-}
+-- Live theme from Cube framework (Settings → Theme applies to all menus)
+local function Theme()
+	if vrmod.cube and vrmod.cube.ThemeLive then
+		return vrmod.cube.ThemeLive()
+	end
+	return vrmod.cube and vrmod.cube.Theme or {
+		bg = Color(12, 6, 10, 250),
+		header = Color(196, 30, 58, 255),
+		headerDim = Color(80, 12, 24, 255),
+		row = Color(40, 14, 20, 245),
+		rowHot = Color(90, 22, 36, 255),
+		text = Color(255, 240, 244, 255),
+		muted = Color(200, 150, 165, 230),
+		hot = Color(255, 70, 100, 255),
+		ok = Color(90, 220, 150, 255),
+		off = Color(70, 20, 30, 255),
+	}
+end
 
 local function Catalog()
 	return vrmod.SettingsCatalog or {}
@@ -227,29 +233,29 @@ local function paintColorEditor(focused, mx, my)
 	-- Done
 	buttons[#buttons + 1] = { x = W - PAD - 90, y = 8, w = 90, h = 36, kind = "color_done" }
 
-	surface.SetDrawColor(Theme.bg)
+	surface.SetDrawColor(Theme().bg)
 	surface.DrawRect(0, 0, W, H)
-	surface.SetDrawColor(Theme.headerDim)
+	surface.SetDrawColor(Theme().headerDim)
 	surface.DrawRect(0, 0, W, HEADER)
-	surface.SetDrawColor(Theme.header)
+	surface.SetDrawColor(Theme().header)
 	surface.DrawRect(0, HEADER - 4, W, 4)
-	draw.SimpleText("COLOR", "DermaLarge", W * 0.5, 10, Theme.header, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	draw.SimpleText(ce.label or ce.cvar, "DermaDefault", W * 0.5, 36, Theme.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	draw.SimpleText("COLOR", "DermaLarge", W * 0.5, 10, Theme().header, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	draw.SimpleText(ce.label or ce.cvar, "DermaDefault", W * 0.5, 36, Theme().muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
 	local backHot = focused and mx >= PAD and mx <= PAD + 80 and my >= 8 and my <= 44
 	local doneHot = focused and mx >= W - PAD - 90 and mx <= W - PAD and my >= 8 and my <= 44
-	surface.SetDrawColor(backHot and Theme.rowHot or Theme.row)
+	surface.SetDrawColor(backHot and Theme().rowHot or Theme().row)
 	surface.DrawRect(PAD, 8, 80, 36)
-	draw.SimpleText("◀ BACK", "DermaDefaultBold", PAD + 40, 26, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-	surface.SetDrawColor(doneHot and Theme.ok or Theme.header)
+	draw.SimpleText("◀ BACK", "DermaDefaultBold", PAD + 40, 26, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	surface.SetDrawColor(doneHot and Theme().ok or Theme().header)
 	surface.DrawRect(W - PAD - 90, 8, 90, 36)
-	draw.SimpleText("DONE", "DermaDefaultBold", W - PAD - 45, 26, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	draw.SimpleText("DONE", "DermaDefaultBold", W - PAD - 45, 26, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 	-- Large swatch (like mixer preview)
 	local swX, swY, swW, swH = PAD, HEADER + 12, W - PAD * 2, 56
 	surface.SetDrawColor(col.r, col.g, col.b, 255)
 	surface.DrawRect(swX, swY, swW, swH)
-	surface.SetDrawColor(Theme.header)
+	surface.SetDrawColor(Theme().header)
 	surface.DrawOutlinedRect(swX, swY, swW, swH, 2)
 	draw.SimpleText(string.format("%d, %d, %d, %d", col.r, col.g, col.b, col.a), "DermaDefaultBold", W * 0.5, swY + swH * 0.5, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
@@ -278,7 +284,7 @@ local function paintColorEditor(focused, mx, my)
 		surface.SetDrawColor(pcol.r, pcol.g, pcol.b, 255)
 		surface.DrawRect(x, y, pw, pw)
 		if hot then
-			surface.SetDrawColor(Theme.hot)
+			surface.SetDrawColor(Theme().hot)
 			surface.DrawOutlinedRect(x, y, pw, pw, 3)
 		else
 			surface.SetDrawColor(40, 40, 40, 200)
@@ -304,19 +310,19 @@ local function paintColorEditor(focused, mx, my)
 		local val = col[ch.key] or 255
 		local t = val / 255
 		draw.SimpleText(ch.label, "DermaDefaultBold", PAD + 16, y + 18, ch.c, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-		surface.SetDrawColor(Theme.headerDim)
+		surface.SetDrawColor(Theme().headerDim)
 		surface.DrawRect(x0, y + 12, x1 - x0, 12)
 		surface.SetDrawColor(ch.c.r, ch.c.g, ch.c.b, 255)
 		surface.DrawRect(x0, y + 12, (x1 - x0) * t, 12)
-		surface.SetDrawColor(Theme.hot)
+		surface.SetDrawColor(Theme().hot)
 		surface.DrawRect(x0 + (x1 - x0) * t - 5, y + 6, 10, 24)
-		draw.SimpleText(tostring(val), "DermaDefault", x1, y + 18, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+		draw.SimpleText(tostring(val), "DermaDefault", x1, y + 18, Theme().muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 	end
 
-	draw.SimpleText("same convar as Derma DColorMixer", "DermaDefault", W * 0.5, H - 18, Theme.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	draw.SimpleText("same convar as Derma DColorMixer", "DermaDefault", W * 0.5, H - 18, Theme().muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 	if focused and mx >= 0 and my >= 0 then
-		surface.SetDrawColor(Theme.hot)
+		surface.SetDrawColor(Theme().hot)
 		surface.DrawRect(mx - 2, my - 14, 4, 28)
 		surface.DrawRect(mx - 14, my - 2, 28, 4)
 	end
@@ -346,21 +352,21 @@ local function paint()
 
 		rebuildButtons()
 
-		surface.SetDrawColor(Theme.bg)
+		surface.SetDrawColor(Theme().bg)
 		surface.DrawRect(0, 0, W, H)
-		surface.SetDrawColor(Theme.headerDim)
+		surface.SetDrawColor(Theme().headerDim)
 		surface.DrawRect(0, 0, W, HEADER)
-		surface.SetDrawColor(Theme.header)
+		surface.SetDrawColor(Theme().header)
 		surface.DrawRect(0, HEADER - 4, W, 4)
 
-		draw.SimpleText("SETTINGS", "DermaLarge", PAD, 10, Theme.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-		draw.SimpleText(focused and "LASER · trigger" or "point laser · VR + desktop share catalog", "DermaDefault", PAD, 36, focused and Theme.ok or Theme.muted)
+		draw.SimpleText("SETTINGS", "DermaLarge", PAD, 10, Theme().header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		draw.SimpleText(focused and "LASER · trigger" or "point laser · VR + desktop share catalog", "DermaDefault", PAD, 36, focused and Theme().ok or Theme().muted)
 
 		local cx = W - 52
 		local closeHot = focused and mx >= cx and mx <= cx + 40 and my >= 8 and my <= 44
-		surface.SetDrawColor(closeHot and Theme.hot or Theme.header)
+		surface.SetDrawColor(closeHot and Theme().hot or Theme().header)
 		surface.DrawRect(cx, 8, 40, 36)
-		draw.SimpleText("X", "DermaLarge", cx + 20, 26, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText("X", "DermaLarge", cx + 20, 26, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 		local cats = Catalog()
 		local n = #cats
@@ -373,9 +379,9 @@ local function paint()
 			local y = HEADER + trow * (TAB_H + 2)
 			local hot = focused and mx >= x and mx < x + tabW - 3 and my >= y and my < y + TAB_H
 			local on = (i == category)
-			surface.SetDrawColor(on and Theme.header or (hot and Theme.rowHot or Theme.row))
+			surface.SetDrawColor(on and Theme().header or (hot and Theme().rowHot or Theme().row))
 			surface.DrawRect(x, y, tabW - 3, TAB_H)
-			draw.SimpleText(cat.title or "?", "DermaDefaultBold", x + (tabW - 3) * 0.5, y + TAB_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			draw.SimpleText(cat.title or "?", "DermaDefaultBold", x + (tabW - 3) * 0.5, y + TAB_H * 0.5, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
 
 		local y0 = HEADER + tabRowsCount() * (TAB_H + 2) + 8
@@ -389,28 +395,28 @@ local function paint()
 			local hot = focused and mx >= PAD and mx <= W - PAD and my >= y and my < y + ROW_H
 
 			if row.kind == "header" then
-				draw.SimpleText(row.label or "", "DermaDefaultBold", PAD + 4, y + ROW_H * 0.5, Theme.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				draw.SimpleText(row.label or "", "DermaDefaultBold", PAD + 4, y + ROW_H * 0.5, Theme().header, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 			elseif row.kind == "help" then
-				draw.SimpleText(row.label or "", "DermaDefault", PAD + 8, y + ROW_H * 0.5, Theme.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				draw.SimpleText(row.label or "", "DermaDefault", PAD + 8, y + ROW_H * 0.5, Theme().muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 			else
-				surface.SetDrawColor(hot and Theme.rowHot or Theme.row)
+				surface.SetDrawColor(hot and Theme().rowHot or Theme().row)
 				surface.DrawRect(PAD, y, W - PAD * 2, ROW_H)
 				if hot then
-					surface.SetDrawColor(Theme.hot)
+					surface.SetDrawColor(Theme().hot)
 					surface.DrawRect(PAD, y, 4, ROW_H)
 				end
-				draw.SimpleText(row.label or "?", "DermaDefaultBold", PAD + 12, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				draw.SimpleText(row.label or "?", "DermaDefaultBold", PAD + 12, y + ROW_H * 0.5, Theme().text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 
 				if row.kind == "bool" then
 					local on = getBool(row.cvar, false)
 					local bx = W - PAD - 52
-					surface.SetDrawColor(on and Theme.ok or Theme.off)
+					surface.SetDrawColor(on and Theme().ok or Theme().off)
 					surface.DrawRect(bx, y + 8, 40, 28)
 					local label = on and "ON" or "OFF"
 					if row.cvar == "vrmod_hud" and on and vrmod.IsHUDActive and not vrmod.IsHUDActive() then
 						label = "…" -- convar on, wait for rebind
 					end
-					draw.SimpleText(label, "DermaDefaultBold", bx + 20, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText(label, "DermaDefaultBold", bx + 20, y + ROW_H * 0.5, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "slider" then
 					local val = getFloat(row.cvar, row.min or 0)
 					local t = 0
@@ -419,13 +425,13 @@ local function paint()
 					end
 					local x0, x1 = PAD + 170, W - PAD - 12
 					local ty = y + ROW_H * 0.5
-					surface.SetDrawColor(Theme.headerDim)
+					surface.SetDrawColor(Theme().headerDim)
 					surface.DrawRect(x0, ty - 4, x1 - x0, 8)
-					surface.SetDrawColor(Theme.header)
+					surface.SetDrawColor(Theme().header)
 					surface.DrawRect(x0, ty - 4, (x1 - x0) * t, 8)
-					surface.SetDrawColor(Theme.hot)
+					surface.SetDrawColor(Theme().hot)
 					surface.DrawRect(x0 + (x1 - x0) * t - 5, ty - 10, 10, 20)
-					draw.SimpleText(string.format("%." .. (row.decimals or 2) .. "f", val), "DermaDefault", x0 - 6, ty, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+					draw.SimpleText(string.format("%." .. (row.decimals or 2) .. "f", val), "DermaDefault", x0 - 6, ty, Theme().muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 				elseif row.kind == "combo" then
 					local cur = getInt(row.cvar, 0)
 					local text = tostring(cur)
@@ -435,19 +441,19 @@ local function paint()
 						end
 					end
 					local bx = W - PAD - 120
-					surface.SetDrawColor(Theme.headerDim)
+					surface.SetDrawColor(Theme().headerDim)
 					surface.DrawRect(bx, y + 8, 108, 28)
-					draw.SimpleText(text .. " ▸", "DermaDefaultBold", bx + 54, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText(text .. " ▸", "DermaDefaultBold", bx + 54, y + ROW_H * 0.5, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "color" and row.cvar then
 					local c = getColorCvar(row.cvar)
 					local bx = W - PAD - 52
 					surface.SetDrawColor(c.r, c.g, c.b, 255)
 					surface.DrawRect(bx, y + 8, 40, 28)
-					surface.SetDrawColor(Theme.hot)
+					surface.SetDrawColor(Theme().hot)
 					surface.DrawOutlinedRect(bx, y + 8, 40, 28, 2)
-					draw.SimpleText("▸", "DermaLarge", bx - 16, y + ROW_H * 0.5, Theme.hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText("▸", "DermaLarge", bx - 16, y + ROW_H * 0.5, Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "action" then
-					draw.SimpleText("▸", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5, Theme.hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText("▸", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5, Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				end
 			end
 		end
@@ -455,16 +461,16 @@ local function paint()
 		-- Footer scroll
 		local sHotL = focused and mx >= PAD and mx <= PAD + 70 and my >= H - FOOTER + 8 and my <= H - FOOTER + 40
 		local sHotR = focused and mx >= PAD + 78 and mx <= PAD + 148 and my >= H - FOOTER + 8 and my <= H - FOOTER + 40
-		surface.SetDrawColor(sHotL and Theme.rowHot or Theme.row)
+		surface.SetDrawColor(sHotL and Theme().rowHot or Theme().row)
 		surface.DrawRect(PAD, H - FOOTER + 8, 70, 32)
-		surface.SetDrawColor(sHotR and Theme.rowHot or Theme.row)
+		surface.SetDrawColor(sHotR and Theme().rowHot or Theme().row)
 		surface.DrawRect(PAD + 78, H - FOOTER + 8, 70, 32)
-		draw.SimpleText("▲", "DermaDefaultBold", PAD + 35, H - FOOTER + 24, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-		draw.SimpleText("▼", "DermaDefaultBold", PAD + 113, H - FOOTER + 24, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-		draw.SimpleText(string.format("%d–%d / %d", rowScroll + 1, math.min(rowScroll + VISIBLE_ROWS, #rows), #rows), "DermaDefault", W - PAD, H - FOOTER + 24, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+		draw.SimpleText("▲", "DermaDefaultBold", PAD + 35, H - FOOTER + 24, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText("▼", "DermaDefaultBold", PAD + 113, H - FOOTER + 24, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText(string.format("%d–%d / %d", rowScroll + 1, math.min(rowScroll + VISIBLE_ROWS, #rows), #rows), "DermaDefault", W - PAD, H - FOOTER + 24, Theme().muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 
 		if focused and mx >= 0 and my >= 0 then
-			surface.SetDrawColor(Theme.hot)
+			surface.SetDrawColor(Theme().hot)
 			surface.DrawRect(mx - 2, my - 14, 4, 28)
 			surface.DrawRect(mx - 14, my - 2, 28, 4)
 		end

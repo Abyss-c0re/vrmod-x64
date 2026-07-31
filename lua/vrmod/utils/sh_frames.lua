@@ -33,27 +33,33 @@ function vrmod.utils.CopyFrame(srcFrame)
     return copy
 end
 
-function vrmod.utils.ConvertToRelativeFrame(absFrame)
-    local lp = LocalPlayer()
-    if not IsValid(lp) then return nil end
-    local plyAng
-    if lp:InVehicle() then
-        local veh = lp:GetVehicle()
-        if IsValid(veh) then
-            plyAng = veh:GetAngles()
+--- World → origin-local frame (reusable for player net, NPC retarget, braincube).
+-- originPos / originAng default to LocalPlayer when CLIENT; must be passed on SERVER.
+function vrmod.utils.FrameToRelative(absFrame, originPos, originAng)
+    if not absFrame then return nil end
+    if not originPos or not originAng then
+        if CLIENT then
+            local lp = LocalPlayer()
+            if not IsValid(lp) then return nil end
+            originPos = originPos or lp:GetPos()
+            if not originAng then
+                if lp:InVehicle() then
+                    local veh = lp:GetVehicle()
+                    originAng = IsValid(veh) and veh:GetAngles() or Angle()
+                else
+                    originAng = Angle()
+                end
+            end
         else
-            plyAng = Angle()
+            return nil
         end
-    else
-        plyAng = Angle()
     end
+    if isnumber(originAng) then originAng = Angle(0, originAng, 0) end
 
-    local plyPos = lp:GetPos()
     local relFrame = {
-        characterYaw = absFrame.characterYaw
+        characterYaw = absFrame.characterYaw,
+        ts = absFrame.ts,
     }
-
-    -- Fingers
     for i = 1, 10 do
         relFrame["finger" .. i] = absFrame["finger" .. i]
     end
@@ -62,22 +68,78 @@ function vrmod.utils.ConvertToRelativeFrame(absFrame)
         local pos = absFrame[posKey]
         local ang = absFrame[angKey]
         if pos and ang then
-            local localPos, localAng = WorldToLocal(pos, ang, plyPos, plyAng)
+            local localPos, localAng = WorldToLocal(pos, ang, originPos, originAng)
             relFrame[posKey] = localPos
             relFrame[angKey] = localAng
         end
     end
 
-    -- Main tracked points
     convertPosAng("hmdPos", "hmdAng")
     convertPosAng("lefthandPos", "lefthandAng")
     convertPosAng("righthandPos", "righthandAng")
-    if g_VR.sixPoints then
+    if absFrame.waistPos or absFrame.leftfootPos or absFrame.rightfootPos then
         convertPosAng("waistPos", "waistAng")
         convertPosAng("leftfootPos", "leftfootAng")
         convertPosAng("rightfootPos", "rightfootAng")
     end
     return relFrame
+end
+
+--- Origin-local → world (NPC stand / retarget).
+function vrmod.utils.FrameToAbsolute(relFrame, originPos, originAng)
+    if not relFrame or not originPos then return nil end
+    if not originAng then originAng = Angle() end
+    if isnumber(originAng) then originAng = Angle(0, originAng, 0) end
+
+    local absFrame = {
+        characterYaw = (originAng.yaw or 0) + (relFrame.characterYaw or 0),
+        ts = relFrame.ts,
+    }
+    -- characterYaw stored relative is often absolute yaw already — prefer explicit
+    if relFrame.characterYawAbsolute then
+        absFrame.characterYaw = relFrame.characterYaw
+    end
+    for i = 1, 10 do
+        absFrame["finger" .. i] = relFrame["finger" .. i]
+    end
+
+    local function convertPosAng(posKey, angKey)
+        local pos = relFrame[posKey]
+        local ang = relFrame[angKey]
+        if pos and ang then
+            absFrame[posKey], absFrame[angKey] = LocalToWorld(pos, ang, originPos, originAng)
+        end
+    end
+
+    convertPosAng("hmdPos", "hmdAng")
+    convertPosAng("lefthandPos", "lefthandAng")
+    convertPosAng("righthandPos", "righthandAng")
+    if relFrame.waistPos or relFrame.leftfootPos or relFrame.rightfootPos then
+        convertPosAng("waistPos", "waistAng")
+        convertPosAng("leftfootPos", "leftfootAng")
+        convertPosAng("rightfootPos", "rightfootAng")
+    end
+    return absFrame
+end
+
+--- Feet+yaw origin for a VR frame (pelvis/feet proxy from HMD when no feet).
+function vrmod.utils.FrameOrigin(absFrame, fallbackPos)
+    if not absFrame then return fallbackPos or Vector(), Angle() end
+    local yaw = absFrame.characterYaw or 0
+    local z = fallbackPos and fallbackPos.z or 0
+    local x, y = fallbackPos and fallbackPos.x or 0, fallbackPos and fallbackPos.y or 0
+    if absFrame.waistPos then
+        x, y, z = absFrame.waistPos.x, absFrame.waistPos.y, absFrame.waistPos.z
+    elseif absFrame.hmdPos then
+        x, y = absFrame.hmdPos.x, absFrame.hmdPos.y
+        z = absFrame.hmdPos.z - 66.8
+    end
+    return Vector(x, y, z), Angle(0, yaw, 0)
+end
+
+-- Back-compat: player-relative (CLIENT)
+function vrmod.utils.ConvertToRelativeFrame(absFrame)
+    return vrmod.utils.FrameToRelative(absFrame, nil, nil)
 end
 
 function vrmod.utils.FramesAreEqual(f1, f2)

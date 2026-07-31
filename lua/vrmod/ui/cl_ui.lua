@@ -16,8 +16,10 @@ if CLIENT then
 		"Global VR/Derma UI scale (0.5–2.0)", 0.5, 2.0)
 
 	function vrmod.GetUIScale()
+		-- Default 1.0 — never silently shrink fonts/menus
 		local s = cv_ui_scale and cv_ui_scale:GetFloat() or 1
-		if s ~= s or s < 0.5 then s = 0.5 end
+		if s ~= s or s <= 0 then s = 1 end
+		if s < 0.75 then s = 0.75 end -- floor so QM text stays readable
 		if s > 2 then s = 2 end
 		return s
 	end

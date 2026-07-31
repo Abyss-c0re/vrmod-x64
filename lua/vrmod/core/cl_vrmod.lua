@@ -802,14 +802,34 @@ if CLIENT then
 		if not view or not view.origin or not view.angles then return end
 		if not g_VR.rt then return end
 
+		-- Recover RT size after lua_refresh / partial start (never arithmetic on nil)
+		local rtW = tonumber(g_VR.rtWidth)
+		local rtH = tonumber(g_VR.rtHeight)
+		if not rtW or not rtH or rtW < 32 or rtH < 32 then
+			local rtw, rth = 0, 0
+			if g_VR.rt.Width and g_VR.rt.Height then
+				rtw, rth = g_VR.rt:Width(), g_VR.rt:Height()
+			end
+			rtW = (rtw and rtw >= 32) and rtw or 2048
+			rtH = (rth and rth >= 32) and rth or 1024
+			g_VR.rtWidth, g_VR.rtHeight = rtW, rtH
+			if vrmod.logger then
+				vrmod.logger.Warn("PerformRenderViews recovered rt size %sx%s", rtW, rtH)
+			end
+		end
+		local rtHalfW = math.floor(rtW / 2)
+		if rtHalfW < 16 then return end
+
 		local ang = view.angles
 		local fwd = ang:Forward()
 		local right = ang:Right()
 		local up = ang:Up()
-		local scale = g_VR.scale
-		local eyeScale = convars.vrmod_eyescale:GetFloat()
-		eyeOffset = ipd * scale
-		forwardOffset = fwd * -(eyez * scale)
+		local scale = g_VR.scale or 1
+		local eyeScale = (convars.vrmod_eyescale and convars.vrmod_eyescale:GetFloat()) or 0.5
+		local ipdUse = ipd or 0.064
+		local eyezUse = eyez or 0
+		eyeOffset = ipdUse * scale
+		forwardOffset = fwd * -(eyezUse * scale)
 		verticalOffset = up * -2.1
 
 		-- Cyclopean SoT (public) — never leave g_VR.view stuck on last eye
@@ -820,10 +840,6 @@ if CLIENT then
 
 		g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale) + verticalOffset
 		g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale) + verticalOffset
-
-		local rtW = g_VR.rtWidth
-		local rtH = g_VR.rtHeight
-		local rtHalfW = math.floor(rtW / 2)
 
 		-- Optional eye swap (PSVR2 / inverted-stereo reports): content for logical L/R
 		-- still uses correct IPD/FOV, but is written into the opposite SBS half.
@@ -1052,13 +1068,43 @@ if CLIENT then
 		BindRenderProfileCallbacks()
 	end
 
-	-- 4) Action manifest & input initialization
+	-- 4) Action manifest & input initialization (never abort VR start)
 	local function SetupActions()
-		VRMOD_SetActionManifest("vrmod/vrmod_action_manifest.txt")
+		-- Ensure DATA files exist before native path resolve
+		if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
+		if g_VR.action_manifest and not file.Exists("vrmod/vrmod_action_manifest.txt", "DATA") then
+			file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
+		elseif g_VR.action_manifest then
+			-- refresh if empty
+			local existing = file.Read("vrmod/vrmod_action_manifest.txt", "DATA")
+			if not existing or #existing < 32 then
+				file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
+			end
+		end
+
+		local okMan, errMan = pcall(VRMOD_SetActionManifest, "vrmod/vrmod_action_manifest.txt")
+		if not okMan then
+			-- retry after force rewrite
+			if g_VR.action_manifest then
+				file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
+			end
+			okMan, errMan = pcall(VRMOD_SetActionManifest, "vrmod/vrmod_action_manifest.txt")
+		end
+		if not okMan and vrmod.logger then
+			vrmod.logger.Err("SetActionManifest failed (VR continues without bindings): %s", errMan)
+		end
+
 		local set = LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main"
-		VRMOD_SetActiveActionSets("/actions/base", set)
-		VRUtilLoadCustomActions()
-		g_VR.input, g_VR.changedInputs = VRMOD_GetActions()
+		pcall(VRMOD_SetActiveActionSets, "/actions/base", set)
+		if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
+		if isfunction(VRMOD_GetActions) then
+			local okA, a, b = pcall(VRMOD_GetActions)
+			if okA then
+				g_VR.input, g_VR.changedInputs = a, b
+			else
+				g_VR.input, g_VR.changedInputs = g_VR.input or {}, g_VR.changedInputs or {}
+			end
+		end
 	end
 
 	-- 5) Networking & origin
@@ -1268,7 +1314,8 @@ if CLIENT then
 				render.PopRenderTarget()
 				g_VR.rt = nil
 			end
-
+			g_VR.rtWidth, g_VR.rtHeight = nil, nil
+			g_VR.stereoEye = nil
 			g_VR.active = false
 			EndVRNestedRenderLock()
 			VRMOD_Shutdown()
@@ -1282,22 +1329,38 @@ if CLIENT then
 	function VRUtilClientStart()
 		if not PerformStartup() then return end
 		OverridePerformanceConvars()
-		SetupRenderTargets()
-		SetupActions()
-		SetupNetworkAndOrigin()
-		SetupScaleAndOffsets()
+		-- RT setup is mandatory; if it fails, do not bind RenderScene
+		local okRT, errRT = pcall(SetupRenderTargets)
+		if not okRT or not g_VR.rt or not g_VR.rtWidth then
+			if vrmod.logger then
+				vrmod.logger.Err("SetupRenderTargets failed: %s", errRT)
+			end
+			return
+		end
+		-- Actions may fail (manifest path) — never block eyes/HUD
+		pcall(SetupActions)
+		pcall(SetupNetworkAndOrigin)
+		pcall(SetupScaleAndOffsets)
 		SetupViewParams()
 		if g_VR.view then
 			g_VR.view.drawmonitors = false
+			g_VR.view.w = g_VR.view.w or (g_VR.rtWidth / 2)
+			g_VR.view.h = g_VR.view.h or g_VR.rtHeight
 		end
 		InitializeTracking()
-		SetupHandSimulation()
+		pcall(SetupHandSimulation)
 		g_VR.active = true
 		BeginVRNestedRenderLock()
 		BindRenderSceneHook()
 		SetupModelAndPlayerHooks()
 		SetupShutdownHooks()
-		vrmod.StartLocomotion()
-		vrmod.logger.Info("Started VR session (nested RenderView lock active)")
+		if vrmod.StartLocomotion then pcall(vrmod.StartLocomotion) end
+		-- HUD bind after eyes are live
+		if vrmod.RefreshHUD then
+			timer.Simple(0, function()
+				if g_VR.active and vrmod.RefreshHUD then vrmod.RefreshHUD() end
+			end)
+		end
+		vrmod.logger.Info("Started VR session (nested RenderView lock active) rt=%sx%s", g_VR.rtWidth, g_VR.rtHeight)
 	end
 end

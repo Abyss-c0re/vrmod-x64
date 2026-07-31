@@ -21,19 +21,28 @@ local statusUntil = 0
 local W, H = 512, 600
 local livePos, liveAng, liveScale = Vector(2.5, 3, 4), Angle(0, -90, 55), 0.025
 
-local Theme = {
-	bg = Color(12, 6, 10, 250),
-	header = Color(196, 30, 58, 255),
-	headerDim = Color(70, 14, 24, 255),
-	row = Color(40, 14, 20, 245),
-	rowHot = Color(95, 24, 38, 255),
-	rowOn = Color(120, 30, 48, 255),
-	text = Color(255, 240, 244, 255),
-	muted = Color(200, 150, 165, 230),
-	hot = Color(255, 70, 100, 255),
-	ok = Color(90, 220, 150, 255),
-	off = Color(70, 20, 30, 255),
-}
+-- Live theme (Settings → Theme applies to Avatar + all menus)
+local function Theme()
+	if vrmod.cube and vrmod.cube.ThemeLive then
+		local T = vrmod.cube.ThemeLive()
+		-- rowOn alias for selected tabs
+		if not T.rowOn then T.rowOn = T.rowHot or T.btnHover end
+		return T
+	end
+	return {
+		bg = Color(12, 6, 10, 250),
+		header = Color(196, 30, 58, 255),
+		headerDim = Color(70, 14, 24, 255),
+		row = Color(40, 14, 20, 245),
+		rowHot = Color(95, 24, 38, 255),
+		rowOn = Color(120, 30, 48, 255),
+		text = Color(255, 240, 244, 255),
+		muted = Color(200, 150, 165, 230),
+		hot = Color(255, 70, 100, 255),
+		ok = Color(90, 220, 150, 255),
+		off = Color(70, 20, 30, 255),
+	}
+end
 
 local TAB_NAMES = { "Height", "Model", "Body", "Bones" }
 local HEADER, TAB_H, PAD, ROW_H = 52, 36, 12, 44
@@ -181,11 +190,11 @@ local function rebuildButtons()
 end
 
 local function drawBtn(x, y, w, h, label, hot, on)
-	surface.SetDrawColor(on and Theme.rowOn or (hot and Theme.rowHot or Theme.row))
+	surface.SetDrawColor(on and Theme().rowOn or (hot and Theme().rowHot or Theme().row))
 	surface.DrawRect(x, y, w, h)
-	surface.SetDrawColor(hot and Theme.hot or Theme.header)
+	surface.SetDrawColor(hot and Theme().hot or Theme().header)
 	surface.DrawOutlinedRect(x, y, w, h, hot and 2 or 1)
-	draw.SimpleText(tostring(label or ""), "DermaDefaultBold", x + w * 0.5, y + h * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	draw.SimpleText(tostring(label or ""), "DermaDefaultBold", x + w * 0.5, y + h * 0.5, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 end
 
 local function paint()
@@ -202,15 +211,15 @@ local function paint()
 
 	if VRUtilMenuRenderStart(UID) == false then return end
 	local okPaint, errPaint = pcall(function()
-		surface.SetDrawColor(Theme.bg)
+		surface.SetDrawColor(Theme().bg)
 		surface.DrawRect(0, 0, W, H)
-		surface.SetDrawColor(Theme.headerDim)
+		surface.SetDrawColor(Theme().headerDim)
 		surface.DrawRect(0, 0, W, HEADER)
-		surface.SetDrawColor(Theme.header)
+		surface.SetDrawColor(Theme().header)
 		surface.DrawRect(0, HEADER - 3, W, 3)
 
-		draw.SimpleText("AVATAR", "DermaLarge", PAD, 8, Theme.header)
-		draw.SimpleText(focused and "LASER LOCK" or "point laser · Cube custom", "DermaDefault", PAD, 32, focused and Theme.ok or Theme.muted)
+		draw.SimpleText("AVATAR", "DermaLarge", PAD, 8, Theme().header)
+		draw.SimpleText(focused and "LASER LOCK" or "point laser · Cube custom", "DermaDefault", PAD, 32, focused and Theme().ok or Theme().muted)
 
 		local closeHot = focused and mx >= W - 52 and mx <= W - 12 and my >= 6 and my <= 42
 		drawBtn(W - 52, 6, 40, 36, "X", closeHot, false)
@@ -228,8 +237,8 @@ local function paint()
 
 		if tab == 1 then
 			local sc = g_VR.scale or 1
-			draw.SimpleText(string.format("world scale  %.2f", sc), "DermaLarge", W * 0.5, y0 + 8, Theme.text, TEXT_ALIGN_CENTER)
-			draw.SimpleText("MIRROR = your left↔right · like a real mirror", "DermaDefault", W * 0.5, y0 + 32, Theme.muted, TEXT_ALIGN_CENTER)
+			draw.SimpleText(string.format("world scale  %.2f", sc), "DermaLarge", W * 0.5, y0 + 8, Theme().text, TEXT_ALIGN_CENTER)
+			draw.SimpleText("MIRROR = your left↔right · like a real mirror", "DermaDefault", W * 0.5, y0 + 32, Theme().muted, TEXT_ALIGN_CENTER)
 			local bw = (W - PAD * 2 - 16) / 3
 			drawBtn(PAD, y0 + 50, bw, 48, "+", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD + bw + 8, y0 + 50, bw, 48, "AUTO", focused and my >= y0 + 50 and my <= y0 + 98, false)
@@ -244,7 +253,7 @@ local function paint()
 			drawBtn(PAD, y0 + 226, (W - PAD * 2 - 8) / 2, 40, "DIST −", false, false)
 			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 226, (W - PAD * 2 - 8) / 2, 40, string.format("DIST %.0f", dist), false, false)
 		elseif tab == 2 then
-			draw.SimpleText("select playermodel · twin updates live", "DermaDefault", PAD, y0 - 2, Theme.muted)
+			draw.SimpleText("select playermodel · twin updates live", "DermaDefault", PAD, y0 - 2, Theme().muted)
 			local vis = 8
 			local cur = s and s.model or ""
 			for i = 1, vis do
@@ -264,9 +273,9 @@ local function paint()
 		elseif tab == 3 then
 			local ent = s and s:GetEntity()
 			if not IsValid(ent) then
-				draw.SimpleText("open twin first…", "DermaDefault", W * 0.5, y0 + 40, Theme.muted, TEXT_ALIGN_CENTER)
+				draw.SimpleText("open twin first…", "DermaDefault", W * 0.5, y0 + 40, Theme().muted, TEXT_ALIGN_CENTER)
 			else
-				draw.SimpleText("bodygroups · skins", "DermaDefault", PAD, y0 - 2, Theme.muted)
+				draw.SimpleText("bodygroups · skins", "DermaDefault", PAD, y0 - 2, Theme().muted)
 				local nbg = ent:GetNumBodyGroups() or 0
 				local vis = 7
 				for i = 1, vis do
@@ -277,9 +286,9 @@ local function paint()
 						local val = ent:GetBodygroup(bg) or 0
 						local cnt = ent:GetBodygroupCount(bg) or 1
 						drawBtn(PAD, y, 48, ROW_H, "−", false, false)
-						surface.SetDrawColor(Theme.row)
+						surface.SetDrawColor(Theme().row)
 						surface.DrawRect(PAD + 52, y, W - PAD * 2 - 104, ROW_H)
-						draw.SimpleText(string.format("%s  %d/%d", name, val, math.max(0, cnt - 1)), "DermaDefaultBold", W * 0.5, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+						draw.SimpleText(string.format("%s  %d/%d", name, val, math.max(0, cnt - 1)), "DermaDefaultBold", W * 0.5, y + ROW_H * 0.5, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 						drawBtn(W - PAD - 48, y, 48, ROW_H, "+", false, false)
 					end
 				end
@@ -300,7 +309,7 @@ local function paint()
 			if s2 and s2.customHidden then
 				for _ in pairs(s2.customHidden) do nHide = nHide + 1 end
 			end
-			draw.SimpleText("point laser at twin bone · trigger = hide/show", "DermaDefault", PAD, y0 - 4, Theme.muted)
+			draw.SimpleText("point laser at twin bone · trigger = hide/show", "DermaDefault", PAD, y0 - 4, Theme().muted)
 			drawBtn(PAD, y0 + 8, W - PAD * 2, 40, hh and "HEAD HIDDEN" or "HIDE HEAD", false, hh)
 			drawBtn(PAD, y0 + 54, W - PAD * 2, 40, hh2 and "HANDS HIDDEN" or "HIDE HANDS", false, hh2)
 			drawBtn(PAD, y0 + 100, W - PAD * 2, 40, tr and "HAND TRACKERS ON" or "HAND TRACKERS", false, tr)
@@ -309,16 +318,16 @@ local function paint()
 			drawBtn(PAD, y0 + 238, W - PAD * 2, 40, "RESTART TWIN", false, false)
 			drawBtn(PAD, y0 + 284, W - PAD * 2, 40, "SAVE TO PLAYER", false, false)
 			if hoverName then
-				draw.SimpleText("aim: " .. hoverName, "DermaDefaultBold", W * 0.5, H - 36, Theme.hot, TEXT_ALIGN_CENTER)
+				draw.SimpleText("aim: " .. hoverName, "DermaDefaultBold", W * 0.5, H - 36, Theme().hot, TEXT_ALIGN_CENTER)
 			end
 		end
 
 		if statusMsg ~= "" and CurTime() < statusUntil then
-			draw.SimpleText(statusMsg, "DermaDefaultBold", W * 0.5, H - 22, Theme.ok, TEXT_ALIGN_CENTER)
+			draw.SimpleText(statusMsg, "DermaDefaultBold", W * 0.5, H - 22, Theme().ok, TEXT_ALIGN_CENTER)
 		end
 
 		if focused and mx >= 0 then
-			surface.SetDrawColor(Theme.hot)
+			surface.SetDrawColor(Theme().hot)
 			surface.DrawRect(mx - 2, my - 12, 4, 24)
 			surface.DrawRect(mx - 12, my - 2, 24, 4)
 		end

@@ -83,28 +83,54 @@ function g_VR.MenuOpen()
 	local function paint(hoveredItem)
 		if not isfunction(VRUtilMenuRenderStart) then return end
 		VRUtilMenuRenderStart("miscmenu")
-		local buttonWidth, buttonHeight = 82, 53
+		local C = vrmod.cube
+		local T = (C and C.ThemeLive and C.ThemeLive()) or (C and C.Theme) or {}
+		local buttonWidth, buttonHeight = 82, 56
 		local gap = (512 - buttonWidth * 6) / 5
+
+		-- Crimson Cube chrome (not flat black boxes)
+		if C and C.DrawChrome then
+			C.DrawChrome(0, 0, 512, 512, "QUICK MENU", {
+				subtitle = (T.presetLabel or "Theme"),
+				pad = 14,
+				headerH = 48,
+			})
+		else
+			surface.SetDrawColor(12, 6, 10, 240)
+			surface.DrawRect(0, 0, 512, 512)
+			surface.SetDrawColor(196, 30, 58, 255)
+			surface.DrawRect(0, 0, 512, 4)
+		end
+
 		for i = 1, #items do
 			local x, y = items[i].slot, items[i].actualSlotPos
-			draw.RoundedBox(8, x * (buttonWidth + gap), 230 + y * (buttonHeight + gap), buttonWidth, buttonHeight, Color(0, 0, 0, hoveredItem == i and 200 or 128))
+			local bx = x * (buttonWidth + gap)
+			local by = 200 + y * (buttonHeight + gap)
 			local item = g_VR.menuItems and g_VR.menuItems[items[i].index]
+			local label = ""
 			if item then
-				local label
 				if hoveredItem == i and item.hint then
 					label = item.hint
 				else
 					label = item.name
 				end
 				label = tostring(label or "")
-				local explosion = string.Explode(" ", label, false)
-				for j = 1, #explosion do
-					draw.SimpleText(explosion[j], "HudSelectionText", buttonWidth / 2 + x * (buttonWidth + gap), 230 + buttonHeight / 2 + y * (buttonHeight + gap) - (#explosion * 6 - 6 - (j - 1) * 12), Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-				end
+			end
+			if C and C.DrawButtonMultiline then
+				C.DrawButtonMultiline(bx, by, buttonWidth, buttonHeight, label, hoveredItem == i, true)
+			elseif C and C.DrawSlot then
+				C.DrawSlot(bx, by, buttonWidth, buttonHeight, label, hoveredItem == i, false, true)
+			else
+				draw.RoundedBox(8, bx, by, buttonWidth, buttonHeight, Color(55, 14, 24, hoveredItem == i and 250 or 200))
+				draw.SimpleText(label, "HudSelectionText", bx + buttonWidth / 2, by + buttonHeight / 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 			end
 		end
 		if #items == 0 then
-			draw.SimpleText("no menu items", "HudSelectionText", 256, 256, Color(200, 200, 200), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			local font = (C and C.Font and C.Font("CubeLabel")) or "HudSelectionText"
+			draw.SimpleText("no menu items", font, 256, 280, T.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
+		if C and C.DrawFooterLaw then
+			C.DrawFooterLaw(0, 488, 512, 2)
 		end
 		VRUtilMenuRenderEnd()
 	end
