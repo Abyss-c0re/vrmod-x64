@@ -102,28 +102,34 @@ local function CVString(name, default)
 	return default
 end
 
---- Crimson Cube vitals (no center crosshair — VR aims with hands/laser)
+--- Vitals match Settings → Theme (same palette as menus). No center crosshair.
 local function PaintVitals(w, h)
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return end
-	-- World HUD stays neutral; Theme skins menus only
-	local outline = Color(0, 0, 0, 220)
+
+	local T = (vrmod.cube and vrmod.cube.ThemeLive and vrmod.cube.ThemeLive())
+		or (vrmod.cube and vrmod.cube.Theme)
+		or {}
+	local outline = T.outline or Color(0, 0, 0, 220)
 	local fontV = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeHuge")) or "DermaLarge"
 	local fontL = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefaultBold"
+	local muted = T.muted or Color(200, 150, 165, 230)
 
 	local hp = math.max(0, math.floor(ply:Health() or 0))
 	local arm = math.max(0, math.floor(ply:Armor() or 0))
-	local hpCol = hp <= 25 and Color(255, 50, 50, 255) or Color(255, 220, 60, 255)
+	local hpCol = hp <= 25
+		and (T.healthLow or Color(255, 50, 50, 255))
+		or (T.health or Color(255, 220, 60, 255))
 
 	draw.SimpleTextOutlined(tostring(hp), fontV, 36, h - 52, hpCol,
 		TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 2, outline)
-	draw.SimpleTextOutlined("HEALTH", fontL, 36, h - 28, T.muted or Color(200, 150, 165, 230),
+	draw.SimpleTextOutlined("HEALTH", fontL, 36, h - 28, muted,
 		TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 1, outline)
 
 	if arm > 0 then
-		draw.SimpleTextOutlined(tostring(arm), fontV, 170, h - 52, Color(90, 170, 255, 255),
+		draw.SimpleTextOutlined(tostring(arm), fontV, 170, h - 52, T.armor or Color(90, 170, 255, 255),
 			TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 2, outline)
-		draw.SimpleTextOutlined("ARMOR", fontL, 170, h - 28, Color(170, 200, 255, 255),
+		draw.SimpleTextOutlined("ARMOR", fontL, 170, h - 28, muted,
 			TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 1, outline)
 	end
 
@@ -142,9 +148,9 @@ local function PaintVitals(w, h)
 			line = tostring(ammo)
 		end
 		if line then
-			draw.SimpleTextOutlined(line, fontV, w - 36, h - 52, color_white,
+			draw.SimpleTextOutlined(line, fontV, w - 36, h - 52, T.ammo or T.text or color_white,
 				TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 2, outline)
-			draw.SimpleTextOutlined("AMMO", fontL, w - 36, h - 28, Color(220, 220, 220, 255),
+			draw.SimpleTextOutlined("AMMO", fontL, w - 36, h - 28, muted,
 				TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, outline)
 		end
 	end

@@ -204,7 +204,7 @@ function F.RefreshTheme()
 	end
 
 	F.Theme = T
-	-- Menus / settings re-paint from ThemeLive; world HUD stays neutral
+	-- Menus + HUD vitals read ThemeLive each paint; fire for listeners
 	hook.Run("VRMod_CubeThemeChanged", T)
 	return T
 end
