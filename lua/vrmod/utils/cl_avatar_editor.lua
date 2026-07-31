@@ -1,16 +1,15 @@
 -- =============================================================================
 -- vrmod.avatar — Cube player customization twin
 --
--- Cube law: one body SoT = vrmod.charik (same math as cl_character).
--- Frame SoT = sh_network buildClientFrame / lerpedFrame (read-only here).
+-- Cube law: the VR playermodel is already correct (cl_character / FBT).
+-- Twin does NOT re-solve arm IK. Every frame:
+--   snapshot LocalPlayer bone matrices (working VR body)
+--   → MapMirror / MapClone into twin stand space
+--   → L↔R bone name remap (facing) so limbs never stretch same-ID
+--   → BuildBonePositions SetBoneMatrix only
 --
--- Every frame:
---   ReadLocalVRFrame (never VRUtilNetUpdateLocalPly)
---   → charik.TransformFrame(facing = flip + L↔R | clone = rigid)
---   → charik.Update (full arms + fingers + crouch manip + head angle-only)
---   → BuildBonePositions: charik.ApplyMatrices
---
--- Customization only on twin model looks. No dual-truth pose forks.
+-- Fallback: charik.TransformFrame + Update only if player skeleton unavailable.
+-- Never VRUtilNetUpdateLocalPly from the twin.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
 if SERVER then return end
@@ -725,8 +724,87 @@ local function ReadLocalVRFrame()
 	return frame
 end
 
---- Net frame (read-only) → charik.TransformFrame (flip) → charik.Update (full body).
--- facing: sagittal flip + L↔R before ProcessArm — never same-ID mirrored limbs.
+--- Mirror the *already-solved* VR playermodel — do NOT re-run arm IK.
+-- The real player bones are the SoT (cl_character / FBT). We only:
+--   1) snapshot world bone matrices from LocalPlayer
+--   2) MapMirror / MapClone into twin stand space
+--   3) L↔R bone name remap in facing mode (never same-ID flip → stretch)
+-- That preserves limb lengths exactly — no rubber-band ProcessArm reach.
+function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
+	local ply = LocalPlayer()
+	if not IsValid(ply) or not IsValid(self.ent) then return false end
+	if not g_VR or not g_VR.active then return false end
+
+	local headId = ply:LookupBone("ValveBiped.Bip01_Head1")
+	-- Stereo path hides local head (scale 0 + nudge). Unhide for one snapshot so
+	-- the twin gets a real head, then restore.
+	local hideHead = false
+	if isnumber(headId) and headId >= 0 then
+		local ep = EyePos()
+		hideHead = g_VR.eyePosLeft and g_VR.eyePosRight
+			and (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight)
+			and ply:GetViewEntity() == ply
+		ply:ManipulateBoneScale(headId, Vector(1, 1, 1))
+		ply:ManipulateBonePosition(headId, Vector(0, 0, 0))
+	end
+
+	-- Force a clean posed skeleton (player IK already ran in PrePlayerDraw this frame)
+	ply:InvalidateBoneCache()
+	ply:SetupBones()
+
+	local mirror = self:_isMirrorMode()
+	local standPos = self.standPos
+	local standAng = self.standAng or playerYaw
+	local targets = {}
+	local n = ply:GetBoneCount() or 0
+	local copied = 0
+
+	for i = 0, n - 1 do
+		local name = ply:GetBoneName(i)
+		if not name or name == "" or name == "__INVALIDBONE__" then continue end
+		local m = ply:GetBoneMatrix(i)
+		if not m then continue end
+
+		local pos = m:GetTranslation()
+		local ang = m:GetAngles()
+		local npos, nang
+		if self.mode == "world" then
+			npos, nang = pos, ang
+		elseif mirror then
+			npos, nang = MapMirror(pos, ang, playerFeet, playerYaw, standPos, standAng)
+		else
+			npos, nang = MapClone(pos, ang, playerFeet, playerYaw, standPos, standAng)
+		end
+
+		local twinName = mirror and MirrorBoneName(name) or name
+		local tid = self.ent:LookupBone(twinName)
+		if not tid or tid < 0 then
+			-- same-name fallback (center bones / missing pair)
+			tid = self.ent:LookupBone(name)
+		end
+		if not tid or tid < 0 then continue end
+
+		-- World matrix only — never copy scale (would stretch mesh)
+		local mat = Matrix()
+		mat:Identity()
+		mat:SetTranslation(npos)
+		mat:SetAngles(nang)
+		targets[tid] = mat
+		copied = copied + 1
+	end
+
+	-- Restore local head hide for stereo comfort
+	if hideHead and isnumber(headId) and headId >= 0 then
+		ply:ManipulateBoneScale(headId, Vector(0.001, 0.001, 0.001))
+		ply:ManipulateBonePosition(headId, Vector(0, 20, 0))
+	end
+
+	if copied < 4 then return false end
+	self.targets = targets
+	return true
+end
+
+--- Fallback only if player skeleton unavailable (no character system yet).
 function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	local charik = vrmod.charik or vrmod.frameik
 	if not charik then return false end
@@ -754,15 +832,14 @@ function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	)
 	if not okT or not twinFrame then return false end
 
-	-- Park twin root for clavicle matrices during Update
 	self.ent:SetPos(self.standPos)
 	self.ent:SetAngles(self.standAng or Angle(0, twinFrame.characterYaw or 0, 0))
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
 	self.ik.noStretch = true
-	self.ik.headDampen = self.headDampen ~= false
-	self.ik.headMaxPitch = self.headMaxPitch or 55
+	self.ik.headDampen = true
+	self.ik.headMaxPitch = self.headMaxPitch or 45
 
 	local eyeH = 66.8
 	if vrmod.GetConvars then
@@ -784,18 +861,23 @@ function Session:_applyTracking()
 	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
 	if not hmd then return end
 
-	-- Same body yaw as net frame / character system
+	-- Same body yaw as real VR character (net / character system)
 	local cyaw = g_VR.characterYaw
 	if isnumber(cyaw) then
 		yaw = cyaw
 		playerYaw = Angle(0, yaw, 0)
 	end
 	local originZ = (g_VR.origin and g_VR.origin.z) or playerFeet.z
-	playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
+	-- Feet under character, not HMD pitch-wobble
+	local frame = ReadLocalVRFrame()
+	if frame and frame.hmdPos then
+		playerFeet = Vector(frame.hmdPos.x, frame.hmdPos.y, originZ)
+	else
+		playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
+	end
 
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
 
-	-- Always park twin in world (visible even if IK fails)
 	self.ent:SetPos(self.standPos)
 	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 
@@ -804,8 +886,17 @@ function Session:_applyTracking()
 		return
 	end
 
-	-- Net frame (read-only) → transform → character IK
-	if not self:_applyFromNetFrame(playerFeet, playerYaw) then
+	-- Primary: mirror the working VR playermodel bones (no re-IK stretch)
+	local ok = false
+	local okP, res = pcall(function()
+		return self:_mirrorWorkingPlayer(playerFeet, playerYaw)
+	end)
+	ok = okP and res
+	-- Fallback: frame → charik only if player skeleton not ready
+	if not ok then
+		ok = self:_applyFromNetFrame(playerFeet, playerYaw)
+	end
+	if not ok then
 		self.targets = {}
 	end
 end
@@ -950,17 +1041,12 @@ function vrmod.avatar.Open(opts)
 	s:_applyHideBones()
 	sessions[id] = s
 
-	-- Full charik matrices (arms + fingers + head) only in BuildBonePositions
+	-- Apply twin targets only (mirrored player matrices or fallback IK)
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
-		if not s.active then return end
-		local charik = vrmod.charik or vrmod.frameik
-		if charik and s.ik then
-			charik.ApplyMatrices(e, s.ik)
-		elseif s.targets then
-			for boneId, mat in pairs(s.targets) do
-				if boneId and mat and e:GetBoneMatrix(boneId) then
-					e:SetBoneMatrix(boneId, mat)
-				end
+		if not s.active or not s.targets then return end
+		for boneId, mat in pairs(s.targets) do
+			if boneId and mat and e:GetBoneMatrix(boneId) then
+				e:SetBoneMatrix(boneId, mat)
 			end
 		end
 	end)
