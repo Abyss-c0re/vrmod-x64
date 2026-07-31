@@ -85,6 +85,8 @@ local bound = {} -- uid → { panel, kind, place }
 local seq = 0
 local hooksInstalled = false
 local origMakePopup = nil
+-- Last free-float pose per shell kind (origin-relative) so reopen keeps placement
+local shellFloatPose = {} -- kind → { pos, ang, scale }
 
 local MAX_RT = 1024 -- Linux/ToGL-friendly RT dim for UI surfaces
 local MIN_RT = 128
@@ -353,6 +355,17 @@ function W.ManifestPanel(panel, opts)
 	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
 	panel:SetPaintedManually(true)
 
+	local isShell = (kind == "spawnmenu" or kind == "contextmenu")
+	-- Restore free-float placement if user parked this shell earlier
+	local saved = isShell and shellFloatPose[kind] or nil
+	local useFloat = saved and saved.pos and saved.ang
+	if useFloat then
+		place.attachment = false
+		place.pos = saved.pos
+		place.ang = saved.ang
+		if saved.scale then place.scale = saved.scale end
+	end
+
 	-- Already bound same surface + same size: do NOT VRUtilMenuClose/reopen (pose jump)
 	local existing = bound[uid]
 	local already = existing and existing.panel == panel
@@ -360,8 +373,10 @@ function W.ManifestPanel(panel, opts)
 		and g_VR.menus[uid].width == w and g_VR.menus[uid].height == h
 	if already then
 		local m = g_VR.menus[uid]
-		-- Only re-apply pose if still hand-attached (never after free grab)
-		if not m.freeFloat and not m.grabHand and place.attachment then
+		-- Never reset free-float; only re-pin hand if still attached
+		if m.freeFloat or m.grabHand then
+			-- keep parked world pose
+		elseif place.attachment then
 			m.attachment = true
 			m.freeFloat = false
 			m.pos = place.pos
@@ -372,12 +387,22 @@ function W.ManifestPanel(panel, opts)
 		end
 		m.cubeMenu = true
 		m.grabbable = true
+		m.persistOpen = isShell
 		if isfunction(VRUtilMenuRenderPanel) then VRUtilMenuRenderPanel(uid) end
 		log("manifest keep %s uid=%s (no reopen)", kind, uid)
 		return uid
 	end
 
 	VRUtilMenuOpen(uid, w, h, panel, place.attachment, place.pos, place.ang, place.scale, true, function()
+		-- Snapshot free-float before drop so reopen restores placement
+		local m = g_VR and g_VR.menus and g_VR.menus[uid]
+		if m and (m.freeFloat or not m.attachment) and m.pos and m.ang and isShell then
+			shellFloatPose[kind] = {
+				pos = Vector(m.pos),
+				ang = Angle(m.ang.p, m.ang.y, m.ang.r),
+				scale = m.scale,
+			}
+		end
 		if IsValid(panel) then
 			panel:SetPaintedManually(false)
 		end
@@ -388,21 +413,28 @@ function W.ManifestPanel(panel, opts)
 
 	if g_VR.menus and g_VR.menus[uid] then
 		local sc = place.scale or 0.022
-		if kind == "spawnmenu" or kind == "contextmenu" then sc = math.max(sc, 0.02) end
+		if isShell then sc = math.max(sc, 0.02) end
 		local m = g_VR.menus[uid]
 		m.scale = sc
 		m.baseScale = sc
 		m._lastAssignedScale = sc
 		m.cubeMenu = true
 		m.grabbable = true
-		m.keepAlive = false
-		m.allowHiddenPanel = false
-		-- Pin hand pose once at open; Think must not overwrite with raw Place.hand
-		m.attachment = place.attachment and true or false
-		m.freeFloat = not m.attachment
-		m.pos = place.pos
-		m.ang = place.ang
-		m._handPoseLocked = place.attachment and true or false
+		-- Stay alive while QM / other menus open (IsVisible flicker must not kill shell)
+		m.persistOpen = isShell
+		m.keepAlive = isShell
+		m.allowHiddenPanel = isShell
+		if useFloat then
+			m.attachment = false
+			m.freeFloat = true
+			m.pos = place.pos
+			m.ang = place.ang
+		else
+			m.attachment = place.attachment and true or false
+			m.freeFloat = not m.attachment
+			m.pos = place.pos
+			m.ang = place.ang
+		end
 	end
 
 	bound[uid] = {
@@ -414,6 +446,7 @@ function W.ManifestPanel(panel, opts)
 		handPos = place.pos,
 		handAng = place.ang,
 		handScale = place.scale,
+		persistOpen = isShell,
 	}
 
 	if isfunction(VRUtilMenuRenderPanel) then

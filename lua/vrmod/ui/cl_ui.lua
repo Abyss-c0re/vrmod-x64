@@ -299,11 +299,11 @@ if CLIENT then
 					VRUtilMenuClose(k)
 					continue
 				end
-				-- Spawn/context (and other PaintManual shells) can report IsVisible=false
-				-- while still the active VR surface — never auto-close those.
+				-- Spawn/context stay open while bound (QM open must not kill them).
 				if not v.panel:IsVisible() then
-					local keep = v.keepAlive or v.allowHiddenPanel
+					local keep = v.persistOpen or v.keepAlive or v.allowHiddenPanel
 						or (v.panel.IsPaintedManually and v.panel:IsPaintedManually())
+						or k == "p2v_spawnmenu" or k == "p2v_contextmenu"
 					if keep then
 						v.panel:SetVisible(true)
 					else
