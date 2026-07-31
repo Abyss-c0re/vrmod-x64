@@ -1,25 +1,23 @@
 if SERVER then return end
 -- =============================================================================
--- Crimson Cube UI Framework — one energy path for all VR/desktop chrome
+-- Cube UI Framework — customizable + extensible per-element theme
 --
--- Law (cubalc / PROPHECY / CUBE_SYNTHESIS):
---   · Overlay never black-walls the Real
---   · Digit 0–9 = path/identity (algocube law labels)
---   · Desktop: Derma · VR: panel2vr / VRUtilMenu laser surfaces
---   · mat_queue_mode untouched · one SoT theme
+-- Every UI atom is a registered element (id → color/token/font/visible).
+-- Presets fill defaults; per-element overrides persist; addons RegisterElement.
 --
--- Customize:
---   vrmod_cube_preset   classic | void | hive | commander
---   vrmod_cube_accent   "r,g,b" (overrides crimson accent)
---   vrmod_cube_density  compact | comfort | large
---   vrmod_cube_hud_style vitals | full | minimal
---   vrmod_cube_glass    0–1 panel opacity factor
+--   F.El("hud.health")           → Color
+--   F.RegisterElement(id, def)   → extend
+--   F.SetElementColor(id, col)   → customize
+--   F.ListElements()             → Theme settings / tools
+--
+-- Global: vrmod_cube_preset | accent | density | glass
+-- Elements: data/vrmod/cube_elements.json + optional vrmod_cube_el_* cvars
 -- =============================================================================
 
 vrmod = vrmod or {}
 vrmod.cube = vrmod.cube or {}
 local F = vrmod.cube
-F.Framework = F.Framework or { version = 1, name = "CrimsonCube" }
+F.Framework = F.Framework or { version = 2, name = "CubeTheme" }
 
 ------------------------------------------------------------------------
 -- Convars (archive — player customizes the Experience)
@@ -60,10 +58,11 @@ local PRESETS = {
 		muted = { 200, 150, 165, 230 },
 		ok = { 90, 220, 150, 255 },
 		warn = { 255, 200, 100, 255 },
-		ammo = { 255, 255, 255, 255 },
-		health = { 255, 220, 60, 255 },
-		healthLow = { 255, 50, 50, 255 },
-		armor = { 90, 170, 255, 255 },
+		-- HUD vitals share crimson accent (health + ammo match)
+		ammo = { 255, 80, 110, 255 },
+		health = { 255, 80, 110, 255 },
+		healthLow = { 255, 45, 70, 255 },
+		armor = { 200, 150, 165, 255 },
 	},
 	void = {
 		label = "Void Lattice",
@@ -80,7 +79,7 @@ local PRESETS = {
 		muted = { 140, 160, 190, 230 },
 		ok = { 80, 220, 180, 255 },
 		warn = { 255, 190, 80, 255 },
-		ammo = { 200, 220, 255, 255 },
+		ammo = { 100, 220, 255, 255 },
 		health = { 100, 220, 255, 255 },
 		healthLow = { 255, 80, 120, 255 },
 		armor = { 140, 180, 255, 255 },
@@ -100,7 +99,7 @@ local PRESETS = {
 		muted = { 150, 190, 160, 230 },
 		ok = { 100, 255, 160, 255 },
 		warn = { 255, 210, 80, 255 },
-		ammo = { 220, 255, 220, 255 },
+		ammo = { 120, 255, 140, 255 },
 		health = { 120, 255, 140, 255 },
 		healthLow = { 255, 100, 80, 255 },
 		armor = { 100, 200, 255, 255 },
@@ -120,17 +119,17 @@ local PRESETS = {
 		muted = { 210, 170, 130, 230 },
 		ok = { 180, 255, 120, 255 },
 		warn = { 255, 200, 60, 255 },
-		ammo = { 255, 240, 200, 255 },
+		ammo = { 255, 180, 60, 255 },
 		health = { 255, 180, 60, 255 },
 		healthLow = { 255, 60, 40, 255 },
-		armor = { 120, 180, 255, 255 },
+		armor = { 210, 170, 130, 255 },
 	},
 }
 
 local DENSITY = {
-	compact = { pad = 10, row = 40, title = 22, label = 14, small = 11, hud = 0.9 },
-	comfort = { pad = 16, row = 48, title = 28, label = 16, small = 13, hud = 1.0 },
-	large   = { pad = 20, row = 56, title = 34, label = 18, small = 15, hud = 1.15 },
+	compact = { id = "compact", pad = 8,  row = 36, title = 20, label = 13, small = 11, hud = 0.88, bar = 3 },
+	comfort = { id = "comfort", pad = 14, row = 46, title = 26, label = 15, small = 12, hud = 1.0,  bar = 4 },
+	large   = { id = "large",   pad = 20, row = 56, title = 34, label = 18, small = 15, hud = 1.18, bar = 5 },
 }
 
 local function rgba(t, glassMul)
@@ -201,6 +200,21 @@ function F.RefreshTheme()
 		T.header = T.crimson
 		T.headerDim = T.crimsonDim
 		T.hot = T.crimsonHot
+		-- HUD vitals share accent — health + ammo identical, armor muted
+		T.health = T.crimsonHot
+		T.ammo = T.crimsonHot
+		T.healthLow = Color(
+			math.min(255, T.crimson.r + 40),
+			math.max(0, math.floor(T.crimson.g * 0.4)),
+			math.max(0, math.floor(T.crimson.b * 0.45)),
+			255
+		)
+		T.armor = Color(
+			math.min(255, math.floor(T.crimsonHot.r * 0.85 + 40)),
+			math.min(255, math.floor(T.crimsonHot.g * 0.7 + 50)),
+			math.min(255, math.floor(T.crimsonHot.b * 0.75 + 50)),
+			255
+		)
 	end
 
 	F.Theme = T
@@ -209,9 +223,14 @@ function F.RefreshTheme()
 	return T
 end
 
-function F.Density()
+function F.DensityId()
 	local d = string.lower(cv_density:GetString() or "comfort")
-	return DENSITY[d] or DENSITY.comfort
+	if not DENSITY[d] then d = "comfort" end
+	return d
+end
+
+function F.Density()
+	return DENSITY[F.DensityId()] or DENSITY.comfort
 end
 
 function F.HudStyle()
@@ -225,11 +244,77 @@ function F.ThemeLive()
 	return F.Theme
 end
 
+------------------------------------------------------------------------
+-- Density-aware fonts (CreateFont same names → resize)
+------------------------------------------------------------------------
+local fontsDensityId = nil
+
+function F.RefreshFonts()
+	local d = F.Density()
+	local face = "Roboto"
+	if system.IsLinux and system.IsLinux() then face = "DejaVu Sans" end
+	local specs = {
+		CubeTitle = { font = face, size = d.title, weight = 800, antialias = true, extended = true },
+		CubeLabel = { font = face, size = d.label, weight = 700, antialias = true, extended = true },
+		CubeSmall = { font = face, size = d.small, weight = 500, antialias = true, extended = true },
+		CubeHuge  = { font = face, size = math.floor(d.title * 1.4 + 4), weight = 900, antialias = true, extended = true },
+	}
+	for name, spec in pairs(specs) do
+		local ok = pcall(surface.CreateFont, name, spec)
+		if not ok then
+			spec.font = "Arial"
+			ok = pcall(surface.CreateFont, name, spec)
+		end
+		if not ok then
+			spec.font = "Trebuchet MS"
+			pcall(surface.CreateFont, name, spec)
+		end
+	end
+	fontsDensityId = d.id
+	-- Sync legacy theme font helper
+	if vrmod.cube then vrmod.cube._fontsDensityId = d.id end
+	hook.Run("VRMod_CubeDensityChanged", d)
+	return d
+end
+
+function F.Font(name)
+	local id = F.DensityId()
+	if fontsDensityId ~= id then F.RefreshFonts() end
+	if not name then return "DermaDefault" end
+	local ok, w = pcall(function()
+		surface.SetFont(name)
+		return surface.GetTextSize("W")
+	end)
+	if ok and w and w > 0 then return name end
+	return ({ CubeTitle = "DermaLarge", CubeLabel = "DermaDefaultBold", CubeSmall = "DermaDefault", CubeHuge = "DermaLarge" })[name] or "DermaDefault"
+end
+
+function F.ApplyDensity(id)
+	id = string.lower(tostring(id or "comfort"))
+	if not DENSITY[id] then id = "comfort" end
+	cv_density:SetString(id)
+	F.RefreshFonts()
+	F.RefreshTheme()
+	if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+	return id
+end
+
 -- Initial + live refresh
 F.RefreshTheme()
+timer.Simple(0, function()
+	if F.RefreshFonts then F.RefreshFonts() end
+end)
 cvars.AddChangeCallback("vrmod_cube_preset", function() F.RefreshTheme() end, "cube_fw")
 cvars.AddChangeCallback("vrmod_cube_accent", function() F.RefreshTheme() end, "cube_fw")
 cvars.AddChangeCallback("vrmod_cube_glass", function() F.RefreshTheme() end, "cube_fw")
+cvars.AddChangeCallback("vrmod_cube_density", function(_, _, new)
+	if F.RefreshFonts then F.RefreshFonts() end
+	if F.RefreshTheme then F.RefreshTheme() end
+	if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+	if vrmod.logger then
+		vrmod.logger.Info("[cube] density → %s", tostring(new))
+	end
+end, "cube_fw_density")
 
 ------------------------------------------------------------------------
 -- Layout metrics
@@ -237,12 +322,17 @@ cvars.AddChangeCallback("vrmod_cube_glass", function() F.RefreshTheme() end, "cu
 function F.Metrics()
 	local d = F.Density()
 	return {
+		id = d.id,
 		pad = d.pad,
 		row = d.row,
 		gap = math.floor(d.pad * 0.5),
-		headerH = d.title + d.pad + 8,
+		headerH = d.title + d.pad + 10,
 		footerH = d.small + d.pad,
 		hudScale = d.hud,
+		title = d.title,
+		label = d.label,
+		small = d.small,
+		bar = d.bar or 4,
 	}
 end
 
@@ -252,23 +342,25 @@ end
 function F.DrawChrome(x, y, w, h, title, opts)
 	opts = opts or {}
 	local T = F.ThemeLive()
-	if F.Font then F.Font("CubeTitle") end -- ensure fonts
+	local M = F.Metrics()
+	if F.Font then F.Font("CubeTitle") end
+	local barH = opts.barH or M.bar
+	local headerH = opts.headerH or M.headerH
+	local pad = opts.pad or M.pad
 	surface.SetDrawColor(T.bg)
 	surface.DrawRect(x, y, w, h)
-	-- Crimson crown bar
 	surface.SetDrawColor(T.crimson)
-	surface.DrawRect(x, y, w, opts.barH or 4)
-	-- Soft glass strip under bar
+	surface.DrawRect(x, y, w, barH)
 	surface.SetDrawColor(T.bgGlass)
-	surface.DrawRect(x, y + (opts.barH or 4), w, (opts.headerH or 40) - (opts.barH or 4))
+	surface.DrawRect(x, y + barH, w, math.max(0, headerH - barH))
 	surface.SetDrawColor(T.crimsonDim)
 	surface.DrawOutlinedRect(x, y, w, h, 2)
 	if title and title ~= "" then
 		local font = (F.Font and F.Font("CubeTitle")) or "DermaLarge"
-		draw.SimpleText(title, font, x + (opts.pad or 16), y + 10, T.crimson, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-		if opts.subtitle then
+		draw.SimpleText(title, font, x + pad, y + math.floor(barH + 4), T.crimson, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		if opts.subtitle and opts.subtitle ~= "" then
 			local sf = (F.Font and F.Font("CubeSmall")) or "DermaDefault"
-			draw.SimpleText(opts.subtitle, sf, x + w - (opts.pad or 16), y + 16, T.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+			draw.SimpleText(opts.subtitle, sf, x + w - pad, y + math.floor(barH + 8), T.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
 		end
 	end
 end

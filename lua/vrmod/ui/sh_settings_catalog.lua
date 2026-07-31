@@ -142,6 +142,10 @@ vrmod.SettingsCatalog = {
 			{ kind = "color", label = "Weapon laser color (tap to edit)", cvar = "vrmod_laser_color" },
 			{ kind = "bool", label = "Enable HUD", cvar = "vrmod_hud" },
 			{ kind = "bool", label = "Aim crosshair on HUD plate", cvar = "vrmod_hud_crosshair" },
+			{ kind = "bool", label = "Mini radar (CS-style player map)", cvar = "vrmod_hud_radar" },
+			{ kind = "bool", label = "Radar 3D world backdrop", cvar = "vrmod_hud_radar_3d" },
+			{ kind = "slider", label = "Radar range", cvar = "vrmod_hud_radar_range", min = 400, max = 4000, decimals = 0 },
+			{ kind = "slider", label = "Radar size (px)", cvar = "vrmod_hud_radar_size", min = 120, max = 320, decimals = 0 },
 			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.75, max = 2.0, decimals = 2 },
 			{ kind = "slider", label = "HUD distance", cvar = "vrmod_huddistance", min = 1, max = 100, decimals = 0 },
 			{ kind = "slider", label = "HUD scale", cvar = "vrmod_hudscale", min = 0.01, max = 0.1, decimals = 2 },
@@ -165,9 +169,11 @@ vrmod.SettingsCatalog = {
 			{ kind = "action", label = "Theme · hive", action_id = "cube_preset_hive" },
 			{ kind = "action", label = "Theme · commander", action_id = "cube_preset_commander" },
 			{ kind = "slider", label = "Glass opacity (menus)", cvar = "vrmod_cube_glass", min = 0.5, max = 1.2, decimals = 2 },
+			{ kind = "bool", label = "Theme spawn/context (VR only)", cvar = "vrmod_cube_spawnmenu" },
 			{ kind = "action", label = "Density · compact", action_id = "cube_density_compact" },
 			{ kind = "action", label = "Density · comfort", action_id = "cube_density_comfort" },
 			{ kind = "action", label = "Density · large", action_id = "cube_density_large" },
+			{ kind = "action", label = "Refresh spawn theme (VR)", cmd = "vrmod_cube_spawnmenu_refresh" },
 			{ kind = "action", label = "Theme status", cmd = "vrmod_cube_status" },
 		},
 	},
@@ -230,6 +236,20 @@ vrmod.SettingsCatalog = {
 		},
 	},
 	{
+		id = "quickmenu",
+		title = "Quick Menu",
+		icon = "icon16/application_view_tile.png",
+		-- rows filled live by vrmod.GetSettingsCatalog() (layout-aware labels)
+		rows = {
+			{ kind = "help", label = "VR only — customize pages & which buttons show" },
+			{ kind = "action", label = "Reset layout (defaults)", action_id = "qm_reset" },
+			{ kind = "action", label = "Add page", action_id = "qm_add_page" },
+			{ kind = "action", label = "Remove last page", action_id = "qm_remove_page" },
+			{ kind = "action", label = "Layout status", cmd = "vrmod_quickmenu_status" },
+			{ kind = "help", label = "Open Settings while VR is on for per-item page cycle" },
+		},
+	},
+	{
 		id = "session",
 		title = "Session",
 		icon = "icon16/disconnect.png",
@@ -240,6 +260,25 @@ vrmod.SettingsCatalog = {
 		},
 	},
 }
+
+--- Live catalog: injects Quick Menu item rows from layout (status labels update)
+function vrmod.GetSettingsCatalog()
+	local base = vrmod.SettingsCatalog or {}
+	local out = {}
+	for _, cat in ipairs(base) do
+		if cat.id == "quickmenu" and CLIENT and vrmod.QuickMenu and vrmod.QuickMenu.BuildSettingsRows then
+			out[#out + 1] = {
+				id = cat.id,
+				title = cat.title,
+				icon = cat.icon,
+				rows = vrmod.QuickMenu.BuildSettingsRows(),
+			}
+		else
+			out[#out + 1] = cat
+		end
+	end
+	return out
+end
 
 ------------------------------------------------------------------------
 -- Color helpers — "r,g,b,a" strings (vrmod_beam_color / vrmod_laser_color)
@@ -441,7 +480,19 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		return true
 	end
 	if action_id and string.StartWith(action_id, "cube_density_") then
-		RunConsoleCommand("vrmod_cube_density", string.sub(action_id, #"cube_density_" + 1))
+		local id = string.match(action_id, "^cube_density_(.+)$") or "comfort"
+		if CLIENT and vrmod.cube and vrmod.cube.ApplyDensity then
+			vrmod.cube.ApplyDensity(id)
+		else
+			RunConsoleCommand("vrmod_cube_density", id)
+			local c = GetConVar("vrmod_cube_density")
+			if c then pcall(function() c:SetString(id) end) end
+			if CLIENT and vrmod.cube then
+				if vrmod.cube.RefreshFonts then vrmod.cube.RefreshFonts() end
+				if vrmod.cube.RefreshTheme then vrmod.cube.RefreshTheme() end
+			end
+			if CLIENT and vrmod.RefreshHUD then vrmod.RefreshHUD() end
+		end
 		return true
 	end
 
@@ -521,6 +572,45 @@ function vrmod.SettingsRunAction(action_id, ctx)
 	end
 	if action_id == "close_settings" then
 		if ctx.close then ctx.close() end
+		return true
+	end
+	-- Quick Menu layout (VR pages / visibility) — client only
+	if CLIENT and action_id and string.StartWith(action_id, "qm_") then
+		local QM = vrmod.QuickMenu
+		if not QM then return true end
+		if action_id == "qm_reset" then
+			if QM.ResetLayout then QM.ResetLayout() end
+			return true
+		end
+		if action_id == "qm_add_page" then
+			if QM.AddPage then QM.AddPage() end
+			return true
+		end
+		if action_id == "qm_remove_page" then
+			if QM.RemovePage then QM.RemovePage(QM.GetPageCount and QM.GetPageCount() or 1) end
+			return true
+		end
+		if string.StartWith(action_id, "qm_cycle_") then
+			local id = string.sub(action_id, #"qm_cycle_" + 1)
+			if QM.CycleItemPage then QM.CycleItemPage(id) end
+			return true
+		end
+		if string.StartWith(action_id, "qm_nudge_") then
+			local id = string.sub(action_id, #"qm_nudge_" + 1)
+			-- Cycle nudge: right → down → left → up
+			QM._nudgeDir = QM._nudgeDir or {}
+			local d = (QM._nudgeDir[id] or 0) % 4
+			local deltas = {
+				[0] = { 1, 0 },
+				[1] = { 0, 1 },
+				[2] = { -1, 0 },
+				[3] = { 0, -1 },
+			}
+			local dd = deltas[d]
+			if QM.NudgeItem then QM.NudgeItem(id, dd[1], dd[2]) end
+			QM._nudgeDir[id] = d + 1
+			return true
+		end
 		return true
 	end
 	return false

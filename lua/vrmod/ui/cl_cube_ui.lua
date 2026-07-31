@@ -172,7 +172,10 @@ local function markMenu()
 	m.scale = SCALE
 	m.cubeMenu = true
 	m.cubeui = true
-	m.attachment = true
+	m.grabbable = true
+	if not m.freeFloat and not m.grabHand then
+		m.attachment = true
+	end
 end
 
 local function paint()

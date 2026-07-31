@@ -25,6 +25,19 @@ local ROW_H = 44
 local FOOTER = 52
 local VISIBLE_ROWS = 8
 
+--- Live density → row/header sizes (Theme density switch must visibly change settings UI)
+local function ApplyDensityLayout()
+	local M = vrmod.cube and vrmod.cube.Metrics and vrmod.cube.Metrics()
+	if not M then return end
+	PAD = M.pad
+	ROW_H = M.row
+	HEADER = math.max(48, M.headerH + 4)
+	TAB_H = math.max(28, math.floor(M.row * 0.72))
+	FOOTER = math.max(44, M.footerH + 24)
+	local y0 = HEADER + 80
+	VISIBLE_ROWS = math.Clamp(math.floor((H - y0 - FOOTER) / (ROW_H + 4)), 5, 14)
+end
+
 -- Palette matches classic Derma mixer presets + common VR pointer colors
 local COLOR_PALETTE = {
 	Color(255, 0, 0, 255),
@@ -68,6 +81,10 @@ local function Theme()
 end
 
 local function Catalog()
+	-- Live catalog (Quick Menu rows reflect current layout labels)
+	if vrmod.GetSettingsCatalog then
+		return vrmod.GetSettingsCatalog()
+	end
 	return vrmod.SettingsCatalog or {}
 end
 
@@ -151,6 +168,7 @@ local function maxScroll()
 end
 
 local function rebuildButtons()
+	ApplyDensityLayout()
 	buttons = {}
 	local cats = Catalog()
 	-- Close
@@ -333,17 +351,22 @@ local function paint()
 	if not (g_VR.menus and g_VR.menus[UID]) then return end
 
 	local m = g_VR.menus[UID]
-	m.scale = liveScale
-	m.pos = livePos
-	m.ang = liveAng
-	m.cubeMenu = true
-	m.attachment = true
+	if vrmod.MenuApplyHandAnchor then
+		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng)
+	elseif not m.freeFloat and not m.grabHand then
+		m.scale = liveScale
+		m.pos = livePos
+		m.ang = liveAng
+		m.cubeMenu = true
+		m.attachment = true
+	end
 
 	local focused = (g_VR.menuFocus == UID)
 	local mx = g_VR.menuCursorX or -1
 	local my = g_VR.menuCursorY or -1
 
 	if VRUtilMenuRenderStart(UID) == false then return end
+	ApplyDensityLayout()
 	pcall(function()
 		if colorEdit then
 			paintColorEditor(focused, mx, my)
@@ -399,13 +422,27 @@ local function paint()
 			elseif row.kind == "help" then
 				draw.SimpleText(row.label or "", "DermaDefault", PAD + 8, y + ROW_H * 0.5, Theme().muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 			else
-				surface.SetDrawColor(hot and Theme().rowHot or Theme().row)
-				surface.DrawRect(PAD, y, W - PAD * 2, ROW_H)
-				if hot then
-					surface.SetDrawColor(Theme().hot)
-					surface.DrawRect(PAD, y, 4, ROW_H)
+				-- Active density / theme preset rows light up so density switch is obvious
+				local selected = false
+				if row.kind == "action" and row.action_id then
+					if string.StartWith(row.action_id, "cube_density_") then
+						local id = string.match(row.action_id, "^cube_density_(.+)$")
+						local cur = GetConVar("vrmod_cube_density")
+						selected = cur and cur:GetString() == id
+					elseif string.StartWith(row.action_id, "cube_preset_") then
+						local id = string.match(row.action_id, "^cube_preset_(.+)$")
+						local cur = GetConVar("vrmod_cube_preset")
+						selected = cur and cur:GetString() == id
+					end
 				end
-				draw.SimpleText(row.label or "?", "DermaDefaultBold", PAD + 12, y + ROW_H * 0.5, Theme().text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				surface.SetDrawColor(selected and Theme().header or (hot and Theme().rowHot or Theme().row))
+				surface.DrawRect(PAD, y, W - PAD * 2, ROW_H)
+				if hot or selected then
+					surface.SetDrawColor(Theme().hot)
+					surface.DrawRect(PAD, y, selected and 6 or 4, ROW_H)
+				end
+				local fontRow = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeLabel")) or "DermaDefaultBold"
+				draw.SimpleText(row.label or "?", fontRow, PAD + 12, y + ROW_H * 0.5, Theme().text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 
 				if row.kind == "bool" then
 					local on = getBool(row.cvar, false)
@@ -453,7 +490,8 @@ local function paint()
 					surface.DrawOutlinedRect(bx, y + 8, 40, 28, 2)
 					draw.SimpleText("▸", "DermaLarge", bx - 16, y + ROW_H * 0.5, Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "action" then
-					draw.SimpleText("▸", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5, Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText(selected and "●" or "▸", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5,
+						selected and Theme().ok or Theme().hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				end
 			end
 		end
@@ -622,11 +660,15 @@ function vrmod.CubeSettings_Open()
 		open = false
 		return
 	end
-	g_VR.menus[UID].scale = liveScale
-	g_VR.menus[UID].pos = livePos
-	g_VR.menus[UID].ang = liveAng
-	g_VR.menus[UID].cubeMenu = true
-	g_VR.menus[UID].attachment = true
+	if vrmod.MenuApplyHandAnchor then
+		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
+	else
+		g_VR.menus[UID].scale = liveScale
+		g_VR.menus[UID].pos = livePos
+		g_VR.menus[UID].ang = liveAng
+		g_VR.menus[UID].cubeMenu = true
+		g_VR.menus[UID].attachment = true
+	end
 
 	paint()
 

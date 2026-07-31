@@ -1,6 +1,7 @@
 if SERVER then return end
 -- =============================================================================
 -- Cube UI theme — shared palette + fonts (safe CreateFont + fallbacks)
+-- Framework (cl_cube_framework) owns density-scaled Font/RefreshFonts when present.
 -- =============================================================================
 vrmod = vrmod or {}
 vrmod.cube = vrmod.cube or {}
@@ -25,7 +26,6 @@ if not (vrmod.cube.RefreshTheme and vrmod.cube.Framework) then
 	}
 end
 
--- Fallbacks if CreateFont fails or file loads before surface is ready
 local FONT_FALLBACK = {
 	CubeTitle = "DermaLarge",
 	CubeLabel = "DermaDefaultBold",
@@ -33,23 +33,21 @@ local FONT_FALLBACK = {
 	CubeHuge = "DermaLarge",
 }
 
-local fontsReady = false
-
+--- Always available: prefer framework density fonts, else static CreateFont
 local function EnsureCubeFonts()
-	if fontsReady then return end
-	-- Tahoma is often missing on Linux → silent bad font; prefer cross-platform faces
-	local face = "Roboto"
-	if system.IsLinux and system.IsLinux() then
-		face = "DejaVu Sans"
+	if vrmod.cube.RefreshFonts then
+		pcall(vrmod.cube.RefreshFonts)
+		return
 	end
+	local face = "Roboto"
+	if system.IsLinux and system.IsLinux() then face = "DejaVu Sans" end
 	local specs = {
-		CubeTitle = { font = face, size = 28, weight = 800, antialias = true, extended = true },
-		CubeLabel = { font = face, size = 16, weight = 700, antialias = true, extended = true },
-		CubeSmall = { font = face, size = 13, weight = 500, antialias = true, extended = true },
+		CubeTitle = { font = face, size = 26, weight = 800, antialias = true, extended = true },
+		CubeLabel = { font = face, size = 15, weight = 700, antialias = true, extended = true },
+		CubeSmall = { font = face, size = 12, weight = 500, antialias = true, extended = true },
 		CubeHuge = { font = face, size = 36, weight = 900, antialias = true, extended = true },
 	}
 	for name, spec in pairs(specs) do
-		-- Try preferred face, then Arial, then Trebuchet MS
 		local ok = pcall(surface.CreateFont, name, spec)
 		if not ok then
 			spec.font = "Arial"
@@ -60,28 +58,29 @@ local function EnsureCubeFonts()
 			pcall(surface.CreateFont, name, spec)
 		end
 	end
-	fontsReady = true
 end
 
---- Resolve a Cube font name; never returns an unregistered font
-function vrmod.cube.Font(name)
-	EnsureCubeFonts()
-	if not name then return "DermaDefault" end
-	-- surface.SetFont does not error on missing fonts; measure width instead
-	local ok, w = pcall(function()
-		surface.SetFont(name)
-		return surface.GetTextSize("W")
-	end)
-	if ok and w and w > 0 then return name end
-	return FONT_FALLBACK[name] or "DermaDefault"
+-- Only install Font if framework did not already (density-aware Font in cl_cube_framework)
+if not vrmod.cube.Font then
+	function vrmod.cube.Font(name)
+		EnsureCubeFonts()
+		if not name then return "DermaDefault" end
+		local ok, w = pcall(function()
+			surface.SetFont(name)
+			return surface.GetTextSize("W")
+		end)
+		if ok and w and w > 0 then return name end
+		return FONT_FALLBACK[name] or "DermaDefault"
+	end
 end
 
 function vrmod.cube.DrawPanel(x, y, w, h, title)
 	EnsureCubeFonts()
-	local T = vrmod.cube.Theme
+	local T = (vrmod.cube.ThemeLive and vrmod.cube.ThemeLive()) or vrmod.cube.Theme
+	if not T then return end
 	surface.SetDrawColor(T.bg)
 	surface.DrawRect(x, y, w, h)
-	surface.SetDrawColor(T.crimson)
+	surface.SetDrawColor(T.crimson or Color(196, 30, 58))
 	surface.DrawRect(x, y, w, 4)
 	surface.DrawOutlinedRect(x, y, w, h, 2)
 	if title and title ~= "" then
@@ -91,16 +90,17 @@ end
 
 function vrmod.cube.DrawButton(x, y, w, h, label, hovered, enabled)
 	EnsureCubeFonts()
-	local T = vrmod.cube.Theme
+	local T = (vrmod.cube.ThemeLive and vrmod.cube.ThemeLive()) or vrmod.cube.Theme
+	if not T then return end
 	if enabled == false then
-		surface.SetDrawColor(T.btnDim)
+		surface.SetDrawColor(T.btnDim or T.btn)
 	elseif hovered then
-		surface.SetDrawColor(T.btnHover)
+		surface.SetDrawColor(T.btnHover or T.btn)
 	else
 		surface.SetDrawColor(T.btn)
 	end
 	surface.DrawRect(x, y, w, h)
-	surface.SetDrawColor(hovered and T.crimsonHot or T.crimsonDim)
+	surface.SetDrawColor(hovered and (T.crimsonHot or T.crimson) or (T.crimsonDim or T.crimson))
 	surface.DrawOutlinedRect(x, y, w, h, hovered and 3 or 2)
 	if hovered then
 		surface.SetDrawColor(T.crimson)
@@ -111,16 +111,17 @@ end
 
 function vrmod.cube.DrawButtonMultiline(x, y, w, h, label, hovered, enabled)
 	EnsureCubeFonts()
-	local T = vrmod.cube.Theme
+	local T = (vrmod.cube.ThemeLive and vrmod.cube.ThemeLive()) or vrmod.cube.Theme
+	if not T then return end
 	if enabled == false then
-		surface.SetDrawColor(T.btnDim)
+		surface.SetDrawColor(T.btnDim or T.btn)
 	elseif hovered then
-		surface.SetDrawColor(T.btnHover)
+		surface.SetDrawColor(T.btnHover or T.btn)
 	else
 		surface.SetDrawColor(T.btn)
 	end
 	surface.DrawRect(x, y, w, h)
-	surface.SetDrawColor(hovered and T.crimsonHot or T.crimsonDim)
+	surface.SetDrawColor(hovered and (T.crimsonHot or T.crimson) or (T.crimsonDim or T.crimson))
 	surface.DrawOutlinedRect(x, y, w, h, hovered and 3 or 2)
 	if hovered then
 		surface.SetDrawColor(T.crimson)
@@ -144,6 +145,11 @@ function vrmod.cube.DrawButtonMultiline(x, y, w, h, label, hovered, enabled)
 	end
 end
 
+function vrmod.cube.T()
+	if vrmod.cube.ThemeLive then return vrmod.cube.ThemeLive() end
+	return vrmod.cube.Theme
+end
+
 -- Create ASAP + again when client is fully up
 EnsureCubeFonts()
 hook.Add("InitPostEntity", "vrmod_cube_fonts", function()
@@ -151,12 +157,5 @@ hook.Add("InitPostEntity", "vrmod_cube_fonts", function()
 	if vrmod.cube.RefreshTheme then vrmod.cube.RefreshTheme() end
 end)
 hook.Add("OnScreenSizeChanged", "vrmod_cube_fonts", function()
-	fontsReady = false
 	EnsureCubeFonts()
 end)
-
--- Draw helpers prefer framework Theme when live
-function vrmod.cube.T()
-	if vrmod.cube.ThemeLive then return vrmod.cube.ThemeLive() end
-	return vrmod.cube.Theme
-end

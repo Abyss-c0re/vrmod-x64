@@ -159,7 +159,7 @@ local function AddRowToForm(parent, row, y)
 end
 
 local function PopulateFromCatalog(sheet)
-	local catalog = vrmod.SettingsCatalog
+	local catalog = (vrmod.GetSettingsCatalog and vrmod.GetSettingsCatalog()) or vrmod.SettingsCatalog
 	if not catalog then
 		local err = vgui.Create("DLabel", sheet)
 		err:SetText("Settings catalog missing (sh_settings_catalog.lua)")
