@@ -173,17 +173,30 @@ local function MirrorBoneName(name)
 	return name
 end
 
+-- Lateral limb bones (arms/legs/fingers) vs center chain (pelvis/spine/neck/head)
+local function IsLateralBoneName(name)
+	if not name then return false end
+	if string.find(name, "_L_", 1, true) or string.find(name, "_R_", 1, true) then return true end
+	if string.find(name, "Left", 1, true) or string.find(name, "Right", 1, true) then return true end
+	if string.find(name, "Finger", 1, true) then return true end
+	return false
+end
+
 --- True mirror: left-right reflection in the player's sagittal plane → twin space.
--- Source WorldToLocal(playerYaw): X=Forward, Y=Right, Z=Up.
--- Flip Y (right) only. Orientation: Euler mirror in that frame —
---   pitch stays, yaw and roll negate (keeps ValveBiped hand/arm twist stable).
--- AngleFromBasis after vector flip introduced 180° limb twists (inverted gloves).
-local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
+-- Source WorldToLocal(playerYaw): X=Forward, Y=Right, Z=Up. Flip Y only.
+-- Limbs:  Euler (p, -y, -r) — gloves/arms/legs stay untwisted.
+-- Center: Euler (p, -y,  r) — only yaw flips; negating roll twisted torso/head.
+local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw, boneName)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 
 	relPos.y = -relPos.y
-	-- Local Euler reflection across XZ (sagittal)
-	local nang = Angle(relAng.p, -relAng.y, -relAng.r)
+	local nang
+	if IsLateralBoneName(boneName) then
+		nang = Angle(relAng.p, -relAng.y, -relAng.r)
+	else
+		-- Pelvis / spine / neck / head / attachments
+		nang = Angle(relAng.p, -relAng.y, relAng.r)
+	end
 
 	return LocalToWorld(relPos, nang, avatarFeet, avatarYaw)
 end
