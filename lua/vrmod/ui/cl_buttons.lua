@@ -17,10 +17,11 @@ local function InitializeMenuItems()
 
 	local function openSandboxShell(which)
 		-- Defer so quick-menu close finishes first (nested menu open)
+		-- Spawn/context stay open when QM reopens — close only via X or toggle item
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
 			local p2v = vrmod.panel2vr
-			-- Toggle: second pick closes instead of stacking
+			-- Toggle same item: second pick closes that shell only
 			if p2v and p2v.IsShellOpen and p2v.IsShellOpen(which) then
 				if p2v.CloseSandboxShell then p2v.CloseSandboxShell(which) end
 				return
@@ -43,21 +44,13 @@ local function InitializeMenuItems()
 				vrmod.logger.Warn("[QM] %s menu open failed (valid=%s)",
 					which, tostring(IsValid(which == "context" and g_ContextMenu or g_SpawnMenu)))
 			end
-			-- Opening quick menu again always force-closes spawn/context
-			local hookId = which == "context" and "closecontextmenu" or "close_spawnmenu"
-			hook.Add("VRMod_OpenQuickMenu", hookId, function()
-				hook.Remove("VRMod_OpenQuickMenu", hookId)
-				if p2v and p2v.CloseSandboxShell then
-					p2v.CloseSandboxShell(which)
-				end
-			end)
 		end)
 	end
 
 	-- Row 1 defaults (page 1 via layout file)
-	add("Spawn Menu", 0, 0, function() openSandboxShell("spawn") end, true, "toggle", "spawn")
+	add("Spawn Menu", 0, 0, function() openSandboxShell("spawn") end, true, "open / close", "spawn")
 
-	add("Context Menu", 1, 0, function() openSandboxShell("context") end, true, "toggle", "context")
+	add("Context Menu", 1, 0, function() openSandboxShell("context") end, true, "open / close", "context")
 
 	add("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end, true, nil, "chat")
 	add("Numpad", 3, 0, function() LocalPlayer():ConCommand("vrmod_numpad") end, true, nil, "numpad")

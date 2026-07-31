@@ -574,36 +574,85 @@ function vrmod.cube.RestoreDermaSkin(panel)
 end
 
 ------------------------------------------------------------------------
--- Spawn / context root chrome (EditablePanel has no frame paint)
+-- Spawn / context root chrome (window frame + close X)
 ------------------------------------------------------------------------
-local function installRootChrome(panel, title)
+local TITLE_H = 32
+
+local function installCloseButton(panel, which)
+	if not IsValid(panel) then return end
+	if IsValid(panel._cubeCloseBtn) then
+		panel._cubeCloseBtn:SetVisible(shouldTheme() and panel._cubeThemed)
+		return
+	end
+	local btn = vgui.Create("DButton", panel)
+	panel._cubeCloseBtn = btn
+	btn:SetText("")
+	btn:SetSize(40, 28)
+	btn:SetZPos(32767)
+	btn:SetMouseInputEnabled(true)
+	btn._cubeShell = which or "spawn"
+	function btn:Think()
+		if not IsValid(panel) then return end
+		local pw = panel:GetWide()
+		self:SetPos(math.max(4, pw - 46), 3)
+		self:SetVisible(shouldTheme() and panel._cubeThemed == true)
+	end
+	function btn:Paint(w, h)
+		if not shouldTheme() or not panel._cubeThemed then return end
+		local th = T()
+		local hot = self:IsHovered()
+		local bg = hot and (th.btnHover or th.crimson) or (th.btn or th.panel)
+		rect(0, 0, w, h, bg)
+		outline(0, 0, w, h, hot and (th.crimsonHot or th.crimson) or (th.crimsonDim or th.crimson), hot and 3 or 2)
+		if hot then rect(0, 0, 4, h, th.crimson) end
+		draw.SimpleText("X", "DermaDefaultBold", w * 0.5, h * 0.5, th.text or color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	end
+	function btn:DoClick()
+		local shell = self._cubeShell or "spawn"
+		if vrmod.panel2vr and vrmod.panel2vr.CloseSandboxShell then
+			vrmod.panel2vr.CloseSandboxShell(shell)
+		elseif shell == "context" and IsValid(g_ContextMenu) and g_ContextMenu.Close then
+			g_ContextMenu:Close()
+		elseif IsValid(g_SpawnMenu) and g_SpawnMenu.Close then
+			g_SpawnMenu:Close()
+		end
+	end
+end
+
+local function installRootChrome(panel, title, which)
 	if not IsValid(panel) then return end
 	if not panel._cubeChrome then
 		panel._cubeChrome = true
 		panel._cubePaintOrig = panel.Paint
 		panel._cubeChromeTitle = title
+		panel._cubeShellWhich = which or "spawn"
 		panel.Paint = function(self, w, h)
 			-- Only draw Cube chrome during VR; desktop keeps stock (usually no paint)
 			if shouldTheme() and self._cubeThemed then
 				local th = T()
 				local ttl = self._cubeChromeTitle or "SPAWN"
-				-- Light glass fill (not solid brick) so left tree can sit cleanly inside
 				local bg = th.bg or Color(12, 6, 10, 245)
-				rect(0, 0, w, h, Color(bg.r, bg.g, bg.b, math.min(bg.a or 245, 200)))
+				-- Window body
+				rect(0, 0, w, h, Color(bg.r, bg.g, bg.b, math.min(bg.a or 245, 210)))
+				-- Title bar
+				rect(0, 0, w, TITLE_H, Color((th.bgGlass or bg).r, (th.bgGlass or bg).g, (th.bgGlass or bg).b, 200))
 				rect(0, 0, w, 3, th.crimson)
-				rect(0, 3, w, 24, Color((th.bgGlass or bg).r, (th.bgGlass or bg).g, (th.bgGlass or bg).b, 160))
+				rect(0, TITLE_H - 1, w, 1, th.crimsonDim or th.crimson)
 				outline(0, 0, w, h, th.crimsonDim or th.crimson, 2)
 				local fnt = (vrmod.cube.Font and vrmod.cube.Font("CubeTitle")) or "DermaLarge"
-				draw.SimpleText(ttl, fnt, 12, 6, th.crimson, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+				draw.SimpleText(ttl, fnt, 12, math.floor(TITLE_H * 0.5), th.crimson, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				-- Preset left of close button
 				local preset = th.presetLabel or "CUBE"
 				local sf = (vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefault"
-				draw.SimpleText(preset, sf, w - 12, 10, th.muted or th.crimsonDim, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+				draw.SimpleText(preset, sf, w - 56, math.floor(TITLE_H * 0.5), th.muted or th.crimsonDim, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 			end
 			if self._cubePaintOrig then return self._cubePaintOrig(self, w, h) end
 		end
 	else
 		panel._cubeChromeTitle = title or panel._cubeChromeTitle
+		panel._cubeShellWhich = which or panel._cubeShellWhich
 	end
+	installCloseButton(panel, which or panel._cubeShellWhich or "spawn")
 end
 
 local function polishSpawnTreePanels(root)
@@ -646,19 +695,22 @@ local function polishSpawnTreePanels(root)
 	walk(root, 0)
 end
 
-local function themeWorkbench(panel, title)
+local function themeWorkbench(panel, title, which)
 	if not IsValid(panel) or not shouldTheme() then return end
 	if not cubeSkin then vrmod.cube.RefreshDermaSkin() end
 	vrmod.cube.ApplyDermaSkin(panel)
-	installRootChrome(panel, title)
-	-- Compact margins + nested dividers so left tree stays inside Cube chrome
+	installRootChrome(panel, title, which or "spawn")
+	-- Compact margins + nested dividers so content sits under title bar + X
 	local function applyMargins()
 		if not IsValid(panel) or not shouldTheme() or not panel._cubeThemed then return end
+		if IsValid(panel._cubeCloseBtn) then
+			panel._cubeCloseBtn:SetVisible(true)
+			panel._cubeCloseBtn:MoveToFront()
+		end
 		local div = panel.HorizontalDivider
 		if IsValid(div) then
 			if div.DockMargin then
-				-- top pad under SPAWN MENU title bar
-				div:DockMargin(8, 30, 8, 8)
+				div:DockMargin(8, TITLE_H + 4, 8, 8)
 			end
 			local tw = panel:GetWide()
 			if tw < 100 then tw = 1024 end
@@ -666,6 +718,19 @@ local function themeWorkbench(panel, title)
 			if div.SetLeftMin then div:SetLeftMin(math.floor(tw * 0.42)) end
 			if div.SetLeftWidth then div:SetLeftWidth(math.floor(tw * 0.62)) end
 			if div.SetDividerWidth then div:SetDividerWidth(4) end
+		else
+			-- Context menu: sandbox positions Canvas with ScrW/ScrH — fix into VR RT frame
+			if panel.Canvas and IsValid(panel.Canvas) then
+				local cw = math.min(340, math.max(200, panel:GetWide() - 24))
+				local ch = math.max(120, panel:GetTall() - TITLE_H - 20)
+				panel.Canvas:SetPos(12, TITLE_H + 8)
+				panel.Canvas:SetSize(cw, ch)
+				panel.Canvas:SetVisible(true)
+				if panel.Canvas.InvalidateLayout then panel.Canvas:InvalidateLayout(true) end
+			end
+			if panel.DockPadding then
+				panel:DockPadding(4, TITLE_H + 2, 4, 4)
+			end
 		end
 		polishSpawnTreePanels(panel)
 	end
@@ -688,18 +753,21 @@ end
 
 function vrmod.cube.ThemeSpawnMenu(panel)
 	if not shouldTheme() then return end
-	themeWorkbench(panel or g_SpawnMenu, "SPAWN MENU")
+	themeWorkbench(panel or g_SpawnMenu, "SPAWN MENU", "spawn")
 end
 
 function vrmod.cube.ThemeContextMenu(panel)
 	if not shouldTheme() then return end
-	themeWorkbench(panel or g_ContextMenu, "CONTEXT")
+	themeWorkbench(panel or g_ContextMenu, "CONTEXT", "context")
 end
 
 --- Undo VR workbench theming (Default skin, stock layout path)
 function vrmod.cube.RestoreWorkbench(panel)
 	if not IsValid(panel) then return end
 	vrmod.cube.RestoreDermaSkin(panel)
+	if IsValid(panel._cubeCloseBtn) then
+		panel._cubeCloseBtn:SetVisible(false)
+	end
 	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
 end
 

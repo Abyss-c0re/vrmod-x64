@@ -740,12 +740,7 @@ function W.OpenSandboxShell(which)
 		return false
 	end
 
-	-- Close opposite shell only (spawn vs context), not self if re-entering
-	if not isCtx then
-		W.CloseSandboxShell("context")
-	else
-		W.CloseSandboxShell("spawn")
-	end
+	-- Spawn + context may both stay open (close via X or toggle same QM item)
 
 	if panel.SetHangOpen then panel:SetHangOpen(false) end
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
