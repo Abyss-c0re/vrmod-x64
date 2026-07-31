@@ -1,12 +1,12 @@
 -- =============================================================================
 -- vrmod.avatar — Cube player customization twin
 --
--- Cube law: the VR playermodel is already correct (cl_character / FBT).
--- Twin does NOT re-solve arm IK.
---   CLONE  = MapClone rigid (same facing) — proven upright body
---   FACING = same MapClone bone path facing the player + RenderMultiply
---            scale(1,-1,1) so laterality is mirrored without twisting bones
--- Never VRUtilNetUpdateLocalPly from the twin.
+-- SoT = working VR playermodel bone matrices (snap). No re-IK.
+--
+--   CLONE:  LocalToWorld( WorldToLocal(bone) ) into twin — same yaw. DONE.
+--   MIRROR: same, but flip local Y (Right) and face twin at yaw+180. DONE.
+--
+-- X=Forward Y=Right Z=Up. Never mix paths. Never VRUtilNetUpdateLocalPly.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
 if SERVER then return end
@@ -124,52 +124,20 @@ local function AngleBetween(fromPos, toPos)
 	return dir:Angle()
 end
 
--- Clone: same laterality (your right → twin's right in twin space)
-local function MapClone(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
-	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
-	return LocalToWorld(relPos, relAng, avatarFeet, avatarYaw)
+-- Source local frame (playerYaw): X=Forward, Y=Right, Z=Up.
+
+--- CLONE: rigid reparent of world bone into twin stand (no flip).
+local function MapClone(worldPos, worldAng, srcFeet, srcYaw, dstFeet, dstYaw)
+	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), srcFeet, srcYaw)
+	return LocalToWorld(relPos, relAng, dstFeet, dstYaw)
 end
 
--- Reconstruct Angle from orthonormal right-handed basis (forward, up)
-local function AngleFromBasis(forward, up)
-	forward = forward:GetNormalized()
-	-- Orthonormalize up against forward
-	local right = forward:Cross(up)
-	if right:LengthSqr() < 1e-6 then
-		right = forward:Cross(Vector(0, 0, 1))
-		if right:LengthSqr() < 1e-6 then right = forward:Cross(Vector(0, 1, 0)) end
-	end
-	right:Normalize()
-	up = right:Cross(forward)
-	up:Normalize()
-	-- Source Angle from forward, then roll so local Up matches
-	local ang = forward:Angle()
-	local curUp = ang:Up()
-	local curRight = ang:Right()
-	local roll = math.deg(math.atan2(curRight:Dot(up), curUp:Dot(up)))
-	ang.r = roll
-	return ang
-end
-
---- Swap ValveBiped (and common) left/right bone names.
--- A real mirror needs BOTH spatial reflection AND writing the mirrored matrix
--- onto the opposite limb bone — same-ID flip stretches R arm mesh to the left.
-local function MirrorBoneName(name)
-	if not name or name == "" then return name end
-	if string.find(name, "_L_", 1, true) then
-		return (string.gsub(name, "_L_", "_R_", 1))
-	end
-	if string.find(name, "_R_", 1, true) then
-		return (string.gsub(name, "_R_", "_L_", 1))
-	end
-	-- rarer conventions
-	if string.find(name, "Left", 1, true) then
-		return (string.gsub(name, "Left", "Right", 1))
-	end
-	if string.find(name, "Right", 1, true) then
-		return (string.gsub(name, "Right", "Left", 1))
-	end
-	return name
+--- MIRROR: same as clone, but flip Right (Y) in source local, then place at dst.
+local function MapMirrorWorld(worldPos, worldAng, srcFeet, srcYaw, dstFeet, dstYaw)
+	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), srcFeet, srcYaw)
+	relPos.y = -relPos.y
+	relAng = Angle(relAng.p, -relAng.y, -relAng.r)
+	return LocalToWorld(relPos, relAng, dstFeet, dstYaw)
 end
 
 local function ParseBodygroups(str)
@@ -749,21 +717,15 @@ function vrmod.avatar.PublishPlayerPose(ply, frame)
 	}
 end
 
---- Apply published VR pose to twin.
--- CLONE  = MapClone rigid (proven upright).
--- FACING = MapClone into face-to-face stand (same upright SoT), then ONE uniform
---          sagittal flip of that whole pose in twin local space (isometry — no
---          per-bone Euler/hierarchy hacks that corkscrew the torso).
-function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
+--- Build twin bone targets from pose snap.
+-- CLONE and MIRROR are SEPARATE. Clone never runs the Y-flip.
+function Session:_applyPoseSnap(playerFeet, playerYaw)
 	if not IsValid(self.ent) then return false end
 
 	local ply = LocalPlayer()
 	local snap = g_VR.avatarPoseSnap
-	local needCapture = (not snap) or (not snap.bones) or (#snap.bones < 4)
-		or (snap.frame and FrameNumber() - snap.frame > 1)
-	if needCapture and IsValid(ply) and vrmod.avatar.PublishPlayerPose then
-		local fr = ReadLocalVRFrame()
-		pcall(vrmod.avatar.PublishPlayerPose, ply, fr)
+	if (not snap or not snap.bones or #snap.bones < 4) and IsValid(ply) then
+		pcall(vrmod.avatar.PublishPlayerPose, ply, ReadLocalVRFrame())
 		snap = g_VR.avatarPoseSnap
 	end
 	if not snap or not snap.bones or #snap.bones < 4 then return false end
@@ -771,24 +733,24 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 
 	local mode = self.mode or "facing"
 	if mode == "mirror" then mode = "facing" end
-	local isClone = (mode == "clone")
-	local isWorld = (mode == "world")
-	local isFacing = (not isClone and not isWorld)
 
 	local srcFeet = snap.feet or playerFeet
 	local srcYaw = Angle(0, snap.characterYaw or (playerYaw and playerYaw.yaw) or 0, 0)
-
 	local dist = self.distance or cv_distance:GetFloat()
+
 	local standPos, standAng
-	if isWorld then
+	if mode == "world" then
 		standPos, standAng = srcFeet, srcYaw
-	elseif isClone then
+	elseif mode == "clone" then
+		-- CLONE ONLY: same facing, rigid copy — no flip, no +180
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw, 0)
 	else
+		-- MIRROR ONLY: face player, Y-flip in source local
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw + 180, 0)
 	end
+
 	self.standPos, self.standAng = standPos, standAng
 	self.ent:SetPos(standPos)
 	self.ent:SetAngles(standAng)
@@ -796,25 +758,17 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 	local targets = {}
 	local copied = 0
 	for _, b in ipairs(snap.bones) do
-		local name, pos, ang = b.name, b.pos, b.ang
-		if not pos or not ang then continue end
-
+		if not b.pos or not b.ang or not b.name then continue end
 		local npos, nang
-		if isWorld then
-			npos, nang = pos, ang
+		if mode == "world" then
+			npos, nang = b.pos, b.ang
+		elseif mode == "clone" then
+			npos, nang = MapClone(b.pos, b.ang, srcFeet, srcYaw, standPos, standAng)
 		else
-			-- Rigid copy of working VR pose into twin stand (CLONE quality)
-			npos, nang = MapClone(pos, ang, srcFeet, srcYaw, standPos, standAng)
-			if isFacing then
-				-- Uniform isometry in twin frame: flip Right (Y). Whole body stays intact.
-				local lp, la = WorldToLocal(npos, nang, standPos, standAng)
-				lp.y = -lp.y
-				la = Angle(la.p, -la.y, -la.r)
-				npos, nang = LocalToWorld(lp, la, standPos, standAng)
-			end
+			-- facing / mirror — ONLY place that flips
+			npos, nang = MapMirrorWorld(b.pos, b.ang, srcFeet, srcYaw, standPos, standAng)
 		end
-
-		local tid = self.ent:LookupBone(name)
+		local tid = self.ent:LookupBone(b.name)
 		if not tid or tid < 0 then continue end
 		local mat = Matrix()
 		mat:Identity()
@@ -835,59 +789,6 @@ function Session:_drawModel()
 	end
 end
 
---- Fallback only if player skeleton unavailable (no character system yet).
-function Session:_applyFromNetFrame(playerFeet, playerYaw)
-	local charik = vrmod.charik or vrmod.frameik
-	if not charik then return false end
-	if not self.ik then
-		local ok, ik = pcall(charik.Init, self.ent, {
-			noStretch = true,
-			headDampen = self.headDampen ~= false,
-			headMaxPitch = self.headMaxPitch or 55,
-		})
-		self.ik = ok and ik or nil
-	end
-	if not self.ik then return false end
-
-	local src = ReadLocalVRFrame()
-	if not src or (not src.lefthandPos and not src.righthandPos) then
-		return false
-	end
-
-	local mode = self.mode or "facing"
-	if mode == "mirror" then mode = "facing" end
-
-	local okT, twinFrame = pcall(
-		charik.TransformFrame,
-		src, mode, playerFeet, playerYaw, self.standPos, self.standAng or playerYaw
-	)
-	if not okT or not twinFrame then return false end
-
-	self.ent:SetPos(self.standPos)
-	self.ent:SetAngles(self.standAng or Angle(0, twinFrame.characterYaw or 0, 0))
-	self.ent:InvalidateBoneCache()
-	self.ent:SetupBones()
-
-	self.ik.noStretch = true
-	self.ik.headDampen = true
-	self.ik.headMaxPitch = self.headMaxPitch or 45
-
-	local eyeH = 66.8
-	if vrmod.GetConvars then
-		local _, cv = vrmod.GetConvars()
-		if cv and cv.characterEyeHeight then eyeH = cv.characterEyeHeight end
-	end
-
-	local okA = pcall(charik.Update, self.ent, self.ik, twinFrame, {
-		baseZ = self.standPos.z,
-		eyeHeight = eyeH,
-		applyManip = true,
-	})
-	if not okA then return false end
-	self.targets = self.ik.targets or {}
-	return next(self.targets) ~= nil
-end
-
 function Session:_applyTracking()
 	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
 	if not hmd then return end
@@ -898,9 +799,8 @@ function Session:_applyTracking()
 		playerYaw = Angle(0, yaw, 0)
 	end
 
-	-- Prefer snap feet (pelvis/floor) when available — matches bone snapshot root
 	local snap = g_VR.avatarPoseSnap
-	if snap and snap.feet and snap.frame and FrameNumber() - snap.frame <= 3 then
+	if snap and snap.feet and snap.frame and FrameNumber() - snap.frame <= 90 then
 		playerFeet = Vector(snap.feet.x, snap.feet.y, snap.feet.z)
 		if snap.characterYaw then
 			yaw = snap.characterYaw
@@ -916,20 +816,23 @@ function Session:_applyTracking()
 		end
 	end
 
-	-- Tentative stand (overwritten inside _mirrorWorkingPlayer from snap)
-	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
-	self.ent:SetPos(self.standPos)
-	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
-
 	if self.idleOnly then
+		self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
+		self.ent:SetPos(self.standPos)
+		self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 		self.targets = {}
 		return
 	end
 
+	local ok = false
 	local okP, res = pcall(function()
-		return self:_mirrorWorkingPlayer(playerFeet, playerYaw)
+		return self:_applyPoseSnap(playerFeet, playerYaw)
 	end)
-	if not (okP and res) then
+	ok = okP and res
+	if not ok then
+		self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
+		self.ent:SetPos(self.standPos)
+		self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 		self.targets = {}
 	end
 end
