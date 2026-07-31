@@ -724,79 +724,85 @@ local function ReadLocalVRFrame()
 	return frame
 end
 
---- Mirror the *already-solved* VR playermodel — do NOT re-run arm IK.
--- The real player bones are the SoT (cl_character / FBT). We only:
---   1) snapshot world bone matrices from LocalPlayer
---   2) MapMirror / MapClone into twin stand space
---   3) L↔R bone name remap in facing mode (never same-ID flip → stretch)
--- That preserves limb lengths exactly — no rubber-band ProcessArm reach.
-function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
-	local ply = LocalPlayer()
-	if not IsValid(ply) or not IsValid(self.ent) then return false end
-	if not g_VR or not g_VR.active then return false end
+--- Published by cl_character after VR IK is applied (do not SetupBones the player here).
+-- { frame = n, characterYaw, feet, bones = { {name, pos, ang}, ... } }
+g_VR.avatarPoseSnap = g_VR.avatarPoseSnap or nil
 
-	local headId = ply:LookupBone("ValveBiped.Bip01_Head1")
-	-- Stereo path hides local head (scale 0 + nudge). Unhide for one snapshot so
-	-- the twin gets a real head, then restore.
-	local hideHead = false
-	if isnumber(headId) and headId >= 0 then
-		local ep = EyePos()
-		hideHead = g_VR.eyePosLeft and g_VR.eyePosRight
-			and (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight)
-			and ply:GetViewEntity() == ply
-		ply:ManipulateBoneScale(headId, Vector(1, 1, 1))
-		ply:ManipulateBonePosition(headId, Vector(0, 0, 0))
-	end
-
-	-- Force a clean posed skeleton (player IK already ran in PrePlayerDraw this frame)
-	ply:InvalidateBoneCache()
-	ply:SetupBones()
-
-	local mirror = self:_isMirrorMode()
-	local standPos = self.standPos
-	local standAng = self.standAng or playerYaw
-	local targets = {}
+--- Call from cl_character PrePlayerDraw AFTER SetBoneMatrix IK — never from twin.
+function vrmod.avatar.PublishPlayerPose(ply, frame)
+	if not IsValid(ply) then return end
 	local n = ply:GetBoneCount() or 0
-	local copied = 0
-
+	if n < 4 then return end
+	local yaw = (frame and frame.characterYaw) or g_VR.characterYaw or 0
+	local originZ = (g_VR.origin and g_VR.origin.z) or ply:GetPos().z
+	local hx = frame and frame.hmdPos and frame.hmdPos.x or ply:GetPos().x
+	local hy = frame and frame.hmdPos and frame.hmdPos.y or ply:GetPos().y
+	local bones = {}
 	for i = 0, n - 1 do
 		local name = ply:GetBoneName(i)
 		if not name or name == "" or name == "__INVALIDBONE__" then continue end
 		local m = ply:GetBoneMatrix(i)
 		if not m then continue end
+		local p, a = m:GetTranslation(), m:GetAngles()
+		bones[#bones + 1] = {
+			name = name,
+			pos = Vector(p.x, p.y, p.z),
+			ang = Angle(a.p, a.y, a.r),
+		}
+	end
+	if #bones < 4 then return end
+	g_VR.avatarPoseSnap = {
+		frame = FrameNumber(),
+		characterYaw = yaw,
+		feet = Vector(hx, hy, originZ),
+		bones = bones,
+	}
+end
 
-		local pos = m:GetTranslation()
-		local ang = m:GetAngles()
+--- Mirror the published VR pose snap — do NOT re-run arm IK, do NOT SetupBones player.
+function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
+	if not IsValid(self.ent) then return false end
+	local snap = g_VR.avatarPoseSnap
+	if not snap or not snap.bones or #snap.bones < 4 then return false end
+	-- Stale snap from a previous session
+	if snap.frame and FrameNumber() - snap.frame > 3 then return false end
+
+	local mirror = self:_isMirrorMode()
+	local standPos = self.standPos
+	local standAng = self.standAng or playerYaw
+	-- Use snap feet/yaw when available (same SoT as real character)
+	local srcFeet = snap.feet or playerFeet
+	local srcYaw = Angle(0, snap.characterYaw or (playerYaw and playerYaw.yaw) or 0, 0)
+
+	local targets = {}
+	local copied = 0
+	for _, b in ipairs(snap.bones) do
+		local name = b.name
+		local pos, ang = b.pos, b.ang
+		if not pos or not ang then continue end
+
 		local npos, nang
 		if self.mode == "world" then
 			npos, nang = pos, ang
 		elseif mirror then
-			npos, nang = MapMirror(pos, ang, playerFeet, playerYaw, standPos, standAng)
+			npos, nang = MapMirror(pos, ang, srcFeet, srcYaw, standPos, standAng)
 		else
-			npos, nang = MapClone(pos, ang, playerFeet, playerYaw, standPos, standAng)
+			npos, nang = MapClone(pos, ang, srcFeet, srcYaw, standPos, standAng)
 		end
 
 		local twinName = mirror and MirrorBoneName(name) or name
 		local tid = self.ent:LookupBone(twinName)
 		if not tid or tid < 0 then
-			-- same-name fallback (center bones / missing pair)
 			tid = self.ent:LookupBone(name)
 		end
 		if not tid or tid < 0 then continue end
 
-		-- World matrix only — never copy scale (would stretch mesh)
 		local mat = Matrix()
 		mat:Identity()
 		mat:SetTranslation(npos)
 		mat:SetAngles(nang)
 		targets[tid] = mat
 		copied = copied + 1
-	end
-
-	-- Restore local head hide for stereo comfort
-	if hideHead and isnumber(headId) and headId >= 0 then
-		ply:ManipulateBoneScale(headId, Vector(0.001, 0.001, 0.001))
-		ply:ManipulateBonePosition(headId, Vector(0, 20, 0))
 	end
 
 	if copied < 4 then return false end

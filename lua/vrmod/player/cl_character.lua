@@ -345,12 +345,16 @@ if CLIENT then
 		local frame = netTab.lerpedFrame
 		local cv = CV()
 		local headToHmdDist = cv.characterHeadToHmdDist or DEFAULT_HEAD_TO_HMD_DIST
+		-- Twin needs a real head matrix: never hide head while avatar twin is open.
+		local twinOpen = ply == LocalPlayer()
+			and vrmod.avatar
+			and (vrmod.avatar.IsOpen("avatar") or vrmod.avatar.IsOpen("default") or vrmod.avatar.IsOpen("fbt_cal"))
 		if ply == LocalPlayer() then
-			-- Hide local head in stereo eye views only (mirrors / 3rd person keep the head).
 			local headBone = ci.bones.b_head
 			if isnumber(headBone) and headBone >= 0 then
 				local ep = EyePos()
-				local hide = g_VR.eyePosLeft and g_VR.eyePosRight
+				local hide = (not twinOpen)
+					and g_VR.eyePosLeft and g_VR.eyePosRight
 					and (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight)
 					and ply:GetViewEntity() == ply
 				ply:ManipulateBoneScale(headBone, hide and zeroVec or Vector(1, 1, 1))
@@ -372,7 +376,15 @@ if CLIENT then
 		end
 
 		ply:SetupBones()
-		if g_VR.fbtActive and g_VR.fbtActive[steamid] then return end
+		if g_VR.fbtActive and g_VR.fbtActive[steamid] then
+			-- FBT still publishes a pose snap for the twin
+			if twinOpen then
+				pcall(function()
+					vrmod.avatar.PublishPlayerPose(ply, frame)
+				end)
+			end
+			return
+		end
 
 		if prevFrameNumber ~= FrameNumber() then
 			prevFrameNumber = FrameNumber()
@@ -396,15 +408,29 @@ if CLIENT then
 				end
 			end
 		end
+
+		-- Pose snap after DrawModel (PostPlayerDraw) so BoneCallback head/hands are included
 	end
 
 	local function PostPlayerDrawFunc(ply)
 		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
 		if activePlayers[steamid] == nil then return end
-		if not g_VR.net or not g_VR.net[steamid] or not g_VR.net[steamid].lerpedFrame then return end
+		local netTab = g_VR.net and g_VR.net[steamid]
+		if not netTab or not netTab.lerpedFrame then return end
 		if not characterInfo or not characterInfo[steamid] then return end
-		if g_VR.vehicle.current then return end
+
+		-- After full DrawModel (BuildBonePositions + BoneCallback): snapshot for twin
+		if ply == LocalPlayer() and vrmod.avatar and vrmod.avatar.PublishPlayerPose then
+			local twinOpen = vrmod.avatar.IsOpen("avatar")
+				or vrmod.avatar.IsOpen("default")
+				or vrmod.avatar.IsOpen("fbt_cal")
+			if twinOpen then
+				pcall(vrmod.avatar.PublishPlayerPose, ply, netTab.lerpedFrame)
+			end
+		end
+
+		if g_VR.vehicle and g_VR.vehicle.current then return end
 		ply:SetPos(characterInfo[steamid].preRenderPos)
 	end
 
