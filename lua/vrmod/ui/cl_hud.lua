@@ -45,7 +45,9 @@ if radarMat and not radarMat:IsError() then
 end
 
 -- Cached top-down brush heightmap (buildings + terrain) — no nested world RenderView
-local BMAP_RES = 52
+-- Classification uses player feet Z (stable). Min-of-sample ground made the whole disc
+-- paint solid pink when any deep pit existed.
+local BMAP_RES = 44
 local bmap = {
 	frame = -999,
 	origin = Vector(0, 0, 0),
@@ -53,8 +55,9 @@ local bmap = {
 	res = BMAP_RES,
 	-- cells[i] = absolute hit Z (or false if open sky)
 	cells = {},
-	groundZ = 0, -- min hit Z this sample (local “floor”)
+	playerZ = 0,
 	wx0 = 0, wy0 = 0, step = 1,
+	ready = false,
 }
 
 local function HudRes()
@@ -274,26 +277,36 @@ end
 
 ------------------------------------------------------------------------
 -- Building / terrain heightmap (brush traces — shows roofs & walls)
+-- Paint is stable: snap world sample rarely; classify vs player feet Z;
+-- no stencil; no min-Z (that filled the whole disc pink).
 ------------------------------------------------------------------------
+local BUILD_ABOVE = 56 -- units above player feet → structure
+local BUILD_TALL = 160
+
 local function SampleBuildingMap(ply, range)
 	if not cv_radar_buildings:GetBool() then return end
 	if not IsValid(ply) then return end
 	range = math.Clamp(range or 1500, 400, 4000)
 	local origin = ply:GetPos()
 	local fn = FrameNumber and FrameNumber() or 0
-	-- Refresh every ~10 frames, or when player moved / range changed
-	local moved = origin:DistToSqr(bmap.origin) > (48 * 48)
-	local rangeChanged = math.abs((bmap.range or 0) - range) > 24
-	if not moved and not rangeChanged and (fn - (bmap.frame or 0)) < 10 then
+	-- Slow refresh — avoids cell flicker. Snap grid to player only when moved far.
+	local moved = origin:DistToSqr(bmap.origin) > (128 * 128)
+	local rangeChanged = math.abs((bmap.range or 0) - range) > 64
+	if bmap.ready and not moved and not rangeChanged and (fn - (bmap.frame or 0)) < 30 then
+		-- Keep playerZ fresh for classification without resampling
+		bmap.playerZ = origin.z
 		return
 	end
 
 	local res = BMAP_RES
 	local step = (range * 2) / res
-	local wx0 = origin.x - range + step * 0.5
-	local wy0 = origin.y - range + step * 0.5
-	local skyZ = origin.z + math.Clamp(range * 0.9, 700, 3200)
-	local deepZ = origin.z - 1600
+	-- Snap sample origin to step grid so cells don't crawl when resampling
+	local ox = math.floor(origin.x / step + 0.5) * step
+	local oy = math.floor(origin.y / step + 0.5) * step
+	local wx0 = ox - range + step * 0.5
+	local wy0 = oy - range + step * 0.5
+	local skyZ = origin.z + math.Clamp(range * 0.85, 600, 2800)
+	local deepZ = origin.z - 800
 	local cells = bmap.cells
 	local tr = {
 		mask = MASK_SOLID_BRUSHONLY,
@@ -301,7 +314,6 @@ local function SampleBuildingMap(ply, range)
 		filter = ply,
 	}
 
-	local minZ = math.huge
 	for iy = 0, res - 1 do
 		local wy = wy0 + iy * step
 		for ix = 0, res - 1 do
@@ -311,113 +323,72 @@ local function SampleBuildingMap(ply, range)
 			local hit = util.TraceLine(tr)
 			local idx = iy * res + ix + 1
 			if hit.Hit and not hit.HitSky then
-				local z = hit.HitPos.z
-				cells[idx] = z
-				if z < minZ then minZ = z end
+				cells[idx] = hit.HitPos.z
 			else
 				cells[idx] = false
 			end
 		end
 	end
-	if minZ == math.huge then minZ = origin.z end
 
 	bmap.frame = fn
-	bmap.origin = Vector(origin)
+	bmap.origin = Vector(ox, oy, origin.z)
+	bmap.playerZ = origin.z
 	bmap.range = range
 	bmap.res = res
 	bmap.wx0 = wx0
 	bmap.wy0 = wy0
 	bmap.step = step
-	bmap.groundZ = minZ
+	bmap.ready = true
 end
 
--- Height above local ground (from last sample)
-local function CellElev(z)
+-- Height of surface relative to player feet (stable; not map-min)
+local function CellElev(z, playerZ)
 	if not z or z == false then return nil end
-	return z - (bmap.groundZ or z)
+	return z - (playerZ or 0)
 end
 
 local function IsBuildingElev(elev)
-	-- Anything clearly above local ground reads as structure
-	return elev and elev >= 40
+	return elev ~= nil and elev >= BUILD_ABOVE
 end
 
 local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	if not cv_radar_buildings:GetBool() then return end
-	if not bmap.cells or not bmap.step or bmap.step <= 0 then return end
+	if not bmap.ready or not bmap.cells or not bmap.step or bmap.step <= 0 then return end
 	local res = bmap.res or BMAP_RES
 	local step = bmap.step
 	local wx0, wy0 = bmap.wx0, bmap.wy0
-	-- Cell size on plate; inset radius so the whole square stays inside the circle
-	local cellPx = math.max(3, (radius * 2 / res) * 1.12)
+	local playerZ = bmap.playerZ or origin.z
+	-- Cell size; keep full square inside circle
+	local cellPx = math.max(2, math.floor((radius * 2 / res) + 0.5))
 	local half = cellPx * 0.5
-	-- half-diagonal of square ≈ half * sqrt(2); keep full rect inside circle
-	local maxR = math.max(0, radius - half * 1.42 - 1)
+	local maxR = math.max(0, radius - half * 1.42 - 2)
 	local maxR2 = maxR * maxR
 	local cells = bmap.cells
+	-- Paint vs sample origin so map scrolls smoothly without reclass flicker
+	local refX, refY = origin.x, origin.y
 
-	local function elevAt(ix, iy)
-		if ix < 0 or iy < 0 or ix >= res or iy >= res then return nil end
-		return CellElev(cells[iy * res + ix + 1])
-	end
+	draw.NoTexture()
 
-	local function cellInside(u, v)
-		return (u * u + v * v) <= maxR2
-	end
-
-	-- Pass 1: ground fill (very dark so buildings pop)
+	-- Buildings only (no full-disc ground flood — that looked solid pink)
 	for iy = 0, res - 1 do
-		local wy = wy0 + iy * step - origin.y
+		local wy = wy0 + iy * step - refY
 		for ix = 0, res - 1 do
 			local z = cells[iy * res + ix + 1]
 			if z == false or z == nil then continue end
-			local elev = CellElev(z)
-			if IsBuildingElev(elev) then continue end
-			local wx = wx0 + ix * step - origin.x
-			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
-			if not cellInside(u, v) then continue end
-			surface.SetDrawColor(6, 14, 12, 210)
-			surface.DrawRect(cx + u - half, cy + v - half, cellPx, cellPx)
-		end
-	end
-
-	-- Pass 2: buildings — high contrast + silhouette edges
-	for iy = 0, res - 1 do
-		local wy = wy0 + iy * step - origin.y
-		for ix = 0, res - 1 do
-			local z = cells[iy * res + ix + 1]
-			if z == false or z == nil then continue end
-			local elev = CellElev(z)
+			local elev = CellElev(z, playerZ)
 			if not IsBuildingElev(elev) then continue end
 
-			local wx = wx0 + ix * step - origin.x
+			local wx = wx0 + ix * step - refX
 			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
-			if not cellInside(u, v) then continue end
-			local bx, by = cx + u, cy + v
+			if (u * u + v * v) > maxR2 then continue end
 
-			-- Height band: low walls / tall roofs
-			local t = math.Clamp((elev - 40) / 280, 0, 1)
-			-- Warm Cube crimson → hot pink-white (very readable on dark plate)
-			local r = 150 + t * 105
-			local g = 40 + t * 100
-			local b = 70 + t * 90
-			surface.SetDrawColor(r, g, b, 235)
-			surface.DrawRect(bx - half, by - half, cellPx, cellPx)
-
-			-- Silhouette: bright edge where neighbor is open/ground
-			local edge = false
-			local n = elevAt(ix - 1, iy)
-			if not IsBuildingElev(n) then edge = true end
-			n = elevAt(ix + 1, iy)
-			if not IsBuildingElev(n) then edge = true end
-			n = elevAt(ix, iy - 1)
-			if not IsBuildingElev(n) then edge = true end
-			n = elevAt(ix, iy + 1)
-			if not IsBuildingElev(n) then edge = true end
-			if edge then
-				surface.SetDrawColor(255, 230, 240, 255)
-				surface.DrawOutlinedRect(bx - half, by - half, cellPx, cellPx, 1)
-			end
+			-- Cool slate (readable, not solid crimson disc)
+			local t = math.Clamp((elev - BUILD_ABOVE) / (BUILD_TALL - BUILD_ABOVE), 0, 1)
+			local r = 70 + t * 90
+			local g = 85 + t * 70
+			local b = 100 + t * 80
+			surface.SetDrawColor(r, g, b, 200)
+			surface.DrawRect(cx + u - half, cy + v - half, cellPx, cellPx)
 		end
 	end
 end
@@ -519,61 +490,33 @@ local function PaintRadar(w, h, T)
 		has3d = radarMat and not radarMat:IsError()
 	end
 
-	-- Circular plate
+	-- Circular plate (dark — buildings are slate blocks, not a pink flood)
 	surface.SetDrawColor(bg.r, bg.g, bg.b, 235)
 	draw.NoTexture()
 	local segs = 48
 	local platePoly = {}
-	local clipPoly = {} -- stencil clip = inner disc (no bleed past ring)
 	for i = 0, segs do
 		local a = math.rad(i / segs * 360)
-		local ca, sa = math.cos(a), math.sin(a)
-		platePoly[#platePoly + 1] = { x = cx + ca * (radius + 4), y = cy + sa * (radius + 4) }
-		clipPoly[#clipPoly + 1] = { x = cx + ca * radius, y = cy + sa * radius }
+		platePoly[#platePoly + 1] = {
+			x = cx + math.cos(a) * (radius + 4),
+			y = cy + math.sin(a) * (radius + 4),
+		}
 	end
 	surface.DrawPoly(platePoly)
 
-	-- Stencil: map content (3D square + building cells) only inside the circle
-	local stOn = false
-	if render.SetStencilEnable then
-		pcall(function()
-			render.ClearStencil()
-			render.SetStencilEnable(true)
-			render.SetStencilWriteMask(255)
-			render.SetStencilTestMask(255)
-			render.SetStencilReferenceValue(1)
-			render.SetStencilCompareFunction(STENCIL_ALWAYS)
-			render.SetStencilPassOperation(STENCIL_REPLACE)
-			render.SetStencilFailOperation(STENCIL_KEEP)
-			render.SetStencilZFailOperation(STENCIL_KEEP)
-			-- Write circle into stencil (alpha write not needed; color discarded)
-			render.OverrideColorWriteEnable(true, false)
-			surface.SetDrawColor(255, 255, 255, 255)
-			draw.NoTexture()
-			surface.DrawPoly(clipPoly)
-			render.OverrideColorWriteEnable(false)
-			render.SetStencilCompareFunction(STENCIL_EQUAL)
-			render.SetStencilPassOperation(STENCIL_KEEP)
-			stOn = true
-		end)
-	end
+	-- No stencil / color-write overrides (they leaked → flicker & full-red plate)
 
 	if has3d then
 		surface.SetMaterial(radarMat)
-		surface.SetDrawColor(255, 255, 255, 180)
-		-- Inscribed square (diagonal = diameter) so texture never sticks out of circle
+		surface.SetDrawColor(255, 255, 255, 140)
+		-- Inscribed square (diagonal = diameter) so texture stays inside circle
 		local half = radius / math.sqrt(2)
 		surface.DrawTexturedRect(cx - half, cy - half, half * 2, half * 2)
-	end
-
-	-- Buildings / terrain (cells also radius-inset; stencil is hard clip)
-	if cv_radar_buildings:GetBool() then
 		draw.NoTexture()
-		pcall(PaintBuildingMap, cx, cy, radius, yaw, range, origin)
 	end
 
-	if stOn then
-		pcall(function() render.SetStencilEnable(false) end)
+	if cv_radar_buildings:GetBool() then
+		pcall(PaintBuildingMap, cx, cy, radius, yaw, range, origin)
 	end
 
 	-- Grid rings + cross (CS-style)
@@ -841,7 +784,8 @@ local function Bind()
 	end
 
 	-- Radar world data BEFORE stereo RT is pushed (see cl_vrmod).
-	-- Building heightmap is cheap traces; optional 3D photo is separate.
+	-- Buildings: rare grid sample. 3D photo: rare (every-frame RenderView = flicker).
+	local radar3dFrame = -999
 	hook.Add("VRMod_PreStereoCapture", "vrmod_radar_world", function()
 		if not g_VR or not g_VR.active then return end
 		if not cv_radar:GetBool() then return end
@@ -852,7 +796,11 @@ local function Bind()
 			pcall(SampleBuildingMap, ply, range)
 		end
 		if cv_radar_3d:GetBool() then
-			pcall(CaptureRadar3D, ply, range)
+			local fn = FrameNumber and FrameNumber() or 0
+			if (fn - radar3dFrame) >= 20 then
+				radar3dFrame = fn
+				pcall(CaptureRadar3D, ply, range)
+			end
 		end
 	end)
 
