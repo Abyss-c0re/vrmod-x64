@@ -1,6 +1,30 @@
 if SERVER then return end
+-- =============================================================================
+-- VR Quick Menu (miscmenu) — Cube chrome + multi-page layout
+-- Layout SoT: vrmod.QuickMenu (cl_quick_menu_layout.lua)
+-- Item activation still on menu close (laser hover); page ◀▶ on trigger press.
+-- =============================================================================
+
+g_VR = g_VR or {}
 g_VR.menuBackup = g_VR.menuBackup or {}
+
 local open = false
+local pageEntries = {} -- current page entries for hit-test / activate
+local prevHoveredItem = -2
+local hoverNav = nil -- "prev" | "next" | nil
+local navPrev = { x = 0, y = 0, w = 0, h = 0 }
+local navNext = { x = 0, y = 0, w = 0, h = 0 }
+
+local function QM()
+	return vrmod and vrmod.QuickMenu
+end
+
+local function ensureLayout()
+	local q = QM()
+	if q and q.Load and not q.GetLayout then q.Load() end
+	if q and q.GetLayout then q.GetLayout() end
+end
+
 function g_VR.MenuOpen()
 	if hook.Call("VRMod_OpenQuickMenu") == false then return end
 	-- Recover if flag stuck after UI reset / failed open
@@ -8,38 +32,10 @@ function g_VR.MenuOpen()
 	if open then return end
 	if not g_VR.active or not isfunction(VRUtilMenuOpen) then return end
 	open = true
-	--
-	local items = {}
-	for k, v in pairs(g_VR.menuItems or {}) do
-		local slot, slotPos = v.slot, v.slotPos
-		local index = #items + 1
-		for i = 1, #items do
-			if items[i].slot > slot or items[i].slot == slot and items[i].slotPos > slotPos then
-				index = i
-				break
-			end
-		end
+	ensureLayout()
+	prevHoveredItem = -2
+	hoverNav = nil
 
-		table.insert(items, index, {
-			index = k,
-			slot = slot,
-			slotPos = slotPos
-		})
-	end
-
-	local currentSlot, actualSlotPos = 0, 0
-	for i = 1, #items do
-		if items[i].slot ~= currentSlot then
-			actualSlotPos = 0
-			currentSlot = items[i].slot
-		end
-
-		items[i].actualSlotPos = actualSlotPos
-		actualSlotPos = actualSlotPos + 1
-	end
-
-	--
-	local prevHoveredItem = -2
 	local qmW, qmH, qmScale = 512, 512, 0.025
 	local qmPos, qmAng = Vector(2.5, 3, 4), Angle(0, -90, 55)
 	if isfunction(VRUtilHandMenuPose) then
@@ -47,11 +43,16 @@ function g_VR.MenuOpen()
 	end
 	VRUtilMenuOpen("miscmenu", qmW, qmH, nil, true, qmPos, qmAng, qmScale, true, function()
 		hook.Remove("PreRender", "vrutil_hook_renderigm")
+		hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
 		open = false
 		local sel = prevHoveredItem
-		-- Run after miscmenu is fully closed so nested VRUtilMenuOpen works (Avatar/Settings)
-		if sel > 0 and items[sel] and g_VR.menuItems and g_VR.menuItems[items[sel].index] then
-			local fn = g_VR.menuItems[items[sel].index].func
+		local nav = hoverNav
+		hoverNav = nil
+		-- Page nav on close shouldn't fire items
+		if nav then return end
+		-- Run after miscmenu is fully closed so nested VRUtilMenuOpen works
+		if sel > 0 and pageEntries[sel] then
+			local fn = pageEntries[sel].func
 			if isfunction(fn) then
 				timer.Simple(0, function()
 					if g_VR and g_VR.active then
@@ -64,10 +65,14 @@ function g_VR.MenuOpen()
 			end
 		end
 	end)
+
 	if g_VR.menus and g_VR.menus.miscmenu then
 		g_VR.menus.miscmenu.scale = qmScale
 		g_VR.menus.miscmenu.cubeMenu = true
-		g_VR.menus.miscmenu.attachment = true
+		g_VR.menus.miscmenu.grabbable = true
+		if not g_VR.menus.miscmenu.freeFloat and not g_VR.menus.miscmenu.grabHand then
+			g_VR.menus.miscmenu.attachment = true
+		end
 	end
 
 	if not (g_VR.menus and g_VR.menus.miscmenu) then
@@ -75,47 +80,149 @@ function g_VR.MenuOpen()
 		return
 	end
 
-	-- Keep hand scale; never let cl_ui crush attached menus
 	g_VR.menus.miscmenu.scale = 0.03
 	g_VR.menus.miscmenu.cubeMenu = true
-	g_VR.menus.miscmenu.attachment = true
+	g_VR.menus.miscmenu.grabbable = true
+	if not g_VR.menus.miscmenu.freeFloat then
+		g_VR.menus.miscmenu.attachment = true
+	end
+
+	local function layoutMetrics()
+		local C = vrmod.cube
+		local M = (C and C.Metrics and C.Metrics()) or { pad = 14, row = 48, headerH = 48, id = "comfort" }
+		local dens = (M.id == "compact" and 0.88) or (M.id == "large" and 1.12) or 1
+		-- Always fit 6 columns in 512px (large density used to make gap negative → missing/unclickable Spawn)
+		local gap = 6
+		local buttonWidth = math.floor((512 - gap * 5) / 6)
+		buttonWidth = math.Clamp(math.floor(buttonWidth * math.min(dens, 1.05)), 64, 82)
+		-- re-center leftover space into gap
+		gap = math.max(4, (512 - buttonWidth * 6) / 5)
+		local buttonHeight = math.floor(math.Clamp(math.max((M.row or 48) + 8, 48) * math.min(dens, 1.08), 44, 72))
+		local headerH = math.min(M.headerH or 48, 56)
+		local baseY = headerH + 36
+		return C, M, buttonWidth, buttonHeight, gap, baseY, headerH
+	end
+
+	local function rebuildPage()
+		local q = QM()
+		-- Recover empty registry after lua reload without VR re-start
+		if not g_VR.menuItems or #g_VR.menuItems == 0 then
+			if vrmod.RebuildInGameMenuItems then
+				vrmod.RebuildInGameMenuItems()
+			end
+		end
+		-- If Spawn is unassigned (not intentionally OFF), pin to page 1 slot 0,0
+		if q and q.FindItem and q.AssignToPage then
+			local pi, _, hid = q.FindItem("spawn")
+			if not hid and not pi then
+				q.AssignToPage("spawn", 1, 0, 0)
+			end
+		end
+		if q and q.BuildPageEntries then
+			pageEntries = q.BuildPageEntries(q.GetCurrentPage and q.GetCurrentPage() or 1)
+		else
+			-- Fallback: legacy flat sort of all items (no pages)
+			pageEntries = {}
+			local items = {}
+			for k, v in pairs(g_VR.menuItems or {}) do
+				local slot, slotPos = v.slot, v.slotPos
+				local index = #items + 1
+				for i = 1, #items do
+					if items[i].slot > slot or items[i].slot == slot and items[i].slotPos > slotPos then
+						index = i
+						break
+					end
+				end
+				table.insert(items, index, { index = k, slot = slot, slotPos = slotPos })
+			end
+			local currentSlot, actualSlotPos = 0, 0
+			for i = 1, #items do
+				if items[i].slot ~= currentSlot then
+					actualSlotPos = 0
+					currentSlot = items[i].slot
+				end
+				local mi = g_VR.menuItems[items[i].index]
+				pageEntries[#pageEntries + 1] = {
+					menuIndex = items[i].index,
+					name = mi and mi.name or "?",
+					hint = mi and mi.hint,
+					func = mi and mi.func,
+					col = items[i].slot,
+					row = actualSlotPos,
+				}
+				actualSlotPos = actualSlotPos + 1
+			end
+		end
+	end
+
+	rebuildPage()
 
 	local function paint(hoveredItem)
 		if not isfunction(VRUtilMenuRenderStart) then return end
 		VRUtilMenuRenderStart("miscmenu")
-		local C = vrmod.cube
+		local C, M, buttonWidth, buttonHeight, gap, baseY, headerH = layoutMetrics()
 		local T = (C and C.ThemeLive and C.ThemeLive()) or (C and C.Theme) or {}
-		local buttonWidth, buttonHeight = 82, 56
-		local gap = (512 - buttonWidth * 6) / 5
+		local q = QM()
+		local pageCount = (q and q.GetPageCount and q.GetPageCount()) or 1
+		local pageIdx = (q and q.GetCurrentPage and q.GetCurrentPage()) or 1
+		local pageName = (q and q.GetPageName and q.GetPageName(pageIdx)) or "Menu"
 
-		-- Crimson Cube chrome (not flat black boxes)
+		local subtitle = string.format("%s · %d/%d", pageName, pageIdx, pageCount)
+		if T.presetLabel then
+			subtitle = (T.presetLabel or "") .. " · " .. subtitle
+		end
+
 		if C and C.DrawChrome then
 			C.DrawChrome(0, 0, 512, 512, "QUICK MENU", {
-				subtitle = (T.presetLabel or "Theme"),
-				pad = 14,
-				headerH = 48,
+				subtitle = subtitle,
+				pad = M.pad or 14,
+				headerH = headerH,
 			})
 		else
 			surface.SetDrawColor(12, 6, 10, 240)
 			surface.DrawRect(0, 0, 512, 512)
 			surface.SetDrawColor(196, 30, 58, 255)
 			surface.DrawRect(0, 0, 512, 4)
+			draw.SimpleText("QUICK MENU", "DermaLarge", 16, 12, Color(196, 30, 58))
+			draw.SimpleText(subtitle, "DermaDefault", 16, 36, Color(200, 150, 165))
 		end
 
-		for i = 1, #items do
-			local x, y = items[i].slot, items[i].actualSlotPos
-			local bx = x * (buttonWidth + gap)
-			local by = 200 + y * (buttonHeight + gap)
-			local item = g_VR.menuItems and g_VR.menuItems[items[i].index]
+		-- Page nav buttons (always shown when multi-page; still useful with 1 page for future)
+		local navY = headerH + 4
+		local navH = 28
+		local navW = 56
+		navPrev.x, navPrev.y, navPrev.w, navPrev.h = 12, navY, navW, navH
+		navNext.x, navNext.y, navNext.w, navNext.h = 512 - 12 - navW, navY, navW, navH
+		local prevHot = hoverNav == "prev"
+		local nextHot = hoverNav == "next"
+		if C and C.DrawSlot then
+			C.DrawSlot(navPrev.x, navPrev.y, navPrev.w, navPrev.h, "◀", prevHot, false, pageCount > 1)
+			C.DrawSlot(navNext.x, navNext.y, navNext.w, navNext.h, "▶", nextHot, false, pageCount > 1)
+		else
+			surface.SetDrawColor(prevHot and 100 or 55, 14, 24, 250)
+			surface.DrawRect(navPrev.x, navPrev.y, navPrev.w, navPrev.h)
+			surface.SetDrawColor(nextHot and 100 or 55, 14, 24, 250)
+			surface.DrawRect(navNext.x, navNext.y, navNext.w, navNext.h)
+			draw.SimpleText("◀", "DermaDefaultBold", navPrev.x + navW * 0.5, navY + navH * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			draw.SimpleText("▶", "DermaDefaultBold", navNext.x + navW * 0.5, navY + navH * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
+		-- Center page chip
+		local chip = string.format("%d / %d", pageIdx, pageCount)
+		local fontChip = (C and C.Font and C.Font("CubeSmall")) or "DermaDefault"
+		draw.SimpleText(chip, fontChip, 256, navY + navH * 0.5, T.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+		for i = 1, #pageEntries do
+			local e = pageEntries[i]
+			local bx = e.col * (buttonWidth + gap)
+			local by = baseY + e.row * (buttonHeight + gap)
+			if by + buttonHeight > 480 then continue end
 			local label = ""
-			if item then
-				if hoveredItem == i and item.hint then
-					label = item.hint
-				else
-					label = item.name
-				end
-				label = tostring(label or "")
+			if hoveredItem == i and e.hint then
+				label = e.hint
+			else
+				label = e.name or ""
 			end
+			label = tostring(label or "")
 			if C and C.DrawButtonMultiline then
 				C.DrawButtonMultiline(bx, by, buttonWidth, buttonHeight, label, hoveredItem == i, true)
 			elseif C and C.DrawSlot then
@@ -125,9 +232,10 @@ function g_VR.MenuOpen()
 				draw.SimpleText(label, "HudSelectionText", bx + buttonWidth / 2, by + buttonHeight / 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 			end
 		end
-		if #items == 0 then
+
+		if #pageEntries == 0 then
 			local font = (C and C.Font and C.Font("CubeLabel")) or "HudSelectionText"
-			draw.SimpleText("no menu items", font, 256, 280, T.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			draw.SimpleText("empty page — Settings → Quick Menu", font, 256, 300, T.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		end
 		if C and C.DrawFooterLaw then
 			C.DrawFooterLaw(0, 488, 512, 2)
@@ -135,31 +243,65 @@ function g_VR.MenuOpen()
 		VRUtilMenuRenderEnd()
 	end
 
-	-- Immediate paint so RT is never blank before laser focus
 	paint(-1)
+
+	-- Trigger while open: flip pages without closing
+	hook.Add("VRMod_Input", "vrmod_qm_page_nav", function(action, pressed)
+		if not open or not pressed then return end
+		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		if hoverNav == "prev" then
+			local q = QM()
+			if q and q.PrevPage then q.PrevPage() end
+			rebuildPage()
+			prevHoveredItem = -1
+			return
+		elseif hoverNav == "next" then
+			local q = QM()
+			if q and q.NextPage then q.NextPage() end
+			rebuildPage()
+			prevHoveredItem = -1
+			return
+		end
+	end)
 
 	hook.Add("PreRender", "vrutil_hook_renderigm", function()
 		if not open or not (g_VR.menus and g_VR.menus.miscmenu) then
 			open = false
 			hook.Remove("PreRender", "vrutil_hook_renderigm")
+			hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
 			return
 		end
 		g_VR.menus.miscmenu.scale = 0.03
 		g_VR.menus.miscmenu.cubeMenu = true
+
+		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()
 		local hoveredItem = -1
-		local hoveredSlot, hoveredSlotPos = -1, -1
+		hoverNav = nil
+		local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
 		if g_VR.menuFocus == "miscmenu" then
-			hoveredSlot = math.floor((g_VR.menuCursorX or 0) / 86)
-			hoveredSlotPos = math.floor(((g_VR.menuCursorY or 0) - 230) / 57)
-		end
-		for i = 1, #items do
-			if items[i].slot == hoveredSlot and items[i].actualSlotPos == hoveredSlotPos then
-				hoveredItem = i
-				break
+			-- Nav hit
+			if mx >= navPrev.x and mx <= navPrev.x + navPrev.w and my >= navPrev.y and my <= navPrev.y + navPrev.h then
+				hoverNav = "prev"
+			elseif mx >= navNext.x and mx <= navNext.x + navNext.w and my >= navNext.y and my <= navNext.y + navNext.h then
+				hoverNav = "next"
+			else
+				-- Rect hit-test (floor(col) failed when gap was negative / non-uniform)
+				for i = 1, #pageEntries do
+					local e = pageEntries[i]
+					local bx = e.col * (buttonWidth + gap)
+					local by = baseY + e.row * (buttonHeight + gap)
+					if mx >= bx and mx <= bx + buttonWidth and my >= by and my <= by + buttonHeight then
+						hoveredItem = i
+						break
+					end
+				end
 			end
 		end
-		prevHoveredItem = hoveredItem
-		-- ALWAYS paint while open (blank RT = unsummonable menu)
+		if hoverNav then
+			prevHoveredItem = -1
+		else
+			prevHoveredItem = hoveredItem
+		end
 		paint(hoveredItem)
 	end)
 end
@@ -167,46 +309,45 @@ end
 function g_VR.MenuClose()
 	open = false
 	hook.Remove("PreRender", "vrutil_hook_renderigm")
+	hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
 	if isfunction(VRUtilMenuClose) then
 		VRUtilMenuClose("miscmenu")
 	end
 end
 
-local function AddMenuItemInternal(name, slot, slotpos, func, forceSlot, hint)
+local function AddMenuItemInternal(name, slot, slotpos, func, forceSlot, hint, id)
 	g_VR.menuItems = g_VR.menuItems or {}
-	-- Avoid duplicates
 	for _, item in ipairs(g_VR.menuItems) do
 		if item.name == name and item.func == func then return end
 	end
-
+	local q = QM()
+	id = id or (q and q.IdFromName and q.IdFromName(name)) or nil
 	table.insert(g_VR.menuItems, {
 		name = name,
 		slot = slot,
 		slotPos = slotpos,
-		func = func, -- always string or nil
+		func = func,
 		internal = forceSlot == true,
-		hint = hint, -- track forced slot
+		hint = hint,
+		id = id,
 	})
 end
 
--- Restore missing items safely
-local restoreCooldown = 1 -- seconds
+local restoreCooldown = 1
 local lastRestore = 0
 hook.Add("Think", "SafeRestoreVRMenuItems", function()
 	if CurTime() - lastRestore < restoreCooldown then return end
 	lastRestore = CurTime()
 	for id, data in pairs(g_VR.menuBackup) do
 		local exists = false
-		for _, item in ipairs(g_VR.menuItems) do
+		for _, item in ipairs(g_VR.menuItems or {}) do
 			if item.name == data.name and item.func == data.func then
 				exists = true
 				break
 			end
 		end
-
 		if not exists then
-			-- revive both forced slot and hint safely
-			AddMenuItemInternal(data.name, data.slot, data.slotPos, data.func, data.internal, data.hint)
+			AddMenuItemInternal(data.name, data.slot, data.slotPos, data.func, data.internal, data.hint, data.id)
 		end
 	end
 end)
@@ -214,6 +355,7 @@ end)
 hook.Add("VRMod_Exit", "PurgeMenuBackup", function()
 	open = false
 	hook.Remove("PreRender", "vrutil_hook_renderigm")
+	hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
 	g_VR = g_VR or {}
 	g_VR.menuBackup = {}
 end)

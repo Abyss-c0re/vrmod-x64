@@ -1,98 +1,128 @@
 if SERVER then return end
 local function InitializeMenuItems()
-    g_VR.menuItems = {}
-    -- Drop legacy "Mirror" entries so restore Think cannot resurrect them
-    g_VR.menuBackup = g_VR.menuBackup or {}
-    for id, data in pairs(g_VR.menuBackup) do
-        if data and (data.name == "Mirror" or data.name == "mirror") then
-            g_VR.menuBackup[id] = nil
-        end
-    end
-    if vrmod.RemoveInGameMenuItem then
-        vrmod.RemoveInGameMenuItem("Mirror", nil, true)
-    end
+	g_VR.menuItems = {}
+	-- Drop legacy "Mirror" entries so restore Think cannot resurrect them
+	g_VR.menuBackup = g_VR.menuBackup or {}
+	for id, data in pairs(g_VR.menuBackup) do
+		if data and (data.name == "Mirror" or data.name == "mirror") then
+			g_VR.menuBackup[id] = nil
+		end
+	end
+	if vrmod.RemoveInGameMenuItem then
+		vrmod.RemoveInGameMenuItem("Mirror", nil, true)
+	end
 
-    -- Row 1
-    vrmod.AddInGameMenuItem("Spawn Menu", 0, 0, function()
-        if not IsValid(g_SpawnMenu) then return end
-        g_SpawnMenu:Open()
-        hook.Add("VRMod_OpenQuickMenu", "close_spawnmenu", function()
-            hook.Remove("VRMod_OpenQuickMenu", "close_spawnmenu")
-            g_SpawnMenu:Close()
-            return false
-        end)
-    end, true)
+	local add = vrmod.AddInGameMenuItem
+	-- id is 7th arg — used by Quick Menu pages / settings layout
 
-    vrmod.AddInGameMenuItem("Context Menu", 1, 0, function()
-        if not IsValid(g_ContextMenu) then return end
-        g_ContextMenu:Open()
-        hook.Add("VRMod_OpenQuickMenu", "closecontextmenu", function()
-            hook.Remove("VRMod_OpenQuickMenu", "closecontextmenu")
-            g_ContextMenu:Close()
-            return false
-        end)
-    end, true)
+	local function openSandboxShell(which)
+		-- Defer so quick-menu close finishes first (nested menu open)
+		timer.Simple(0, function()
+			if not g_VR or not g_VR.active then return end
+			local p2v = vrmod.panel2vr
+			-- Toggle: second pick closes instead of stacking
+			if p2v and p2v.IsShellOpen and p2v.IsShellOpen(which) then
+				if p2v.CloseSandboxShell then p2v.CloseSandboxShell(which) end
+				return
+			end
+			local ok = false
+			if which == "context" then
+				if p2v and p2v.OpenContextMenu then
+					ok = p2v.OpenContextMenu()
+				elseif vrmod.OpenContextMenuVR then
+					ok = vrmod.OpenContextMenuVR()
+				end
+			else
+				if p2v and p2v.OpenSpawnMenu then
+					ok = p2v.OpenSpawnMenu()
+				elseif vrmod.OpenSpawnMenuVR then
+					ok = vrmod.OpenSpawnMenuVR()
+				end
+			end
+			if not ok and vrmod.logger then
+				vrmod.logger.Warn("[QM] %s menu open failed (valid=%s)",
+					which, tostring(IsValid(which == "context" and g_ContextMenu or g_SpawnMenu)))
+			end
+			-- Opening quick menu again always force-closes spawn/context
+			local hookId = which == "context" and "closecontextmenu" or "close_spawnmenu"
+			hook.Add("VRMod_OpenQuickMenu", hookId, function()
+				hook.Remove("VRMod_OpenQuickMenu", hookId)
+				if p2v and p2v.CloseSandboxShell then
+					p2v.CloseSandboxShell(which)
+				end
+			end)
+		end)
+	end
 
-    vrmod.AddInGameMenuItem("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end, true)
-    vrmod.AddInGameMenuItem("Numpad", 3, 0, function() LocalPlayer():ConCommand("vrmod_numpad") end, true)
-    -- Defer open one tick: quickmenu closeFunc must finish first or open is eaten
-    vrmod.AddInGameMenuItem("Avatar", 4, 0, function()
-        timer.Simple(0, function()
-            if not g_VR or not g_VR.active then return end
-            if vrmod.AvatarMenu_Open then
-                vrmod.AvatarMenu_Open()
-            elseif VRUtilOpenHeightMenu then
-                VRUtilOpenHeightMenu()
-            else
-                RunConsoleCommand("vrmod_avatar")
-            end
-        end)
-    end, true, "customize twin")
-    -- Same catalog for VR (hand Cube) and desktop (Derma) via Settings_Open
-    vrmod.AddInGameMenuItem("Settings", 5, 0, function()
-        timer.Simple(0, function()
-            if vrmod.Settings_Open then
-                vrmod.Settings_Open()
-            elseif vrmod.panel2vr and vrmod.panel2vr.OpenSettings then
-                vrmod.panel2vr.OpenSettings()
-            elseif VRUtilOpenMenu then
-                VRUtilOpenMenu()
-            end
-        end)
-    end, true)
+	-- Row 1 defaults (page 1 via layout file)
+	add("Spawn Menu", 0, 0, function() openSandboxShell("spawn") end, true, "toggle", "spawn")
 
-    -- Row 2
-    vrmod.AddInGameMenuItem("Flashlight", 0, 1, function() LocalPlayer():ConCommand("impulse 100") end, true)
-    vrmod.AddInGameMenuItem("Laser pointer", 1, 1, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end, true)
-    vrmod.AddInGameMenuItem("Toggle Noclip", 2, 1, function() LocalPlayer():ConCommand("noclip") end, true)
-    vrmod.AddInGameMenuItem("Undo", 3, 1, function() LocalPlayer():ConCommand("gmod_undo") end, true)
-    vrmod.AddInGameMenuItem("Cleanup", 4, 1, function() LocalPlayer():ConCommand("gmod_cleanup") end, true)
-    vrmod.AddInGameMenuItem("Admin Cleanup", 5, 1, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true)
+	add("Context Menu", 1, 0, function() openSandboxShell("context") end, true, "toggle", "context")
 
-    -- Row 3
-    vrmod.AddInGameMenuItem("Reset Vehicle View", 0, 2, function() VRUtilresetVehicleView() end, true)
-    vrmod.AddInGameMenuItem("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end, true)
-    vrmod.AddInGameMenuItem("Border Cal", 1, 3, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true)
-    vrmod.AddInGameMenuItem("Toggle blacklist weapon", 2, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true)
-    vrmod.AddInGameMenuItem("Map Browser", 3, 2, function()
-        local window = VRUtilCreateMapBrowserWindow()
-        hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
-            hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
-            if IsValid(window) then window:Remove() end
-            return false
-        end)
-    end, true)
-    vrmod.AddInGameMenuItem("RESPAWN", 4, 2, function() LocalPlayer():ConCommand("kill") end, true)
-    vrmod.AddInGameMenuItem("VR EXIT", 5, 2, function() LocalPlayer():ConCommand("vrmod_exit") end, true)
-    vrmod.AddInGameMenuItem("DISCONNECT", 5, 2, function() LocalPlayer():ConCommand("disconnect") end, true)
+	add("Chat", 2, 0, function() LocalPlayer():ConCommand("vrmod_chatmode") end, true, nil, "chat")
+	add("Numpad", 3, 0, function() LocalPlayer():ConCommand("vrmod_numpad") end, true, nil, "numpad")
+	add("Avatar", 4, 0, function()
+		timer.Simple(0, function()
+			if not g_VR or not g_VR.active then return end
+			if vrmod.AvatarMenu_Open then
+				vrmod.AvatarMenu_Open()
+			elseif VRUtilOpenHeightMenu then
+				VRUtilOpenHeightMenu()
+			else
+				RunConsoleCommand("vrmod_avatar")
+			end
+		end)
+	end, true, "customize twin", "avatar")
+	add("Settings", 5, 0, function()
+		timer.Simple(0, function()
+			if vrmod.Settings_Open then
+				vrmod.Settings_Open()
+			elseif vrmod.panel2vr and vrmod.panel2vr.OpenSettings then
+				vrmod.panel2vr.OpenSettings()
+			elseif VRUtilOpenMenu then
+				VRUtilOpenMenu()
+			end
+		end)
+	end, true, nil, "settings")
+
+	-- Row 2
+	add("Flashlight", 0, 1, function() LocalPlayer():ConCommand("impulse 100") end, true, nil, "flashlight")
+	add("Laser pointer", 1, 1, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end, true, nil, "laser")
+	add("Toggle Noclip", 2, 1, function() LocalPlayer():ConCommand("noclip") end, true, nil, "noclip")
+	add("Undo", 3, 1, function() LocalPlayer():ConCommand("gmod_undo") end, true, nil, "undo")
+	add("Cleanup", 4, 1, function() LocalPlayer():ConCommand("gmod_cleanup") end, true, nil, "cleanup")
+	add("Admin Cleanup", 5, 1, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
+
+	-- Row 3 / system (page 2 via layout)
+	add("Reset Vehicle View", 0, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
+	add("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end, true, nil, "ui_reset")
+	add("Border Cal", 2, 2, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
+	add("Toggle blacklist weapon", 3, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
+	add("Map Browser", 4, 2, function()
+		local window = VRUtilCreateMapBrowserWindow()
+		hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
+			hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
+			if IsValid(window) then window:Remove() end
+			return false
+		end)
+	end, true, nil, "map")
+	add("RESPAWN", 0, 3, function() LocalPlayer():ConCommand("kill") end, true, nil, "respawn")
+	add("VR EXIT", 1, 3, function() LocalPlayer():ConCommand("vrmod_exit") end, true, nil, "vr_exit")
+	add("DISCONNECT", 2, 3, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
 end
 
 hook.Add("VRMod_Start", "ReloadMenuItems", function() InitializeMenuItems() end)
+-- Safe re-init without full VR restart (lua reload / empty registry)
+vrmod.RebuildInGameMenuItems = InitializeMenuItems
+concommand.Add("vrmod_quickmenu_rebuild_items", function()
+	InitializeMenuItems()
+	print("[vrmod] quick menu items rebuilt:", g_VR.menuItems and #g_VR.menuItems or 0)
+end)
 hook.Add("VRMod_Exit", "restore_spawnmenu", function(ply)
-    if ply ~= LocalPlayer() then return end
-    timer.Simple(0.1, function()
-        if IsValid(g_SpawnMenu) and g_SpawnMenu.HorizontalDivider ~= nil then
-            g_SpawnMenu.HorizontalDivider:SetLeftWidth(ScrW())
-        end
-    end)
+	if ply ~= LocalPlayer() then return end
+	timer.Simple(0.1, function()
+		if IsValid(g_SpawnMenu) and g_SpawnMenu.HorizontalDivider ~= nil then
+			g_SpawnMenu.HorizontalDivider:SetLeftWidth(ScrW())
+		end
+	end)
 end)

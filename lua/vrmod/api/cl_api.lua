@@ -668,9 +668,14 @@ if CLIENT then
     end
 
     -- Add or restore a menu item
-    function vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot, hint)
+    -- id (optional): stable layout key for Quick Menu pages (Settings → Quick Menu)
+    function vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot, hint, id)
         g_VR.menuItems = g_VR.menuItems or {}
         g_VR.menuBackup = g_VR.menuBackup or {}
+        -- Stable layout id (for multi-page quick menu)
+        if not id and vrmod.QuickMenu and vrmod.QuickMenu.IdFromName then
+            id = vrmod.QuickMenu.IdFromName(name)
+        end
         -- Determine slot if not forced
         if not forceSlot then
             local occupied = {}
@@ -697,7 +702,11 @@ if CLIENT then
 
         -- Avoid exact duplicates
         for _, item in ipairs(g_VR.menuItems) do
-            if item.name == name and item.func == func then return end
+            if item.name == name and item.func == func then
+                -- Upgrade id if newer call provides one
+                if id and not item.id then item.id = id end
+                return
+            end
         end
 
         table.insert(g_VR.menuItems, {
@@ -705,18 +714,20 @@ if CLIENT then
             slot = slot,
             slotPos = slotpos,
             func = func,
-            hint = hint
+            hint = hint,
+            id = id,
         })
 
-        -- Store in backup with unique ID
-        local id = GetMenuItemID(name, func)
-        g_VR.menuBackup[id] = {
+        -- Store in backup with unique ID (name+func; not layout id)
+        local bakId = GetMenuItemID(name, func)
+        g_VR.menuBackup[bakId] = {
             name = name,
             slot = slot,
             slotPos = slotpos,
             func = func,
             internal = forceSlot == true,
-            hint = hint
+            hint = hint,
+            id = id,
         }
     end
 
