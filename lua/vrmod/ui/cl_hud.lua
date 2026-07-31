@@ -348,15 +348,21 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	local res = bmap.res or BMAP_RES
 	local step = bmap.step
 	local wx0, wy0 = bmap.wx0, bmap.wy0
-	local r2 = radius * radius
-	-- Slightly oversized cells so roofs read as solid blocks
-	local cellPx = math.max(3, (radius * 2 / res) * 1.15)
+	-- Cell size on plate; inset radius so the whole square stays inside the circle
+	local cellPx = math.max(3, (radius * 2 / res) * 1.12)
 	local half = cellPx * 0.5
+	-- half-diagonal of square ≈ half * sqrt(2); keep full rect inside circle
+	local maxR = math.max(0, radius - half * 1.42 - 1)
+	local maxR2 = maxR * maxR
 	local cells = bmap.cells
 
 	local function elevAt(ix, iy)
 		if ix < 0 or iy < 0 or ix >= res or iy >= res then return nil end
 		return CellElev(cells[iy * res + ix + 1])
+	end
+
+	local function cellInside(u, v)
+		return (u * u + v * v) <= maxR2
 	end
 
 	-- Pass 1: ground fill (very dark so buildings pop)
@@ -369,7 +375,7 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 			if IsBuildingElev(elev) then continue end
 			local wx = wx0 + ix * step - origin.x
 			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
-			if (u * u + v * v) > r2 then continue end
+			if not cellInside(u, v) then continue end
 			surface.SetDrawColor(6, 14, 12, 210)
 			surface.DrawRect(cx + u - half, cy + v - half, cellPx, cellPx)
 		end
@@ -386,7 +392,7 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 
 			local wx = wx0 + ix * step - origin.x
 			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
-			if (u * u + v * v) > r2 then continue end
+			if not cellInside(u, v) then continue end
 			local bx, by = cx + u, cy + v
 
 			-- Height band: low walls / tall roofs
@@ -517,25 +523,57 @@ local function PaintRadar(w, h, T)
 	surface.SetDrawColor(bg.r, bg.g, bg.b, 235)
 	draw.NoTexture()
 	local segs = 48
-	local poly = {}
+	local platePoly = {}
+	local clipPoly = {} -- stencil clip = inner disc (no bleed past ring)
 	for i = 0, segs do
 		local a = math.rad(i / segs * 360)
-		poly[#poly + 1] = { x = cx + math.cos(a) * (radius + 4), y = cy + math.sin(a) * (radius + 4) }
+		local ca, sa = math.cos(a), math.sin(a)
+		platePoly[#platePoly + 1] = { x = cx + ca * (radius + 4), y = cy + sa * (radius + 4) }
+		clipPoly[#clipPoly + 1] = { x = cx + ca * radius, y = cy + sa * radius }
 	end
-	surface.DrawPoly(poly)
+	surface.DrawPoly(platePoly)
+
+	-- Stencil: map content (3D square + building cells) only inside the circle
+	local stOn = false
+	if render.SetStencilEnable then
+		pcall(function()
+			render.ClearStencil()
+			render.SetStencilEnable(true)
+			render.SetStencilWriteMask(255)
+			render.SetStencilTestMask(255)
+			render.SetStencilReferenceValue(1)
+			render.SetStencilCompareFunction(STENCIL_ALWAYS)
+			render.SetStencilPassOperation(STENCIL_REPLACE)
+			render.SetStencilFailOperation(STENCIL_KEEP)
+			render.SetStencilZFailOperation(STENCIL_KEEP)
+			-- Write circle into stencil (alpha write not needed; color discarded)
+			render.OverrideColorWriteEnable(true, false)
+			surface.SetDrawColor(255, 255, 255, 255)
+			draw.NoTexture()
+			surface.DrawPoly(clipPoly)
+			render.OverrideColorWriteEnable(false)
+			render.SetStencilCompareFunction(STENCIL_EQUAL)
+			render.SetStencilPassOperation(STENCIL_KEEP)
+			stOn = true
+		end)
+	end
 
 	if has3d then
 		surface.SetMaterial(radarMat)
 		surface.SetDrawColor(255, 255, 255, 180)
-		-- square map clipped visually by ring border
-		local half = radius * 0.92
+		-- Inscribed square (diagonal = diameter) so texture never sticks out of circle
+		local half = radius / math.sqrt(2)
 		surface.DrawTexturedRect(cx - half, cy - half, half * 2, half * 2)
 	end
 
-	-- Buildings / terrain (always when enabled — works without 3D RenderView)
+	-- Buildings / terrain (cells also radius-inset; stencil is hard clip)
 	if cv_radar_buildings:GetBool() then
 		draw.NoTexture()
 		pcall(PaintBuildingMap, cx, cy, radius, yaw, range, origin)
+	end
+
+	if stOn then
+		pcall(function() render.SetStencilEnable(false) end)
 	end
 
 	-- Grid rings + cross (CS-style)
