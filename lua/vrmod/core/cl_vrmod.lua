@@ -862,7 +862,16 @@ if CLIENT then
 
 			render.Clear(0, 0, 0, 255, true, true)
 
-			-- LEFT eye content → leftX half of SBS
+			-- ============================================================
+			-- ONE pose/solve phase for the whole frame (not per-eye).
+			-- Twin IK, HUD RT capture, etc. subscribe here — never on
+			-- VRMod_PreRender(left) only. Both eyes then only DRAW.
+			-- ============================================================
+			g_VR.stereoEye = nil
+			g_VR.stereoFrame = (g_VR.stereoFrame or 0) + 1
+			hook.Call("VRMod_PreStereo", nil)
+
+			-- LEFT eye — draw only
 			view.origin = g_VR.eyePosLeft
 			view.angles = baseAngles
 			view.fov = hfovLeft
@@ -875,8 +884,9 @@ if CLIENT then
 
 			render.ClearDepth(true)
 
-			-- RIGHT eye content → rightX half of SBS
+			-- RIGHT eye — draw only (same world pose as left)
 			view.origin = g_VR.eyePosRight
+			view.angles = baseAngles
 			view.fov = hfovRight
 			view.aspectratio = aspectRight
 			view.x, view.y, view.w, view.h = rightX, 0, rtHalfW, rtH

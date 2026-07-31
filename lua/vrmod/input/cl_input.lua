@@ -139,6 +139,13 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_left_pickup" then
+		-- WayVR-style panel grab consumes grip when laser is on a menu
+		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
+		if g_VR.menuGrabActive then return end
+		-- Free twin: grips spin/distance the avatar (not world pickup)
+		if g_VR.avatarSteerTwin then return end
+		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
+		if twin and twin.active and twin.mode == "free" and not g_VR.menuFocus then return end
 		if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 		if cl_pickupdisable:GetBool() then return end
 		vrmod.Pickup(true, not pressed)
@@ -146,6 +153,11 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_right_pickup" then
+		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("right", pressed) then return end
+		if g_VR.menuGrabActive then return end
+		if g_VR.avatarSteerTwin then return end
+		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
+		if twin and twin.active and twin.mode == "free" and not g_VR.menuFocus then return end
 		if g_VR.vehicle.wheel_bone or g_VR.vehicle.type == "aircraft" then rightGrip = pressed end
 		if cl_pickupdisable:GetBool() then return end
 		vrmod.Pickup(false, not pressed)

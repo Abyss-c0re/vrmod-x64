@@ -14,6 +14,9 @@ if CLIENT then
 	-- Global UI scale: VR menus (3D2D) + Derma frames. 1.0 = default.
 	local cv_ui_scale = CreateClientConVar("vrmod_ui_scale", "1", true, FCVAR_ARCHIVE,
 		"Global VR/Derma UI scale (0.5–2.0)", 0.5, 2.0)
+	-- WayVR-style free grab: grip while laser-focused on a panel to drag it into world space.
+	local cv_menu_grab = CreateClientConVar("vrmod_menu_grab", "1", true, FCVAR_ARCHIVE,
+		"Grip + laser on VR menu panels to free-move them (WayVR overlay style)", 0, 1)
 
 	function vrmod.GetUIScale()
 		-- Default 1.0 — never silently shrink fonts/menus
@@ -133,6 +136,150 @@ if CLIENT then
 		return pos, panelAng, scale
 	end
 
+	------------------------------------------------------------------------
+	-- WayVR-style free panel grab
+	-- Point laser at panel + grip → detach from hand, drag freely, release to float in world.
+	------------------------------------------------------------------------
+	local grabState = nil -- { uid, hand ("left"|"right") }
+	-- Same-frame multi-hook idempotency (ui + defaultinput both call TryMenuGrab)
+	local consumeStamp = { frame = -1, hand = nil, pressed = nil }
+
+	local function HandPose(handName)
+		if not g_VR.tracking then return nil end
+		if handName == "left" then return g_VR.tracking.pose_lefthand end
+		if handName == "right" then return g_VR.tracking.pose_righthand end
+		return nil
+	end
+
+	local function MarkConsumed(handName, pressed)
+		consumeStamp.frame = FrameNumber and FrameNumber() or 0
+		consumeStamp.hand = handName
+		consumeStamp.pressed = pressed and true or false
+	end
+
+	local function AlreadyConsumed(handName, pressed)
+		local f = FrameNumber and FrameNumber() or 0
+		return consumeStamp.frame == f
+			and consumeStamp.hand == handName
+			and consumeStamp.pressed == (pressed and true or false)
+	end
+
+	local function ResolveMenuWorldPose(menu)
+		if not menu then return nil, nil end
+		local pos, ang = menu.pos, menu.ang
+		if menu.grabHand and menu.grabPos and menu.grabAng then
+			local hand = HandPose(menu.grabHand)
+			if hand and hand.pos and hand.ang then
+				return LocalToWorld(menu.grabPos, menu.grabAng, hand.pos, hand.ang)
+			end
+		end
+		if menu.freeFloat or not menu.attachment then
+			local origin = g_VR.origin or Vector()
+			local originAng = g_VR.originAngle or Angle()
+			return LocalToWorld(pos, ang, origin, originAng)
+		end
+		local hand = HandPose("left")
+		if hand and hand.pos and hand.ang then
+			return LocalToWorld(pos, ang, hand.pos, hand.ang)
+		end
+		return nil, nil
+	end
+
+	--- Called from default input before entity pickup. Returns true if grip was consumed by UI grab.
+	--- Safe to call from multiple VRMod_Input hooks on the same event (idempotent).
+	function vrmod.TryMenuGrab(handName, pressed)
+		if not cv_menu_grab:GetBool() then return false end
+		if not g_VR.active then return false end
+		if AlreadyConsumed(handName, pressed) then return true end
+
+		if not pressed then
+			if not grabState or grabState.hand ~= handName then return false end
+			local menu = menus[grabState.uid]
+			if menu and menu.grabPos and menu.grabAng then
+				local hand = HandPose(handName)
+				if hand and hand.pos and hand.ang then
+					local wPos, wAng = LocalToWorld(menu.grabPos, menu.grabAng, hand.pos, hand.ang)
+					local origin = g_VR.origin or Vector()
+					local originAng = g_VR.originAngle or Angle()
+					menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
+				end
+				menu.grabHand = nil
+				menu.grabPos = nil
+				menu.grabAng = nil
+				menu.freeFloat = true
+				menu.attachment = false
+			end
+			grabState = nil
+			g_VR.menuGrabActive = false
+			MarkConsumed(handName, pressed)
+			return true
+		end
+
+		-- Already holding a panel with this hand
+		if grabState then
+			if grabState.hand == handName then
+				MarkConsumed(handName, pressed)
+				return true
+			end
+			return false
+		end
+
+		-- Press: only start grab when laser is on a grabbable panel
+		local uid = g_VR.menuFocus
+		if not uid or uid == false then return false end
+		local menu = menus[uid]
+		if not menu then return false end
+		if menu.grabbable == false then return false end
+
+		local wPos, wAng = ResolveMenuWorldPose(menu)
+		local hand = HandPose(handName)
+		if not wPos or not hand or not hand.pos or not hand.ang then return false end
+
+		menu.grabPos, menu.grabAng = WorldToLocal(wPos, wAng, hand.pos, hand.ang)
+		menu.grabHand = handName
+		menu.freeFloat = true
+		menu.attachment = false
+		grabState = { uid = uid, hand = handName }
+		g_VR.menuGrabActive = true
+		MarkConsumed(handName, pressed)
+		if vrmod.logger then
+			vrmod.logger.Debug("[UI] Panel grab start uid=%s hand=%s", tostring(uid), handName)
+		end
+		return true
+	end
+
+	--- Call from menus that re-apply hand pose each paint. Skips when free-floating / grabbed.
+	function vrmod.MenuApplyHandAnchor(menu, scale, pos, ang)
+		if not menu then return end
+		if scale then menu.scale = scale end
+		menu.cubeMenu = true
+		menu.grabbable = menu.grabbable ~= false
+		if menu.grabHand or menu.freeFloat then return end
+		if pos then menu.pos = pos end
+		if ang then menu.ang = ang end
+		menu.attachment = true
+	end
+
+	--- Snap a free-floating panel back to left-hand attach (optional helper / concommand).
+	function vrmod.MenuReattach(uid)
+		local menu = menus[uid or g_VR.menuFocus]
+		if not menu then return false end
+		local wPos, wAng = ResolveMenuWorldPose(menu)
+		local hand = HandPose("left")
+		if not wPos or not hand or not hand.pos or not hand.ang then return false end
+		menu.pos, menu.ang = WorldToLocal(wPos, wAng, hand.pos, hand.ang)
+		menu.freeFloat = false
+		menu.attachment = true
+		menu.grabHand = nil
+		menu.grabPos = nil
+		menu.grabAng = nil
+		if grabState and grabState.uid == menu.uid then
+			grabState = nil
+			g_VR.menuGrabActive = false
+		end
+		return true
+	end
+
 	function VRUtilRenderMenuSystem()
 		if not menusExist or #menuOrder == 0 then
 			g_VR.menuFocus = false
@@ -148,13 +295,24 @@ if CLIENT then
 		for k, v in ipairs(menuOrder) do
 			k = v.uid
 			if v.panel then
-				if not IsValid(v.panel) or not v.panel:IsVisible() then
+				if not IsValid(v.panel) then
 					VRUtilMenuClose(k)
 					continue
 				end
+				-- Spawn/context (and other PaintManual shells) can report IsVisible=false
+				-- while still the active VR surface — never auto-close those.
+				if not v.panel:IsVisible() then
+					local keep = v.keepAlive or v.allowHiddenPanel
+						or (v.panel.IsPaintedManually and v.panel:IsPaintedManually())
+					if keep then
+						v.panel:SetVisible(true)
+					else
+						VRUtilMenuClose(k)
+						continue
+					end
+				end
 			end
 
-			local pos, ang = v.pos, v.ang
 			-- Remember open-time scale once; never bake global UI scale into baseScale
 			if not v.baseScale then
 				local uid = v.uid or ""
@@ -183,16 +341,27 @@ if CLIENT then
 			end
 			local drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
 
-			if v.attachment then
+			-- WayVR free-float / grab wins over attachment (callers may re-set attachment each frame)
+			local pos, ang
+			if v.grabHand and v.grabPos and v.grabAng then
+				local hand = HandPose(v.grabHand)
+				if hand and hand.pos and hand.ang then
+					pos, ang = LocalToWorld(v.grabPos, v.grabAng, hand.pos, hand.ang)
+				else
+					continue
+				end
+			elseif v.freeFloat then
+				pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
+			elseif v.attachment then
 				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
 				if hand and hand.pos and hand.ang then
-					pos, ang = LocalToWorld(pos, ang, hand.pos, hand.ang)
+					pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
 				else
 					-- no left hand yet — skip draw rather than park menu off to the side
 					continue
 				end
 			else
-				pos, ang = LocalToWorld(pos, ang, g_VR.origin, g_VR.originAngle)
+				pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin, g_VR.originAngle)
 			end
 
 			if v.mat and not v.mat:IsError() then
@@ -302,7 +471,13 @@ if CLIENT then
 			width = width,
 			height = height,
 			lastCursorX = 0,
-			lastCursorY = 0
+			lastCursorY = 0,
+			-- WayVR free-grab defaults: all menus grabbable unless marked grabbable=false
+			grabbable = true,
+			freeFloat = not attachment,
+			grabHand = nil,
+			grabPos = nil,
+			grabAng = nil,
 		}
 
 		menuOrder[#menuOrder + 1] = menus[uid]
@@ -352,6 +527,10 @@ if CLIENT then
 	function VRUtilMenuClose(uid)
 		for k, v in pairs(menus) do
 			if k == uid or not uid then
+				if grabState and grabState.uid == k then
+					grabState = nil
+					g_VR.menuGrabActive = false
+				end
 				if IsValid(v.panel) then v.panel:SetPaintedManually(false) end
 				if v.closeFunc then v.closeFunc() end
 				for k2, v2 in ipairs(menuOrder) do
@@ -368,12 +547,21 @@ if CLIENT then
 		if table.IsEmpty(menus) then
 			hook.Remove("PostDrawTranslucentRenderables", "vrutil_hook_drawmenus")
 			g_VR.menuFocus = false
+			g_VR.menuGrabActive = false
+			grabState = nil
 			menusExist = false
 			gui.EnableScreenClicker(false)
 		end
 	end
 
 	hook.Add("VRMod_Input", "ui", function(action, pressed)
+		-- Panel grab is handled in cl_input (before entity pickup) via vrmod.TryMenuGrab.
+		-- Also handle here so grab works if default input is disabled / reordered.
+		if action == "boolean_left_pickup" or action == "boolean_right_pickup" then
+			local hand = action == "boolean_left_pickup" and "left" or "right"
+			if vrmod.TryMenuGrab(hand, pressed) then return end
+		end
+
 		if not g_VR.menuFocus then return end
 		local mouseButton = nil
 		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
@@ -381,6 +569,14 @@ if CLIENT then
 		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right" then
 			mouseButton = MOUSE_RIGHT
 		elseif action == "boolean_sprint" then
+			-- Sprint while laser-focused on a free-floating panel re-snaps it to left hand
+			if pressed then
+				local m = menus[g_VR.menuFocus]
+				if m and m.freeFloat and not g_VR.menuGrabActive then
+					vrmod.MenuReattach(g_VR.menuFocus)
+					return
+				end
+			end
 			mouseButton = MOUSE_MIDDLE
 		end
 
@@ -430,3 +626,10 @@ end)
 cvars.AddChangeCallback("vrmod_ui_scale", function()
 	if vrmod.RefreshHUD then vrmod.RefreshHUD() end
 end, "vrmod_ui_scale_hud")
+
+concommand.Add("vrmod_menu_reattach", function()
+	if not CLIENT then return end
+	if vrmod.MenuReattach and vrmod.MenuReattach() then
+		if vrmod.logger then vrmod.logger.Info("[UI] Menu reattached to left hand") end
+	end
+end)

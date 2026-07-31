@@ -118,6 +118,11 @@ local function start()
 	-- Dedicated Think hook for snap-turn
 	hook.Add("Think", "vrmod_snapturn", function()
 		if not g_VR.threePoints then return end
+		-- Twin free-place steals right stick (point + rotate avatar)
+		if g_VR.avatarSteerTwin then
+			snapped = false
+			return
+		end
 		if convarValues.smoothTurn then
 			snapped = false
 			return
@@ -165,8 +170,8 @@ local function start()
 			g_VR.originAngle = Angle(0, g_VR.originAngle.yaw, 0)
 		end
 
-		-- Smooth turn
-		if convarValues.smoothTurn then
+		-- Smooth turn (disabled while avatar twin steers with right stick)
+		if convarValues.smoothTurn and not g_VR.avatarSteerTwin then
 			local amt = -g_VR.input.vector2_smoothturn.x * convarValues.smoothTurnRate * RealFrameTime()
 			if amt ~= 0 then
 				local pos = ply:GetPos()
