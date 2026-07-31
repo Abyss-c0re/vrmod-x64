@@ -187,27 +187,33 @@ function g_VR.MenuOpen()
 			draw.SimpleText(subtitle, "DermaDefault", 16, 36, Color(200, 150, 165))
 		end
 
-		-- Page nav buttons (always shown when multi-page; still useful with 1 page for future)
+		-- Page nav: geometric chevrons (unicode arrows render as empty squares on Linux)
 		local navY = headerH + 4
-		local navH = 28
-		local navW = 56
+		local navH = 32
+		local navW = 64
 		navPrev.x, navPrev.y, navPrev.w, navPrev.h = 12, navY, navW, navH
 		navNext.x, navNext.y, navNext.w, navNext.h = 512 - 12 - navW, navY, navW, navH
 		local prevHot = hoverNav == "prev"
 		local nextHot = hoverNav == "next"
-		if C and C.DrawSlot then
-			C.DrawSlot(navPrev.x, navPrev.y, navPrev.w, navPrev.h, "◀", prevHot, false, pageCount > 1)
-			C.DrawSlot(navNext.x, navNext.y, navNext.w, navNext.h, "▶", nextHot, false, pageCount > 1)
+		local canPage = pageCount > 1
+		if C and C.DrawArrowBtn then
+			C.DrawArrowBtn(navPrev.x, navPrev.y, navPrev.w, navPrev.h, "left", prevHot, canPage)
+			C.DrawArrowBtn(navNext.x, navNext.y, navNext.w, navNext.h, "right", nextHot, canPage)
 		else
 			surface.SetDrawColor(prevHot and 100 or 55, 14, 24, 250)
 			surface.DrawRect(navPrev.x, navPrev.y, navPrev.w, navPrev.h)
 			surface.SetDrawColor(nextHot and 100 or 55, 14, 24, 250)
 			surface.DrawRect(navNext.x, navNext.y, navNext.w, navNext.h)
-			draw.SimpleText("◀", "DermaDefaultBold", navPrev.x + navW * 0.5, navY + navH * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-			draw.SimpleText("▶", "DermaDefaultBold", navNext.x + navW * 0.5, navY + navH * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			if C and C.DrawChevron then
+				C.DrawChevron(navPrev.x + navW * 0.5, navY + navH * 0.5, 12, "left", color_white)
+				C.DrawChevron(navNext.x + navW * 0.5, navY + navH * 0.5, 12, "right", color_white)
+			else
+				draw.SimpleText("<", "DermaLarge", navPrev.x + navW * 0.5, navY + navH * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				draw.SimpleText(">", "DermaLarge", navNext.x + navW * 0.5, navY + navH * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			end
 		end
-		-- Center page chip
-		local chip = string.format("%d / %d", pageIdx, pageCount)
+		-- Center page chip with label
+		local chip = string.format("PAGE  %d / %d", pageIdx, pageCount)
 		local fontChip = (C and C.Font and C.Font("CubeSmall")) or "DermaDefault"
 		draw.SimpleText(chip, fontChip, 256, navY + navH * 0.5, T.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 

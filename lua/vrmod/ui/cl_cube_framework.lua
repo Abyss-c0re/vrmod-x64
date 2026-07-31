@@ -387,6 +387,75 @@ function F.DrawSlot(x, y, w, h, label, hovered, selected, enabled)
 	end
 end
 
+--- Geometric chevron (no unicode tofu boxes). dir: left|right|up|down
+function F.DrawChevron(cx, cy, size, dir, col)
+	dir = string.lower(tostring(dir or "right"))
+	size = math.max(6, tonumber(size) or 12)
+	local c = col or Color(255, 240, 244, 255)
+	local s = size * 0.5
+	local poly
+	if dir == "left" then
+		poly = {
+			{ x = cx + s * 0.55, y = cy - s },
+			{ x = cx - s * 0.75, y = cy },
+			{ x = cx + s * 0.55, y = cy + s },
+		}
+	elseif dir == "up" then
+		poly = {
+			{ x = cx, y = cy - s * 0.75 },
+			{ x = cx + s, y = cy + s * 0.55 },
+			{ x = cx - s, y = cy + s * 0.55 },
+		}
+	elseif dir == "down" then
+		poly = {
+			{ x = cx - s, y = cy - s * 0.55 },
+			{ x = cx + s, y = cy - s * 0.55 },
+			{ x = cx, y = cy + s * 0.75 },
+		}
+	else
+		poly = {
+			{ x = cx - s * 0.55, y = cy - s },
+			{ x = cx + s * 0.75, y = cy },
+			{ x = cx - s * 0.55, y = cy + s },
+		}
+	end
+	draw.NoTexture()
+	surface.SetDrawColor(c.r, c.g, c.b, c.a or 255)
+	surface.DrawPoly(poly)
+end
+
+--- Arrow button with drawn chevron (not unicode). dir: left|right|up|down
+function F.DrawArrowBtn(x, y, w, h, dir, hovered, enabled)
+	local T = F.ThemeLive()
+	if enabled == false then
+		surface.SetDrawColor(T.btnDim or T.btn)
+	elseif hovered then
+		surface.SetDrawColor(T.btnHover or T.btn)
+	else
+		surface.SetDrawColor(T.btn or T.panel)
+	end
+	surface.DrawRect(x, y, w, h)
+	surface.SetDrawColor(hovered and (T.crimsonHot or T.crimson) or (T.crimsonDim or T.crimson))
+	surface.DrawOutlinedRect(x, y, w, h, hovered and 3 or 2)
+	if hovered then
+		surface.SetDrawColor(T.crimson)
+		if dir == "left" then
+			surface.DrawRect(x, y, 5, h)
+		elseif dir == "right" then
+			surface.DrawRect(x + w - 5, y, 5, h)
+		elseif dir == "up" then
+			surface.DrawRect(x, y, w, 4)
+		else
+			surface.DrawRect(x, y + h - 4, w, 4)
+		end
+	end
+	local col = T.text or color_white
+	if enabled == false then
+		col = T.muted or Color(col.r, col.g, col.b, 120)
+	end
+	F.DrawChevron(x + w * 0.5, y + h * 0.5, math.min(w, h) * 0.34, dir, col)
+end
+
 function F.DrawDigitChip(x, y, size, digit, hot)
 	local T = F.ThemeLive()
 	digit = (tonumber(digit) or 0) % 10

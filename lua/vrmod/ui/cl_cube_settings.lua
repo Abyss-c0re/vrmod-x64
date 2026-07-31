@@ -262,9 +262,17 @@ local function paintColorEditor(focused, mx, my)
 
 	local backHot = focused and mx >= PAD and mx <= PAD + 80 and my >= 8 and my <= 44
 	local doneHot = focused and mx >= W - PAD - 90 and mx <= W - PAD and my >= 8 and my <= 44
-	surface.SetDrawColor(backHot and Theme().rowHot or Theme().row)
-	surface.DrawRect(PAD, 8, 80, 36)
-	draw.SimpleText("◀ BACK", "DermaDefaultBold", PAD + 40, 26, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	local C = vrmod.cube
+	if C and C.DrawArrowBtn then
+		C.DrawArrowBtn(PAD, 8, 36, 36, "left", backHot, true)
+		surface.SetDrawColor(backHot and Theme().rowHot or Theme().row)
+		surface.DrawRect(PAD + 40, 8, 48, 36)
+		draw.SimpleText("BACK", "DermaDefaultBold", PAD + 64, 26, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	else
+		surface.SetDrawColor(backHot and Theme().rowHot or Theme().row)
+		surface.DrawRect(PAD, 8, 80, 36)
+		draw.SimpleText("< BACK", "DermaDefaultBold", PAD + 40, 26, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	end
 	surface.SetDrawColor(doneHot and Theme().ok or Theme().header)
 	surface.DrawRect(W - PAD - 90, 8, 90, 36)
 	draw.SimpleText("DONE", "DermaDefaultBold", W - PAD - 45, 26, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
@@ -496,15 +504,21 @@ local function paint()
 			end
 		end
 
-		-- Footer scroll
+		-- Footer scroll (geometric chevrons — unicode ▲▼ show as empty squares on Linux)
 		local sHotL = focused and mx >= PAD and mx <= PAD + 70 and my >= H - FOOTER + 8 and my <= H - FOOTER + 40
 		local sHotR = focused and mx >= PAD + 78 and mx <= PAD + 148 and my >= H - FOOTER + 8 and my <= H - FOOTER + 40
-		surface.SetDrawColor(sHotL and Theme().rowHot or Theme().row)
-		surface.DrawRect(PAD, H - FOOTER + 8, 70, 32)
-		surface.SetDrawColor(sHotR and Theme().rowHot or Theme().row)
-		surface.DrawRect(PAD + 78, H - FOOTER + 8, 70, 32)
-		draw.SimpleText("▲", "DermaDefaultBold", PAD + 35, H - FOOTER + 24, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-		draw.SimpleText("▼", "DermaDefaultBold", PAD + 113, H - FOOTER + 24, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		local C = vrmod.cube
+		if C and C.DrawArrowBtn then
+			C.DrawArrowBtn(PAD, H - FOOTER + 8, 70, 32, "up", sHotL, true)
+			C.DrawArrowBtn(PAD + 78, H - FOOTER + 8, 70, 32, "down", sHotR, true)
+		else
+			surface.SetDrawColor(sHotL and Theme().rowHot or Theme().row)
+			surface.DrawRect(PAD, H - FOOTER + 8, 70, 32)
+			surface.SetDrawColor(sHotR and Theme().rowHot or Theme().row)
+			surface.DrawRect(PAD + 78, H - FOOTER + 8, 70, 32)
+			draw.SimpleText("^", "DermaLarge", PAD + 35, H - FOOTER + 24, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			draw.SimpleText("v", "DermaLarge", PAD + 113, H - FOOTER + 24, Theme().text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
 		draw.SimpleText(string.format("%d–%d / %d", rowScroll + 1, math.min(rowScroll + VISIBLE_ROWS, #rows), #rows), "DermaDefault", W - PAD, H - FOOTER + 24, Theme().muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 
 		if focused and mx >= 0 and my >= 0 then
