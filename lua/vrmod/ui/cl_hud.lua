@@ -184,10 +184,6 @@ local function PaintAimCrosshair(w, h, pScale)
 	surface.DrawRect(px, py - s, 1, s * 2)
 	-- center dot
 	surface.DrawRect(px - 1, py - 1, 3, 3)
-
-	-- tiny source tag (debug-friendly, low alpha)
-	local fontL = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefault"
-	draw.SimpleText(src or "aim", fontL, px + 14, py - 2, Color(col.r, col.g, col.b, 120), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 end
 
 local function CVBool(name, default)
