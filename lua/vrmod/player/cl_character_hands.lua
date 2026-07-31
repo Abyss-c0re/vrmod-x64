@@ -58,18 +58,28 @@ if CLIENT then
 				local netFrame = g_VR.net[steamid] and g_VR.net[steamid].lerpedFrame
 				local useTrack = (ply == LocalPlayer()) and g_VR.tracking and g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand
 				if useTrack then
-					-- Use live tracking; never share one Vector for both override slots
-					local lpos, lang = g_VR.tracking.pose_lefthand.pos, g_VR.tracking.pose_lefthand.ang
-					local rpos, rang = g_VR.tracking.pose_righthand.pos, g_VR.tracking.pose_righthand.ang
-					if lpos and rpos and lpos == rpos then
-						-- Defensive: glued SoT — skip bone override this frame after heal
-						rpos = Vector(rpos.x, rpos.y, rpos.z)
+					-- Always clone into overrides — never hold tracking Vector refs
+					local lt, rt = g_VR.tracking.pose_lefthand, g_VR.tracking.pose_righthand
+					local lpos = lt.pos and Vector(lt.pos.x, lt.pos.y, lt.pos.z) or nil
+					local rpos = rt.pos and Vector(rt.pos.x, rt.pos.y, rt.pos.z) or nil
+					local lang = lt.ang and Angle(lt.ang.p, lt.ang.y, lt.ang.r) or Angle()
+					local rang = rt.ang and Angle(rt.ang.p, rt.ang.y, rt.ang.r) or Angle()
+					-- If still collapsed, fall back to rawTracking
+					local raw = g_VR.rawTracking
+					if lpos and rpos and lpos:DistToSqr(rpos) < 4 and raw then
+						local rL, rR = raw.pose_lefthand, raw.pose_righthand
+						if rL and rR and rL.pos and rR.pos and rL.pos:DistToSqr(rR.pos) > 36 then
+							lpos = Vector(rL.pos.x, rL.pos.y, rL.pos.z)
+							rpos = Vector(rR.pos.x, rR.pos.y, rR.pos.z)
+							if rL.ang then lang = Angle(rL.ang.p, rL.ang.y, rL.ang.r) end
+							if rR.ang then rang = Angle(rR.ang.p, rR.ang.y, rR.ang.r) end
+						end
 					end
-					if leftHand and leftHand >= 0 and boneinfo[leftHand] then
+					if leftHand and leftHand >= 0 and boneinfo[leftHand] and lpos then
 						boneinfo[leftHand].overridePos = lpos
 						boneinfo[leftHand].overrideAng = lang
 					end
-					if rightHand and rightHand >= 0 and boneinfo[rightHand] then
+					if rightHand and rightHand >= 0 and boneinfo[rightHand] and rpos then
 						boneinfo[rightHand].overridePos = rpos
 						boneinfo[rightHand].overrideAng = rang + Angle(0, 0, 180)
 					end

@@ -628,23 +628,18 @@ end
 function C.ApplyHead(ent, state, frame)
 	if not IsValid(ent) or not state then return end
 	local bid = state.bones and state.bones.b_head
-	if not bid or bid < 0 then return end
+	if not isnumber(bid) or bid < 0 then return end
 	local hmdAng = frame and frame.hmdAng
-	if not hmdAng and state.headTargetAng then
-		local mtx = ent:GetBoneMatrix(bid)
-		if mtx then
-			mtx:SetAngles(state.headTargetAng)
-			ent:SetBoneMatrix(bid, mtx)
-		end
-		return
+	local targetAng = state.headTargetAng
+	if hmdAng then
+		local _
+		_, targetAng = LocalToWorld(ZERO_VEC, Angle(-80, 0, 90), ZERO_VEC, hmdAng)
 	end
-	if not hmdAng then return end
-	local _, targetAng = LocalToWorld(ZERO_VEC, Angle(-80, 0, 90), ZERO_VEC, hmdAng)
+	if not targetAng then return end
 	local mtx = ent:GetBoneMatrix(bid)
-	if mtx then
-		mtx:SetAngles(targetAng)
-		ent:SetBoneMatrix(bid, mtx)
-	end
+	if not mtx then return end
+	mtx:SetAngles(targetAng)
+	ent:SetBoneMatrix(bid, mtx)
 end
 
 --- Clear manip angles (exit / model change)

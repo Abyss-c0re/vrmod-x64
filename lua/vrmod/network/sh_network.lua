@@ -51,48 +51,56 @@ local function buildClientFrame(relative)
 		characterYaw = g_VR.characterYaw or 0
 	end
 
+	-- Always clone pos/ang off tracking — never share Vector identity into net frames
+	-- (L/R glue + playermodel glitch if two fields hold the same userdata).
+	local function clonePose(pose)
+		if not pose or not pose.pos or not pose.ang then return nil, nil end
+		return Vector(pose.pos.x, pose.pos.y, pose.pos.z), Angle(pose.ang.p, pose.ang.y, pose.ang.r)
+	end
+
+	local hmd = g_VR.tracking and g_VR.tracking.hmd
+	local hmdPos, hmdAng = clonePose(hmd)
+	if not hmdPos then return nil end
+
 	local frame = {
 		characterYaw = characterYaw,
-		hmdPos = g_VR.tracking.hmd.pos,
-		hmdAng = g_VR.tracking.hmd.ang,
+		hmdPos = hmdPos,
+		hmdAng = hmdAng,
 	}
 
 	local netFrame = g_VR.net and g_VR.net[lp:SteamID()] and g_VR.net[lp:SteamID()].lerpedFrame
-	-- Handle hands: use netFrame if gripping, otherwise tracking
-	if g_VR.wheelGrippedLeft and netFrame then
-		frame.lefthandPos = netFrame.lefthandPos
-		frame.lefthandAng = netFrame.lefthandAng
+	-- Handle hands: use netFrame if gripping, otherwise tracking clones
+	if g_VR.wheelGrippedLeft and netFrame and netFrame.lefthandPos then
+		frame.lefthandPos = Vector(netFrame.lefthandPos.x, netFrame.lefthandPos.y, netFrame.lefthandPos.z)
+		frame.lefthandAng = netFrame.lefthandAng and Angle(netFrame.lefthandAng.p, netFrame.lefthandAng.y, netFrame.lefthandAng.r) or Angle()
 	else
-		-- Clone — never put tracking Vector identity into the net frame (L/R glue risk)
-		local lp = g_VR.tracking.pose_lefthand.pos
-		local la = g_VR.tracking.pose_lefthand.ang
-		frame.lefthandPos = Vector(lp.x, lp.y, lp.z)
-		frame.lefthandAng = Angle(la.p, la.y, la.r)
+		local p, a = clonePose(g_VR.tracking.pose_lefthand)
+		if p then frame.lefthandPos, frame.lefthandAng = p, a end
 	end
 
-	if g_VR.wheelGrippedRight and netFrame then
-		frame.righthandPos = netFrame.righthandPos
-		frame.righthandAng = netFrame.righthandAng
+	if g_VR.wheelGrippedRight and netFrame and netFrame.righthandPos then
+		frame.righthandPos = Vector(netFrame.righthandPos.x, netFrame.righthandPos.y, netFrame.righthandPos.z)
+		frame.righthandAng = netFrame.righthandAng and Angle(netFrame.righthandAng.p, netFrame.righthandAng.y, netFrame.righthandAng.r) or Angle()
 	else
-		local rp = g_VR.tracking.pose_righthand.pos
-		local ra = g_VR.tracking.pose_righthand.ang
-		frame.righthandPos = Vector(rp.x, rp.y, rp.z)
-		frame.righthandAng = Angle(ra.p, ra.y, ra.r)
+		local p, a = clonePose(g_VR.tracking.pose_righthand)
+		if p then frame.righthandPos, frame.righthandAng = p, a end
 	end
 
 	-- Assign fingers using loop
+	local inL = g_VR.input and g_VR.input.skeleton_lefthand and g_VR.input.skeleton_lefthand.fingerCurls
+	local inR = g_VR.input and g_VR.input.skeleton_righthand and g_VR.input.skeleton_righthand.fingerCurls
 	for i = 1, 5 do
-		frame["finger" .. i] = g_VR.input.skeleton_lefthand.fingerCurls[i]
-		frame["finger" .. i + 5] = g_VR.input.skeleton_righthand.fingerCurls[i]
+		frame["finger" .. i] = inL and inL[i] or 0
+		frame["finger" .. (i + 5)] = inR and inR[i] or 0
 	end
 
 	if g_VR.sixPoints then
-		frame.waistPos = g_VR.tracking.pose_waist.pos
-		frame.waistAng = g_VR.tracking.pose_waist.ang
-		frame.leftfootPos = g_VR.tracking.pose_leftfoot.pos
-		frame.leftfootAng = g_VR.tracking.pose_leftfoot.ang
-		frame.rightfootPos = g_VR.tracking.pose_rightfoot.pos
-		frame.rightfootAng = g_VR.tracking.pose_rightfoot.ang
+		local wp, wa = clonePose(g_VR.tracking.pose_waist)
+		local lfp, lfa = clonePose(g_VR.tracking.pose_leftfoot)
+		local rfp, rfa = clonePose(g_VR.tracking.pose_rightfoot)
+		if wp then frame.waistPos, frame.waistAng = wp, wa end
+		if lfp then frame.leftfootPos, frame.leftfootAng = lfp, lfa end
+		if rfp then frame.rightfootPos, frame.rightfootAng = rfp, rfa end
 	end
 
 	if relative then return vrmod.utils.ConvertToRelativeFrame(frame) end

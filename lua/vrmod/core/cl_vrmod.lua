@@ -371,34 +371,65 @@ if CLIENT then
 		}
 	end
 
-	--- Ensure two pose tables never share Vector/Angle identity (runtime heal)
+	--- Ensure two pose tables never share Vector/Angle identity (runtime heal).
+	-- Workshop: "hands stuck together" / "hands tied" — shared Vector identity or
+	-- collision collapse to same world point. Heal identity always; if positions
+	-- coincide but raw still has separation, restore from raw.
 	local function EnsurePoseIndependence()
 		local tr = g_VR.tracking
 		if not tr then return end
 		local L, R, H = tr.pose_lefthand, tr.pose_righthand, tr.hmd
+		local raw = g_VR.rawTracking
+		local rL = raw and raw.pose_lefthand
+		local rR = raw and raw.pose_righthand
+
+		local function cloneVec(v)
+			return Vector(v.x, v.y, v.z)
+		end
+		local function cloneAng(a)
+			return Angle(a.p, a.y, a.r)
+		end
+
+		-- 1) Identity glue (same userdata) — always split
 		if L and R and L.pos and R.pos and L.pos == R.pos then
-			R.pos = Vector(R.pos.x, R.pos.y, R.pos.z)
+			R.pos = cloneVec(R.pos)
 			if vrmod.logger then
 				vrmod.logger.Warn("Healed glued hand pos identity (L==R Vector)")
 			end
 		end
 		if L and R and L.ang and R.ang and L.ang == R.ang then
-			R.ang = Angle(R.ang.p, R.ang.y, R.ang.r)
+			R.ang = cloneAng(R.ang)
 		end
 		if H and L and H.pos and L.pos and H.pos == L.pos then
-			L.pos = Vector(L.pos.x, L.pos.y, L.pos.z)
+			L.pos = cloneVec(L.pos)
 		end
 		if H and R and H.pos and R.pos and H.pos == R.pos then
-			R.pos = Vector(R.pos.x, R.pos.y, R.pos.z)
+			R.pos = cloneVec(R.pos)
 		end
-		local raw = g_VR.rawTracking
-		if not raw then return end
-		local rL, rR = raw.pose_lefthand, raw.pose_righthand
 		if rL and rR and rL.pos and rR.pos and rL.pos == rR.pos then
-			rR.pos = Vector(rR.pos.x, rR.pos.y, rR.pos.z)
+			rR.pos = cloneVec(rR.pos)
 		end
 		if rL and rR and rL.ang and rR.ang and rL.ang == rR.ang then
-			rR.ang = Angle(rR.ang.p, rR.ang.y, rR.ang.r)
+			rR.ang = cloneAng(rR.ang)
+		end
+
+		-- 2) Value collapse: L/R nearly same world pos but raw is separated → un-stick
+		if L and R and L.pos and R.pos and rL and rR and rL.pos and rR.pos then
+			local trackDist = L.pos:DistToSqr(R.pos)
+			local rawDist = rL.pos:DistToSqr(rR.pos)
+			if trackDist < 4 and rawDist > 36 then -- <2u glued, raw >6u apart
+				L.pos.x, L.pos.y, L.pos.z = rL.pos.x, rL.pos.y, rL.pos.z
+				R.pos.x, R.pos.y, R.pos.z = rR.pos.x, rR.pos.y, rR.pos.z
+				if rL.ang and L.ang then
+					L.ang.p, L.ang.y, L.ang.r = rL.ang.p, rL.ang.y, rL.ang.r
+				end
+				if rR.ang and R.ang then
+					R.ang.p, R.ang.y, R.ang.r = rR.ang.p, rR.ang.y, rR.ang.r
+				end
+				if vrmod.logger then
+					vrmod.logger.Warn("Unstuck hands from rawTracking (track collapsed, raw separated)")
+				end
+			end
 		end
 	end
 
@@ -527,6 +558,8 @@ if CLIENT then
 		-- Zero-arg: mutates g_VR.tracking.pose_*.pos in place (Cube SoT).
 		-- Passing explicit Vector copies would break identity for gun readers.
 		vrmod.utils.UpdateHandCollisions()
+		-- Collisions can re-glue L/R if a path assigns one Vector to both — re-heal.
+		EnsurePoseIndependence()
 
 		hook.Call("VRMod_TrackingModified", nil, g_VR.tracking, g_VR.rawTracking)
 
