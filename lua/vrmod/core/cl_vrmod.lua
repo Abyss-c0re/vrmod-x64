@@ -1215,6 +1215,14 @@ if CLIENT then
 				cam.Start3D()
 				cam.End3D()
 				g_VR.allowPlayerDraw = false
+				-- Avatar twin SoT: pose snap right after the VR body is drawn this eye
+				if vrmod.avatar and vrmod.avatar.PublishPlayerPose then
+					local lp = LocalPlayer()
+					local tab = g_VR.net and g_VR.net[lp:SteamID()]
+					if tab and tab.lerpedFrame then
+						pcall(vrmod.avatar.PublishPlayerPose, lp, tab.lerpedFrame)
+					end
+				end
 			end
 
 			VRUtilRenderMenuSystem()

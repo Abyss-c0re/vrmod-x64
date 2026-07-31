@@ -4,11 +4,9 @@
 -- Cube law: the VR playermodel is already correct (cl_character / FBT).
 -- Twin does NOT re-solve arm IK. Every frame:
 --   snapshot LocalPlayer bone matrices (working VR body)
---   → MapMirror / MapClone into twin stand space
---   → L↔R bone name remap (facing) so limbs never stretch same-ID
+--   → MapClone (clone) or MapMirror flip Y (facing) into twin stand space
+--   → same bone IDs (full-chain snap — do NOT L↔R rename, that double-flips)
 --   → BuildBonePositions SetBoneMatrix only
---
--- Fallback: charik.TransformFrame + Update only if player skeleton unavailable.
 -- Never VRUtilNetUpdateLocalPly from the twin.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
@@ -785,9 +783,20 @@ end
 --          (L↔R remap is only for hand *targets* into ProcessArm, not matrix copy.)
 function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 	if not IsValid(self.ent) then return false end
+
+	-- Prefer fresh snap; if twin draws before player this eye, capture live matrices now
+	local ply = LocalPlayer()
 	local snap = g_VR.avatarPoseSnap
+	local needCapture = (not snap) or (not snap.bones) or (#snap.bones < 4)
+		or (snap.frame and FrameNumber() - snap.frame > 1)
+	if needCapture and IsValid(ply) and vrmod.avatar.PublishPlayerPose then
+		local fr = ReadLocalVRFrame()
+		pcall(vrmod.avatar.PublishPlayerPose, ply, fr)
+		snap = g_VR.avatarPoseSnap
+	end
 	if not snap or not snap.bones or #snap.bones < 4 then return false end
-	if snap.frame and FrameNumber() - snap.frame > 3 then return false end
+	-- Keep using last good snap even if a few frames old (don't freeze twin)
+	if snap.frame and FrameNumber() - snap.frame > 90 then return false end
 
 	local mode = self.mode or "facing"
 	if mode == "mirror" then mode = "facing" end
@@ -795,11 +804,9 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 	local isWorld = (mode == "world")
 	local isFacing = (not isClone and not isWorld)
 
-	-- Source root from snap (pelvis/floor) — must match what bone matrices were posed in
 	local srcFeet = snap.feet or playerFeet
 	local srcYaw = Angle(0, snap.characterYaw or (playerYaw and playerYaw.yaw) or 0, 0)
 
-	-- Twin root: rebuild stand from snap feet so lower body stays under pelvis
 	local dist = self.distance or cv_distance:GetFloat()
 	local standPos, standAng
 	if isWorld then
@@ -808,7 +815,6 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw, 0)
 	else
-		-- Facing: in front of player, looking at them
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw + 180, 0)
 	end
@@ -832,7 +838,6 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 			npos, nang = MapClone(pos, ang, srcFeet, srcYaw, standPos, standAng)
 		end
 
-		-- Always same bone name — full pose snap preserves chain topology
 		local tid = self.ent:LookupBone(name)
 		if not tid or tid < 0 then continue end
 
@@ -1088,11 +1093,11 @@ function vrmod.avatar.Open(opts)
 	s:_applyHideBones()
 	sessions[id] = s
 
-	-- Apply twin targets only (mirrored player matrices or fallback IK)
+	-- Apply twin targets (always SetBoneMatrix — do not require GetBoneMatrix first)
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
 		if not s.active or not s.targets then return end
 		for boneId, mat in pairs(s.targets) do
-			if boneId and mat and e:GetBoneMatrix(boneId) then
+			if boneId and mat then
 				e:SetBoneMatrix(boneId, mat)
 			end
 		end
@@ -1110,10 +1115,11 @@ function vrmod.avatar.Open(opts)
 		end
 	end)
 
+	-- Draw after player body snap (player hook is PostDrawTranslucent; we use a later name
+	-- and also re-apply on PreDrawEffects so motion is not one frame stuck).
 	hook.Add("PostDrawTranslucentRenderables", s.hookId, function(depth, sky)
 		if depth or sky or not s.active or not IsValid(s.ent) then return end
 		if not g_VR.active or not g_VR.tracking then return end
-		-- Prefer stereo eyes; still draw once for desktop/debug if no eye match
 		local ep = EyePos()
 		local stereo = (g_VR.eyePosLeft and ep == g_VR.eyePosLeft)
 			or (g_VR.eyePosRight and ep == g_VR.eyePosRight)
@@ -1121,10 +1127,10 @@ function vrmod.avatar.Open(opts)
 			return
 		end
 
-		-- Never let IK errors kill the twin draw
 		pcall(function() s:_applyTracking() end)
 		pcall(function()
-			s.ent:SetupBones() -- BuildBonePositions → targets
+			s.ent:InvalidateBoneCache()
+			s.ent:SetupBones()
 			s:_applyHideBones()
 		end)
 		s.ent:DrawModel()

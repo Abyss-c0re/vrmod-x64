@@ -377,13 +377,7 @@ if CLIENT then
 
 		ply:SetupBones()
 		if g_VR.fbtActive and g_VR.fbtActive[steamid] then
-			-- FBT still publishes a pose snap for the twin
-			if twinOpen then
-				pcall(function()
-					vrmod.avatar.PublishPlayerPose(ply, frame)
-				end)
-			end
-			return
+			return -- snap still taken in PostPlayerDraw after FBT bone apply
 		end
 
 		if prevFrameNumber ~= FrameNumber() then
@@ -409,7 +403,10 @@ if CLIENT then
 			end
 		end
 
-		-- Pose snap after DrawModel (PostPlayerDraw) so BoneCallback head/hands are included
+		-- Publish as soon as IK matrices are on the player (twin may draw same frame)
+		if twinOpen and vrmod.avatar and vrmod.avatar.PublishPlayerPose then
+			pcall(vrmod.avatar.PublishPlayerPose, ply, frame)
+		end
 	end
 
 	local function PostPlayerDrawFunc(ply)
@@ -420,12 +417,9 @@ if CLIENT then
 		if not netTab or not netTab.lerpedFrame then return end
 		if not characterInfo or not characterInfo[steamid] then return end
 
-		-- After full DrawModel (BuildBonePositions + BoneCallback): snapshot for twin
+		-- After DrawModel/BoneCallback: refresh snap (head angles included)
 		if ply == LocalPlayer() and vrmod.avatar and vrmod.avatar.PublishPlayerPose then
-			local twinOpen = vrmod.avatar.IsOpen("avatar")
-				or vrmod.avatar.IsOpen("default")
-				or vrmod.avatar.IsOpen("fbt_cal")
-			if twinOpen then
+			if vrmod.avatar.IsOpen("avatar") or vrmod.avatar.IsOpen("default") or vrmod.avatar.IsOpen("fbt_cal") then
 				pcall(vrmod.avatar.PublishPlayerPose, ply, netTab.lerpedFrame)
 			end
 		end
