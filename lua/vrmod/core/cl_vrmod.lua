@@ -646,6 +646,9 @@ if CLIENT then
 
 	-- Persistent eye viewsetups (no table alloc per frame — Cube stability)
 	-- drawmonitors MUST be false: monitors nest RenderView while we hold g_VR.rt → heap corruption
+	-- Explicit zfar: nested RenderView (radar etc.) can leave a short far plane on the
+	-- engine; eye views must always reassert a full distance or the world clips early.
+	local VIEW_ZFAR = 32768
 	local viewLeft = {
 		x = 0, y = 0, w = 0, h = 0,
 		origin = nil, angles = nil,
@@ -656,6 +659,7 @@ if CLIENT then
 		bloomtone = false,
 		dopostprocess = false,
 		znear = 1,
+		zfar = VIEW_ZFAR,
 	}
 	local viewRight = {
 		x = 0, y = 0, w = 0, h = 0,
@@ -667,6 +671,7 @@ if CLIENT then
 		bloomtone = false,
 		dopostprocess = false,
 		znear = 1,
+		zfar = VIEW_ZFAR,
 	}
 
 	-- Freeze evidence (14:21): malloc unsorted double-linked list + empty .txt —
@@ -775,18 +780,23 @@ if CLIENT then
 	end
 
 	--- Fill a private eye viewsetup from public g_VR.view SoT + eye-specific fields.
-	local function SyncEyeView(dst, origin, fov, aspect, x, y, w, h, angles, znear, dopost)
+	local function SyncEyeView(dst, origin, fov, aspect, x, y, w, h, angles, znear, dopost, zfar)
 		dst.origin = origin
 		dst.angles = angles
 		dst.fov = fov
 		dst.aspectratio = aspect
 		dst.x, dst.y, dst.w, dst.h = x, y, w, h
 		dst.znear = znear
+		-- Always set zfar — never inherit a short far plane from radar/minimap RenderView
+		local zf = tonumber(zfar) or VIEW_ZFAR
+		if zf < 256 then zf = VIEW_ZFAR end
+		dst.zfar = zf
 		dst.dopostprocess = dopost and true or false
 		dst.drawmonitors = false -- nested RenderView = freeze/heap corruption on Linux
 		dst.drawviewmodel = false
 		dst.drawhud = false
 		dst.bloomtone = false
+		dst.ortho = false -- radar uses ortho; must clear or eyes stay orthographic-clipped
 	end
 
 	local function PerformRenderViews()
@@ -836,6 +846,8 @@ if CLIENT then
 		local cyclopeanOrigin = view.origin
 		local baseAngles = ang
 		local znear = view.znear or 1
+		local zfar = view.zfar or VIEW_ZFAR
+		if zfar < 256 then zfar = VIEW_ZFAR end
 		local dopost = view.dopostprocess and true or false
 
 		g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale) + verticalOffset
@@ -849,8 +861,8 @@ if CLIENT then
 			leftX, rightX = rtHalfW, 0
 		end
 
-		SyncEyeView(viewLeft, g_VR.eyePosLeft, hfovLeft, aspectLeft, leftX, 0, rtHalfW, rtH, baseAngles, znear, dopost)
-		SyncEyeView(viewRight, g_VR.eyePosRight, hfovRight, aspectRight, rightX, 0, rtHalfW, rtH, baseAngles, znear, dopost)
+		SyncEyeView(viewLeft, g_VR.eyePosLeft, hfovLeft, aspectLeft, leftX, 0, rtHalfW, rtH, baseAngles, znear, dopost, zfar)
+		SyncEyeView(viewRight, g_VR.eyePosRight, hfovRight, aspectRight, rightX, 0, rtHalfW, rtH, baseAngles, znear, dopost, zfar)
 
 		renderingEyes = true
 		local okEyes, errEyes = pcall(function()
@@ -1146,6 +1158,8 @@ if CLIENT then
 			drawmonitors = false, -- nested RenderView → freeze/heap corruption in VR RT
 			drawviewmodel = false,
 			znear = convars.vrmod_znear:GetFloat(),
+			zfar = VIEW_ZFAR,
+			ortho = false,
 			dopostprocess = convars.vrmod_postprocess:GetBool()
 		}
 	end

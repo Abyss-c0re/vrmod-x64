@@ -247,6 +247,8 @@ local function RadarYaw(ply)
 end
 
 -- Guard: never nest RenderView while stereo SBS RT is active (map-wide flicker).
+-- Also restore fog / clip state — short radar zfar used to leak into eye views
+-- and clip the whole world (player “render distance” collapse).
 local function CaptureRadar3D(ply, range)
 	if not cv_radar_3d:GetBool() or not radarRT then return false end
 	if not IsValid(ply) then return false end
@@ -257,11 +259,25 @@ local function CaptureRadar3D(ply, range)
 	local yaw = RadarYaw(ply)
 	local height = math.Clamp(range * 0.85, 400, 2500)
 
+	-- Snapshot fog so ortho capture cannot leave short fog end on the frame
+	local fogMode, fogStart, fogEnd, fogMax, fr, fg, fb
+	if render.GetFogMode then fogMode = render.GetFogMode() end
+	if render.GetFogDistances then
+		local a, b = render.GetFogDistances()
+		fogStart, fogEnd = a, b
+	end
+	if render.GetFogColor then
+		fr, fg, fb = render.GetFogColor()
+	end
+	if render.GetFogMaxDensity then fogMax = render.GetFogMaxDensity() end
+
 	g_VR._radarCapturing = true
 	render.PushRenderTarget(radarRT)
 	render.Clear(8, 4, 6, 220, true, true)
 	local ok = pcall(function()
-		render.RenderView({
+		-- Prefer engine RealRenderView if present (avoid portal wrappers)
+		local rv = (isfunction(render.RealRenderView) and render.RealRenderView) or render.RenderView
+		rv({
 			origin = pos + Vector(0, 0, height),
 			angles = Angle(90, yaw, 0),
 			x = 0, y = 0, w = RADAR_RT_SZ, h = RADAR_RT_SZ,
@@ -283,6 +299,19 @@ local function CaptureRadar3D(ply, range)
 	end)
 	render.PopRenderTarget()
 	g_VR._radarCapturing = false
+
+	-- Undo fog / density pollution from the short ortho pass
+	pcall(function()
+		if fogMode ~= nil and render.FogMode then render.FogMode(fogMode) end
+		if fogStart ~= nil and render.FogStart then render.FogStart(fogStart) end
+		if fogEnd ~= nil and render.FogEnd then render.FogEnd(fogEnd) end
+		if fogMax ~= nil and render.FogMaxDensity then render.FogMaxDensity(fogMax) end
+		if fr and render.FogColor then render.FogColor(fr, fg, fb) end
+		if render.OverrideDepthEnable then render.OverrideDepthEnable(false, false) end
+		if render.SetScissorRect then render.SetScissorRect(0, 0, 0, 0, false) end
+		if render.DepthRange then render.DepthRange(0, 1) end
+	end)
+
 	return ok
 end
 
