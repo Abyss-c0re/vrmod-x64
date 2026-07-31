@@ -133,6 +133,9 @@ local function Bind()
 	end
 
 	local scale = CVFloat("vrmod_hudscale", 0.05)
+	-- Global UI scale also enlarges world HUD
+	local uiS = (vrmod.GetUIScale and vrmod.GetUIScale()) or 1
+	scale = scale * uiS
 	local curve = CVFloat("vrmod_hudcurve", 60)
 	local meshName = tostring(scale) .. "_" .. tostring(curve) .. "_" .. w .. "x" .. h
 

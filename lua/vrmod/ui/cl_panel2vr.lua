@@ -38,6 +38,7 @@ W.Theme = {
 -- attachment: true = local to left hand, false = world origin relative
 W.Place = {
 	-- Left hand — same family as quickmenu / heightmenu (NOT world-float)
+	-- scale = base; global vrmod_ui_scale applied at draw time in cl_ui
 	wrist = {
 		attachment = true,
 		pos = Vector(6, 4, 8),

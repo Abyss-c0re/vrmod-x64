@@ -11,6 +11,22 @@ if CLIENT then
 
 	local _, convarValues = vrmod.GetConvars()
 	local uioutline = CreateClientConVar("vrmod_ui_outline", 0, true, FCVAR_ARCHIVE, nil, 0, 1)
+	-- Global UI scale: VR menus (3D2D) + Derma frames. 1.0 = default.
+	local cv_ui_scale = CreateClientConVar("vrmod_ui_scale", "1", true, FCVAR_ARCHIVE,
+		"Global VR/Derma UI scale (0.5–2.0)", 0.5, 2.0)
+
+	function vrmod.GetUIScale()
+		local s = cv_ui_scale and cv_ui_scale:GetFloat() or 1
+		if s ~= s or s < 0.5 then s = 0.5 end
+		if s > 2 then s = 2 end
+		return s
+	end
+
+	--- Effective 3D2D scale for a menu entry (open scale × global UI scale)
+	function vrmod.GetMenuDrawScale(menu)
+		local base = (menu and (menu.baseScale or menu.scale)) or 0.03
+		return base * vrmod.GetUIScale()
+	end
 	local rt_beam = GetRenderTarget("vrmod_rt_beam", 64, 64, false)
 	local mat_beam = CreateMaterial("vrmod_mat_beam", "UnlitGeneric", {
 		["$basetexture"] = rt_beam:GetName(),
@@ -137,24 +153,34 @@ if CLIENT then
 			end
 
 			local pos, ang = v.pos, v.ang
-			-- CubeUI faces / height / cubeMenu keep scale; plain world panels default 0.02
-			local uid = v.uid or ""
-			local keepScale = v.cubeMenu or v.cubeui
-				or uid == "heightmenu"
-				or uid == "avatar_menu"
-				or uid == "cube_settings"
-				or uid == "cubeui_main"
-				or string.StartWith(uid, "cubeui_")
-			if not keepScale then
-				if v.attachment then
-					if not v.scale or v.scale < 0.03 then v.scale = 0.04 end
-				else
-					v.scale = 0.02
+			-- Remember open-time scale once; never bake global UI scale into baseScale
+			if not v.baseScale then
+				local uid = v.uid or ""
+				local keepScale = v.cubeMenu or v.cubeui
+					or uid == "heightmenu"
+					or uid == "avatar_menu"
+					or uid == "cube_settings"
+					or uid == "cubeui_main"
+					or string.StartWith(uid, "cubeui_")
+				local base = v.scale
+				if not base or base <= 0 then
+					base = keepScale and 0.04 or (v.attachment and 0.04 or 0.02)
+				elseif not keepScale and v.attachment and base < 0.03 then
+					base = 0.04
+				elseif not keepScale and not v.attachment then
+					base = 0.02
+				elseif keepScale and base < 0.02 then
+					base = 0.04
 				end
-			elseif not v.scale or v.scale < 0.03 then
-				-- heightmenu / cube_settings SoT scale
-				v.scale = 0.04
+				v.baseScale = base
 			end
+			-- Callers that re-assign .scale (cube_settings paint) update baseScale
+			if v.scale and v.scale > 0 and math.abs(v.scale - (v._lastAssignedScale or -1)) > 1e-6 then
+				v.baseScale = v.scale
+				v._lastAssignedScale = v.scale
+			end
+			local drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
+
 			if v.attachment then
 				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
 				if hand and hand.pos and hand.ang then
@@ -171,7 +197,7 @@ if CLIENT then
 				v.mat:SetTexture("$basetexture", v.rt)
 			end
 			cam.IgnoreZ(true)
-			cam.Start3D2D(pos, ang, v.scale)
+			cam.Start3D2D(pos, ang, drawScale)
 			local blendOn = false
 			if render.OverrideBlend then
 				blendOn = pcall(function()
@@ -205,8 +231,8 @@ if CLIENT then
 						dist = B / A
 						cursorWorldPos = start + dir * dist
 						local tp = WorldToLocal(cursorWorldPos, Angle(0, 0, 0), pos, ang)
-						cursorX = tp.x * 1 / v.scale
-						cursorY = -tp.y * 1 / v.scale
+						cursorX = tp.x * 1 / drawScale
+						cursorY = -tp.y * 1 / drawScale
 					end
 				end
 
@@ -258,6 +284,7 @@ if CLIENT then
 	function VRUtilMenuOpen(uid, width, height, panel, attachment, pos, ang, scale, cursorEnabled, closeFunc)
 		VRUtilMenuClose(uid)
 		local rt = CreateMenuRT(uid, width, height)
+		local baseScale = scale or 0.03
 		menus[uid] = {
 			uid = uid,
 			panel = panel,
@@ -265,7 +292,9 @@ if CLIENT then
 			attachment = attachment,
 			pos = pos,
 			ang = ang,
-			scale = scale,
+			scale = baseScale,
+			baseScale = baseScale,
+			_lastAssignedScale = baseScale,
 			cursorEnabled = cursorEnabled,
 			rt = rt,
 			width = width,
@@ -394,3 +423,8 @@ concommand.Add("vrmod_vgui_reset", function()
 		end
 	end
 end)
+
+-- Rebuild HUD mesh when UI scale changes
+cvars.AddChangeCallback("vrmod_ui_scale", function()
+	if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+end, "vrmod_ui_scale_hud")

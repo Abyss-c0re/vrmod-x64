@@ -137,6 +137,9 @@ vrmod.SettingsCatalog = {
 		title = "HUD/UI",
 		icon = "icon16/layers.png",
 		rows = {
+			{ kind = "header", label = "Global UI" },
+			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.5, max = 2.0, decimals = 2 },
+			{ kind = "help", label = "Scales all VR hand/world menus and Derma windows. 1.0 = default." },
 			{ kind = "bool", label = "Enable HUD", cvar = "vrmod_hud" },
 			{ kind = "slider", label = "HUD curve", cvar = "vrmod_hudcurve", min = -100, max = 100, decimals = 0 },
 			{ kind = "slider", label = "HUD distance", cvar = "vrmod_huddistance", min = 1, max = 100, decimals = 0 },
@@ -385,6 +388,7 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		return true
 	end
 	if action_id == "reset_hud" then
+		RunConsoleCommand("vrmod_ui_scale", "1")
 		RunConsoleCommand("vrmod_hud", "1")
 		RunConsoleCommand("vrmod_hudcurve", "60")
 		RunConsoleCommand("vrmod_huddistance", "60")
@@ -394,6 +398,7 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_hud_visible_quickmenukey", "0")
 		RunConsoleCommand("vrmod_beam_color", "255,0,0,255")
 		RunConsoleCommand("vrmod_laser_color", "255,0,0,255")
+		if CLIENT and vrmod.RefreshHUD then vrmod.RefreshHUD() end
 		return true
 	end
 	if action_id == "reset_melee" then

@@ -249,10 +249,27 @@ function VRUtilOpenMenu()
 	end
 
 	frame = vgui.Create("DFrame")
-	frame:SetSize(440, 560)
+	-- Global UI scale (same convar as VR menus)
+	local uiS = (vrmod.GetUIScale and vrmod.GetUIScale()) or 1
+	local fw, fh = math.floor(440 * uiS + 0.5), math.floor(560 * uiS + 0.5)
+	fw = math.Clamp(fw, 360, math.min(ScrW() - 20, 900))
+	fh = math.Clamp(fh, 420, math.min(ScrH() - 20, 1000))
+	frame:SetSize(fw, fh)
 	frame:SetTitle("VRMod Menu")
 	frame:MakePopup()
 	frame:Center()
+	-- Live rescale when vrmod_ui_scale changes while open
+	frame._uiBaseW, frame._uiBaseH = 440, 560
+	function frame:Think()
+		if not vrmod.GetUIScale then return end
+		local s = vrmod.GetUIScale()
+		if self._lastUiS == s then return end
+		self._lastUiS = s
+		local nw = math.Clamp(math.floor(self._uiBaseW * s + 0.5), 360, math.min(ScrW() - 20, 900))
+		local nh = math.Clamp(math.floor(self._uiBaseH * s + 0.5), 420, math.min(ScrH() - 20, 1000))
+		self:SetSize(nw, nh)
+		self:Center()
+	end
 
 	local error = vrmod.GetStartupError and vrmod.GetStartupError()
 	if error and error ~= "Already running" then
