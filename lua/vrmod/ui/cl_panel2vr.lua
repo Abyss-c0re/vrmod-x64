@@ -155,17 +155,25 @@ function W.ResolvePlace(placeName, override)
 			base[k] = v
 		end
 	end
-	-- Hand-follow shells (spawn/context): optional VRUtilHandMenuPose like quickmenu
-	if base.attachment and (placeName == "workbench" or placeName == "hand") then
+	-- Hand shells: convert center → top-left once (same as quickmenu). Never re-run every Think.
+	if base.attachment and (placeName == "hand" or placeName == "workbench" or placeName == "popup" or placeName == "wrist") then
+		local sc = base.scale or 0.022
+		local center = base.pos or Vector(6, 4, 8)
+		local pang = base.ang or Angle(0, -90, 55)
+		local pw = (placeName == "hand" or placeName == "workbench") and 1024 or 512
+		local ph = (placeName == "hand" or placeName == "workbench") and 768 or 512
 		if isfunction(VRUtilHandMenuPose) then
-			local hp, ha, hs = VRUtilHandMenuPose(1024, 768, base.scale or 0.022, base.pos, base.ang)
+			local hp, ha, hs = VRUtilHandMenuPose(pw, ph, sc, center, pang)
 			if hp then base.pos = hp end
 			if ha then base.ang = ha end
 			if hs then base.scale = hs end
+		else
+			base.pos = center
+			base.ang = pang
+			base.scale = sc
 		end
 		base.attachment = true
 	elseif not base.attachment and (not base.pos or not base.ang) then
-		-- True world-float only (place = float)
 		base.pos, base.ang = W.ComputeFloatPose(28, -4)
 		base.attachment = false
 	end
@@ -323,18 +331,15 @@ function W.ManifestPanel(panel, opts)
 			W.Close(buid)
 		end
 	end
-	-- Settings / generic derma → left HAND. Spawn/context stay workbench float.
-	-- Spawn/context follow left hand — same attachment path as quickmenu
 	local placeName = opts.place
 		or ((kind == "spawnmenu" or kind == "contextmenu") and "hand")
 		or "popup"
-	if placeName == "workbench" then placeName = "hand" end -- legacy alias
+	if placeName == "workbench" then placeName = "hand" end
 	local place = W.ResolvePlace(placeName, opts.placeOverride)
 
 	local pw, ph = panel:GetSize()
 	if not pw or pw < 32 then pw = 512 end
 	if not ph or ph < 32 then ph = 512 end
-	-- Settings frame is small (420x505) — keep readable RT
 	if kind == "settings" then
 		pw, ph = math.max(pw, 420), math.max(ph, 505)
 	end
@@ -343,11 +348,34 @@ function W.ManifestPanel(panel, opts)
 	end
 	local w, h = clampSize(opts.width or pw, opts.height or ph)
 
-	-- Force visible BEFORE VR surface — cl_ui used to drop !IsVisible panels
 	if panel.SetVisible then panel:SetVisible(true) end
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
 	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
 	panel:SetPaintedManually(true)
+
+	-- Already bound same surface + same size: do NOT VRUtilMenuClose/reopen (pose jump)
+	local existing = bound[uid]
+	local already = existing and existing.panel == panel
+		and g_VR.menus and g_VR.menus[uid]
+		and g_VR.menus[uid].width == w and g_VR.menus[uid].height == h
+	if already then
+		local m = g_VR.menus[uid]
+		-- Only re-apply pose if still hand-attached (never after free grab)
+		if not m.freeFloat and not m.grabHand and place.attachment then
+			m.attachment = true
+			m.freeFloat = false
+			m.pos = place.pos
+			m.ang = place.ang
+			m.scale = place.scale or m.scale
+			m.baseScale = m.scale
+			m._lastAssignedScale = m.scale
+		end
+		m.cubeMenu = true
+		m.grabbable = true
+		if isfunction(VRUtilMenuRenderPanel) then VRUtilMenuRenderPanel(uid) end
+		log("manifest keep %s uid=%s (no reopen)", kind, uid)
+		return uid
+	end
 
 	VRUtilMenuOpen(uid, w, h, panel, place.attachment, place.pos, place.ang, place.scale, true, function()
 		if IsValid(panel) then
@@ -358,26 +386,23 @@ function W.ManifestPanel(panel, opts)
 		if opts.onClose then opts.onClose(panel) end
 	end)
 
-	-- Hand-follow: same flags as quickmenu (attachment + cubeMenu + grabbable)
 	if g_VR.menus and g_VR.menus[uid] then
-		local isShell = (kind == "spawnmenu" or kind == "contextmenu")
 		local sc = place.scale or 0.022
-		if isShell then sc = math.max(sc, 0.02) end
-		g_VR.menus[uid].scale = sc
-		g_VR.menus[uid].baseScale = sc
-		g_VR.menus[uid]._lastAssignedScale = sc
-		g_VR.menus[uid].cubeMenu = true
-		g_VR.menus[uid].grabbable = true
-		-- Shells must be closeable: never keepAlive (was blocking SetVisible false)
-		g_VR.menus[uid].keepAlive = false
-		g_VR.menus[uid].allowHiddenPanel = false
-		-- Follow left hand unless user free-grabbed
-		if not g_VR.menus[uid].freeFloat and not g_VR.menus[uid].grabHand then
-			g_VR.menus[uid].attachment = true
-			g_VR.menus[uid].freeFloat = false
-			if place.pos then g_VR.menus[uid].pos = place.pos end
-			if place.ang then g_VR.menus[uid].ang = place.ang end
-		end
+		if kind == "spawnmenu" or kind == "contextmenu" then sc = math.max(sc, 0.02) end
+		local m = g_VR.menus[uid]
+		m.scale = sc
+		m.baseScale = sc
+		m._lastAssignedScale = sc
+		m.cubeMenu = true
+		m.grabbable = true
+		m.keepAlive = false
+		m.allowHiddenPanel = false
+		-- Pin hand pose once at open; Think must not overwrite with raw Place.hand
+		m.attachment = place.attachment and true or false
+		m.freeFloat = not m.attachment
+		m.pos = place.pos
+		m.ang = place.ang
+		m._handPoseLocked = place.attachment and true or false
 	end
 
 	bound[uid] = {
@@ -386,6 +411,9 @@ function W.ManifestPanel(panel, opts)
 		place = placeName,
 		html = (kind == "html"),
 		alwaysPaint = (kind == "settings" or kind == "html" or kind == "spawnmenu" or kind == "contextmenu"),
+		handPos = place.pos,
+		handAng = place.ang,
+		handScale = place.scale,
 	}
 
 	if isfunction(VRUtilMenuRenderPanel) then
@@ -513,29 +541,27 @@ function W.InstallHooks()
 	meta.MakePopup = function(panel, ...)
 		origMakePopup(panel, ...)
 		if not shouldIntercept(panel) then return end
-		-- Defer one frame so layout finishes (sandbox menus size after Open)
+		local kind = detectKind(panel)
+		-- Spawn/context: OpenSandboxShell / OnSpawn* own a single manifest — skip here
+		-- (double manifest = first pose then jump)
+		if kind == "spawnmenu" or kind == "contextmenu" then return end
 		timer.Simple(0, function()
 			if not IsValid(panel) or not W.IsVR() then return end
-			if W.IsBound(panel) then return end -- OnSpawnMenuOpen / explicit path already owned it
-			local kind = detectKind(panel)
-			-- Spawn/context: left-hand follow (same as quickmenu)
-			local place = (kind == "spawnmenu" or kind == "contextmenu") and "hand" or "popup"
+			if W.IsBound(panel) then return end
 			W.ManifestPanel(panel, {
 				kind = kind,
-				place = place,
+				place = "popup",
 				hint = kind,
 			})
 		end)
 	end
 
-	-- Spawn / context: ensure open shells are resized + manifested even if
-	-- they already called MakePopup before VR, or use non-standard popup paths.
+	-- Spawn: only if nothing bound yet (e.g. +menu without our OpenSandboxShell)
 	hook.Add("OnSpawnMenuOpen", "panel2vr_spawn", function()
 		if not W.IsVR() then return end
-		-- Single deferred manifest (OpenSandboxShell may already own it)
 		timer.Simple(0, function()
 			if not IsValid(g_SpawnMenu) or not W.IsVR() then return end
-			if W.IsBound(g_SpawnMenu) then return end
+			if W.IsBound(g_SpawnMenu) or bound[STABLE_UID.spawnmenu] then return end
 			if vrmod.cube and vrmod.cube.ThemeSpawnMenu then
 				vrmod.cube.ThemeSpawnMenu(g_SpawnMenu)
 			end
@@ -561,7 +587,7 @@ function W.InstallHooks()
 		if not W.IsVR() then return end
 		timer.Simple(0, function()
 			if not IsValid(g_ContextMenu) or not W.IsVR() then return end
-			if W.IsBound(g_ContextMenu) then return end
+			if W.IsBound(g_ContextMenu) or bound[STABLE_UID.contextmenu] then return end
 			if vrmod.cube and vrmod.cube.ThemeContextMenu then
 				vrmod.cube.ThemeContextMenu(g_ContextMenu)
 			end
@@ -604,14 +630,11 @@ function W.InstallHooks()
 					if info.kind == "spawnmenu" or info.kind == "contextmenu" then
 						m.cubeMenu = true
 						m.grabbable = true
-						-- allow close: do not keepAlive when panel wants hidden
 						m.keepAlive = false
 						m.allowHiddenPanel = false
+						-- Keep hand attach flag only — do NOT rewrite pos/ang (that caused pose jump)
 						if not m.freeFloat and not m.grabHand then
 							m.attachment = true
-							local place = W.Place.hand or W.Place.popup
-							if place.pos then m.pos = place.pos end
-							if place.ang then m.ang = place.ang end
 						end
 					elseif m.cubeMenu and m.scale and m.scale < 0.03 and m.attachment then
 						m.scale = 0.035
@@ -717,28 +740,22 @@ function W.OpenSandboxShell(which)
 		return false
 	end
 
-	-- Ensure no ghost surfaces of this kind
-	W.Close(uidStable)
-	for buid, info in pairs(bound) do
-		if info.kind == kind then W.Close(buid) end
+	-- Close opposite shell only (spawn vs context), not self if re-entering
+	if not isCtx then
+		W.CloseSandboxShell("context")
+	else
+		W.CloseSandboxShell("spawn")
 	end
 
 	if panel.SetHangOpen then panel:SetHangOpen(false) end
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
 	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
 
-	if panel.Open then
-		-- Don't thrash Close/Open if already visible — just manifest once
-		if not panel:IsVisible() then
-			panel:Open()
-		else
-			if panel.MakePopup then panel:MakePopup() end
-			panel:SetVisible(true)
-		end
-	elseif panel.MakePopup then
-		panel:MakePopup()
-		panel:SetVisible(true)
-	else
+	-- Open sandbox once; MakePopup intercept skips spawn/context (we manifest below)
+	if panel.Open and not panel:IsVisible() then
+		panel:Open()
+	elseif not panel:IsVisible() then
+		if panel.MakePopup then panel:MakePopup() end
 		panel:SetVisible(true)
 	end
 
@@ -750,6 +767,7 @@ function W.OpenSandboxShell(which)
 		end
 	end
 
+	-- Single manifest after Open (hooks will no-op if already bound)
 	local uid = W.ManifestPanel(panel, {
 		kind = kind,
 		place = "hand",
