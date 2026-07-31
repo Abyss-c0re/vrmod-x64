@@ -17,6 +17,9 @@ if CLIENT then
 	-- WayVR-style free grab: grip while laser-focused on a panel to drag it into world space.
 	local cv_menu_grab = CreateClientConVar("vrmod_menu_grab", "1", true, FCVAR_ARCHIVE,
 		"Grip + laser on VR menu panels to free-move them (WayVR overlay style)", 0, 1)
+	-- Corner resize: grip + pull bottom-right corner to scale a panel.
+	local cv_menu_resize = CreateClientConVar("vrmod_menu_resize", "1", true, FCVAR_ARCHIVE,
+		"Grip + pull panel corner to resize (scale) VR menus", 0, 1)
 
 	function vrmod.GetUIScale()
 		-- Default 1.0 — never silently shrink fonts/menus
@@ -137,10 +140,127 @@ if CLIENT then
 	end
 
 	------------------------------------------------------------------------
-	-- WayVR-style free panel grab
+	-- Panel layout persistence (pos / ang / scale / freeFloat) — all menus
+	-- File: data/vrmod/panel_layouts.json
+	------------------------------------------------------------------------
+	local LAYOUT_FILE = "vrmod/panel_layouts.json"
+	local layoutCache = nil
+	local SCALE_MIN, SCALE_MAX = 0.008, 0.22
+	-- Bottom-right corner zone for grip-to-resize (pixels, or fraction of min side)
+	local CORNER_PX = 64
+	local CORNER_FRAC = 0.12
+
+	local function EnsureLayoutDir()
+		if not file.IsDir("vrmod", "DATA") then
+			file.CreateDir("vrmod")
+		end
+	end
+
+	local function ReadLayouts()
+		if layoutCache then return layoutCache end
+		EnsureLayoutDir()
+		local raw = file.Read(LAYOUT_FILE, "DATA")
+		layoutCache = util.JSONToTable(raw or "") or {}
+		return layoutCache
+	end
+
+	local function WriteLayouts(all)
+		EnsureLayoutDir()
+		layoutCache = all or layoutCache or {}
+		file.Write(LAYOUT_FILE, util.TableToJSON(layoutCache, true) or "{}")
+	end
+
+	--- Persist pose + scale for a menu uid (origin-relative pos/ang when free-floating).
+	function vrmod.SaveMenuLayout(uid)
+		if not uid or uid == false then return false end
+		local menu = menus[uid]
+		if not menu then return false end
+		local all = ReadLayouts()
+		local entry = {
+			scale = menu.baseScale or menu.scale or 0.03,
+			freeFloat = (menu.freeFloat or not menu.attachment) and true or false,
+			width = menu.width,
+			height = menu.height,
+		}
+		if menu.pos then
+			entry.pos = { x = menu.pos.x, y = menu.pos.y, z = menu.pos.z }
+		end
+		if menu.ang then
+			entry.ang = { p = menu.ang.p, y = menu.ang.y, r = menu.ang.r }
+		end
+		all[tostring(uid)] = entry
+		WriteLayouts(all)
+		if vrmod.logger then
+			vrmod.logger.Debug("[UI] Saved layout uid=%s scale=%.4f float=%s",
+				tostring(uid), entry.scale, tostring(entry.freeFloat))
+		end
+		return true
+	end
+
+	--- Apply saved layout onto a menu table. Returns true if anything applied.
+	function vrmod.ApplyMenuLayout(uid, menu)
+		menu = menu or (uid and menus[uid])
+		if not menu or not uid then return false end
+		local e = ReadLayouts()[tostring(uid)]
+		if not e then return false end
+		local applied = false
+		if e.scale and tonumber(e.scale) and tonumber(e.scale) > 0 then
+			local sc = math.Clamp(tonumber(e.scale), SCALE_MIN, SCALE_MAX)
+			menu.scale = sc
+			menu.baseScale = sc
+			menu._lastAssignedScale = sc
+			applied = true
+		end
+		-- freeFloat==false means user reattached: keep open-time attachment, only scale above
+		if e.freeFloat and e.pos and e.ang then
+			local px, py, pz = e.pos.x or e.pos[1], e.pos.y or e.pos[2], e.pos.z or e.pos[3]
+			local ap, ay, ar = e.ang.p or e.ang[1], e.ang.y or e.ang[2], e.ang.r or e.ang[3]
+			if px and py and pz and ap and ay and ar then
+				menu.pos = Vector(px, py, pz)
+				menu.ang = Angle(ap, ay, ar)
+				menu.freeFloat = true
+				menu.attachment = false
+				applied = true
+			end
+		end
+		return applied
+	end
+
+	function vrmod.GetMenuLayout(uid)
+		if not uid then return nil end
+		return ReadLayouts()[tostring(uid)]
+	end
+
+	function vrmod.ClearMenuLayout(uid)
+		local all = ReadLayouts()
+		if uid then
+			all[tostring(uid)] = nil
+		else
+			all = {}
+		end
+		WriteLayouts(all)
+		return true
+	end
+
+	local function CornerZoneSize(menu)
+		if not menu or not menu.width or not menu.height then return CORNER_PX end
+		return math.max(CORNER_PX, math.min(menu.width, menu.height) * CORNER_FRAC)
+	end
+
+	local function CursorInResizeCorner(menu, cx, cy)
+		if not menu or not cx or not cy then return false end
+		local cz = CornerZoneSize(menu)
+		return cx >= (menu.width - cz) and cy >= (menu.height - cz)
+			and cx <= menu.width + cz * 0.25 and cy <= menu.height + cz * 0.25
+	end
+
+	------------------------------------------------------------------------
+	-- WayVR-style free panel grab + corner resize
 	-- Point laser at panel + grip → detach from hand, drag freely, release to float in world.
+	-- Point laser at bottom-right corner + grip → pull to scale; release saves layout.
 	------------------------------------------------------------------------
 	local grabState = nil -- { uid, hand ("left"|"right") }
+	local resizeState = nil -- { uid, hand, startScale, startDiag }
 	-- Same-frame multi-hook idempotency (ui + defaultinput both call TryMenuGrab)
 	local consumeStamp = { frame = -1, hand = nil, pressed = nil }
 
@@ -185,37 +305,89 @@ if CLIENT then
 		return nil, nil
 	end
 
-	--- Called from default input before entity pickup. Returns true if grip was consumed by UI grab.
+	local function EndResize(handName)
+		if not resizeState or resizeState.hand ~= handName then return false end
+		local uid = resizeState.uid
+		local menu = menus[uid]
+		if menu then
+			-- Keep free-float if already floating; scale already live on menu
+			vrmod.SaveMenuLayout(uid)
+		end
+		resizeState = nil
+		g_VR.menuResizeActive = false
+		return true
+	end
+
+	local function EndGrab(handName)
+		if not grabState or grabState.hand ~= handName then return false end
+		local menu = menus[grabState.uid]
+		if menu and menu.grabPos and menu.grabAng then
+			local hand = HandPose(handName)
+			if hand and hand.pos and hand.ang then
+				local wPos, wAng = LocalToWorld(menu.grabPos, menu.grabAng, hand.pos, hand.ang)
+				local origin = g_VR.origin or Vector()
+				local originAng = g_VR.originAngle or Angle()
+				menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
+			end
+			menu.grabHand = nil
+			menu.grabPos = nil
+			menu.grabAng = nil
+			menu.freeFloat = true
+			menu.attachment = false
+			vrmod.SaveMenuLayout(grabState.uid)
+		end
+		grabState = nil
+		g_VR.menuGrabActive = false
+		return true
+	end
+
+	--- Apply continuous corner-resize from laser plane hit (panel-local px).
+	local function UpdateResizeFromCursor(menu, cursorX, cursorY)
+		if not resizeState or not menu or resizeState.uid ~= menu.uid then return end
+		if not cursorX or not cursorY then return end
+		local diag = math.sqrt(cursorX * cursorX + cursorY * cursorY)
+		local startDiag = resizeState.startDiag or 1
+		if startDiag < 8 then startDiag = 8 end
+		local ratio = diag / startDiag
+		local ns = (resizeState.startScale or 0.03) * ratio
+		ns = math.Clamp(ns, SCALE_MIN, SCALE_MAX)
+		menu.scale = ns
+		menu.baseScale = ns
+		menu._lastAssignedScale = ns
+	end
+
+	--- Called from default input before entity pickup. Returns true if grip was consumed by UI grab/resize.
 	--- Safe to call from multiple VRMod_Input hooks on the same event (idempotent).
 	function vrmod.TryMenuGrab(handName, pressed)
-		if not cv_menu_grab:GetBool() then return false end
 		if not g_VR.active then return false end
+		local grabOn = cv_menu_grab:GetBool()
+		local resizeOn = cv_menu_resize:GetBool()
+		if not grabOn and not resizeOn then return false end
 		if AlreadyConsumed(handName, pressed) then return true end
 
 		if not pressed then
-			if not grabState or grabState.hand ~= handName then return false end
-			local menu = menus[grabState.uid]
-			if menu and menu.grabPos and menu.grabAng then
-				local hand = HandPose(handName)
-				if hand and hand.pos and hand.ang then
-					local wPos, wAng = LocalToWorld(menu.grabPos, menu.grabAng, hand.pos, hand.ang)
-					local origin = g_VR.origin or Vector()
-					local originAng = g_VR.originAngle or Angle()
-					menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
-				end
-				menu.grabHand = nil
-				menu.grabPos = nil
-				menu.grabAng = nil
-				menu.freeFloat = true
-				menu.attachment = false
+			local ended = false
+			if resizeState and resizeState.hand == handName then
+				ended = EndResize(handName) or ended
 			end
-			grabState = nil
-			g_VR.menuGrabActive = false
-			MarkConsumed(handName, pressed)
-			return true
+			if grabState and grabState.hand == handName then
+				ended = EndGrab(handName) or ended
+			end
+			if ended then
+				MarkConsumed(handName, pressed)
+				return true
+			end
+			return false
 		end
 
-		-- Already holding a panel with this hand
+		-- Already holding resize/grab with this hand
+		if resizeState then
+			if resizeState.hand == handName then
+				MarkConsumed(handName, pressed)
+				return true
+			end
+			return false
+		end
 		if grabState then
 			if grabState.hand == handName then
 				MarkConsumed(handName, pressed)
@@ -224,12 +396,47 @@ if CLIENT then
 			return false
 		end
 
-		-- Press: only start grab when laser is on a grabbable panel
+		-- Press: only start when laser is on a grabbable panel
 		local uid = g_VR.menuFocus
 		if not uid or uid == false then return false end
 		local menu = menus[uid]
 		if not menu then return false end
 		if menu.grabbable == false then return false end
+
+		local cx = menu.lastCursorX or g_VR.menuCursorX or 0
+		local cy = menu.lastCursorY or g_VR.menuCursorY or 0
+
+		-- Corner grip → resize (scale); body grip → free-move
+		if resizeOn and CursorInResizeCorner(menu, cx, cy) then
+			local diag = math.sqrt(cx * cx + cy * cy)
+			if diag < 8 then diag = math.sqrt(menu.width * menu.width + menu.height * menu.height) end
+			resizeState = {
+				uid = uid,
+				hand = handName,
+				startScale = menu.baseScale or menu.scale or 0.03,
+				startDiag = diag,
+			}
+			g_VR.menuResizeActive = true
+			-- Detach to free-float so resize stays put while scaling
+			if not menu.freeFloat then
+				local wPos, wAng = ResolveMenuWorldPose(menu)
+				if wPos and wAng then
+					local origin = g_VR.origin or Vector()
+					local originAng = g_VR.originAngle or Angle()
+					menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
+					menu.freeFloat = true
+					menu.attachment = false
+				end
+			end
+			MarkConsumed(handName, pressed)
+			if vrmod.logger then
+				vrmod.logger.Debug("[UI] Panel resize start uid=%s hand=%s scale=%.4f",
+					tostring(uid), handName, resizeState.startScale)
+			end
+			return true
+		end
+
+		if not grabOn then return false end
 
 		local wPos, wAng = ResolveMenuWorldPose(menu)
 		local hand = HandPose(handName)
@@ -248,13 +455,13 @@ if CLIENT then
 		return true
 	end
 
-	--- Call from menus that re-apply hand pose each paint. Skips when free-floating / grabbed.
+	--- Call from menus that re-apply hand pose each paint. Skips when free-floating / grabbed / resizing.
 	function vrmod.MenuApplyHandAnchor(menu, scale, pos, ang)
 		if not menu then return end
 		if scale then menu.scale = scale end
 		menu.cubeMenu = true
 		menu.grabbable = menu.grabbable ~= false
-		if menu.grabHand or menu.freeFloat then return end
+		if menu.grabHand or menu.freeFloat or (resizeState and resizeState.uid == menu.uid) then return end
 		if pos then menu.pos = pos end
 		if ang then menu.ang = ang end
 		menu.attachment = true
@@ -277,6 +484,19 @@ if CLIENT then
 			grabState = nil
 			g_VR.menuGrabActive = false
 		end
+		if resizeState and resizeState.uid == menu.uid then
+			resizeState = nil
+			g_VR.menuResizeActive = false
+		end
+		-- Remember reattached state (no free-float on next open)
+		local all = ReadLayouts()
+		local e = all[tostring(menu.uid)] or {}
+		e.scale = menu.baseScale or menu.scale
+		e.freeFloat = false
+		e.pos = nil
+		e.ang = nil
+		all[tostring(menu.uid)] = e
+		WriteLayouts(all)
 		return true
 	end
 
@@ -367,6 +587,39 @@ if CLIENT then
 			if v.mat and not v.mat:IsError() then
 				v.mat:SetTexture("$basetexture", v.rt)
 			end
+
+			-- Laser plane hit (needed before draw for live resize + focus)
+			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
+			if v.cursorEnabled then
+				local rh = g_VR.tracking and g_VR.tracking.pose_righthand
+				if rh and rh.pos and rh.ang then
+					local start = rh.pos
+					local dir = rh.ang:Forward()
+					local normal = ang:Up()
+					local A = normal:Dot(dir)
+					if A < 0 then
+						local B = normal:Dot(pos - start)
+						if B < 0 then
+							hitDist = B / A
+							hitWorld = start + dir * hitDist
+							local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
+							hitCursorX = tp.x * 1 / drawScale
+							hitCursorY = -tp.y * 1 / drawScale
+						end
+					end
+				end
+			end
+
+			-- Live corner resize: update scale from plane hit (allow outside panel rect)
+			local resizingThis = resizeState and resizeState.uid == k
+			if resizingThis and hitCursorX and hitCursorY then
+				UpdateResizeFromCursor(v, hitCursorX, hitCursorY)
+				-- Recompute drawScale after scale change (TL fixed, BR moves)
+				drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
+				v.lastCursorX = hitCursorX
+				v.lastCursorY = hitCursorY
+			end
+
 			cam.IgnoreZ(true)
 			cam.Start3D2D(pos, ang, drawScale)
 			local blendOn = false
@@ -385,36 +638,47 @@ if CLIENT then
 				surface.DrawOutlinedRect(0, 0, v.width, v.height)
 			end
 
+			-- Resize corner handle (visible when focused or actively resizing)
+			local showCorner = cv_menu_resize:GetBool() and v.grabbable ~= false
+				and (resizingThis or g_VR.menuFocus == k or (hitCursorX and hitCursorY
+					and hitCursorX > 0 and hitCursorY > 0
+					and hitCursorX < v.width and hitCursorY < v.height))
+			if showCorner then
+				local cz = CornerZoneSize(v)
+				local inC = hitCursorX and hitCursorY and CursorInResizeCorner(v, hitCursorX, hitCursorY)
+				local col = resizingThis and Color(80, 255, 200, 230)
+					or (inC and Color(120, 230, 255, 220) or Color(180, 200, 220, 140))
+				surface.SetDrawColor(col)
+				-- Soft fill on BR corner
+				surface.DrawRect(v.width - cz, v.height - cz, cz, cz)
+				-- Grip lines (diagonal stripes)
+				surface.SetDrawColor(col.r, col.g, col.b, math.min(255, col.a + 40))
+				for i = 0, 3 do
+					local o = 10 + i * 12
+					if o < cz - 4 then
+						surface.DrawLine(v.width - o, v.height - 4, v.width - 4, v.height - o)
+					end
+				end
+				-- Outer L accent
+				surface.DrawRect(v.width - cz, v.height - 3, cz, 3)
+				surface.DrawRect(v.width - 3, v.height - cz, 3, cz)
+			end
+
 			cam.End3D2D()
 			cam.IgnoreZ(false)
 			if v.cursorEnabled then
-				local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-				if not rh or not rh.pos or not rh.ang then continue end
-				local cursorWorldPos = Vector(0, 0, 0)
-				local start = rh.pos
-				local dir = rh.ang:Forward()
-				local dist = nil
-				local normal = ang:Up()
-				local A = normal:Dot(dir)
-				if A < 0 then
-					local B = normal:Dot(pos - start)
-					if B < 0 then
-						dist = B / A
-						cursorWorldPos = start + dir * dist
-						local tp = WorldToLocal(cursorWorldPos, Angle(0, 0, 0), pos, ang)
-						cursorX = tp.x * 1 / drawScale
-						cursorY = -tp.y * 1 / drawScale
-					end
-				end
-
-				if not cursorX or not cursorY or not v or not v.width or not v.height or not dist or not menuFocusDist then continue end
-				if cursorX > 0 and cursorY > 0 and cursorX < v.width and cursorY < v.height and dist < menuFocusDist then
+				if not hitCursorX or not hitCursorY or not hitDist or not menuFocusDist then continue end
+				cursorX, cursorY = hitCursorX, hitCursorY
+				-- Keep focus while resizing even if laser leaves the panel rect
+				local inside = cursorX > 0 and cursorY > 0 and cursorX < v.width and cursorY < v.height
+				local keepResize = resizingThis and hitDist < menuFocusDist + 50
+				if (inside or keepResize) and hitDist < menuFocusDist then
 					g_VR.menuFocus = k
-					menuFocusDist = dist
+					menuFocusDist = hitDist
 					menuFocusPanel = v.panel
 					v.lastCursorX = cursorX
 					v.lastCursorY = cursorY
-					menuFocusCursorWorldPos = cursorWorldPos
+					menuFocusCursorWorldPos = hitWorld
 				end
 			end
 		end
@@ -497,6 +761,9 @@ if CLIENT then
 		end
 		menus[uid].mat = mat
 
+		-- Restore remembered pos / size (scale) / free-float for this panel
+		vrmod.ApplyMenuLayout(uid, menus[uid])
+
 		-- Clear once, then paint panel (never clear after paint — that blanked hand menus)
 		render.PushRenderTarget(menus[uid].rt)
 		cam.Start2D()
@@ -527,9 +794,25 @@ if CLIENT then
 	function VRUtilMenuClose(uid)
 		for k, v in pairs(menus) do
 			if k == uid or not uid then
+				-- Persist last free-float pose/size before teardown
+				if v and (v.freeFloat or not v.attachment) and v.pos and v.ang then
+					vrmod.SaveMenuLayout(k)
+				elseif v and (v.baseScale or v.scale) then
+					-- Still remember scale even if hand-attached
+					local all = ReadLayouts()
+					local e = all[tostring(k)] or {}
+					e.scale = v.baseScale or v.scale
+					if e.freeFloat == nil then e.freeFloat = false end
+					all[tostring(k)] = e
+					WriteLayouts(all)
+				end
 				if grabState and grabState.uid == k then
 					grabState = nil
 					g_VR.menuGrabActive = false
+				end
+				if resizeState and resizeState.uid == k then
+					resizeState = nil
+					g_VR.menuResizeActive = false
 				end
 				if IsValid(v.panel) then v.panel:SetPaintedManually(false) end
 				if v.closeFunc then v.closeFunc() end
@@ -548,7 +831,9 @@ if CLIENT then
 			hook.Remove("PostDrawTranslucentRenderables", "vrutil_hook_drawmenus")
 			g_VR.menuFocus = false
 			g_VR.menuGrabActive = false
+			g_VR.menuResizeActive = false
 			grabState = nil
+			resizeState = nil
 			menusExist = false
 			gui.EnableScreenClicker(false)
 		end
@@ -563,6 +848,8 @@ if CLIENT then
 		end
 
 		if not g_VR.menuFocus then return end
+		-- Don't inject clicks while resizing (corner drag is not a button press)
+		if g_VR.menuResizeActive then return end
 		local mouseButton = nil
 		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
 			mouseButton = MOUSE_LEFT
@@ -572,7 +859,7 @@ if CLIENT then
 			-- Sprint while laser-focused on a free-floating panel re-snaps it to left hand
 			if pressed then
 				local m = menus[g_VR.menuFocus]
-				if m and m.freeFloat and not g_VR.menuGrabActive then
+				if m and m.freeFloat and not g_VR.menuGrabActive and not g_VR.menuResizeActive then
 					vrmod.MenuReattach(g_VR.menuFocus)
 					return
 				end
@@ -632,4 +919,25 @@ concommand.Add("vrmod_menu_reattach", function()
 	if vrmod.MenuReattach and vrmod.MenuReattach() then
 		if vrmod.logger then vrmod.logger.Info("[UI] Menu reattached to left hand") end
 	end
+end)
+
+concommand.Add("vrmod_menu_layout_clear", function(ply, cmd, args)
+	if not CLIENT then return end
+	local uid = args and args[1]
+	if uid and uid ~= "" then
+		vrmod.ClearMenuLayout(uid)
+		print("[vrmod] Cleared layout for " .. tostring(uid))
+	else
+		vrmod.ClearMenuLayout()
+		print("[vrmod] Cleared all panel layouts (data/vrmod/panel_layouts.json)")
+	end
+end)
+
+concommand.Add("vrmod_menu_layout_save", function()
+	if not CLIENT or not g_VR or not g_VR.menus then return end
+	local n = 0
+	for uid, _ in pairs(g_VR.menus) do
+		if vrmod.SaveMenuLayout(uid) then n = n + 1 end
+	end
+	print("[vrmod] Saved layouts for " .. n .. " open panel(s)")
 end)

@@ -356,8 +356,21 @@ function W.ManifestPanel(panel, opts)
 	panel:SetPaintedManually(true)
 
 	local isShell = (kind == "spawnmenu" or kind == "contextmenu")
-	-- Restore free-float placement if user parked this shell earlier
+	-- Restore free-float placement: session cache, then disk layout (panel_layouts.json)
 	local saved = isShell and shellFloatPose[kind] or nil
+	if not saved and isfunction(vrmod.GetMenuLayout) then
+		local lay = vrmod.GetMenuLayout(uid)
+		if lay and lay.freeFloat and lay.pos and lay.ang then
+			saved = {
+				pos = Vector(lay.pos.x or lay.pos[1], lay.pos.y or lay.pos[2], lay.pos.z or lay.pos[3]),
+				ang = Angle(lay.ang.p or lay.ang[1], lay.ang.y or lay.ang[2], lay.ang.r or lay.ang[3]),
+				scale = lay.scale,
+			}
+			if isShell then shellFloatPose[kind] = saved end
+		elseif lay and lay.scale then
+			place.scale = lay.scale
+		end
+	end
 	local useFloat = saved and saved.pos and saved.ang
 	if useFloat then
 		place.attachment = false
@@ -400,8 +413,11 @@ function W.ManifestPanel(panel, opts)
 			shellFloatPose[kind] = {
 				pos = Vector(m.pos),
 				ang = Angle(m.ang.p, m.ang.y, m.ang.r),
-				scale = m.scale,
+				scale = m.baseScale or m.scale,
 			}
+		end
+		if m and isfunction(vrmod.SaveMenuLayout) then
+			vrmod.SaveMenuLayout(uid)
 		end
 		if IsValid(panel) then
 			panel:SetPaintedManually(false)
@@ -412,23 +428,34 @@ function W.ManifestPanel(panel, opts)
 	end)
 
 	if g_VR.menus and g_VR.menus[uid] then
-		local sc = place.scale or 0.022
-		if isShell then sc = math.max(sc, 0.02) end
 		local m = g_VR.menus[uid]
-		m.scale = sc
-		m.baseScale = sc
-		m._lastAssignedScale = sc
+		local disk = isfunction(vrmod.GetMenuLayout) and vrmod.GetMenuLayout(uid) or nil
+		-- Prefer layout already applied by VRUtilMenuOpen; only fill defaults if missing
+		if not (disk and disk.scale) then
+			local sc = place.scale or m.scale or 0.022
+			if isShell then sc = math.max(sc, 0.02) end
+			m.scale = sc
+			m.baseScale = sc
+			m._lastAssignedScale = sc
+		end
 		m.cubeMenu = true
 		m.grabbable = true
 		-- Stay alive while QM / other menus open (IsVisible flicker must not kill shell)
 		m.persistOpen = isShell
 		m.keepAlive = isShell
 		m.allowHiddenPanel = isShell
-		if useFloat then
+		if useFloat or m.freeFloat then
 			m.attachment = false
 			m.freeFloat = true
-			m.pos = place.pos
-			m.ang = place.ang
+			if useFloat then
+				m.pos = place.pos
+				m.ang = place.ang
+				if place.scale and not (disk and disk.scale) then
+					m.scale = place.scale
+					m.baseScale = place.scale
+					m._lastAssignedScale = place.scale
+				end
+			end
 		else
 			m.attachment = place.attachment and true or false
 			m.freeFloat = not m.attachment
@@ -646,13 +673,9 @@ function W.InstallHooks()
 		if not W.IsVR() then return end
 		for uid, info in pairs(bound) do
 			if info.panel and IsValid(info.panel) and isfunction(VRUtilMenuRenderPanel) then
-				-- NEVER force SetVisible(true) here — that made spawn uncloseable
 				if info.kind == "spawnmenu" or info.kind == "contextmenu" then
-					if info.panel.IsVisible and not info.panel:IsVisible() then
-						-- Sandbox closed → drop VR surface
-						W.Close(uid)
-						continue
-					end
+					-- Hold open: re-show if engine flickers IsVisible (QM must not dismiss)
+					if info.panel.SetVisible then info.panel:SetVisible(true) end
 					if info.panel.SetPaintedManually then info.panel:SetPaintedManually(true) end
 				end
 				if info.alwaysPaint or info.html or g_VR.menuFocus == uid then
@@ -663,10 +686,19 @@ function W.InstallHooks()
 					if info.kind == "spawnmenu" or info.kind == "contextmenu" then
 						m.cubeMenu = true
 						m.grabbable = true
-						m.keepAlive = false
-						m.allowHiddenPanel = false
-						-- Keep hand attach flag only — do NOT rewrite pos/ang (that caused pose jump)
-						if not m.freeFloat and not m.grabHand then
+						m.persistOpen = true
+						m.keepAlive = true
+						m.allowHiddenPanel = true
+						-- Snapshot free-float so reopen restores parked pose (session + disk)
+						if (m.freeFloat or not m.attachment) and m.pos and m.ang then
+							shellFloatPose[info.kind] = {
+								pos = Vector(m.pos),
+								ang = Angle(m.ang.p, m.ang.y, m.ang.r),
+								scale = m.baseScale or m.scale,
+							}
+						end
+						-- Do not rewrite pos/ang/scale; only keep hand attach if not free-floated/resizing
+						if not m.freeFloat and not m.grabHand and not g_VR.menuResizeActive then
 							m.attachment = true
 						end
 					elseif m.cubeMenu and m.scale and m.scale < 0.03 and m.attachment then
@@ -712,12 +744,30 @@ function W.IsShellOpen(which)
 	return false
 end
 
---- Hard close — one surface, no ghosts
+--- Hard close — one surface, no ghosts (X button / QM toggle only)
 function W.CloseSandboxShell(which)
 	local isCtx = (which == "context" or which == "contextmenu")
 	local panel = isCtx and g_ContextMenu or g_SpawnMenu
 	local uid = isCtx and STABLE_UID.contextmenu or STABLE_UID.spawnmenu
 	local kind = isCtx and "contextmenu" or "spawnmenu"
+
+	-- Save free-float before teardown (reopen restores)
+	local m = g_VR and g_VR.menus and g_VR.menus[uid]
+	if m and (m.freeFloat or not m.attachment) and m.pos and m.ang then
+		shellFloatPose[kind] = {
+			pos = Vector(m.pos),
+			ang = Angle(m.ang.p, m.ang.y, m.ang.r),
+			scale = m.baseScale or m.scale,
+		}
+	end
+	if m and isfunction(vrmod.SaveMenuLayout) then
+		vrmod.SaveMenuLayout(uid)
+	end
+	if m then
+		m.persistOpen = false
+		m.keepAlive = false
+		m.allowHiddenPanel = false
+	end
 
 	if IsValid(panel) then
 		if panel.SetHangOpen then panel:SetHangOpen(false) end
@@ -735,6 +785,12 @@ function W.CloseSandboxShell(which)
 	end
 	log("CloseSandboxShell %s", kind)
 	return true
+end
+
+--- Clear saved free-float (reattach next open to hand)
+function W.ClearShellFloatPose(which)
+	local isCtx = (which == "context" or which == "contextmenu")
+	shellFloatPose[isCtx and "contextmenu" or "spawnmenu"] = nil
 end
 
 --- Toggle spawn/context — never stack a second copy
