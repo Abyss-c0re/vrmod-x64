@@ -173,15 +173,13 @@ local function MirrorBoneName(name)
 	return name
 end
 
--- Distal limbs use full Euler flip. Clavicles stay on the CENTER formula —
--- treating clavicles as lateral (because of _L_/_R_) twisted the torso vs spine.
+-- Free limbs (good with full Euler flip). Axial skeleton keeps clone orientation
+-- (only position is mirrored) so chest/head don't corkscrew.
 local function IsDistalLimbBone(name)
 	if not name then return false end
-	-- Never distal: axial skeleton
 	if string.find(name, "Clavicle", 1, true) then return false end
 	if string.find(name, "Spine", 1, true) or string.find(name, "Pelvis", 1, true) then return false end
 	if string.find(name, "Neck", 1, true) or string.find(name, "Head", 1, true) then return false end
-	-- Distal free limbs (hands/legs good with full flip)
 	if string.find(name, "Hand", 1, true) or string.find(name, "Finger", 1, true) then return true end
 	if string.find(name, "Wrist", 1, true) or string.find(name, "Ulna", 1, true) then return true end
 	if string.find(name, "Forearm", 1, true) or string.find(name, "UpperArm", 1, true) then return true end
@@ -191,9 +189,11 @@ local function IsDistalLimbBone(name)
 	return false
 end
 
---- True mirror: left-right reflection in the player's sagittal plane → twin space.
--- X=Forward, Y=Right, Z=Up. Position always flips Y.
--- Distal limbs: (p, -y, -r). Axial + clavicle: (p, -y, +r) so chest/head stay upright.
+--- Facing mirror in player local space (X=Fwd, Y=Right, Z=Up).
+-- Position: always flip Y.
+-- Distal limbs: (p, -y, -r) — proven for hands/legs.
+-- Axial (pelvis/spine/clavicle/neck/head): keep relAng (clone orientation).
+--   Twin standYaw+180 turns that into face-to-face without roll corkscrew.
 local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw, boneName)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 
@@ -202,7 +202,8 @@ local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, 
 	if IsDistalLimbBone(boneName) then
 		nang = Angle(relAng.p, -relAng.y, -relAng.r)
 	else
-		nang = Angle(relAng.p, -relAng.y, relAng.r)
+		-- Axial: same local orientation as clone (no Euler mirror)
+		nang = Angle(relAng.p, relAng.y, relAng.r)
 	end
 
 	return LocalToWorld(relPos, nang, avatarFeet, avatarYaw)
