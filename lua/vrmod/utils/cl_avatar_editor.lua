@@ -176,21 +176,22 @@ local function MirrorBoneName(name)
 end
 
 --- True mirror: left-right reflection in the player's sagittal plane, then into twin space.
--- WorldToLocal with playerYaw: X=Right, Y=Forward, Z=Up.
--- Flip X on position; reflect bone basis across YZ.
--- AngleFromBasis rebuilds a right-handed frame (Householder det=-1 is corrected via f×u).
--- Caller MUST also remap L↔R bone targets via MirrorBoneName (see _copyFromLocalPlayer).
+-- Source Angle / WorldToLocal: X = Forward, Y = Right, Z = Up.
+-- Sagittal plane = XZ (forward-up). Flip Y (right), NEVER X (forward) — flipping X
+-- was the Cube failure that folded the twin into spaghetti.
+-- AngleFromBasis rebuilds a right-handed frame after reflection.
+-- Caller MUST also remap L↔R bone targets via MirrorBoneName.
 local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 
-	-- Position: your right (+X) becomes left (−X) in player frame
-	relPos.x = -relPos.x
+	-- Position: your right (+Y) becomes left (−Y)
+	relPos.y = -relPos.y
 
-	-- Orientation: reflect Forward/Up across the sagittal plane (YZ)
+	-- Orientation: reflect Forward/Up across sagittal XZ (negate right component)
 	local f = relAng:Forward()
 	local u = relAng:Up()
-	f = Vector(-f.x, f.y, f.z)
-	u = Vector(-u.x, u.y, u.z)
+	f = Vector(f.x, -f.y, f.z)
+	u = Vector(u.x, -u.y, u.z)
 	local nang = AngleFromBasis(f, u)
 
 	return LocalToWorld(relPos, nang, avatarFeet, avatarYaw)

@@ -188,11 +188,12 @@ end
 local function MapPose(worldPos, worldAng, srcFeet, srcYaw, dstFeet, dstYaw, mirror)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), srcFeet, srcYaw)
 	if mirror then
-		relPos.x = -relPos.x
+		-- Source local: X=Forward, Y=Right, Z=Up. Sagittal flip = negate Y (right).
+		relPos.y = -relPos.y
 		local f = relAng:Forward()
 		local u = relAng:Up()
-		f = Vector(-f.x, f.y, f.z)
-		u = Vector(-u.x, u.y, u.z)
+		f = Vector(f.x, -f.y, f.z)
+		u = Vector(u.x, -u.y, u.z)
 		relAng = AngleFromBasis(f, u)
 	end
 	return LocalToWorld(relPos, relAng, dstFeet, dstYaw)
