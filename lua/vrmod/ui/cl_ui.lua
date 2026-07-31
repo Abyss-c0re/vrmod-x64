@@ -146,9 +146,9 @@ if CLIENT then
 	local LAYOUT_FILE = "vrmod/panel_layouts.json"
 	local layoutCache = nil
 	local SCALE_MIN, SCALE_MAX = 0.008, 0.22
-	-- Bottom-right corner zone for grip-to-resize (pixels, or fraction of min side)
-	local CORNER_PX = 64
-	local CORNER_FRAC = 0.12
+	-- Corner grip zone (any of 4 corners) — large enough to hit reliably in VR
+	local CORNER_PX = 80
+	local CORNER_FRAC = 0.16
 
 	local function EnsureLayoutDir()
 		if not file.IsDir("vrmod", "DATA") then
@@ -257,11 +257,24 @@ if CLIENT then
 		return math.max(CORNER_PX, math.min(menu.width, menu.height) * CORNER_FRAC)
 	end
 
+	--- True if laser is in any corner resize zone (all windows are resizable by default).
 	local function CursorInResizeCorner(menu, cx, cy)
 		if not menu or not cx or not cy then return false end
+		local w, h = menu.width or 0, menu.height or 0
+		if w < 8 or h < 8 then return false end
 		local cz = CornerZoneSize(menu)
-		return cx >= (menu.width - cz) and cy >= (menu.height - cz)
-			and cx <= menu.width + cz * 0.25 and cy <= menu.height + cz * 0.25
+		local pad = cz * 0.35 -- allow slightly outside the rect
+		local nearL = cx >= -pad and cx <= cz
+		local nearR = cx >= (w - cz) and cx <= (w + pad)
+		local nearT = cy >= -pad and cy <= cz
+		local nearB = cy >= (h - cz) and cy <= (h + pad)
+		return (nearL or nearR) and (nearT or nearB)
+	end
+
+	local function MenuIsResizable(menu)
+		if not menu then return false end
+		if menu.resizable == false then return false end
+		return true -- default: every VR window is resizable
 	end
 
 	------------------------------------------------------------------------
@@ -445,18 +458,17 @@ if CLIENT then
 			return false
 		end
 
-		-- Press: only start when laser is on a grabbable panel
+		-- Press: laser on a panel (resize works even if grab is disabled)
 		local uid = g_VR.menuFocus
 		if not uid or uid == false then return false end
 		local menu = menus[uid]
 		if not menu then return false end
-		if menu.grabbable == false then return false end
 
 		local cx = menu.lastCursorX or g_VR.menuCursorX or 0
 		local cy = menu.lastCursorY or g_VR.menuCursorY or 0
 
-		-- Corner grip → resize (scale); body grip → free-move
-		if resizeOn and CursorInResizeCorner(menu, cx, cy) then
+		-- Corner grip → resize (every window by default); body grip → free-move if grabbable
+		if resizeOn and MenuIsResizable(menu) and CursorInResizeCorner(menu, cx, cy) then
 			-- Detach to free-float so resize stays put while scaling
 			local wPos, wAng = ResolveMenuWorldPose(menu)
 			if not menu.freeFloat and wPos and wAng then
@@ -479,6 +491,7 @@ if CLIENT then
 				startDist = startDist,
 			}
 			menu.scaleLocked = true
+			menu.resizable = true
 			g_VR.menuResizeActive = true
 			MarkConsumed(handName, pressed)
 			if vrmod.logger then
@@ -489,6 +502,7 @@ if CLIENT then
 		end
 
 		if not grabOn then return false end
+		if menu.grabbable == false then return false end
 
 		local wPos, wAng = ResolveMenuWorldPose(menu)
 		local hand = HandPose(handName)
@@ -518,6 +532,7 @@ if CLIENT then
 		end
 		menu.cubeMenu = true
 		menu.grabbable = menu.grabbable ~= false
+		menu.resizable = menu.resizable ~= false -- every window resizable unless opted out
 		if menu.grabHand or menu.freeFloat or (resizeState and resizeState.uid == menu.uid) then return end
 		if pos then menu.pos = pos end
 		if ang then menu.ang = ang end
@@ -639,10 +654,11 @@ if CLIENT then
 				v.mat:SetTexture("$basetexture", v.rt)
 			end
 
-			-- Laser plane hit (focus only — resize uses hand distance, not laser)
+			-- Laser plane hit: always for cursor and/or resize (every window resizable)
 			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
 			local resizingThis = resizeState and resizeState.uid == k
-			if v.cursorEnabled then
+			local wantCursor = v.cursorEnabled or MenuIsResizable(v) or resizingThis
+			if wantCursor then
 				local rh = g_VR.tracking and g_VR.tracking.pose_righthand
 				if rh and rh.pos and rh.ang then
 					local start = rh.pos
@@ -679,19 +695,38 @@ if CLIENT then
 				surface.DrawOutlinedRect(0, 0, v.width, v.height)
 			end
 
-			-- Nearly invisible grip: only while actively resizing (hit zone still works)
-			if resizingThis then
-				surface.SetDrawColor(255, 255, 255, 50)
-				surface.DrawLine(v.width - 14, v.height - 3, v.width - 3, v.height - 3)
-				surface.DrawLine(v.width - 3, v.height - 14, v.width - 3, v.height - 3)
+			-- Soft corner hint when laser is in a resize zone (all windows); brighter while dragging
+			local inCorner = hitCursorX and hitCursorY and MenuIsResizable(v)
+				and CursorInResizeCorner(v, hitCursorX, hitCursorY)
+			if (resizingThis or inCorner) and cv_menu_resize:GetBool() then
+				local a = resizingThis and 90 or 45
+				surface.SetDrawColor(255, 255, 255, a)
+				local function cornerGrip(x0, y0, sx, sy)
+					surface.DrawLine(x0, y0 + sy * 12, x0, y0)
+					surface.DrawLine(x0, y0, x0 + sx * 12, y0)
+				end
+				local w, h = v.width, v.height
+				if hitCursorX and hitCursorY then
+					local left = hitCursorX < w * 0.5
+					local top = hitCursorY < h * 0.5
+					if left and top then cornerGrip(3, 3, 1, 1)
+					elseif (not left) and top then cornerGrip(w - 3, 3, -1, 1)
+					elseif left and (not top) then cornerGrip(3, h - 3, 1, -1)
+					else cornerGrip(w - 3, h - 3, -1, -1)
+					end
+				else
+					cornerGrip(w - 3, h - 3, -1, -1)
+				end
 			end
 
 			cam.End3D2D()
 			cam.IgnoreZ(false)
-			if v.cursorEnabled then
+			if wantCursor then
 				if not hitCursorX or not hitCursorY or not hitDist or not menuFocusDist then continue end
 				cursorX, cursorY = hitCursorX, hitCursorY
-				local inside = cursorX > 0 and cursorY > 0 and cursorX < v.width and cursorY < v.height
+				local cz = CornerZoneSize(v)
+				local inside = cursorX > -cz * 0.2 and cursorY > -cz * 0.2
+					and cursorX < v.width + cz * 0.2 and cursorY < v.height + cz * 0.2
 				local keepResize = resizingThis and hitDist < menuFocusDist + 50
 				if (inside or keepResize) and hitDist < menuFocusDist then
 					g_VR.menuFocus = k
@@ -751,14 +786,17 @@ if CLIENT then
 			scale = baseScale,
 			baseScale = baseScale,
 			_lastAssignedScale = baseScale,
-			cursorEnabled = cursorEnabled,
+			-- Laser hit always on for VR windows (needed for corner resize on every panel)
+			cursorEnabled = cursorEnabled ~= false,
 			rt = rt,
 			width = width,
 			height = height,
 			lastCursorX = 0,
 			lastCursorY = 0,
-			-- WayVR free-grab defaults: all menus grabbable unless marked grabbable=false
+			-- Every VR window: free-grab + corner resize (opt out with grabbable/resizable=false)
 			grabbable = true,
+			resizable = true,
+			scaleLocked = false,
 			freeFloat = not attachment,
 			grabHand = nil,
 			grabPos = nil,

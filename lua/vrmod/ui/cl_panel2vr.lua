@@ -440,6 +440,7 @@ function W.ManifestPanel(panel, opts)
 		end
 		m.cubeMenu = true
 		m.grabbable = true
+		m.resizable = true
 		-- Stay alive while QM / other menus open (IsVisible flicker must not kill shell)
 		m.persistOpen = isShell
 		m.keepAlive = isShell
