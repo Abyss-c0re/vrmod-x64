@@ -1,13 +1,14 @@
 -- =============================================================================
 -- vrmod.avatar — Cube player customization twin
 --
--- SoT = working VR playermodel bone matrices (snap from cl_character after IK).
--- Twin NEVER re-IK. Twin NEVER publishes pose snaps (that poisons the SoT).
+-- Cube law: SAME body IK as the real VR player (vrmod.charik).
+--   read-only lerpedFrame → charik.TransformFrame(mode) → charik.Update
+--   → charik.ApplyMatrices in BuildBonePositions
 --
---   CLONE:  same bone names, same angles, position += (stand - feet). No flip.
---   MIRROR: MapMirrorWorld (Y flip + yaw+180). Separate branch only.
+--   CLONE:  TransformFrame rigid (no Y-flip, no L↔R) — same IK arms/head
+--   MIRROR: TransformFrame flip + L↔R, then same IK
 --
--- X=Forward Y=Right Z=Up. Never mix paths. Never VRUtilNetUpdateLocalPly.
+-- Never VRUtilNetUpdateLocalPly from twin. Never dual-truth pose math.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
 if SERVER then return end
@@ -686,132 +687,75 @@ local function ReadLocalVRFrame()
 	return frame
 end
 
---- Published by cl_character after VR IK is applied (do not SetupBones the player here).
--- { frame = n, characterYaw, feet, bones = { {name, pos, ang}, ... } }
+--- Optional pose snap (kept for diagnostics / future). Twin pose uses charik, not this.
 g_VR.avatarPoseSnap = g_VR.avatarPoseSnap or nil
 
---- Call from cl_character / VR draw AFTER player IK + bone apply — NEVER from twin.
--- Twin-side publish captures unposed bones and corkscrews CLONE.
 function vrmod.avatar.PublishPlayerPose(ply, frame)
+	-- No-op for twin drive. Snap path corkscrewed CLONE; charik is SoT.
+	-- Kept so cl_character / cl_vrmod call sites do not error.
 	if not IsValid(ply) then return end
-	local n = ply:GetBoneCount() or 0
-	if n < 4 then return end
-
-	local yaw = (frame and frame.characterYaw) or g_VR.characterYaw or 0
-	-- Prefer render yaw if set this frame
-	local ra = ply:GetRenderAngles()
-	if ra and math.abs(math.AngleDifference(ra.yaw, yaw)) < 90 then
-		yaw = ra.yaw
-	end
-
-	local originZ = (g_VR.origin and g_VR.origin.z) or ply:GetPos().z
-	-- Character root under the body (pelvis XY), not HMD — legs depend on this
-	local fx, fy = ply:GetPos().x, ply:GetPos().y
-	local pelvis = ply:LookupBone("ValveBiped.Bip01_Pelvis")
-	if isnumber(pelvis) and pelvis >= 0 then
-		local pm = ply:GetBoneMatrix(pelvis)
-		if pm then
-			local pp = pm:GetTranslation()
-			fx, fy = pp.x, pp.y
-		end
-	end
-
-	local bones = {}
-	for i = 0, n - 1 do
-		local name = ply:GetBoneName(i)
-		if not name or name == "" or name == "__INVALIDBONE__" then continue end
-		local m = ply:GetBoneMatrix(i)
-		if not m then continue end
-		local p, a = m:GetTranslation(), m:GetAngles()
-		bones[#bones + 1] = {
-			name = name,
-			pos = Vector(p.x, p.y, p.z),
-			ang = Angle(a.p, a.y, a.r),
-		}
-	end
-	if #bones < 4 then return end
-	g_VR.avatarPoseSnap = {
-		frame = FrameNumber(),
-		characterYaw = yaw,
-		feet = Vector(fx, fy, originZ),
-		bones = bones,
-	}
 end
 
---- Apply published VR pose to twin.
--- CLONE path is pure: same bone names, same angles, position offset only.
--- MIRROR is a separate branch (MapMirrorWorld). Never share code that flips into clone.
-function Session:_applyPoseSnap(playerFeet, playerYaw)
+--- Net frame (read-only) → charik.TransformFrame → charik.Update (same IK as player).
+-- CLONE: rigid frame map (no flip). MIRROR: flip + L↔R inside TransformFrame.
+function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	if not IsValid(self.ent) then return false end
+	local charik = vrmod.charik or vrmod.frameik
+	if not charik or not charik.TransformFrame or not charik.Update then return false end
 
-	local snap = g_VR.avatarPoseSnap
-	-- NO twin-side PublishPlayerPose. Unposed GetBoneMatrix poisons CLONE.
-	if not snap or not snap.bones or #snap.bones < 4 then return false end
-	-- Strict freshness (ad9dfc8). Loose windows keep dead/wrong snaps alive.
-	if snap.frame and FrameNumber() - snap.frame > 3 then return false end
+	if not self.ik then
+		local ok, ik = pcall(charik.Init, self.ent, {
+			noStretch = true,
+			headDampen = self.headDampen ~= false,
+			headMaxPitch = self.headMaxPitch or 55,
+		})
+		self.ik = ok and ik or nil
+	end
+	if not self.ik then return false end
+
+	local src = ReadLocalVRFrame()
+	if not src or (not src.lefthandPos and not src.righthandPos) then
+		return false
+	end
 
 	local mode = self.mode or "facing"
 	if mode == "mirror" then mode = "facing" end
-	local isClone = (mode == "clone")
-	local isWorld = (mode == "world")
-	local isFacing = (not isClone and not isWorld)
 
-	local srcFeet = snap.feet or playerFeet
-	local srcYaw = Angle(0, snap.characterYaw or (playerYaw and playerYaw.yaw) or 0, 0)
-	local dist = self.distance or cv_distance:GetFloat()
+	local okT, twinFrame = pcall(
+		charik.TransformFrame,
+		src, mode, playerFeet, playerYaw, self.standPos, self.standAng or playerYaw
+	)
+	if not okT or not twinFrame then return false end
 
-	local standPos, standAng
-	if isWorld then
-		standPos, standAng = srcFeet, srcYaw
-	elseif isClone then
-		-- CLONE: same facing, stand in front — pure rigid copy
-		standPos = srcFeet + srcYaw:Forward() * dist
-		standAng = Angle(0, srcYaw.yaw, 0)
-	else
-		-- MIRROR only: face player
-		standPos = srcFeet + srcYaw:Forward() * dist
-		standAng = Angle(0, srcYaw.yaw + 180, 0)
+	-- Park twin root so clavicle matrices land in world during Update
+	self.ent:SetPos(self.standPos)
+	self.ent:SetAngles(self.standAng or Angle(0, twinFrame.characterYaw or 0, 0))
+	self.ent:InvalidateBoneCache()
+	self.ent:SetupBones()
+
+	self.ik.noStretch = true
+	self.ik.headDampen = self.headDampen ~= false
+	self.ik.headMaxPitch = self.headMaxPitch or 55
+
+	local eyeH = 66.8
+	if vrmod.GetConvars then
+		local _, cv = vrmod.GetConvars()
+		if cv and cv.characterEyeHeight then eyeH = cv.characterEyeHeight end
 	end
 
-	self.standPos, self.standAng = standPos, standAng
-	self.ent:SetPos(standPos)
-	self.ent:SetAngles(standAng)
+	local okA = pcall(charik.Update, self.ent, self.ik, twinFrame, {
+		baseZ = self.standPos.z,
+		eyeHeight = eyeH,
+		applyManip = true,
+	})
+	if not okA then return false end
 
-	-- CLONE with same yaw = pure world translate (no WorldToLocal angle path).
-	-- Any angle remapping risks corkscrew; do not touch bone orientations.
-	local cloneOff = nil
-	if isClone then
-		cloneOff = standPos - srcFeet
+	if charik.ApplyManip then
+		pcall(charik.ApplyManip, self.ent, self.ik)
 	end
 
-	local targets = {}
-	local copied = 0
-	for _, b in ipairs(snap.bones) do
-		if not b.pos or not b.ang or not b.name then continue end
-		local npos, nang
-		if isWorld then
-			npos, nang = b.pos, b.ang
-		elseif isClone then
-			npos = Vector(b.pos.x + cloneOff.x, b.pos.y + cloneOff.y, b.pos.z + cloneOff.z)
-			nang = Angle(b.ang.p, b.ang.y, b.ang.r)
-		else
-			-- facing / mirror ONLY — Y-flip lives exclusively here
-			npos, nang = MapMirrorWorld(b.pos, b.ang, srcFeet, srcYaw, standPos, standAng)
-		end
-		-- CLONE/WORLD: same bone name (your right = twin right). No L↔R.
-		local tid = self.ent:LookupBone(b.name)
-		if not tid or tid < 0 then continue end
-		local mat = Matrix()
-		mat:Identity()
-		mat:SetTranslation(npos)
-		mat:SetAngles(nang)
-		targets[tid] = mat
-		copied = copied + 1
-	end
-
-	if copied < 4 then return false end
-	self.targets = targets
-	return true
+	self.targets = self.ik.targets or {}
+	return next(self.targets) ~= nil
 end
 
 function Session:_drawModel()
@@ -824,45 +768,31 @@ function Session:_applyTracking()
 	local hmd, playerFeet, playerYaw, yaw = self:_playerFrame()
 	if not hmd then return end
 
+	-- Same body yaw as net frame / character system
 	local cyaw = g_VR.characterYaw
 	if isnumber(cyaw) then
 		yaw = cyaw
 		playerYaw = Angle(0, yaw, 0)
 	end
+	local originZ = (g_VR.origin and g_VR.origin.z) or playerFeet.z
+	playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
 
-	-- Prefer snap feet (pelvis/floor) when fresh — matches bone snapshot root
-	local snap = g_VR.avatarPoseSnap
-	if snap and snap.feet and snap.frame and FrameNumber() - snap.frame <= 3 then
-		playerFeet = Vector(snap.feet.x, snap.feet.y, snap.feet.z)
-		if snap.characterYaw then
-			yaw = snap.characterYaw
-			playerYaw = Angle(0, yaw, 0)
-		end
-	else
-		local originZ = (g_VR.origin and g_VR.origin.z) or playerFeet.z
-		local lp = LocalPlayer()
-		if IsValid(lp) then
-			playerFeet = Vector(lp:GetPos().x, lp:GetPos().y, originZ)
-		else
-			playerFeet = Vector(hmd.pos.x, hmd.pos.y, originZ)
-		end
-	end
-
-	-- Tentative stand (overwritten inside _applyPoseSnap from snap)
 	self.standPos, self.standAng = self:_computeStand(hmd, playerFeet, playerYaw, yaw)
+
+	-- Always park twin in world (visible even if IK fails)
 	self.ent:SetPos(self.standPos)
 	self.ent:SetAngles(self.standAng or Angle(0, yaw, 0))
 
 	if self.idleOnly then
 		self.targets = {}
+		if self.ik then self.ik.targets = {} end
 		return
 	end
 
-	local okP, res = pcall(function()
-		return self:_applyPoseSnap(playerFeet, playerYaw)
-	end)
-	if not (okP and res) then
+	-- Same IK path as VR player — not full-skeleton pose snap
+	if not self:_applyFromNetFrame(playerFeet, playerYaw) then
 		self.targets = {}
+		if self.ik then self.ik.targets = {} end
 	end
 end
 
@@ -1006,12 +936,17 @@ function vrmod.avatar.Open(opts)
 	s:_applyHideBones()
 	sessions[id] = s
 
-	-- Apply twin targets only (mirrored/cloned player matrices — no re-IK)
+	-- Full charik matrices (arms + fingers + head) — same ApplyMatrices as player path
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
-		if not s.active or not s.targets then return end
-		for boneId, mat in pairs(s.targets) do
-			if boneId and mat and e:GetBoneMatrix(boneId) then
-				e:SetBoneMatrix(boneId, mat)
+		if not s.active then return end
+		local charik = vrmod.charik or vrmod.frameik
+		if charik and charik.ApplyMatrices and s.ik then
+			charik.ApplyMatrices(e, s.ik)
+		elseif s.targets then
+			for boneId, mat in pairs(s.targets) do
+				if boneId and mat and e:GetBoneMatrix(boneId) then
+					e:SetBoneMatrix(boneId, mat)
+				end
 			end
 		end
 	end)
@@ -1039,10 +974,10 @@ function vrmod.avatar.Open(opts)
 			return
 		end
 
-		-- Never let apply errors kill the twin draw
+		-- Never let IK errors kill the twin draw
 		pcall(function() s:_applyTracking() end)
 		pcall(function()
-			s.ent:SetupBones() -- BuildBonePositions → targets
+			s.ent:SetupBones() -- BuildBonePositions → charik.ApplyMatrices
 			s:_applyHideBones()
 		end)
 		pcall(function() s:_drawModel() end)
