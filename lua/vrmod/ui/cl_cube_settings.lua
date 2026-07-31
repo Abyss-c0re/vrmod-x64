@@ -84,13 +84,13 @@ local function getInt(name, default)
 end
 
 local function setBool(name, v)
-	-- Must use SetBool so cvars.AddChangeCallback + HUD rebind fire
 	if vrmod.SettingsSetBool then
 		vrmod.SettingsSetBool(name, v)
-	else
-		local c = GetConVar(name)
-		if c then c:SetBool(v and true or false) else RunConsoleCommand(name, v and "1" or "0") end
+		return
 	end
+	local c = GetConVar(name)
+	if c then c:SetInt(v and 1 or 0) end
+	RunConsoleCommand(name, v and "1" or "0")
 	if name == "vrmod_hud" and vrmod.RefreshHUD then
 		vrmod.RefreshHUD()
 	end
@@ -253,8 +253,18 @@ local function paintColorEditor(focused, mx, my)
 	surface.DrawOutlinedRect(swX, swY, swW, swH, 2)
 	draw.SimpleText(string.format("%d, %d, %d, %d", col.r, col.g, col.b, col.a), "DermaDefaultBold", W * 0.5, swY + swH * 0.5, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
+	-- Live sample bar + laser dots (visible proof the color applied)
+	local sampleY = swY + swH + 6
+	surface.SetDrawColor(col.r, col.g, col.b, 255)
+	surface.DrawRect(PAD, sampleY, W - PAD * 2, 12)
+	for i = 0, 24 do
+		local t = i / 24
+		surface.SetDrawColor(col.r, col.g, col.b, 255)
+		surface.DrawRect(PAD + t * (W - PAD * 2 - 6), sampleY + 16 + t * 6, 6, 6)
+	end
+
 	-- Palette (Derma SetPalette)
-	local py = swY + swH + 12
+	local py = sampleY + 36
 	local pw = 36
 	local gap = 6
 	local cols = 6

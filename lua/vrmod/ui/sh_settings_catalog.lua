@@ -270,17 +270,21 @@ function vrmod.SettingsSetColor(cvar, col)
 	end
 end
 
---- Reliable bool/float/int write (Set* fires change callbacks; RunConsoleCommand often does not)
+--- Reliable bool/float/int write.
+-- Use SetInt/SetString — SetBool is flaky on some client convars in GMod.
+-- Always update + force RefreshHUD for vrmod_hud.
 function vrmod.SettingsSetBool(cvar, v)
 	if not cvar then return end
+	local on = v and true or false
 	local cv = GetConVar(cvar)
 	if cv then
-		cv:SetBool(v and true or false)
-	else
-		RunConsoleCommand(cvar, v and "1" or "0")
+		cv:SetInt(on and 1 or 0)
 	end
-	if CLIENT and cvar == "vrmod_hud" and vrmod.RefreshHUD then
-		-- ensure HUD rebinds even if callback race
+	-- Belt: also push as console command (some systems only listen here)
+	RunConsoleCommand(cvar, on and "1" or "0")
+	if CLIENT and cvar == "vrmod_hud" then
+		-- Immediate rebind — do not wait for callback
+		if vrmod.RefreshHUD then vrmod.RefreshHUD() end
 		timer.Simple(0, function()
 			if vrmod.RefreshHUD then vrmod.RefreshHUD() end
 		end)
@@ -289,22 +293,18 @@ end
 
 function vrmod.SettingsSetFloat(cvar, v)
 	if not cvar then return end
+	local n = tonumber(v) or 0
 	local cv = GetConVar(cvar)
-	if cv then
-		cv:SetFloat(tonumber(v) or 0)
-	else
-		RunConsoleCommand(cvar, tostring(v))
-	end
+	if cv then cv:SetFloat(n) end
+	RunConsoleCommand(cvar, tostring(n))
 end
 
 function vrmod.SettingsSetInt(cvar, v)
 	if not cvar then return end
+	local n = math.floor(tonumber(v) or 0)
 	local cv = GetConVar(cvar)
-	if cv then
-		cv:SetInt(math.floor(tonumber(v) or 0))
-	else
-		RunConsoleCommand(cvar, tostring(math.floor(tonumber(v) or 0)))
-	end
+	if cv then cv:SetInt(n) end
+	RunConsoleCommand(cvar, tostring(n))
 end
 
 --- Shared action handlers (VR + desktop). Host may wrap close.
