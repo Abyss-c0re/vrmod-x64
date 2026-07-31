@@ -12,6 +12,17 @@ if CLIENT then
 	local ANGLE_THRESHOLD = 0.01
 	local POS_THRESHOLD = 0.01
 	local zeroVec, zeroAng = ZERO_VEC, ZERO_ANG
+
+	-- Safe convar table (GetConvars can lag or return nil on first frames)
+	local function CV()
+		if istable(convarValues) then return convarValues end
+		if vrmod.GetConvars then
+			local c, v = vrmod.GetConvars()
+			convars = c or convars
+			convarValues = v
+		end
+		return istable(convarValues) and convarValues or {}
+	end
 	------------------------------------------------------------------------
 	-- CONVARS
 	------------------------------------------------------------------------
@@ -91,11 +102,14 @@ if CLIENT then
 
 		charinfo.noStretch = false
 		charinfo.headDampen = false
+		-- Defaults so PrePlayerDraw never multiplies nil crouch offsets
+		charinfo.horizontalCrouchOffset = charinfo.horizontalCrouchOffset or 0
+		charinfo.verticalCrouchOffset = charinfo.verticalCrouchOffset or 0
 		charik.Update(ply, charinfo, frame, {
 			inVehicle = inVehicle,
 			vehicleAng = vehicleAng,
 			baseZ = (charinfo.preRenderPos and charinfo.preRenderPos.z) or ply:GetPos().z,
-			eyeHeight = convarValues.characterEyeHeight or DEFAULT_EYE_HEIGHT,
+			eyeHeight = CV().characterEyeHeight or DEFAULT_EYE_HEIGHT,
 			applyManip = true,
 		})
 
@@ -220,24 +234,41 @@ if CLIENT then
 
 	------------------------------------------------------------------------
 	local function BoneCallbackFunc(ply, numbones)
+		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
-		if not activePlayers[steamid] or not g_VR.net[steamid].lerpedFrame or ply:InVehicle() and ply:GetVehicle():GetClass() ~= "prop_vehicle_prisoner_pod" then return end
-		if g_VR.fbtActive[steamid] then -- FBT handles all bones
-			return
+		if not steamid or not activePlayers[steamid] then return end
+		-- Guard each table: activePlayers can outlive net/characterInfo on exit/respawn
+		local netTab = g_VR.net and g_VR.net[steamid]
+		if not netTab or not netTab.lerpedFrame then return end
+		local frame = netTab.lerpedFrame
+		local ci = characterInfo[steamid]
+		if not ci or not ci.bones then return end
+		if ply:InVehicle() then
+			local veh = ply:GetVehicle()
+			if IsValid(veh) and veh:GetClass() ~= "prop_vehicle_prisoner_pod" then return end
 		end
+		if g_VR.fbtActive and g_VR.fbtActive[steamid] then return end
 
-		if ply:GetBoneMatrix(characterInfo[steamid].bones.b_rightHand) then ply:SetBonePosition(characterInfo[steamid].bones.b_rightHand, g_VR.net[steamid].lerpedFrame.righthandPos, g_VR.net[steamid].lerpedFrame.righthandAng + RIGHT_HAND_OFFSET) end
-		if not g_VR.net[steamid].characterAltHead then
-			local charik = vrmod.charik
-			if charik and charik.ApplyHead then
-				charik.ApplyHead(ply, characterInfo[steamid], g_VR.net[steamid].lerpedFrame)
-			else
-				local _, targetAng = LocalToWorld(zeroVec, Angle(-80, 0, 90), zeroVec, g_VR.net[steamid].lerpedFrame.hmdAng)
-				local mtx = ply:GetBoneMatrix(characterInfo[steamid].bones.b_head)
-				if mtx then
-					mtx:SetAngles(targetAng)
-					ply:SetBoneMatrix(characterInfo[steamid].bones.b_head, mtx)
-				end
+		local bones = ci.bones
+		local rh = bones.b_rightHand
+		if isnumber(rh) and rh >= 0 and frame.righthandPos and frame.righthandAng then
+			if ply:GetBoneMatrix(rh) then
+				ply:SetBonePosition(rh, frame.righthandPos, frame.righthandAng + RIGHT_HAND_OFFSET)
+			end
+		end
+		if netTab.characterAltHead then return end
+		if not frame.hmdAng then return end
+		local head = bones.b_head
+		if not isnumber(head) or head < 0 then return end
+		local charik = vrmod.charik
+		if charik and charik.ApplyHead then
+			charik.ApplyHead(ply, ci, frame)
+		else
+			local _, targetAng = LocalToWorld(zeroVec, Angle(-80, 0, 90), zeroVec, frame.hmdAng)
+			local mtx = ply:GetBoneMatrix(head)
+			if mtx then
+				mtx:SetAngles(targetAng)
+				ply:SetBoneMatrix(head, mtx)
 			end
 		end
 	end
@@ -306,33 +337,42 @@ if CLIENT then
 	local function PrePlayerDrawFunc(ply)
 		if not IsValid(ply) then return end
 		local steamid = ply:SteamID()
-		if not activePlayers[steamid] or not g_VR.net[steamid] or not g_VR.net[steamid].lerpedFrame then return end
-		if not characterInfo or not characterInfo[steamid] or not characterInfo[steamid].bones then return end
-		local headToHmdDist = convarValues.characterHeadToHmdDist or 6.3
+		if not steamid or not activePlayers[steamid] then return end
+		local netTab = g_VR.net and g_VR.net[steamid]
+		if not netTab or not netTab.lerpedFrame then return end
+		local ci = characterInfo and characterInfo[steamid]
+		if not ci or not ci.bones then return end
+		local frame = netTab.lerpedFrame
+		local cv = CV()
+		local headToHmdDist = cv.characterHeadToHmdDist or DEFAULT_HEAD_TO_HMD_DIST
 		if ply == LocalPlayer() then
 			-- Hide local head in stereo eye views only (mirrors / 3rd person keep the head).
-			-- Scale alone leaves residual mesh; nudge the bone away from the eyes as well.
-			local headBone = characterInfo[steamid].bones.b_head
-			if isnumber(headBone) then
+			local headBone = ci.bones.b_head
+			if isnumber(headBone) and headBone >= 0 then
 				local ep = EyePos()
-				local hide = (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight) and ply:GetViewEntity() == ply
+				local hide = g_VR.eyePosLeft and g_VR.eyePosRight
+					and (ep == g_VR.eyePosLeft or ep == g_VR.eyePosRight)
+					and ply:GetViewEntity() == ply
 				ply:ManipulateBoneScale(headBone, hide and zeroVec or Vector(1, 1, 1))
 				ply:ManipulateBonePosition(headBone, hide and Vector(0, 20, 0) or zeroVec)
 			end
 		end
 
-		characterInfo[steamid].preRenderPos = ply:GetPos()
-		if not ply:InVehicle() then
-			characterInfo[steamid].renderPos = g_VR.net[steamid].lerpedFrame.hmdPos + up:Cross(g_VR.net[steamid].lerpedFrame.hmdAng:Right()) * -headToHmdDist + Angle(0, g_VR.net[steamid].lerpedFrame.characterYaw, 0):Forward() * -characterInfo[steamid].horizontalCrouchOffset * 0.8
-			characterInfo[steamid].renderPos.z = ply:GetPos().z - characterInfo[steamid].verticalCrouchOffset
-			ply:SetPos(characterInfo[steamid].renderPos)
-			ply:SetRenderAngles(Angle(0, g_VR.net[steamid].lerpedFrame.characterYaw, 0))
+		ci.preRenderPos = ply:GetPos()
+		local hCrouch = ci.horizontalCrouchOffset or 0
+		local vCrouch = ci.verticalCrouchOffset or 0
+		if not ply:InVehicle() and frame.hmdPos and frame.hmdAng then
+			local yaw = frame.characterYaw or 0
+			ci.renderPos = frame.hmdPos
+				+ up:Cross(frame.hmdAng:Right()) * -headToHmdDist
+				+ Angle(0, yaw, 0):Forward() * -hCrouch * 0.8
+			ci.renderPos.z = ply:GetPos().z - vCrouch
+			ply:SetPos(ci.renderPos)
+			ply:SetRenderAngles(Angle(0, yaw, 0))
 		end
 
 		ply:SetupBones()
-		if g_VR.fbtActive[steamid] then -- FBT handles all bone positioning
-			return
-		end
+		if g_VR.fbtActive and g_VR.fbtActive[steamid] then return end
 
 		if prevFrameNumber ~= FrameNumber() then
 			prevFrameNumber = FrameNumber()
@@ -340,14 +380,20 @@ if CLIENT then
 		end
 
 		if not updatedPlayers[steamid] then
-			UpdateIK(ply)
+			local ok, err = pcall(UpdateIK, ply)
+			if not ok and vrmod.logger then
+				vrmod.logger.Debug("UpdateIK: %s", tostring(err))
+			end
 			updatedPlayers[steamid] = 1
 		end
 
-		if characterInfo[steamid].boneorder and characterInfo[steamid].boneinfo then
-			for i = 1, #characterInfo[steamid].boneorder do
-				local bone = characterInfo[steamid].boneorder[i]
-				if ply:GetBoneMatrix(bone) and characterInfo[steamid].boneinfo[bone] and characterInfo[steamid].boneinfo[bone].targetMatrix then ply:SetBoneMatrix(bone, characterInfo[steamid].boneinfo[bone].targetMatrix) end
+		if ci.boneorder and ci.boneinfo then
+			for i = 1, #ci.boneorder do
+				local bone = ci.boneorder[i]
+				local bd = ci.boneinfo[bone]
+				if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
+					ply:SetBoneMatrix(bone, bd.targetMatrix)
+				end
 			end
 		end
 	end
@@ -364,9 +410,11 @@ if CLIENT then
 
 	------------------------------------------------------------------------
 	local function CalcMainActivityFunc(ply, vel)
-		if not activePlayers[ply:SteamID()] or ply:InVehicle() then return end
+		if not IsValid(ply) then return end
+		local sid = ply:SteamID()
+		if not sid or not activePlayers[sid] or ply:InVehicle() then return end
 		-- When animations are disabled, force idle standing pose
-		if not convarValues.characterIK then
+		if not CV().characterIK then
 			ply:SetPlaybackRate(0)
 			ply:SetPoseParameter("move_yaw", 0)
 			ply:SetPoseParameter("move_x", 0)
@@ -377,9 +425,9 @@ if CLIENT then
 		local act = ACT_HL2MP_IDLE
 		if ply.m_bJumping then
 			act = ACT_HL2MP_JUMP_PASSIVE
-			if CurTime() - ply.m_flJumpStartTime > 0.2 and ply:OnGround() then ply.m_bJumping = false end
+			if CurTime() - (ply.m_flJumpStartTime or 0) > 0.2 and ply:OnGround() then ply.m_bJumping = false end
 		else
-			local l = vel:Length2DSqr()
+			local l = vel and vel:Length2DSqr() or 0
 			if l > 22500 then
 				act = ACT_HL2MP_RUN
 			elseif l > 0.25 then
@@ -390,9 +438,11 @@ if CLIENT then
 	end
 
 	local function DoAnimationEventFunc(ply, evt, data)
-		if not activePlayers[ply:SteamID()] or ply:InVehicle() then return end
+		if not IsValid(ply) then return end
+		local sid = ply:SteamID()
+		if not sid or not activePlayers[sid] or ply:InVehicle() then return end
 		-- Block all animation events when animations are disabled
-		if not convarValues.characterIK then return ACT_INVALID end
+		if not CV().characterIK then return ACT_INVALID end
 		if evt ~= PLAYERANIMEVENT_JUMP then return ACT_INVALID end
 	end
 

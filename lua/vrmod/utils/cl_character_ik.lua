@@ -268,6 +268,7 @@ function C.Update(ent, state, frame, opts)
 
 	local bones = state.bones
 	local boneinfo = state.boneinfo
+	if not bones or not boneinfo then return false end
 	local inVehicle = opts.inVehicle and true or false
 	local plyAng = opts.plyAng
 	if not plyAng then
@@ -279,24 +280,39 @@ function C.Update(ent, state, frame, opts)
 	end
 
 	local eyeHeight = opts.eyeHeight or state.eyeHeight or 66.8
-	local convars = vrmod.GetConvars and select(2, vrmod.GetConvars()) or {}
+	local convars = {}
+	if vrmod.GetConvars then
+		local ok, a, b = pcall(vrmod.GetConvars)
+		if ok then convars = b or a or {} end
+	end
+	if not istable(convars) then convars = {} end
 	local stretchAllowed = (not state.noStretch)
-		and convars
 		and (convars.armStretcher == true or convars.armStretcher == 1)
 
 	-- Clear arm overrides / finger offsets
 	for _, bd in pairs(boneinfo) do
-		bd.overrideAng = nil
-		bd.offsetAng = Angle(0, 0, 0)
+		if bd then
+			bd.overrideAng = nil
+			bd.offsetAng = Angle(0, 0, 0)
+		end
 	end
 	state.manip = {}
 	state.L_HandTargetPos = nil
 	state.R_HandTargetPos = nil
 	state.headTargetAng = nil
+	state.horizontalCrouchOffset = state.horizontalCrouchOffset or 0
+	state.verticalCrouchOffset = state.verticalCrouchOffset or 0
+	state.spineZ = state.spineZ or 40
+	state.upperLegLen = state.upperLegLen or 16
+	state.lowerLegLen = state.lowerLegLen or 16
+	state.upperArmLen = state.upperArmLen or 12
+	state.lowerArmLen = state.lowerArmLen or 12
+	state.clavicleLen = state.clavicleLen or 8
 
 	-- Crouch / spine / legs (same formulas as cl_character)
 	if not inVehicle and frame.hmdPos and frame.hmdAng and bones.b_spine and bones.b_spine >= 0 then
 		local spineLen = eyeHeight - state.spineZ
+		if spineLen < 1 then spineLen = 1 end
 		state.spineLen = spineLen
 		local headHeight = frame.hmdPos.z + (frame.hmdAng:Forward() * -3).z
 		local baseZ = opts.baseZ or ent:GetPos().z
