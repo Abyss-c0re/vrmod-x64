@@ -2,10 +2,10 @@
 -- vrmod.avatar — Cube player customization twin
 --
 -- Cube law: the VR playermodel is already correct (cl_character / FBT).
--- Twin does NOT re-solve arm IK. Every frame:
---   snapshot LocalPlayer bone matrices (working VR body)
---   → CLONE: MapClone rigid | FACING: ReflectThroughPlane (glass mirror, all bones)
---   → same bone IDs → BuildBonePositions SetBoneMatrix
+-- Twin does NOT re-solve arm IK.
+--   CLONE  = MapClone rigid (same facing) — proven upright body
+--   FACING = same MapClone bone path facing the player + RenderMultiply
+--            scale(1,-1,1) so laterality is mirrored without twisting bones
 -- Never VRUtilNetUpdateLocalPly from the twin.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
@@ -170,23 +170,6 @@ local function MirrorBoneName(name)
 		return (string.gsub(name, "Right", "Left", 1))
 	end
 	return name
-end
-
---- Reflect point + angle through a vertical world plane (real glass mirror).
--- ONE formula for every bone — no axial/distal Euler splits.
-local function ReflectThroughPlane(pos, ang, planeOrigin, planeNormal)
-	local n = planeNormal
-	local function refVec(v)
-		return v - n * (2 * v:Dot(n))
-	end
-	local npos = planeOrigin + refVec(pos - planeOrigin)
-	local f, r, u = refVec(ang:Forward()), refVec(ang:Right()), refVec(ang:Up())
-	local nang = AngleFromBasis(f, u)
-	-- Reflection is improper; if reconstructed Right opposes reflected Right, fix roll
-	if nang:Right():Dot(r) < 0 then
-		nang:RotateAroundAxis(nang:Forward(), 180)
-	end
-	return npos, nang
 end
 
 local function ParseBodygroups(str)
@@ -722,7 +705,6 @@ end
 g_VR.avatarPoseSnap = g_VR.avatarPoseSnap or nil
 
 --- Call from cl_character after DrawModel — never from twin.
--- Stores hierarchy (id/parent) for parent-local mirror rebuild.
 function vrmod.avatar.PublishPlayerPose(ply, frame)
 	if not IsValid(ply) then return end
 	local n = ply:GetBoneCount() or 0
@@ -746,24 +728,17 @@ function vrmod.avatar.PublishPlayerPose(ply, frame)
 	end
 
 	local bones = {}
-	local byId = {}
 	for i = 0, n - 1 do
 		local name = ply:GetBoneName(i)
 		if not name or name == "" or name == "__INVALIDBONE__" then continue end
 		local m = ply:GetBoneMatrix(i)
 		if not m then continue end
 		local p, a = m:GetTranslation(), m:GetAngles()
-		local par = ply:GetBoneParent(i)
-		if not isnumber(par) or par < 0 then par = -1 end
-		local entry = {
-			id = i,
-			parent = par,
+		bones[#bones + 1] = {
 			name = name,
 			pos = Vector(p.x, p.y, p.z),
 			ang = Angle(a.p, a.y, a.r),
 		}
-		bones[#bones + 1] = entry
-		byId[i] = entry
 	end
 	if #bones < 4 then return end
 	g_VR.avatarPoseSnap = {
@@ -771,70 +746,14 @@ function vrmod.avatar.PublishPlayerPose(ply, frame)
 		characterYaw = yaw,
 		feet = Vector(fx, fy, originZ),
 		bones = bones,
-		byId = byId,
 	}
 end
 
---- FACING: hierarchy rebuild — mirror each bone in its *parent's* local space.
--- Preserves limb chains (hands/legs) and axial topology (spine/head) together.
-local function BuildFacingHierarchy(snap, srcFeet, srcYaw, standPos, standAng)
-	local byId = snap.byId
-	if not byId then return nil end
-
-	-- Topological order: parents before children (iterate until stable)
-	local order = {}
-	local placed = {}
-	local guard = 0
-	while #order < #snap.bones and guard < 256 do
-		guard = guard + 1
-		local progress = false
-		for _, b in ipairs(snap.bones) do
-			if placed[b.id] then continue end
-			if b.parent < 0 or placed[b.parent] or not byId[b.parent] then
-				order[#order + 1] = b
-				placed[b.id] = true
-				progress = true
-			end
-		end
-		if not progress then break end
-	end
-	for _, b in ipairs(snap.bones) do
-		if not placed[b.id] then
-			order[#order + 1] = b
-			placed[b.id] = true
-		end
-	end
-
-	-- Mirrored world pose per source bone id
-	local mir = {} -- [srcId] = {pos, ang}
-
-	for _, b in ipairs(order) do
-		local npos, nang
-		if b.parent < 0 or not byId[b.parent] or not mir[b.parent] then
-			-- Root: MapClone into twin, then sagittal flip in twin/player feet frame
-			local cpos, cang = MapClone(b.pos, b.ang, srcFeet, srcYaw, standPos, srcYaw)
-			local lp, la = WorldToLocal(cpos, cang, standPos, srcYaw)
-			lp.y = -lp.y
-			la = Angle(la.p, -la.y, -la.r)
-			npos, nang = LocalToWorld(lp, la, standPos, standAng)
-		else
-			local pb = byId[b.parent]
-			local mp = mir[b.parent]
-			-- Original parent-local transform
-			local lp, la = WorldToLocal(b.pos, b.ang, pb.pos, pb.ang)
-			-- Mirror across parent local sagittal (Y = parent Right in Source local)
-			lp.y = -lp.y
-			la = Angle(la.p, -la.y, -la.r)
-			npos, nang = LocalToWorld(lp, la, mp.pos, mp.ang)
-		end
-		mir[b.id] = { pos = npos, ang = nang, name = b.name }
-	end
-	return mir
-end
-
 --- Apply published VR pose to twin.
--- CLONE  = MapClone rigid (proven).
--- FACING = parent-local hierarchy mirror (preserves whole body topology).
+-- CLONE  = MapClone rigid (proven upright).
+-- FACING = MapClone into face-to-face stand (same upright SoT), then ONE uniform
+--          sagittal flip of that whole pose in twin local space (isometry — no
+--          per-bone Euler/hierarchy hacks that corkscrew the torso).
 function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 	if not IsValid(self.ent) then return false end
 
@@ -876,45 +795,44 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 
 	local targets = {}
 	local copied = 0
+	for _, b in ipairs(snap.bones) do
+		local name, pos, ang = b.name, b.pos, b.ang
+		if not pos or not ang then continue end
 
-	if isFacing then
-		local mir = BuildFacingHierarchy(snap, srcFeet, srcYaw, standPos, standAng)
-		if not mir then return false end
-		for _, b in pairs(mir) do
-			local tid = self.ent:LookupBone(b.name)
-			if tid and tid >= 0 then
-				local mat = Matrix()
-				mat:Identity()
-				mat:SetTranslation(b.pos)
-				mat:SetAngles(b.ang)
-				targets[tid] = mat
-				copied = copied + 1
+		local npos, nang
+		if isWorld then
+			npos, nang = pos, ang
+		else
+			-- Rigid copy of working VR pose into twin stand (CLONE quality)
+			npos, nang = MapClone(pos, ang, srcFeet, srcYaw, standPos, standAng)
+			if isFacing then
+				-- Uniform isometry in twin frame: flip Right (Y). Whole body stays intact.
+				local lp, la = WorldToLocal(npos, nang, standPos, standAng)
+				lp.y = -lp.y
+				la = Angle(la.p, -la.y, -la.r)
+				npos, nang = LocalToWorld(lp, la, standPos, standAng)
 			end
 		end
-	else
-		for _, b in ipairs(snap.bones) do
-			local name, pos, ang = b.name, b.pos, b.ang
-			if not pos or not ang then continue end
-			local npos, nang
-			if isWorld then
-				npos, nang = pos, ang
-			else
-				npos, nang = MapClone(pos, ang, srcFeet, srcYaw, standPos, standAng)
-			end
-			local tid = self.ent:LookupBone(name)
-			if not tid or tid < 0 then continue end
-			local mat = Matrix()
-			mat:Identity()
-			mat:SetTranslation(npos)
-			mat:SetAngles(nang)
-			targets[tid] = mat
-			copied = copied + 1
-		end
+
+		local tid = self.ent:LookupBone(name)
+		if not tid or tid < 0 then continue end
+		local mat = Matrix()
+		mat:Identity()
+		mat:SetTranslation(npos)
+		mat:SetAngles(nang)
+		targets[tid] = mat
+		copied = copied + 1
 	end
 
 	if copied < 4 then return false end
 	self.targets = targets
 	return true
+end
+
+function Session:_drawModel()
+	if IsValid(self.ent) then
+		self.ent:DrawModel()
+	end
 end
 
 --- Fallback only if player skeleton unavailable (no character system yet).
@@ -1196,7 +1114,7 @@ function vrmod.avatar.Open(opts)
 			s.ent:SetupBones()
 			s:_applyHideBones()
 		end)
-		s.ent:DrawModel()
+		pcall(function() s:_drawModel() end)
 		pcall(function() s:_drawTrackers() end)
 		if s.onDraw then pcall(s.onDraw, s) end
 	end)
