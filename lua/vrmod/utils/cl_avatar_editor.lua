@@ -727,9 +727,15 @@ function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	)
 	if not okT or not twinFrame then return false end
 
-	-- Park twin root so clavicle matrices land in world during Update
+	-- Park twin root
 	self.ent:SetPos(self.standPos)
 	self.ent:SetAngles(self.standAng or Angle(0, twinFrame.characterYaw or 0, 0))
+
+	-- CRITICAL: measure clavicles from idle/bind pose, NOT last frame's IK matrices.
+	-- SetupBones runs BuildBonePositions → if old targets stay, arms feedback-loop
+	-- into a horizontal pancake (clavicle pulled to previous bad world pos).
+	self.targets = {}
+	self.ik.targets = {}
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
@@ -743,16 +749,14 @@ function Session:_applyFromNetFrame(playerFeet, playerYaw)
 		if cv and cv.characterEyeHeight then eyeH = cv.characterEyeHeight end
 	end
 
+	-- applyManip: spine/legs for crouch only; arms come from targets after
 	local okA = pcall(charik.Update, self.ent, self.ik, twinFrame, {
 		baseZ = self.standPos.z,
 		eyeHeight = eyeH,
 		applyManip = true,
+		plyAng = self.standAng or Angle(0, twinFrame.characterYaw or 0, 0),
 	})
 	if not okA then return false end
-
-	if charik.ApplyManip then
-		pcall(charik.ApplyManip, self.ent, self.ik)
-	end
 
 	self.targets = self.ik.targets or {}
 	return next(self.targets) ~= nil
@@ -976,8 +980,10 @@ function vrmod.avatar.Open(opts)
 
 		-- Never let IK errors kill the twin draw
 		pcall(function() s:_applyTracking() end)
+		-- Second SetupBones applies fresh targets from this frame's Update
 		pcall(function()
-			s.ent:SetupBones() -- BuildBonePositions → charik.ApplyMatrices
+			s.ent:InvalidateBoneCache()
+			s.ent:SetupBones()
 			s:_applyHideBones()
 		end)
 		pcall(function() s:_drawModel() end)
