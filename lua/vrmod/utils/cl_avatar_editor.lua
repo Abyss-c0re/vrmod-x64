@@ -1,12 +1,16 @@
 -- =============================================================================
 -- vrmod.avatar — Cube player customization twin
 --
--- SoT path (every frame, same as real players):
---   VRUtilNetUpdateLocalPly / buildClientFrame  →  net frame
---   TransformFrame (clone = rigid rotate, facing = mirror rotate + L/R swap)
---   vrmod.frameik.Apply  →  same arm IK as cl_character UpdateIK
+-- Cube law: one body SoT = vrmod.charik (same math as cl_character).
+-- Frame SoT = sh_network buildClientFrame / lerpedFrame (read-only here).
 --
--- No custom arm reinvent. No algocube UI. Customization only on twin model looks.
+-- Every frame:
+--   ReadLocalVRFrame (never VRUtilNetUpdateLocalPly)
+--   → charik.TransformFrame(facing = flip + L↔R | clone = rigid)
+--   → charik.Update (full arms + fingers + crouch manip + head angle-only)
+--   → BuildBonePositions: charik.ApplyMatrices
+--
+-- Customization only on twin model looks. No dual-truth pose forks.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
 if SERVER then return end
@@ -339,7 +343,12 @@ function Session:SetModel(path)
 	self.ent:SetupBones()
 	self:_cacheBones()
 	self:_measureArms()
-	self.ik = vrmod.frameik and vrmod.frameik.Init(self.ent) or nil
+	local charik = vrmod.charik or vrmod.frameik
+	self.ik = charik and charik.Init(self.ent, {
+		noStretch = true,
+		headDampen = self.headDampen ~= false,
+		headMaxPitch = self.headMaxPitch or 55,
+	}) or nil
 	self:_applyHideBones()
 	return true
 end
@@ -716,52 +725,17 @@ local function ReadLocalVRFrame()
 	return frame
 end
 
---- Soft post-IK clamps: no giraffe neck, no arm rubber-band stretch.
-function Session:_softenTargets()
-	local t = self.targets
-	if not t then return end
-	local b = self.bones
-	if self.headDampen and b and b.head and t[b.head] then
-		local hm = t[b.head]
-		local parentId = self.ent:GetBoneParent(b.head)
-		if parentId and parentId >= 0 then
-			local pm = t[parentId] or self.ent:GetBoneMatrix(parentId)
-			if pm then
-				local maxLen = self.headMaxLen or 14
-				ClampBoneDist(t, parentId, b.head, maxLen)
-				-- If parent was not in targets, clamp against live matrix position
-				if not t[parentId] then
-					local pp = pm:GetTranslation()
-					local cm = t[b.head]
-					local cp = cm:GetTranslation()
-					local ca = cm:GetAngles()
-					local d = cp - pp
-					local len = d:Length()
-					if len > maxLen * 1.15 and len > 0.01 then
-						t[b.head] = MatFrom(pp + d:GetNormalized() * maxLen, ca)
-					end
-				end
-			end
-		end
-	end
-	-- Limb rest-length clamps (upper→fore→hand) when bones are in targets
-	if b then
-		local uLen = (self.upperArmLen or 12) * 1.15
-		local fLen = (self.forearmLen or 12) * 1.15
-		if b.lUpper and b.lFore then ClampBoneDist(t, b.lUpper, b.lFore, uLen) end
-		if b.lFore and b.lHand then ClampBoneDist(t, b.lFore, b.lHand, fLen) end
-		if b.rUpper and b.rFore then ClampBoneDist(t, b.rUpper, b.rFore, uLen) end
-		if b.rFore and b.rHand then ClampBoneDist(t, b.rFore, b.rHand, fLen) end
-	end
-end
-
---- Net frame SoT → rotate/mirror → same character IK (vrmod.frameik).
--- facing/mirror: TransformFrame does sagittal MapPose + L↔R hand/foot/finger
--- swap BEFORE ProcessArm — never write mirrored R onto twin R (cursed limbs).
+--- Net frame (read-only) → charik.TransformFrame (flip) → charik.Update (full body).
+-- facing: sagittal flip + L↔R before ProcessArm — never same-ID mirrored limbs.
 function Session:_applyFromNetFrame(playerFeet, playerYaw)
-	if not vrmod.frameik then return false end
+	local charik = vrmod.charik or vrmod.frameik
+	if not charik then return false end
 	if not self.ik then
-		local ok, ik = pcall(vrmod.frameik.Init, self.ent)
+		local ok, ik = pcall(charik.Init, self.ent, {
+			noStretch = true,
+			headDampen = self.headDampen ~= false,
+			headMaxPitch = self.headMaxPitch or 55,
+		})
 		self.ik = ok and ik or nil
 	end
 	if not self.ik then return false end
@@ -775,26 +749,34 @@ function Session:_applyFromNetFrame(playerFeet, playerYaw)
 	if mode == "mirror" then mode = "facing" end
 
 	local okT, twinFrame = pcall(
-		vrmod.frameik.TransformFrame,
+		charik.TransformFrame,
 		src, mode, playerFeet, playerYaw, self.standPos, self.standAng or playerYaw
 	)
 	if not okT or not twinFrame then return false end
 
-	-- Place twin root for clavicle GetBoneMatrix during Apply
+	-- Park twin root for clavicle matrices during Update
 	self.ent:SetPos(self.standPos)
 	self.ent:SetAngles(self.standAng or Angle(0, twinFrame.characterYaw or 0, 0))
 	self.ent:InvalidateBoneCache()
 	self.ent:SetupBones()
 
-	-- Twin policy: no rubber-band stretch, soft head pitch dampen
 	self.ik.noStretch = true
 	self.ik.headDampen = self.headDampen ~= false
 	self.ik.headMaxPitch = self.headMaxPitch or 55
 
-	local okA = pcall(vrmod.frameik.Apply, self.ent, self.ik, twinFrame)
+	local eyeH = 66.8
+	if vrmod.GetConvars then
+		local _, cv = vrmod.GetConvars()
+		if cv and cv.characterEyeHeight then eyeH = cv.characterEyeHeight end
+	end
+
+	local okA = pcall(charik.Update, self.ent, self.ik, twinFrame, {
+		baseZ = self.standPos.z,
+		eyeHeight = eyeH,
+		applyManip = true,
+	})
 	if not okA then return false end
 	self.targets = self.ik.targets or {}
-	self:_softenTargets()
 	return next(self.targets) ~= nil
 end
 
@@ -959,16 +941,26 @@ function vrmod.avatar.Open(opts)
 
 	s:_cacheBones()
 	s:_measureArms()
-	s.ik = vrmod.frameik and vrmod.frameik.Init(ent) or nil
+	local charik0 = vrmod.charik or vrmod.frameik
+	s.ik = charik0 and charik0.Init(ent, {
+		noStretch = true,
+		headDampen = s.headDampen ~= false,
+		headMaxPitch = s.headMaxPitch or 55,
+	}) or nil
 	s:_applyHideBones()
 	sessions[id] = s
 
-	-- Apply frame-IK matrices only in BuildBonePositions
+	-- Full charik matrices (arms + fingers + head) only in BuildBonePositions
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
-		if not s.active or not s.targets then return end
-		for boneId, mat in pairs(s.targets) do
-			if boneId and mat and e:GetBoneMatrix(boneId) then
-				e:SetBoneMatrix(boneId, mat)
+		if not s.active then return end
+		local charik = vrmod.charik or vrmod.frameik
+		if charik and s.ik then
+			charik.ApplyMatrices(e, s.ik)
+		elseif s.targets then
+			for boneId, mat in pairs(s.targets) do
+				if boneId and mat and e:GetBoneMatrix(boneId) then
+					e:SetBoneMatrix(boneId, mat)
+				end
 			end
 		end
 	end)

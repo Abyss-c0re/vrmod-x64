@@ -66,208 +66,38 @@ if CLIENT then
 		end
 	end
 
+	-- Body IK SoT: vrmod.charik (shared with avatar twin + flip). No dual math.
 	local function UpdateIK(ply)
 		local steamid = ply:SteamID()
 		local net = g_VR.net[steamid]
 		local charinfo = characterInfo[steamid]
-		local boneinfo = charinfo.boneinfo
-		local bones = charinfo.bones
+		if not net or not charinfo or not net.lerpedFrame then return end
 		local frame = net.lerpedFrame
-		-- Skip if frame hasn't changed
 		if lastFrames[steamid] and vrmod.utils.FramesAreEqual(frame, lastFrames[steamid]) then return end
+
+		local charik = vrmod.charik
+		if not charik or not charik.Update then return end
+
+		local bones = charinfo.bones
 		local inVehicle = ply:InVehicle()
-		local plyAng = inVehicle and ply:GetVehicle():GetAngles() or Angle(0, frame.characterYaw, 0)
-		if inVehicle then _, plyAng = LocalToWorld(zeroVec, Angle(0, 90, 0), zeroVec, plyAng) end
-		-- Read from convars every frame (reactive to slider changes)
-		local eyeHeight = convarValues.characterEyeHeight or 66.8
-		-- Alt head
-		if net.characterAltHead then
-			local _, tmp2 = WorldToLocal(zeroVec, frame.hmdAng, zeroVec, Angle(0, frame.characterYaw, 0))
+		local veh = inVehicle and ply:GetVehicle() or nil
+		local vehicleAng = IsValid(veh) and veh:GetAngles() or nil
+
+		-- Alt head (ManipulateBoneAngles path — not SetBoneMatrix head)
+		if net.characterAltHead and bones and bones.b_head and bones.b_head >= 0 and frame.hmdAng then
+			local _, tmp2 = WorldToLocal(zeroVec, frame.hmdAng, zeroVec, Angle(0, frame.characterYaw or 0, 0))
 			ply:ManipulateBoneAngles(bones.b_head, Angle(-tmp2.roll, -tmp2.pitch, tmp2.yaw))
 		end
 
-		-- Crouching
-		if not inVehicle then
-			-- Update spineLen if eyeHeight changed
-			local spineLen = eyeHeight - charinfo.spineZ
-			charinfo.spineLen = spineLen
-			local headHeight = frame.hmdPos.z + (frame.hmdAng:Forward() * -3).z
-			local cutAmount = math.Clamp(charinfo.preRenderPos.z + eyeHeight - headHeight, 0, 40)
-			local spineTargetLen = spineLen - cutAmount * 0.5
-			local a1 = math.acos(math.Clamp(spineTargetLen / spineLen, -1, 1))
-			charinfo.horizontalCrouchOffset = math.sin(a1) * spineLen
-			ply:ManipulateBoneAngles(bones.b_spine, Angle(0, math.deg(a1), 0))
-			charinfo.verticalCrouchOffset = cutAmount * 0.5
-			local legTargetLen = charinfo.upperLegLen + charinfo.lowerLegLen - charinfo.verticalCrouchOffset * 0.8
-			local cosA1 = (charinfo.upperLegLen * charinfo.upperLegLen + legTargetLen * legTargetLen - charinfo.lowerLegLen * charinfo.lowerLegLen) / (2 * charinfo.upperLegLen * legTargetLen)
-			local cosA23 = (charinfo.lowerLegLen * charinfo.lowerLegLen + legTargetLen * legTargetLen - charinfo.upperLegLen * charinfo.upperLegLen) / (2 * charinfo.lowerLegLen * legTargetLen)
-			local a1 = math.deg(math.acos(math.Clamp(cosA1, -1, 1)))
-			local a23 = 180 - a1 - math.deg(math.acos(math.Clamp(cosA23, -1, 1)))
-			if a1 ~= a1 or a23 ~= a23 then
-				a1 = 0
-				a23 = 180
-			end
-
-			ply:ManipulateBoneAngles(bones.b_leftCalf, Angle(0, -(a23 - 180), 0))
-			ply:ManipulateBoneAngles(bones.b_leftThigh, Angle(0, -a1, 0))
-			ply:ManipulateBoneAngles(bones.b_rightCalf, Angle(0, -(a23 - 180), 0))
-			ply:ManipulateBoneAngles(bones.b_rightThigh, Angle(0, -a1, 0))
-			ply:ManipulateBoneAngles(bones.b_leftFoot, Angle(0, -a1, 0))
-			ply:ManipulateBoneAngles(bones.b_rightFoot, Angle(0, -a1, 0))
-		else
-			ply:ManipulateBoneAngles(bones.b_spine, Angle(0, 0, 0))
-			ply:ManipulateBoneAngles(bones.b_leftCalf, Angle(0, 0, 0))
-			ply:ManipulateBoneAngles(bones.b_leftThigh, Angle(0, 0, 0))
-			ply:ManipulateBoneAngles(bones.b_rightCalf, Angle(0, 0, 0))
-			ply:ManipulateBoneAngles(bones.b_rightThigh, Angle(0, 0, 0))
-			ply:ManipulateBoneAngles(bones.b_leftFoot, Angle(0, 0, 0))
-			ply:ManipulateBoneAngles(bones.b_rightFoot, Angle(0, 0, 0))
-		end
-
-		--****************** ARM PROCESSING ******************
-		local function ProcessArm(side)
-			local isLeft = side == "left"
-			local prefix = isLeft and "L_" or "R_"
-			local targetPos = isLeft and frame.lefthandPos or frame.righthandPos
-			local targetAng = isLeft and frame.lefthandAng or frame.righthandAng
-			local clavicleBone = isLeft and bones.b_leftClavicle or bones.b_rightClavicle
-			local upperarmBone = isLeft and bones.b_leftUpperarm or bones.b_rightUpperarm
-			local mtx = ply:GetBoneMatrix(clavicleBone)
-			local claviclePos = mtx and mtx:GetTranslation() or Vector()
-			charinfo[prefix .. "ClaviclePos"] = claviclePos
-			local tmp1 = claviclePos + plyAng:Right() * (isLeft and -charinfo.clavicleLen or charinfo.clavicleLen)
-			local tmp2 = tmp1 + (targetPos - tmp1) * 0.15
-			local clavicleTargetAng
-			if not inVehicle then
-				clavicleTargetAng = (tmp2 - claviclePos):Angle()
-			else
-				_, clavicleTargetAng = LocalToWorld(Vector(), WorldToLocal(tmp2 - claviclePos, zeroAng, zeroVec, plyAng):Angle(), zeroVec, plyAng)
-			end
-
-			clavicleTargetAng:RotateAroundAxis(clavicleTargetAng:Forward(), 90)
-			local upperarmPos = LocalToWorld(boneinfo[upperarmBone].relativePos, boneinfo[upperarmBone].relativeAng, claviclePos, clavicleTargetAng)
-			local targetVec = targetPos - upperarmPos
-			local targetVecLen = targetVec:Length()
-			local targetVecAng, targetVecAngLocal
-			if not inVehicle then
-				targetVecAng = targetVec:Angle()
-			else
-				targetVecAngLocal = WorldToLocal(targetVec, zeroAng, zeroVec, plyAng):Angle()
-				_, targetVecAng = LocalToWorld(Vector(), targetVecAngLocal, zeroVec, plyAng)
-			end
-
-			local upperarmTargetAng = Angle(targetVecAng.pitch, targetVecAng.yaw, targetVecAng.roll)
-			if not isLeft then upperarmTargetAng:RotateAroundAxis(targetVec, 180) end
-			local tmp
-			if not inVehicle then
-				tmp = Angle(targetVecAng.pitch, frame.characterYaw, isLeft and -90 or 90)
-			else
-				_, tmp = LocalToWorld(Vector(), Angle((targetVecAngLocal or targetVecAng).pitch, 0, isLeft and -90 or 90), zeroVec, plyAng)
-			end
-
-			local _, tang = WorldToLocal(zeroVec, tmp, zeroVec, targetVecAng)
-			upperarmTargetAng:RotateAroundAxis(upperarmTargetAng:Forward(), tang.roll)
-			local totalArmLen = charinfo.upperArmLen + charinfo.lowerArmLen
-			local armStretchScale = 1
-			local effUpper, effLower = charinfo.upperArmLen, charinfo.lowerArmLen
-			if convarValues.armStretcher and targetVecLen > totalArmLen * 0.98 then
-				armStretchScale = targetVecLen / (totalArmLen * 0.98)
-				effUpper = charinfo.upperArmLen * armStretchScale
-				effLower = charinfo.lowerArmLen * armStretchScale
-			end
-
-			charinfo[prefix .. "armStretchScale"] = armStretchScale
-			local a1 = math.deg(math.acos(math.Clamp((effUpper * effUpper + targetVecLen * targetVecLen - effLower * effLower) / (2 * effUpper * targetVecLen), -1, 1)))
-			if a1 == a1 then upperarmTargetAng:RotateAroundAxis(upperarmTargetAng:Up(), a1) end
-			local test
-			if not inVehicle then
-				test = (targetPos.z - upperarmPos.z + 20) * 1.5
-			else
-				test = ((targetPos - upperarmPos):Dot(plyAng:Up()) + 20) * 1.5
-			end
-
-			if test < 0 then test = 0 end
-			upperarmTargetAng:RotateAroundAxis(targetVec:GetNormalized(), (isLeft and 1 or -1) * (30 + test))
-			local forearmTargetAng = Angle(upperarmTargetAng.pitch, upperarmTargetAng.yaw, upperarmTargetAng.roll)
-			local a23 = 180 - a1 - math.deg(math.acos(math.Clamp((effLower * effLower + targetVecLen * targetVecLen - effUpper * effUpper) / (2 * effLower * targetVecLen), -1, 1)))
-			if a23 == a23 then forearmTargetAng:RotateAroundAxis(forearmTargetAng:Up(), 180 + a23) end
-			local tmp = Angle(targetAng.pitch, targetAng.yaw, targetAng.roll - 90)
-			local _, tang = WorldToLocal(zeroVec, tmp, zeroVec, forearmTargetAng)
-			local wristTargetAng = Angle(forearmTargetAng.pitch, forearmTargetAng.yaw, forearmTargetAng.roll)
-			wristTargetAng:RotateAroundAxis(wristTargetAng:Forward(), tang.roll)
-			local ulnaTargetAng = LerpAngle(0.5, forearmTargetAng, wristTargetAng)
-			return {
-				clavicle = clavicleTargetAng,
-				upperarm = upperarmTargetAng,
-				forearm = forearmTargetAng,
-				wrist = wristTargetAng,
-				ulna = ulnaTargetAng,
-				hand = isLeft and targetAng or targetAng + RIGHT_HAND_OFFSET,
-				targetPos = targetPos,
-			}
-		end
-
-		local leftArm = ProcessArm("left")
-		local rightArm = ProcessArm("right")
-		-- Override angles
-		boneinfo[bones.b_leftClavicle].overrideAng = leftArm.clavicle
-		boneinfo[bones.b_leftUpperarm].overrideAng = leftArm.upperarm
-		boneinfo[bones.b_leftHand].overrideAng = leftArm.hand
-		boneinfo[bones.b_rightClavicle].overrideAng = rightArm.clavicle
-		boneinfo[bones.b_rightUpperarm].overrideAng = rightArm.upperarm
-		boneinfo[bones.b_rightHand].overrideAng = rightArm.hand
-		-- Hand position override for stretching
-		charinfo.L_HandTargetPos = charinfo.L_armStretchScale ~= 1 and leftArm.targetPos or nil
-		charinfo.R_HandTargetPos = charinfo.R_armStretchScale ~= 1 and rightArm.targetPos or nil
-		if bones.b_leftWrist and boneinfo[bones.b_leftWrist] and bones.b_leftUlna and boneinfo[bones.b_leftUlna] then
-			boneinfo[bones.b_leftForearm].overrideAng = leftArm.forearm
-			boneinfo[bones.b_leftWrist].overrideAng = leftArm.wrist
-			boneinfo[bones.b_leftUlna].overrideAng = leftArm.ulna
-			boneinfo[bones.b_rightForearm].overrideAng = rightArm.forearm
-			boneinfo[bones.b_rightWrist].overrideAng = rightArm.wrist
-			boneinfo[bones.b_rightUlna].overrideAng = rightArm.ulna
-		else
-			boneinfo[bones.b_leftForearm].overrideAng = leftArm.ulna
-			boneinfo[bones.b_rightForearm].overrideAng = rightArm.ulna
-		end
-
-		-- Fingers
-		for k, v in pairs(bones.fingers) do
-			if not boneinfo[v] then continue end
-			boneinfo[v].offsetAng = LerpAngle(frame["finger" .. math.floor((k - 1) / 3 + 1)], g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
-		end
-
-		-- Target matrices (reuse existing Matrix, only update if changed)
-		for i = 1, #charinfo.boneorder do
-			local bone = charinfo.boneorder[i]
-			local bd = boneinfo[bone]
-			local wpos, wang
-			if bd.name == "ValveBiped.Bip01_L_Clavicle" then
-				wpos = charinfo.L_ClaviclePos
-			elseif bd.name == "ValveBiped.Bip01_R_Clavicle" then
-				wpos = charinfo.R_ClaviclePos
-			else
-				wpos, wang = LocalToWorld(bd.relativePos, bd.relativeAng + bd.offsetAng, boneinfo[bd.parent].pos, boneinfo[bd.parent].ang)
-			end
-
-			if bd.overrideAng ~= nil then wang = bd.overrideAng end
-			if charinfo.L_HandTargetPos and bd.name == "ValveBiped.Bip01_L_Hand" then
-				wpos = charinfo.L_HandTargetPos
-			elseif charinfo.R_HandTargetPos and bd.name == "ValveBiped.Bip01_R_Hand" then
-				wpos = charinfo.R_HandTargetPos
-			end
-
-			local mat = bd.targetMatrix
-			if not bd.pos or not bd.ang or wpos:DistToSqr(bd.pos) > POS_THRESHOLD or math.abs(wang.pitch - bd.ang.pitch) > ANGLE_THRESHOLD or math.abs(wang.yaw - bd.ang.yaw) > ANGLE_THRESHOLD or math.abs(wang.roll - bd.ang.roll) > ANGLE_THRESHOLD then
-				mat:Identity()
-				mat:SetTranslation(wpos)
-				mat:SetAngles(wang)
-				if charinfo.L_armStretchScale ~= 1 and (bd.name == "ValveBiped.Bip01_L_UpperArm" or bd.name == "ValveBiped.Bip01_L_Forearm") then mat:Scale(Vector(charinfo.L_armStretchScale, 1, 1)) end
-				if charinfo.R_armStretchScale ~= 1 and (bd.name == "ValveBiped.Bip01_R_UpperArm" or bd.name == "ValveBiped.Bip01_R_Forearm") then mat:Scale(Vector(charinfo.R_armStretchScale, 1, 1)) end
-				bd.pos = wpos
-				bd.ang = wang
-			end
-		end
+		charinfo.noStretch = false
+		charinfo.headDampen = false
+		charik.Update(ply, charinfo, frame, {
+			inVehicle = inVehicle,
+			vehicleAng = vehicleAng,
+			baseZ = (charinfo.preRenderPos and charinfo.preRenderPos.z) or ply:GetPos().z,
+			eyeHeight = convarValues.characterEyeHeight or DEFAULT_EYE_HEIGHT,
+			applyManip = true,
+		})
 
 		lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
 	end
@@ -398,11 +228,16 @@ if CLIENT then
 
 		if ply:GetBoneMatrix(characterInfo[steamid].bones.b_rightHand) then ply:SetBonePosition(characterInfo[steamid].bones.b_rightHand, g_VR.net[steamid].lerpedFrame.righthandPos, g_VR.net[steamid].lerpedFrame.righthandAng + RIGHT_HAND_OFFSET) end
 		if not g_VR.net[steamid].characterAltHead then
-			local _, targetAng = LocalToWorld(zeroVec, Angle(-80, 0, 90), zeroVec, g_VR.net[steamid].lerpedFrame.hmdAng)
-			local mtx = ply:GetBoneMatrix(characterInfo[steamid].bones.b_head)
-			if mtx then
-				mtx:SetAngles(targetAng)
-				ply:SetBoneMatrix(characterInfo[steamid].bones.b_head, mtx)
+			local charik = vrmod.charik
+			if charik and charik.ApplyHead then
+				charik.ApplyHead(ply, characterInfo[steamid], g_VR.net[steamid].lerpedFrame)
+			else
+				local _, targetAng = LocalToWorld(zeroVec, Angle(-80, 0, 90), zeroVec, g_VR.net[steamid].lerpedFrame.hmdAng)
+				local mtx = ply:GetBoneMatrix(characterInfo[steamid].bones.b_head)
+				if mtx then
+					mtx:SetAngles(targetAng)
+					ply:SetBoneMatrix(characterInfo[steamid].bones.b_head, mtx)
+				end
 			end
 		end
 	end
