@@ -333,6 +333,93 @@ if CLIENT then
 		if g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright then g_VR.characterYaw = g_VR.tracking.hmd.ang.yaw end
 	end
 
+	local function TwinOpenLocal()
+		return vrmod.avatar
+			and (vrmod.avatar.IsOpen("avatar") or vrmod.avatar.IsOpen("default") or vrmod.avatar.IsOpen("fbt_cal"))
+	end
+
+	--- Always solve local player IK + publish snap when twin is open.
+	-- PrePlayerDraw often does NOT run in VR first-person → twin got idle/T-pose bones.
+	local function ForceLocalIKAndPublish()
+		local ply = LocalPlayer()
+		if not IsValid(ply) or not g_VR or not g_VR.active then return false end
+		local steamid = ply:SteamID()
+		if not steamid or not activePlayers[steamid] then return false end
+		local netTab = g_VR.net and g_VR.net[steamid]
+		if not netTab or not netTab.lerpedFrame then return false end
+		local ci = characterInfo and characterInfo[steamid]
+		if not ci or not ci.bones then
+			if CharacterInit(ply) == false then return false end
+			ci = characterInfo[steamid]
+			if not ci then return false end
+		end
+		local frame = netTab.lerpedFrame
+
+		-- Head fully visible for a clean snap
+		local headBone = ci.bones.b_head
+		if isnumber(headBone) and headBone >= 0 then
+			ply:ManipulateBoneScale(headBone, Vector(1, 1, 1))
+			ply:ManipulateBonePosition(headBone, zeroVec)
+		end
+
+		local cv = CV()
+		local headToHmdDist = cv.characterHeadToHmdDist or DEFAULT_HEAD_TO_HMD_DIST
+		ci.preRenderPos = ply:GetPos()
+		local hCrouch = ci.horizontalCrouchOffset or 0
+		local vCrouch = ci.verticalCrouchOffset or 0
+		if not ply:InVehicle() and frame.hmdPos and frame.hmdAng then
+			local yaw = frame.characterYaw or 0
+			ci.renderPos = frame.hmdPos
+				+ up:Cross(frame.hmdAng:Right()) * -headToHmdDist
+				+ Angle(0, yaw, 0):Forward() * -hCrouch * 0.8
+			ci.renderPos.z = ply:GetPos().z - vCrouch
+			ply:SetPos(ci.renderPos)
+			ply:SetRenderAngles(Angle(0, yaw, 0))
+		end
+
+		ply:SetupBones()
+		pcall(UpdateIK, ply)
+		if ci.boneorder and ci.boneinfo then
+			for i = 1, #ci.boneorder do
+				local bone = ci.boneorder[i]
+				local bd = ci.boneinfo[bone]
+				if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
+					ply:SetBoneMatrix(bone, bd.targetMatrix)
+				end
+			end
+		end
+		-- Refresh full skeleton after arm matrix write
+		ply:InvalidateBoneCache()
+		ply:SetupBones()
+		if ci.boneorder and ci.boneinfo then
+			for i = 1, #ci.boneorder do
+				local bone = ci.boneorder[i]
+				local bd = ci.boneinfo[bone]
+				if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
+					ply:SetBoneMatrix(bone, bd.targetMatrix)
+				end
+			end
+		end
+
+		if vrmod.avatar and vrmod.avatar.PublishPlayerPose then
+			pcall(vrmod.avatar.PublishPlayerPose, ply, frame)
+		end
+		-- Restore gameplay pos (same as PostPlayerDraw)
+		if not (g_VR.vehicle and g_VR.vehicle.current) and ci.preRenderPos then
+			ply:SetPos(ci.preRenderPos)
+		end
+		return true
+	end
+
+	vrmod.character = vrmod.character or {}
+	vrmod.character.ForceLocalIKAndPublish = ForceLocalIKAndPublish
+
+	-- Twin open: ONE player IK + pose publish per stereo frame (before either eye)
+	hook.Add("VRMod_PreStereo", "vrmod_twin_force_ik", function()
+		if not TwinOpenLocal() then return end
+		pcall(ForceLocalIKAndPublish)
+	end)
+
 	------------------------------------------------------------------------
 	local function PrePlayerDrawFunc(ply)
 		if not IsValid(ply) then return end
@@ -346,9 +433,7 @@ if CLIENT then
 		local cv = CV()
 		local headToHmdDist = cv.characterHeadToHmdDist or DEFAULT_HEAD_TO_HMD_DIST
 		-- Twin needs a real head matrix: never hide head while avatar twin is open.
-		local twinOpen = ply == LocalPlayer()
-			and vrmod.avatar
-			and (vrmod.avatar.IsOpen("avatar") or vrmod.avatar.IsOpen("default") or vrmod.avatar.IsOpen("fbt_cal"))
+		local twinOpen = ply == LocalPlayer() and TwinOpenLocal()
 		if ply == LocalPlayer() then
 			local headBone = ci.bones.b_head
 			if isnumber(headBone) and headBone >= 0 then

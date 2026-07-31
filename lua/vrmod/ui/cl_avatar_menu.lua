@@ -112,7 +112,8 @@ end
 
 local function rebuildButtons()
 	buttons = {}
-	buttons[#buttons + 1] = { x = W - 52, y = 6, w = 40, h = 36, kind = "close" }
+	-- Large close hitbox (top-right) — easy laser target
+	buttons[#buttons + 1] = { x = W - 64, y = 4, w = 56, h = 44, kind = "close" }
 
 	local n = #TAB_NAMES
 	local tw = (W - PAD * 2) / n
@@ -133,10 +134,11 @@ local function rebuildButtons()
 		buttons[#buttons + 1] = { x = PAD + (bw + 8) * 2, y = y0 + 50, w = bw, h = 48, kind = "h_minus" }
 		buttons[#buttons + 1] = { x = PAD, y = y0 + 110, w = (W - PAD * 2 - 8) / 2, h = 48, kind = "h_seated" }
 		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 110, w = (W - PAD * 2 - 8) / 2, h = 48, kind = "h_offset" }
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 170, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "mode_facing" }
-		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 170, w = (W - PAD * 2 - 8) / 2, h = 44, kind = "mode_clone" }
-		buttons[#buttons + 1] = { x = PAD, y = y0 + 226, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_minus" }
-		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 226, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_plus" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 170, w = W - PAD * 2, h = 40, kind = "reset_place" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 218, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_minus" }
+		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 218, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "dist_plus" }
+		buttons[#buttons + 1] = { x = PAD, y = y0 + 266, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "yaw_ccw" }
+		buttons[#buttons + 1] = { x = PAD + (W - PAD * 2 - 8) / 2 + 8, y = y0 + 266, w = (W - PAD * 2 - 8) / 2, h = 40, kind = "yaw_cw" }
 	elseif tab == 2 then
 		-- Model list (scrollable window)
 		local vis = 8
@@ -202,8 +204,12 @@ local function paint()
 	if not isfunction(VRUtilMenuRenderStart) or not isfunction(VRUtilMenuRenderEnd) then return end
 	local m = g_VR.menus[UID]
 	if not m.rt then return end
-	m.scale, m.pos, m.ang = liveScale, livePos, liveAng
-	m.cubeMenu, m.attachment = true, true
+	if vrmod.MenuApplyHandAnchor then
+		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng)
+	elseif not m.freeFloat and not m.grabHand then
+		m.scale, m.pos, m.ang = liveScale, livePos, liveAng
+		m.cubeMenu, m.attachment = true, true
+	end
 
 	local focused = (g_VR.menuFocus == UID)
 	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
@@ -221,8 +227,8 @@ local function paint()
 		draw.SimpleText("AVATAR", "DermaLarge", PAD, 8, Theme().header)
 		draw.SimpleText(focused and "LASER LOCK" or "point laser · Cube custom", "DermaDefault", PAD, 32, focused and Theme().ok or Theme().muted)
 
-		local closeHot = focused and mx >= W - 52 and mx <= W - 12 and my >= 6 and my <= 42
-		drawBtn(W - 52, 6, 40, 36, "X", closeHot, false)
+		local closeHot = focused and mx >= W - 64 and mx <= W - 8 and my >= 4 and my <= 48
+		drawBtn(W - 64, 4, 56, 44, "X", closeHot, false)
 
 		local n = #TAB_NAMES
 		local tw = (W - PAD * 2) / n
@@ -238,20 +244,20 @@ local function paint()
 		if tab == 1 then
 			local sc = g_VR.scale or 1
 			draw.SimpleText(string.format("world scale  %.2f", sc), "DermaLarge", W * 0.5, y0 + 8, Theme().text, TEXT_ALIGN_CENTER)
-			draw.SimpleText("MIRROR = your left↔right · like a real mirror", "DermaDefault", W * 0.5, y0 + 32, Theme().muted, TEXT_ALIGN_CENTER)
+			draw.SimpleText("POINT RH place · R grip twist = rotate · L grip = distance", "DermaDefault", W * 0.5, y0 + 32, Theme().muted, TEXT_ALIGN_CENTER)
 			local bw = (W - PAD * 2 - 16) / 3
 			drawBtn(PAD, y0 + 50, bw, 48, "+", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD + bw + 8, y0 + 50, bw, 48, "AUTO", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD + (bw + 8) * 2, y0 + 50, bw, 48, "-", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD, y0 + 110, (W - PAD * 2 - 8) / 2, 48, seated() and "SEATED ON" or "SEATED OFF", false, seated())
 			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 110, (W - PAD * 2 - 8) / 2, 48, "OFFSET", false, false)
-			local mode = s and s.mode or "facing"
-			if mode == "mirror" then mode = "facing" end
-			drawBtn(PAD, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "MIRROR", false, mode == "facing")
-			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 170, (W - PAD * 2 - 8) / 2, 44, "CLONE", false, mode == "clone")
 			local dist = s and s.distance or 40
-			drawBtn(PAD, y0 + 226, (W - PAD * 2 - 8) / 2, 40, "DIST −", false, false)
-			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 226, (W - PAD * 2 - 8) / 2, 40, string.format("DIST %.0f", dist), false, false)
+			local yaw = s and (s.freeYaw or (s.standAng and s.standAng.yaw)) or 180
+			drawBtn(PAD, y0 + 170, W - PAD * 2, 40, "RESET PLACE (face me)", false, false)
+			drawBtn(PAD, y0 + 218, (W - PAD * 2 - 8) / 2, 40, "DIST −", false, false)
+			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 218, (W - PAD * 2 - 8) / 2, 40, string.format("DIST %.0f", dist), false, false)
+			drawBtn(PAD, y0 + 266, (W - PAD * 2 - 8) / 2, 40, "YAW ↺", false, false)
+			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 266, (W - PAD * 2 - 8) / 2, 40, string.format("YAW %.0f°", yaw % 360), false, false)
 		elseif tab == 2 then
 			draw.SimpleText("select playermodel · twin updates live", "DermaDefault", PAD, y0 - 2, Theme().muted)
 			local vis = 8
@@ -346,8 +352,19 @@ local function doSave()
 		return
 	end
 	local ok, info = s:ApplyToPlayer()
-	statusMsg = ok and ("SAVED · " .. tostring(info)) or ("save failed · " .. tostring(info))
-	statusUntil = CurTime() + 4
+	if ok then
+		statusMsg = "APPLIED · IK reload · " .. tostring(info)
+		statusUntil = CurTime() + 5
+		-- Second nudge: ensure character system + twin snap after timers fire
+		timer.Simple(0.25, function()
+			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+				pcall(vrmod.character.ForceLocalIKAndPublish)
+			end
+		end)
+	else
+		statusMsg = "apply failed · " .. tostring(info)
+		statusUntil = CurTime() + 4
+	end
 end
 
 local function activate(mx, my)
@@ -378,21 +395,39 @@ local function activate(mx, my)
 			end
 		elseif k == "h_offset" then
 			vrmod.AutoSeatedOffset()
-		elseif k == "mode_facing" or k == "mode_mirror" then
+		elseif k == "reset_place" then
 			local s = sess()
-			if s and s.SetMode then s:SetMode("facing") end
-		elseif k == "mode_clone" then
-			local s = sess()
-			if s and s.SetMode then s:SetMode("clone") end
+			if s then
+				if s.SetMode then s:SetMode("free") end
+				s.freeInited = false
+				s.freeYaw = nil
+			end
 		elseif k == "dist_minus" then
 			local s = sess()
 			if s and s.SetDistance then s:SetDistance((s.distance or 40) - 4) end
 		elseif k == "dist_plus" then
 			local s = sess()
 			if s and s.SetDistance then s:SetDistance((s.distance or 40) + 4) end
+		elseif k == "yaw_ccw" then
+			local s = sess()
+			if s then
+				s.freeYaw = (s.freeYaw or (s.standAng and s.standAng.yaw) or 0) + 15
+				s.standAng = Angle(0, s.freeYaw, 0)
+			end
+		elseif k == "yaw_cw" then
+			local s = sess()
+			if s then
+				s.freeYaw = (s.freeYaw or (s.standAng and s.standAng.yaw) or 0) - 15
+				s.standAng = Angle(0, s.freeYaw, 0)
+			end
 		elseif k == "model" and modelList[btn.index] then
 			local s = sess()
-			if s and s.SetModel then s:SetModel(modelList[btn.index].path) end
+			if s and s.SetModel then
+				-- Preview only (no archive) + IK refresh
+				s:SetModel(modelList[btn.index].path, { persist = false })
+				statusMsg = "preview · " .. tostring(modelList[btn.index].name or "")
+				statusUntil = CurTime() + 2
+			end
 		elseif k == "model_up" then
 			modelScroll = math.max(0, modelScroll - 1)
 		elseif k == "model_dn" then
@@ -401,7 +436,9 @@ local function activate(mx, my)
 			local s = sess()
 			local ply = LocalPlayer()
 			if s and s.SetModel and IsValid(ply) then
-				s:SetModel(ply.vrmod_pm or ply:GetModel())
+				s:SetModel(ply.vrmod_pm or ply:GetModel(), { persist = false, keepLooks = true })
+				statusMsg = "twin = live player model"
+				statusUntil = CurTime() + 2
 			end
 		elseif k == "model_save" then
 			doSave()
@@ -458,24 +495,32 @@ local function activate(mx, my)
 end
 
 function vrmod.AvatarMenu_Close()
-	if not open then return end
+	-- Always force-clean even if open flag desynced (stuck menu)
+	local wasOpen = open
 	open = false
 	StopTwin()
 	hook.Remove("PreRender", "avatar_menu_paint")
 	hook.Remove("VRMod_Input", "avatar_menu_input")
 	hook.Remove("VRMod_Exit", "avatar_menu_exit")
 	hook.Remove("VRMod_OpenQuickMenu", "avatar_menu_qm")
-	-- scrub legacy height hooks that crash if still registered from old sessions
 	hook.Remove("VRMod_Input", "vrmodheightmenuinput")
 	hook.Remove("PreRender", "vrmodheightmenuplace")
-	if g_VR and g_VR.menus and g_VR.menus[UID] then
-		g_VR.menus[UID].closeFunc = nil
-	end
-	if g_VR and g_VR.menus and g_VR.menus.heightmenu then
-		g_VR.menus.heightmenu.closeFunc = nil
-		if isfunction(VRUtilMenuClose) then VRUtilMenuClose("heightmenu") end
+	if g_VR and g_VR.menus then
+		if g_VR.menus[UID] then
+			g_VR.menus[UID].closeFunc = nil
+			g_VR.menus[UID].grabHand = nil
+			g_VR.menus[UID].freeFloat = false
+		end
+		if g_VR.menus.heightmenu then
+			g_VR.menus.heightmenu.closeFunc = nil
+			if isfunction(VRUtilMenuClose) then VRUtilMenuClose("heightmenu") end
+		end
 	end
 	if isfunction(VRUtilMenuClose) then VRUtilMenuClose(UID) end
+	g_VR.menuGrabActive = false
+	if not wasOpen and vrmod.logger then
+		vrmod.logger.Debug("[Avatar] close forced (flag was already false)")
+	end
 end
 
 function vrmod.AvatarMenu_Open()
@@ -528,11 +573,15 @@ function vrmod.AvatarMenu_Open()
 		if vrmod.logger then vrmod.logger.Warn("[Avatar] menu open failed (no RT)") end
 		return
 	end
-	g_VR.menus[UID].scale = liveScale
-	g_VR.menus[UID].pos = livePos
-	g_VR.menus[UID].ang = liveAng
-	g_VR.menus[UID].cubeMenu = true
-	g_VR.menus[UID].attachment = true
+	if vrmod.MenuApplyHandAnchor then
+		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
+	else
+		g_VR.menus[UID].scale = liveScale
+		g_VR.menus[UID].pos = livePos
+		g_VR.menus[UID].ang = liveAng
+		g_VR.menus[UID].cubeMenu = true
+		g_VR.menus[UID].attachment = true
+	end
 
 	paint()
 
@@ -545,31 +594,47 @@ function vrmod.AvatarMenu_Open()
 			open = false
 			return
 		end
-		g_VR.menus[UID].scale = liveScale
-		g_VR.menus[UID].pos = livePos
-		g_VR.menus[UID].ang = liveAng
-		g_VR.menus[UID].attachment = true
-		g_VR.menus[UID].cubeMenu = true
+		if vrmod.MenuApplyHandAnchor then
+			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
+		elseif not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
+			g_VR.menus[UID].scale = liveScale
+			g_VR.menus[UID].pos = livePos
+			g_VR.menus[UID].ang = liveAng
+			g_VR.menus[UID].attachment = true
+			g_VR.menus[UID].cubeMenu = true
+		end
 		paint()
 	end)
 
 	hook.Add("VRMod_Input", "avatar_menu_input", function(action, pressed)
 		if not open then return end
-		if pressed and (action == "boolean_secondaryfire" or action == "boolean_chat") then
+		-- B / secondary / chat / use always closes (even if laser focus lost)
+		if pressed and (
+			action == "boolean_secondaryfire"
+			or action == "boolean_chat"
+			or action == "boolean_use"
+			or action == "boolean_changeweapon"
+		) then
 			vrmod.AvatarMenu_Close()
 			return
 		end
 		if not pressed then return end
 		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
 
-		-- 1) UI panel clicks when laser is on the hand menu
-		if g_VR.menuFocus == UID then
-			local cx, cy = g_VR.menuCursorX, g_VR.menuCursorY
-			if cx and cy then activate(cx, cy) end
-			return
+		-- Always try UI hit-test if menu exists (don't require menuFocus — free-float lag)
+		local cx, cy = g_VR.menuCursorX, g_VR.menuCursorY
+		if (g_VR.menuFocus == UID or g_VR.menus and g_VR.menus[UID]) and cx and cy then
+			-- Prefer close if cursor is in header corner even without perfect focus
+			if cx >= W - 64 and cy <= 48 then
+				vrmod.AvatarMenu_Close()
+				return
+			end
+			if g_VR.menuFocus == UID then
+				activate(cx, cy)
+				return
+			end
 		end
 
-		-- 2) Laser pick bone on twin (when not pointing at the menu)
 		local s = sess()
 		if s and s.laserPickBones and s.ToggleCustomBone then
 			s:UpdateLaserHover()

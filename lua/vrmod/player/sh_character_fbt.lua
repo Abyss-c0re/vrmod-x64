@@ -523,9 +523,9 @@ hook.Add("VRMod_OpenQuickMenu", "fbt_quickmenu", function()
 	local steamid = LocalPlayer():SteamID()
 	local active = g_VR.fbtActive and g_VR.fbtActive[steamid] or false
 	if active then
-		vrmod.AddInGameMenuItem("Disable Full-body Tracking", 5, 0, function() vrmod_fbt.Stop(LocalPlayer()) end)
+		vrmod.AddInGameMenuItem("Disable Full-body Tracking", 5, 0, function() vrmod_fbt.Stop(LocalPlayer()) end, false, nil, "fbt_disable")
 	else
-		vrmod.AddInGameMenuItem("Calibrate Full-body Tracking", 5, 0, vrmod_fbt.Calibrate, false, "press reload when done")
+		vrmod.AddInGameMenuItem("Calibrate Full-body Tracking", 5, 0, vrmod_fbt.Calibrate, false, "press reload when done", "fbt_calibrate")
 	end
 end)
 
