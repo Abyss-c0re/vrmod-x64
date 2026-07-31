@@ -137,19 +137,18 @@ vrmod.SettingsCatalog = {
 		title = "HUD/UI",
 		icon = "icon16/layers.png",
 		rows = {
-			{ kind = "header", label = "Global UI" },
-			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.5, max = 2.0, decimals = 2 },
-			{ kind = "help", label = "Scales all VR hand/world menus and Derma windows. 1.0 = default." },
+			-- Colors first so VR scroll is not required to find the picker
+			{ kind = "color", label = "UI beam color (tap to edit)", cvar = "vrmod_beam_color" },
+			{ kind = "color", label = "Weapon laser color (tap to edit)", cvar = "vrmod_laser_color" },
 			{ kind = "bool", label = "Enable HUD", cvar = "vrmod_hud" },
-			{ kind = "slider", label = "HUD curve", cvar = "vrmod_hudcurve", min = -100, max = 100, decimals = 0 },
+			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.5, max = 2.0, decimals = 2 },
 			{ kind = "slider", label = "HUD distance", cvar = "vrmod_huddistance", min = 1, max = 100, decimals = 0 },
 			{ kind = "slider", label = "HUD scale", cvar = "vrmod_hudscale", min = 0.01, max = 0.1, decimals = 2 },
+			{ kind = "slider", label = "HUD curve", cvar = "vrmod_hudcurve", min = -100, max = 100, decimals = 0 },
 			{ kind = "slider", label = "HUD transparency", cvar = "vrmod_hudtestalpha", min = 0, max = 255, decimals = 0 },
 			{ kind = "bool", label = "HUD only with menu key", cvar = "vrmod_hud_visible_quickmenukey" },
 			{ kind = "bool", label = "Menu & UI red outline", cvar = "vrmod_ui_outline" },
-			{ kind = "header", label = "Pointer colors (same as classic Derma)" },
-			{ kind = "color", label = "UI beam color", cvar = "vrmod_beam_color" },
-			{ kind = "color", label = "Weapon laser color", cvar = "vrmod_laser_color" },
+			{ kind = "action", label = "Force HUD on + rebind", action_id = "force_hud_on" },
 			{ kind = "action", label = "UI reset", cmd = "vrmod_vgui_reset" },
 			{ kind = "action", label = "HUD/UI defaults", action_id = "reset_hud" },
 		},
@@ -405,6 +404,16 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")
 		return true
 	end
+	if action_id == "force_hud_on" then
+		RunConsoleCommand("vrmod_hud", "1")
+		local c = GetConVar("vrmod_hud")
+		if c then pcall(function() c:SetInt(1) end) end
+		if CLIENT then
+			if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+			RunConsoleCommand("vrmod_hud_rebind")
+		end
+		return true
+	end
 	if action_id == "reset_hud" then
 		RunConsoleCommand("vrmod_ui_scale", "1")
 		RunConsoleCommand("vrmod_hud", "1")
@@ -416,7 +425,11 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_hud_visible_quickmenukey", "0")
 		RunConsoleCommand("vrmod_beam_color", "255,0,0,255")
 		RunConsoleCommand("vrmod_laser_color", "255,0,0,255")
-		if CLIENT and vrmod.RefreshHUD then vrmod.RefreshHUD() end
+		if CLIENT then
+			if vrmod.ApplyBeamColor then vrmod.ApplyBeamColor("255,0,0,255") end
+			if vrmod.ApplyLaserColor then vrmod.ApplyLaserColor("255,0,0,255") end
+			if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+		end
 		return true
 	end
 	if action_id == "reset_melee" then
