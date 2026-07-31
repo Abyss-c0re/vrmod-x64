@@ -173,24 +173,17 @@ local function MirrorBoneName(name)
 	return name
 end
 
---- True mirror: left-right reflection in the player's sagittal plane, then into twin space.
--- Source Angle / WorldToLocal: X = Forward, Y = Right, Z = Up.
--- Sagittal plane = XZ (forward-up). Flip Y (right), NEVER X (forward) — flipping X
--- was the Cube failure that folded the twin into spaghetti.
--- AngleFromBasis rebuilds a right-handed frame after reflection.
--- Caller MUST also remap L↔R bone targets via MirrorBoneName.
+--- True mirror: left-right reflection in the player's sagittal plane → twin space.
+-- Source WorldToLocal(playerYaw): X=Forward, Y=Right, Z=Up.
+-- Flip Y (right) only. Orientation: Euler mirror in that frame —
+--   pitch stays, yaw and roll negate (keeps ValveBiped hand/arm twist stable).
+-- AngleFromBasis after vector flip introduced 180° limb twists (inverted gloves).
 local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw)
 	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
 
-	-- Position: your right (+Y) becomes left (−Y)
 	relPos.y = -relPos.y
-
-	-- Orientation: reflect Forward/Up across sagittal XZ (negate right component)
-	local f = relAng:Forward()
-	local u = relAng:Up()
-	f = Vector(f.x, -f.y, f.z)
-	u = Vector(u.x, -u.y, u.z)
-	local nang = AngleFromBasis(f, u)
+	-- Local Euler reflection across XZ (sagittal)
+	local nang = Angle(relAng.p, -relAng.y, -relAng.r)
 
 	return LocalToWorld(relPos, nang, avatarFeet, avatarYaw)
 end
