@@ -854,6 +854,12 @@ if CLIENT then
 
 		renderingEyes = true
 		local okEyes, errEyes = pcall(function()
+			-- World RT captures (radar ortho, etc.) MUST run with no stereo RT pushed.
+			-- Nested RenderView under g_VR.rt flickers the entire map.
+			g_VR.stereoEye = nil
+			g_VR.stereoFrame = (g_VR.stereoFrame or 0) + 1
+			hook.Call("VRMod_PreStereoCapture", nil)
+
 			render.PushRenderTarget(g_VR.rt)
 			if DrawErrorOverlay() then
 				render.PopRenderTarget()
@@ -864,11 +870,9 @@ if CLIENT then
 
 			-- ============================================================
 			-- ONE pose/solve phase for the whole frame (not per-eye).
-			-- Twin IK, HUD RT capture, etc. subscribe here — never on
+			-- Twin IK, HUD RT capture, menu pose snapshot — never on
 			-- VRMod_PreRender(left) only. Both eyes then only DRAW.
 			-- ============================================================
-			g_VR.stereoEye = nil
-			g_VR.stereoFrame = (g_VR.stereoFrame or 0) + 1
 			hook.Call("VRMod_PreStereo", nil)
 
 			-- LEFT eye — draw only

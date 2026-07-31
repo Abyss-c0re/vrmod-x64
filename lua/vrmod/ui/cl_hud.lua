@@ -22,8 +22,8 @@ local cv_crosshair_src = CreateClientConVar("vrmod_hud_crosshair_src", "muzzle",
 	"Aim source: muzzle | hand | auto (muzzle then hand; never HMD)")
 local cv_radar = CreateClientConVar("vrmod_hud_radar", "0", true, FCVAR_ARCHIVE,
 	"1 = CS:GO-style mini radar + player blips on HUD plate", 0, 1)
-local cv_radar_3d = CreateClientConVar("vrmod_hud_radar_3d", "1", true, FCVAR_ARCHIVE,
-	"1 = 3D top-down world backdrop under radar (heavier)", 0, 1)
+local cv_radar_3d = CreateClientConVar("vrmod_hud_radar_3d", "0", true, FCVAR_ARCHIVE,
+	"1 = 3D top-down world backdrop under radar (extra RenderView; off by default)", 0, 1)
 local cv_radar_range = CreateClientConVar("vrmod_hud_radar_range", "1500", true, FCVAR_ARCHIVE,
 	"Radar world range (Source units)", 400, 4000)
 local cv_radar_size = CreateClientConVar("vrmod_hud_radar_size", "200", true, FCVAR_ARCHIVE,
@@ -246,13 +246,18 @@ local function RadarYaw(ply)
 	return 0
 end
 
+-- Guard: never nest RenderView while stereo SBS RT is active (map-wide flicker).
 local function CaptureRadar3D(ply, range)
 	if not cv_radar_3d:GetBool() or not radarRT then return false end
 	if not IsValid(ply) then return false end
+	if g_VR and g_VR.stereoEye then return false end
+	if g_VR and g_VR._renderingHudRT then return false end
+
 	local pos = ply:GetPos()
 	local yaw = RadarYaw(ply)
 	local height = math.Clamp(range * 0.85, 400, 2500)
 
+	g_VR._radarCapturing = true
 	render.PushRenderTarget(radarRT)
 	render.Clear(8, 4, 6, 220, true, true)
 	local ok = pcall(function()
@@ -277,6 +282,7 @@ local function CaptureRadar3D(ply, range)
 		})
 	end)
 	render.PopRenderTarget()
+	g_VR._radarCapturing = false
 	return ok
 end
 
@@ -504,16 +510,8 @@ local function CaptureHudRT(w, h, pScale)
 		pcall(render.RenderHUD, 0, 0, w, h)
 	end
 
-	-- 3D radar backdrop: leave 2D, capture ortho top-down, resume HUD paint
-	-- Throttle 3D capture (every 2nd frame) — blips still update every paint
-	if cv_radar:GetBool() and cv_radar_3d:GetBool() and (FrameNumber() % 2 == 0) then
-		cam.End2D()
-		local ply = LocalPlayer()
-		local range = math.Clamp(cv_radar_range:GetFloat(), 400, 4000)
-		pcall(CaptureRadar3D, ply, range)
-		-- back onto HUD RT (still pushed)
-		cam.Start2D()
-	end
+	-- Radar 3D is captured on VRMod_PreStereoCapture (no nested RenderView here).
+	-- PaintVitals / blips run every stereo frame for realtime HUD.
 
 	pcall(PaintVitals, w, h)
 	-- Optional aim reticle: weapon muzzle / hand aim projected onto plate
@@ -549,6 +547,7 @@ end
 local menuSystemBase = nil
 
 local function Unbind()
+	hook.Remove("VRMod_PreStereoCapture", "vrmod_radar_3d")
 	hook.Remove("VRMod_PreStereo", "vrmod_hud_capture")
 	hook.Remove("VRMod_PreRender", "vrmod_hud_capture")
 	hook.Remove("VRMod_PreRender", "hud")
@@ -604,7 +603,17 @@ local function Bind()
 		end)
 	end
 
-	-- Capture once per stereo frame (shared RT for both eyes — not left-eye-only hack)
+	-- 3D radar: every stereo frame, BEFORE stereo RT is pushed (see cl_vrmod).
+	hook.Add("VRMod_PreStereoCapture", "vrmod_radar_3d", function()
+		if not g_VR or not g_VR.active then return end
+		if not cv_radar:GetBool() or not cv_radar_3d:GetBool() then return end
+		local ply = LocalPlayer()
+		if not IsValid(ply) then return end
+		local range = math.Clamp(cv_radar_range:GetFloat(), 400, 4000)
+		pcall(CaptureRadar3D, ply, range)
+	end)
+
+	-- Capture HUD RT once per stereo frame (shared for both eyes — realtime vitals/blips)
 	hook.Add("VRMod_PreStereo", "vrmod_hud_capture", function()
 		if not g_VR.active or not CVBool("vrmod_hud", true) then return end
 		if not g_VR.tracking or not g_VR.tracking.hmd then return end
@@ -621,6 +630,7 @@ local function Bind()
 		pcall(CaptureHudRT, rtW, rtH, plateScale)
 		captureN = captureN + 1
 
+		-- Freeze plate pose for both eyes this frame
 		mtx:Identity()
 		mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * CVFloat("vrmod_huddistance", 60))
 		mtx:Rotate(g_VR.tracking.hmd.ang)
@@ -628,10 +638,11 @@ local function Bind()
 		hook.Call("VRMod_PostRenderHUD", nil)
 	end)
 
-	-- SINGLE draw path (both eyes) — no menu-system wrap (that stacked a second plate)
+	-- SINGLE draw path (both eyes) — same RT + same mtx every eye
 	hook.Add("PostDrawTranslucentRenderables", "vrmod_hud_draw", function(depth, sky)
 		if depth or sky then return end
 		if not g_VR or not g_VR.active or not g_VR.stereoEye then return end
+		if g_VR._radarCapturing then return end
 		pcall(DrawHudMesh)
 	end, 50)
 

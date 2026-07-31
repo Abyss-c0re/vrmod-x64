@@ -668,18 +668,14 @@ function W.InstallHooks()
 		end
 	end)
 
-	-- Continuous re-paint: settings always, others when focused / alwaysPaint
-	hook.Add("Think", "panel2vr_repaint", function()
+	-- Hold-open / layout bookkeeping (not RT paint — that is every stereo frame below)
+	hook.Add("Think", "panel2vr_keepalive", function()
 		if not W.IsVR() then return end
 		for uid, info in pairs(bound) do
-			if info.panel and IsValid(info.panel) and isfunction(VRUtilMenuRenderPanel) then
+			if info.panel and IsValid(info.panel) then
 				if info.kind == "spawnmenu" or info.kind == "contextmenu" then
-					-- Hold open: re-show if engine flickers IsVisible (QM must not dismiss)
 					if info.panel.SetVisible then info.panel:SetVisible(true) end
 					if info.panel.SetPaintedManually then info.panel:SetPaintedManually(true) end
-				end
-				if info.alwaysPaint or info.html or g_VR.menuFocus == uid then
-					VRUtilMenuRenderPanel(uid)
 				end
 				local m = g_VR.menus and g_VR.menus[uid]
 				if m then
@@ -689,7 +685,6 @@ function W.InstallHooks()
 						m.persistOpen = true
 						m.keepAlive = true
 						m.allowHiddenPanel = true
-						-- Snapshot free-float so reopen restores parked pose (session + disk)
 						if (m.freeFloat or not m.attachment) and m.pos and m.ang then
 							shellFloatPose[info.kind] = {
 								pos = Vector(m.pos),
@@ -697,7 +692,6 @@ function W.InstallHooks()
 								scale = m.baseScale or m.scale,
 							}
 						end
-						-- Do not rewrite pos/ang/scale; only keep hand attach if not free-floated/resizing
 						if not m.freeFloat and not m.grabHand and not g_VR.menuResizeActive then
 							m.attachment = true
 						end
@@ -707,6 +701,17 @@ function W.InstallHooks()
 				end
 			elseif info.panel and not IsValid(info.panel) then
 				W.Close(uid)
+			end
+		end
+	end)
+
+	-- Realtime RT paint: every stereo frame for all open Derma shells (shared both eyes)
+	hook.Add("VRMod_PreStereo", "panel2vr_repaint", function()
+		if not W.IsVR() then return end
+		if not isfunction(VRUtilMenuRenderPanel) then return end
+		for uid, info in pairs(bound) do
+			if info.panel and IsValid(info.panel) then
+				VRUtilMenuRenderPanel(uid)
 			end
 		end
 	end)

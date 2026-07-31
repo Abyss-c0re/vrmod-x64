@@ -356,6 +356,30 @@ if CLIENT then
 		menu._lastAssignedScale = ns
 	end
 
+	--- Once per stereo frame: freeze world pose + scale for both eyes (no L/R desync).
+	--- Also advance live resize from last laser sample.
+	local function SnapshotMenuDrawState()
+		if resizeState then
+			local m = menus[resizeState.uid]
+			if m and m.lastCursorX and m.lastCursorY then
+				UpdateResizeFromCursor(m, m.lastCursorX, m.lastCursorY)
+			end
+		end
+		for _, v in ipairs(menuOrder) do
+			local wPos, wAng = ResolveMenuWorldPose(v)
+			v._snapPos = wPos
+			v._snapAng = wAng
+			v._snapScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
+			v._snapFrame = g_VR.stereoFrame or 0
+		end
+	end
+
+	hook.Add("VRMod_PreStereo", "vrmod_ui_snapshot", function()
+		if not g_VR or not g_VR.active then return end
+		if not menusExist then return end
+		SnapshotMenuDrawState()
+	end)
+
 	--- Called from default input before entity pickup. Returns true if grip was consumed by UI grab/resize.
 	--- Safe to call from multiple VRMod_Input hooks on the same event (idempotent).
 	function vrmod.TryMenuGrab(handName, pressed)
@@ -559,37 +583,41 @@ if CLIENT then
 				v.baseScale = v.scale
 				v._lastAssignedScale = v.scale
 			end
-			local drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
-
-			-- WayVR free-float / grab wins over attachment (callers may re-set attachment each frame)
-			local pos, ang
-			if v.grabHand and v.grabPos and v.grabAng then
-				local hand = HandPose(v.grabHand)
-				if hand and hand.pos and hand.ang then
-					pos, ang = LocalToWorld(v.grabPos, v.grabAng, hand.pos, hand.ang)
+			-- Prefer PreStereo snapshot so both eyes draw identical pose/scale
+			local pos, ang, drawScale = v._snapPos, v._snapAng, v._snapScale
+			if not pos or not ang or not drawScale or drawScale <= 0
+				or (v._snapFrame or -1) ~= (g_VR.stereoFrame or 0) then
+				-- Fallback if snapshot missed this frame
+				drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
+				if v.grabHand and v.grabPos and v.grabAng then
+					local hand = HandPose(v.grabHand)
+					if hand and hand.pos and hand.ang then
+						pos, ang = LocalToWorld(v.grabPos, v.grabAng, hand.pos, hand.ang)
+					else
+						continue
+					end
+				elseif v.freeFloat then
+					pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
+				elseif v.attachment then
+					local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
+					if hand and hand.pos and hand.ang then
+						pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
+					else
+						continue
+					end
 				else
-					continue
+					pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin, g_VR.originAngle)
 				end
-			elseif v.freeFloat then
-				pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
-			elseif v.attachment then
-				local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
-				if hand and hand.pos and hand.ang then
-					pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
-				else
-					-- no left hand yet — skip draw rather than park menu off to the side
-					continue
-				end
-			else
-				pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin, g_VR.originAngle)
 			end
+			if not pos or not ang then continue end
 
 			if v.mat and not v.mat:IsError() then
 				v.mat:SetTexture("$basetexture", v.rt)
 			end
 
-			-- Laser plane hit (needed before draw for live resize + focus)
+			-- Laser plane hit (focus + next-frame resize sample; does NOT mutate scale here)
 			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
+			local resizingThis = resizeState and resizeState.uid == k
 			if v.cursorEnabled then
 				local rh = g_VR.tracking and g_VR.tracking.pose_righthand
 				if rh and rh.pos and rh.ang then
@@ -609,13 +637,8 @@ if CLIENT then
 					end
 				end
 			end
-
-			-- Live corner resize: update scale from plane hit (allow outside panel rect)
-			local resizingThis = resizeState and resizeState.uid == k
+			-- Store cursor for PreStereo resize solve (same both eyes → no desync)
 			if resizingThis and hitCursorX and hitCursorY then
-				UpdateResizeFromCursor(v, hitCursorX, hitCursorY)
-				-- Recompute drawScale after scale change (TL fixed, BR moves)
-				drawScale = (v.baseScale or v.scale or 0.03) * vrmod.GetUIScale()
 				v.lastCursorX = hitCursorX
 				v.lastCursorY = hitCursorY
 			end
@@ -632,36 +655,29 @@ if CLIENT then
 			surface.SetMaterial(v.mat)
 			surface.DrawTexturedRect(0, 0, v.width, v.height)
 			if blendOn then pcall(function() render.OverrideBlend(false) end) end
-			--debug outline
 			if uioutline:GetBool() then
 				surface.SetDrawColor(255, 0, 0, 255)
 				surface.DrawOutlinedRect(0, 0, v.width, v.height)
 			end
 
-			-- Resize corner handle (visible when focused or actively resizing)
+			-- Subtle resize grip: only when laser near BR corner or actively resizing
+			local inC = hitCursorX and hitCursorY and CursorInResizeCorner(v, hitCursorX, hitCursorY)
 			local showCorner = cv_menu_resize:GetBool() and v.grabbable ~= false
-				and (resizingThis or g_VR.menuFocus == k or (hitCursorX and hitCursorY
-					and hitCursorX > 0 and hitCursorY > 0
-					and hitCursorX < v.width and hitCursorY < v.height))
+				and (resizingThis or inC)
 			if showCorner then
-				local cz = CornerZoneSize(v)
-				local inC = hitCursorX and hitCursorY and CursorInResizeCorner(v, hitCursorX, hitCursorY)
-				local col = resizingThis and Color(80, 255, 200, 230)
-					or (inC and Color(120, 230, 255, 220) or Color(180, 200, 220, 140))
-				surface.SetDrawColor(col)
-				-- Soft fill on BR corner
-				surface.DrawRect(v.width - cz, v.height - cz, cz, cz)
-				-- Grip lines (diagonal stripes)
-				surface.SetDrawColor(col.r, col.g, col.b, math.min(255, col.a + 40))
-				for i = 0, 3 do
-					local o = 10 + i * 12
-					if o < cz - 4 then
-						surface.DrawLine(v.width - o, v.height - 4, v.width - 4, v.height - o)
-					end
+				local a = resizingThis and 220 or 160
+				local r, g, b = 196, 40, 70 -- Cube crimson accent
+				if resizingThis then r, g, b = 255, 120, 150 end
+				surface.SetDrawColor(r, g, b, a)
+				-- Small diagonal grip lines only (no opaque fill)
+				local ox, oy = v.width - 6, v.height - 6
+				for i = 0, 2 do
+					local o = 8 + i * 7
+					surface.DrawLine(ox - o, oy, ox, oy - o)
 				end
-				-- Outer L accent
-				surface.DrawRect(v.width - cz, v.height - 3, cz, 3)
-				surface.DrawRect(v.width - 3, v.height - cz, 3, cz)
+				surface.SetDrawColor(r, g, b, math.min(255, a + 30))
+				surface.DrawLine(v.width - 28, v.height - 2, v.width - 2, v.height - 2)
+				surface.DrawLine(v.width - 2, v.height - 28, v.width - 2, v.height - 2)
 			end
 
 			cam.End3D2D()
@@ -669,7 +685,6 @@ if CLIENT then
 			if v.cursorEnabled then
 				if not hitCursorX or not hitCursorY or not hitDist or not menuFocusDist then continue end
 				cursorX, cursorY = hitCursorX, hitCursorY
-				-- Keep focus while resizing even if laser leaves the panel rect
 				local inside = cursorX > 0 and cursorY > 0 and cursorX < v.width and cursorY < v.height
 				local keepResize = resizingThis and hitDist < menuFocusDist + 50
 				if (inside or keepResize) and hitDist < menuFocusDist then
