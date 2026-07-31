@@ -4,9 +4,8 @@
 -- Cube law: the VR playermodel is already correct (cl_character / FBT).
 -- Twin does NOT re-solve arm IK. Every frame:
 --   snapshot LocalPlayer bone matrices (working VR body)
---   → MapClone (clone) or MapMirror flip Y (facing) into twin stand space
---   → same bone IDs (full-chain snap — do NOT L↔R rename, that double-flips)
---   → BuildBonePositions SetBoneMatrix only
+--   → CLONE: MapClone rigid | FACING: ReflectThroughPlane (glass mirror, all bones)
+--   → same bone IDs → BuildBonePositions SetBoneMatrix
 -- Never VRUtilNetUpdateLocalPly from the twin.
 -- Credits: Pescorr · Catse — docs/CREDITS.md · Workshop 3695733221
 -- =============================================================================
@@ -173,40 +172,21 @@ local function MirrorBoneName(name)
 	return name
 end
 
--- Free limbs (good with full Euler flip). Axial skeleton keeps clone orientation
--- (only position is mirrored) so chest/head don't corkscrew.
-local function IsDistalLimbBone(name)
-	if not name then return false end
-	if string.find(name, "Clavicle", 1, true) then return false end
-	if string.find(name, "Spine", 1, true) or string.find(name, "Pelvis", 1, true) then return false end
-	if string.find(name, "Neck", 1, true) or string.find(name, "Head", 1, true) then return false end
-	if string.find(name, "Hand", 1, true) or string.find(name, "Finger", 1, true) then return true end
-	if string.find(name, "Wrist", 1, true) or string.find(name, "Ulna", 1, true) then return true end
-	if string.find(name, "Forearm", 1, true) or string.find(name, "UpperArm", 1, true) then return true end
-	if string.find(name, "Foot", 1, true) or string.find(name, "Toe", 1, true) then return true end
-	if string.find(name, "Calf", 1, true) or string.find(name, "Thigh", 1, true) then return true end
-	if string.find(name, "_L_", 1, true) or string.find(name, "_R_", 1, true) then return true end
-	return false
-end
-
---- Facing mirror in player local space (X=Fwd, Y=Right, Z=Up).
--- Position: always flip Y.
--- Distal limbs: (p, -y, -r) — proven for hands/legs.
--- Axial (pelvis/spine/clavicle/neck/head): keep relAng (clone orientation).
---   Twin standYaw+180 turns that into face-to-face without roll corkscrew.
-local function MapMirror(worldPos, worldAng, playerFeet, playerYaw, avatarFeet, avatarYaw, boneName)
-	local relPos, relAng = WorldToLocal(worldPos, worldAng or Angle(), playerFeet, playerYaw)
-
-	relPos.y = -relPos.y
-	local nang
-	if IsDistalLimbBone(boneName) then
-		nang = Angle(relAng.p, -relAng.y, -relAng.r)
-	else
-		-- Axial: same local orientation as clone (no Euler mirror)
-		nang = Angle(relAng.p, relAng.y, relAng.r)
+--- Reflect point + angle through a vertical world plane (real glass mirror).
+-- ONE formula for every bone — no axial/distal Euler splits.
+local function ReflectThroughPlane(pos, ang, planeOrigin, planeNormal)
+	local n = planeNormal
+	local function refVec(v)
+		return v - n * (2 * v:Dot(n))
 	end
-
-	return LocalToWorld(relPos, nang, avatarFeet, avatarYaw)
+	local npos = planeOrigin + refVec(pos - planeOrigin)
+	local f, r, u = refVec(ang:Forward()), refVec(ang:Right()), refVec(ang:Up())
+	local nang = AngleFromBasis(f, u)
+	-- Reflection is improper; if reconstructed Right opposes reflected Right, fix roll
+	if nang:Right():Dot(r) < 0 then
+		nang:RotateAroundAxis(nang:Forward(), 180)
+	end
+	return npos, nang
 end
 
 local function ParseBodygroups(str)
@@ -790,15 +770,12 @@ function vrmod.avatar.PublishPlayerPose(ply, frame)
 end
 
 --- Apply published VR pose to twin.
--- CLONE  = MapClone, same bone IDs (rigid copy).
--- FACING = MapMirror (flip Right/Y), same bone IDs — full-skeleton snap already
---          moves each arm/leg chain as a unit. L↔R *name* remap double-flips and
---          inverts limbs (that was the mirror failure after clone was fixed).
---          (L↔R remap is only for hand *targets* into ProcessArm, not matrix copy.)
+-- CLONE  = MapClone (rigid) — proven.
+-- FACING = world-plane reflection of every bone (true mirror glass between you
+--          and the twin). Same formula for all bones; no Euler per-bone hacks.
 function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 	if not IsValid(self.ent) then return false end
 
-	-- Prefer fresh snap; if twin draws before player this eye, capture live matrices now
 	local ply = LocalPlayer()
 	local snap = g_VR.avatarPoseSnap
 	local needCapture = (not snap) or (not snap.bones) or (#snap.bones < 4)
@@ -809,7 +786,6 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 		snap = g_VR.avatarPoseSnap
 	end
 	if not snap or not snap.bones or #snap.bones < 4 then return false end
-	-- Keep using last good snap even if a few frames old (don't freeze twin)
 	if snap.frame and FrameNumber() - snap.frame > 90 then return false end
 
 	local mode = self.mode or "facing"
@@ -823,12 +799,20 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 
 	local dist = self.distance or cv_distance:GetFloat()
 	local standPos, standAng
+	-- Mirror plane: vertical, halfway to the twin, facing the player
+	local planeOrigin = srcFeet + srcYaw:Forward() * (dist * 0.5)
+	local planeN = srcYaw:Forward()
+	planeN.z = 0
+	if planeN:LengthSqr() < 1e-8 then planeN = Vector(1, 0, 0) end
+	planeN:Normalize()
+
 	if isWorld then
 		standPos, standAng = srcFeet, srcYaw
 	elseif isClone then
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw, 0)
 	else
+		-- Image stands where the glass would show you; face the player
 		standPos = srcFeet + srcYaw:Forward() * dist
 		standAng = Angle(0, srcYaw.yaw + 180, 0)
 	end
@@ -847,7 +831,7 @@ function Session:_mirrorWorkingPlayer(playerFeet, playerYaw)
 		if isWorld then
 			npos, nang = pos, ang
 		elseif isFacing then
-			npos, nang = MapMirror(pos, ang, srcFeet, srcYaw, standPos, standAng, name)
+			npos, nang = ReflectThroughPlane(pos, ang, planeOrigin, planeN)
 		else
 			npos, nang = MapClone(pos, ang, srcFeet, srcYaw, standPos, standAng)
 		end
