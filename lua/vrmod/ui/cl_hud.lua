@@ -20,6 +20,27 @@ local cv_crosshair = CreateClientConVar("vrmod_hud_crosshair", "0", true, FCVAR_
 	"1 = optional aim reticle on HUD plate (weapon muzzle / aim API, not HMD center)")
 local cv_crosshair_src = CreateClientConVar("vrmod_hud_crosshair_src", "muzzle", true, FCVAR_ARCHIVE,
 	"Aim source: muzzle | hand | auto (muzzle then hand; never HMD)")
+local cv_radar = CreateClientConVar("vrmod_hud_radar", "0", true, FCVAR_ARCHIVE,
+	"1 = CS:GO-style mini radar + player blips on HUD plate", 0, 1)
+local cv_radar_3d = CreateClientConVar("vrmod_hud_radar_3d", "1", true, FCVAR_ARCHIVE,
+	"1 = 3D top-down world backdrop under radar (heavier)", 0, 1)
+local cv_radar_range = CreateClientConVar("vrmod_hud_radar_range", "1500", true, FCVAR_ARCHIVE,
+	"Radar world range (Source units)", 400, 4000)
+local cv_radar_size = CreateClientConVar("vrmod_hud_radar_size", "200", true, FCVAR_ARCHIVE,
+	"Radar diameter on HUD plate (px)", 120, 320)
+
+local RADAR_RT_SZ = 256
+local radarRT = GetRenderTarget("vrmod_hud_radar_3d", RADAR_RT_SZ, RADAR_RT_SZ, false)
+local radarMat = CreateMaterial("vrmod_hud_radar_mat_v1", "UnlitGeneric", {
+	["$basetexture"] = radarRT:GetName(),
+	["$translucent"] = 1,
+	["$vertexalpha"] = 1,
+	["$vertexcolor"] = 1,
+	["$nolod"] = 1,
+})
+if radarMat and not radarMat:IsError() then
+	radarMat:SetTexture("$basetexture", radarRT)
+end
 
 local function HudRes()
 	local w = vrScrW:GetInt()
@@ -207,6 +228,188 @@ local function CVString(name, default)
 	return default
 end
 
+--- Suit plate = player Armor only.
+-- Do NOT use GetSuitPower / suit_power — that is AUX (flashlight/sprint), often 100 when armor is 0.
+local function GetSuitEnergy(ply)
+	if not IsValid(ply) then return 0 end
+	return math.max(0, math.floor(ply:Armor() or 0))
+end
+
+------------------------------------------------------------------------
+-- CS:GO-style mini radar (+ optional 3D top-down world)
+------------------------------------------------------------------------
+local function RadarYaw(ply)
+	if g_VR and g_VR.characterYaw then return g_VR.characterYaw end
+	local hmd = g_VR and g_VR.tracking and g_VR.tracking.hmd
+	if hmd and hmd.ang then return hmd.ang.yaw end
+	if IsValid(ply) then return ply:EyeAngles().yaw end
+	return 0
+end
+
+local function CaptureRadar3D(ply, range)
+	if not cv_radar_3d:GetBool() or not radarRT then return false end
+	if not IsValid(ply) then return false end
+	local pos = ply:GetPos()
+	local yaw = RadarYaw(ply)
+	local height = math.Clamp(range * 0.85, 400, 2500)
+
+	render.PushRenderTarget(radarRT)
+	render.Clear(8, 4, 6, 220, true, true)
+	local ok = pcall(function()
+		render.RenderView({
+			origin = pos + Vector(0, 0, height),
+			angles = Angle(90, yaw, 0),
+			x = 0, y = 0, w = RADAR_RT_SZ, h = RADAR_RT_SZ,
+			aspectratio = 1,
+			fov = 90,
+			drawhud = false,
+			drawmonitors = false,
+			drawviewmodel = false,
+			dopostprocess = false,
+			bloomtone = false,
+			ortho = true,
+			ortholeft = -range,
+			orthoright = range,
+			orthotop = -range,
+			orthobottom = range,
+			znear = 1,
+			zfar = height + range * 2,
+		})
+	end)
+	render.PopRenderTarget()
+	return ok
+end
+
+local function WorldToRadar(localPos, yaw, range, radius)
+	-- world delta → radar local (forward = up on map, yaw-aligned like CS)
+	local c, s = math.cos(math.rad(-yaw)), math.sin(math.rad(-yaw))
+	local rx = localPos.x * c - localPos.y * s
+	local ry = localPos.x * s + localPos.y * c
+	-- screen: +X right, +Y down; map forward = -Y
+	local u = (rx / range) * radius
+	local v = (-ry / range) * radius
+	return u, v
+end
+
+local function PaintRadar(w, h, T)
+	if not cv_radar:GetBool() then return end
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return end
+
+	local size = math.Clamp(cv_radar_size:GetInt(), 120, 320)
+	local radius = size * 0.5 - 4
+	local cx = w - size * 0.5 - 20
+	local cy = size * 0.5 + 20
+	local range = math.Clamp(cv_radar_range:GetFloat(), 400, 4000)
+	local yaw = RadarYaw(ply)
+	local origin = ply:GetPos()
+	local cr = T.crimson or Color(196, 30, 58)
+	local bg = T.bgGlass or T.bg or Color(12, 6, 10, 230)
+	local muted = T.muted or Color(200, 150, 165)
+
+	-- Optional 3D world backdrop (top-down ortho)
+	local has3d = false
+	if cv_radar_3d:GetBool() then
+		-- Caller must leave 2D; CaptureRadar3D handles RT swap if invoked outside 2D.
+		-- Here we only blit last frame if mat is ready — capture runs in CaptureHudRT.
+		has3d = radarMat and not radarMat:IsError()
+	end
+
+	-- Circular plate
+	surface.SetDrawColor(bg.r, bg.g, bg.b, 235)
+	draw.NoTexture()
+	local segs = 48
+	local poly = {}
+	for i = 0, segs do
+		local a = math.rad(i / segs * 360)
+		poly[#poly + 1] = { x = cx + math.cos(a) * (radius + 4), y = cy + math.sin(a) * (radius + 4) }
+	end
+	surface.DrawPoly(poly)
+
+	if has3d then
+		surface.SetMaterial(radarMat)
+		surface.SetDrawColor(255, 255, 255, 200)
+		-- square map clipped visually by ring border
+		local half = radius * 0.92
+		surface.DrawTexturedRect(cx - half, cy - half, half * 2, half * 2)
+	end
+
+	-- Grid rings + cross (CS-style)
+	surface.SetDrawColor(cr.r, cr.g, cr.b, 90)
+	for ring = 1, 3 do
+		local rr = radius * (ring / 3)
+		local prevx, prevy
+		for i = 0, segs do
+			local a = math.rad(i / segs * 360)
+			local x, y = cx + math.cos(a) * rr, cy + math.sin(a) * rr
+			if prevx then surface.DrawLine(prevx, prevy, x, y) end
+			prevx, prevy = x, y
+		end
+	end
+	surface.SetDrawColor(cr.r, cr.g, cr.b, 120)
+	surface.DrawLine(cx - radius, cy, cx + radius, cy)
+	surface.DrawLine(cx, cy - radius, cx, cy + radius)
+
+	-- Outer ring
+	surface.SetDrawColor(cr.r, cr.g, cr.b, 220)
+	local prevx, prevy
+	for i = 0, segs do
+		local a = math.rad(i / segs * 360)
+		local x, y = cx + math.cos(a) * (radius + 3), cy + math.sin(a) * (radius + 3)
+		if prevx then surface.DrawLine(prevx, prevy, x, y) end
+		prevx, prevy = x, y
+	end
+
+	-- Local player triangle (always center, facing up = look dir)
+	local tri = {
+		{ x = cx, y = cy - 9 },
+		{ x = cx - 7, y = cy + 7 },
+		{ x = cx + 7, y = cy + 7 },
+	}
+	surface.SetDrawColor(T.crimsonHot or Color(255, 80, 110))
+	surface.DrawPoly(tri)
+	surface.SetDrawColor(255, 255, 255, 200)
+	surface.DrawLine(tri[1].x, tri[1].y, tri[2].x, tri[2].y)
+	surface.DrawLine(tri[2].x, tri[2].y, tri[3].x, tri[3].y)
+	surface.DrawLine(tri[3].x, tri[3].y, tri[1].x, tri[1].y)
+
+	-- Player radar blips
+	local myTeam = ply:Team()
+	for _, p in ipairs(player.GetAll()) do
+		if not IsValid(p) or p == ply then continue end
+		if not p:Alive() then continue end
+		local delta = p:GetPos() - origin
+		local dist = delta:Length2D()
+		if dist > range then continue end
+		local u, v = WorldToRadar(delta, yaw, range, radius)
+		local bx, by = cx + u, cy + v
+		-- stay inside circle
+		local d2 = u * u + v * v
+		if d2 > radius * radius then
+			local s = radius / math.sqrt(d2)
+			bx, by = cx + u * s, cy + v * s
+		end
+		local same = (p:Team() == myTeam)
+		local col = same and Color(100, 200, 255, 255) or Color(255, 90, 90, 255)
+		-- height cue (CS-like): above = outline ring, below = darker
+		local dz = p:GetPos().z - origin.z
+		local r = 5
+		if dz > 48 then
+			surface.SetDrawColor(col.r, col.g, col.b, 255)
+			surface.DrawOutlinedRect(bx - r - 1, by - r - 1, (r + 1) * 2, (r + 1) * 2, 2)
+		elseif dz < -48 then
+			surface.SetDrawColor(col.r * 0.55, col.g * 0.55, col.b * 0.55, 255)
+			surface.DrawRect(bx - r, by - r, r * 2, r * 2)
+		else
+			surface.SetDrawColor(col.r, col.g, col.b, 255)
+			surface.DrawRect(bx - r, by - r, r * 2, r * 2)
+		end
+	end
+
+	local fontS = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefault"
+	draw.SimpleText("RADAR", fontS, cx, cy + radius + 10, muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+end
+
 --- Theme-matched vitals only (one layer — not a full desktop HUD clone)
 local function PaintVitals(w, h)
 	local ply = LocalPlayer()
@@ -215,26 +418,39 @@ local function PaintVitals(w, h)
 	local T = (vrmod.cube and vrmod.cube.ThemeLive and vrmod.cube.ThemeLive())
 		or (vrmod.cube and vrmod.cube.Theme)
 		or {}
+	local M = (vrmod.cube and vrmod.cube.Metrics and vrmod.cube.Metrics()) or { hudScale = 1, pad = 16 }
+	local hudS = M.hudScale or 1
 	local outline = T.outline or Color(0, 0, 0, 220)
+	-- Density-scaled fonts (RefreshFonts already sizes CubeHuge/Label)
 	local fontV = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeHuge")) or "DermaLarge"
 	local fontL = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefaultBold"
 	local muted = T.muted or Color(200, 150, 165, 230)
+	local baseY = h - math.floor(48 * hudS)
+	local labelY = h - math.floor(24 * hudS)
+	local xHp = math.floor(32 * hudS)
+	local xSuit = math.floor(160 * hudS)
+	local xAm = w - math.floor(32 * hudS)
 
 	local hp = math.max(0, math.floor(ply:Health() or 0))
-	local arm = math.max(0, math.floor(ply:Armor() or 0))
-	local hpCol = hp <= 25
-		and (T.healthLow or Color(255, 50, 50, 255))
-		or (T.health or Color(255, 220, 60, 255))
+	local suit = GetSuitEnergy(ply)
+	-- Vitals share accent: ammo matches health (not white-vs-crimson mismatch)
+	local colHealth = T.health or T.crimsonHot or T.crimson or Color(255, 80, 110, 255)
+	local colLow = T.healthLow or Color(255, 45, 70, 255)
+	local colSuit = T.armor or T.muted or Color(200, 150, 165, 255)
+	local colAmmo = T.ammo or T.health or T.crimsonHot or colHealth
+	local hpCol = hp <= 25 and colLow or colHealth
+	local suitCol = suit <= 0 and muted or colSuit
 
-	draw.SimpleTextOutlined(tostring(hp), fontV, 36, h - 52, hpCol,
+	draw.SimpleTextOutlined(tostring(hp), fontV, xHp, baseY, hpCol,
 		TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 2, outline)
-	draw.SimpleTextOutlined("HEALTH", fontL, 36, h - 28, muted,
+	draw.SimpleTextOutlined("HEALTH", fontL, xHp, labelY, muted,
 		TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 1, outline)
 
-	if arm > 0 then
-		draw.SimpleTextOutlined(tostring(arm), fontV, 170, h - 52, T.armor or Color(90, 170, 255, 255),
+	-- Armor only (hide when 0 — no fake AUX 100)
+	if suit > 0 then
+		draw.SimpleTextOutlined(tostring(suit), fontV, xSuit, baseY, suitCol,
 			TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 2, outline)
-		draw.SimpleTextOutlined("ARMOR", fontL, 170, h - 28, muted,
+		draw.SimpleTextOutlined("SUIT", fontL, xSuit, labelY, muted,
 			TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM, 1, outline)
 	end
 
@@ -253,12 +469,14 @@ local function PaintVitals(w, h)
 			line = tostring(ammo)
 		end
 		if line then
-			draw.SimpleTextOutlined(line, fontV, w - 36, h - 52, T.ammo or T.text or color_white,
+			draw.SimpleTextOutlined(line, fontV, xAm, baseY, colAmmo,
 				TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 2, outline)
-			draw.SimpleTextOutlined("AMMO", fontL, w - 36, h - 28, muted,
+			draw.SimpleTextOutlined("AMMO", fontL, xAm, labelY, muted,
 				TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, outline)
 		end
 	end
+
+	pcall(PaintRadar, w, h, T)
 end
 
 local function CaptureHudRT(w, h, pScale)
@@ -285,6 +503,18 @@ local function CaptureHudRT(w, h, pScale)
 	if cv_engine:GetBool() then
 		pcall(render.RenderHUD, 0, 0, w, h)
 	end
+
+	-- 3D radar backdrop: leave 2D, capture ortho top-down, resume HUD paint
+	-- Throttle 3D capture (every 2nd frame) — blips still update every paint
+	if cv_radar:GetBool() and cv_radar_3d:GetBool() and (FrameNumber() % 2 == 0) then
+		cam.End2D()
+		local ply = LocalPlayer()
+		local range = math.Clamp(cv_radar_range:GetFloat(), 400, 4000)
+		pcall(CaptureRadar3D, ply, range)
+		-- back onto HUD RT (still pushed)
+		cam.Start2D()
+	end
+
 	pcall(PaintVitals, w, h)
 	-- Optional aim reticle: weapon muzzle / hand aim projected onto plate
 	pcall(PaintAimCrosshair, w, h, pScale or plateScale)
@@ -314,14 +544,23 @@ local function DrawHudMesh()
 	cam.PopModelMatrix()
 end
 
+-- If an ancient bind ever stashed a wrap, restore via this upvalue only.
+-- NEVER index VRUtilRenderMenuSystem as a table (it is a function → Lua error).
+local menuSystemBase = nil
+
 local function Unbind()
+	hook.Remove("VRMod_PreStereo", "vrmod_hud_capture")
 	hook.Remove("VRMod_PreRender", "vrmod_hud_capture")
 	hook.Remove("VRMod_PreRender", "hud")
 	hook.Remove("VRMod_PreRender", "vrmod_hud_rt")
 	hook.Remove("PostDrawTranslucentRenderables", "vrmod_hud_draw")
 	hook.Remove("HUDShouldDraw", "vrmod_hud")
 	hook.Remove("HUDShouldDraw", "vrmod_hud_bl")
-	-- No menu-system wrap anymore (single plate only)
+	-- Safe unwrap: only restore if we own a base function reference
+	if isfunction(menuSystemBase) and isfunction(VRUtilRenderMenuSystem) then
+		VRUtilRenderMenuSystem = menuSystemBase
+	end
+	menuSystemBase = nil
 	hudBound = false
 end
 
@@ -365,13 +604,12 @@ local function Bind()
 		end)
 	end
 
-	-- Capture once per frame (left eye)
-	hook.Add("VRMod_PreRender", "vrmod_hud_capture", function(eye)
-		if eye == "right" then return end
+	-- Capture once per stereo frame (shared RT for both eyes — not left-eye-only hack)
+	hook.Add("VRMod_PreStereo", "vrmod_hud_capture", function()
 		if not g_VR.active or not CVBool("vrmod_hud", true) then return end
 		if not g_VR.tracking or not g_VR.tracking.hmd then return end
 
-		hook.Call("VRMod_PreRenderHUD", nil, eye)
+		hook.Call("VRMod_PreRenderHUD", nil)
 
 		local rw, rh = HudRes()
 		if rw ~= rtW or rh ~= rtH then
@@ -387,7 +625,7 @@ local function Bind()
 		mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * CVFloat("vrmod_huddistance", 60))
 		mtx:Rotate(g_VR.tracking.hmd.ang)
 
-		hook.Call("VRMod_PostRenderHUD", nil, eye)
+		hook.Call("VRMod_PostRenderHUD", nil)
 	end)
 
 	-- SINGLE draw path (both eyes) — no menu-system wrap (that stacked a second plate)
