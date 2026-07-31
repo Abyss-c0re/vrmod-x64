@@ -9,6 +9,7 @@
 --   bool    { label, cvar [, default] }
 --   slider  { label, cvar, min, max, decimals }
 --   combo   { label, cvar, choices = { {text, value}, ... } }  -- value = convar string/int
+--   color   { label, cvar }  -- "r,g,b,a" string (UI beam / weapon laser)
 --   action  { label, cmd = "concommand" }  OR  { label, action_id = "..." }
 --   header  { label }
 --   help    { label }
@@ -143,6 +144,9 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "HUD transparency", cvar = "vrmod_hudtestalpha", min = 0, max = 255, decimals = 0 },
 			{ kind = "bool", label = "HUD only with menu key", cvar = "vrmod_hud_visible_quickmenukey" },
 			{ kind = "bool", label = "Menu & UI red outline", cvar = "vrmod_ui_outline" },
+			{ kind = "header", label = "Pointer colors (same as classic Derma)" },
+			{ kind = "color", label = "UI beam color", cvar = "vrmod_beam_color" },
+			{ kind = "color", label = "Weapon laser color", cvar = "vrmod_laser_color" },
 			{ kind = "action", label = "UI reset", cmd = "vrmod_vgui_reset" },
 			{ kind = "action", label = "HUD/UI defaults", action_id = "reset_hud" },
 		},
@@ -216,6 +220,40 @@ vrmod.SettingsCatalog = {
 		},
 	},
 }
+
+------------------------------------------------------------------------
+-- Color helpers — "r,g,b,a" strings (vrmod_beam_color / vrmod_laser_color)
+------------------------------------------------------------------------
+function vrmod.SettingsParseColor(str, fallback)
+	fallback = fallback or Color(255, 0, 0, 255)
+	if not str or str == "" then return Color(fallback.r, fallback.g, fallback.b, fallback.a) end
+	local r, g, b, a = string.match(tostring(str), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+	if not r then
+		r, g, b = string.match(tostring(str), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+		a = 255
+	end
+	if not r then return Color(fallback.r, fallback.g, fallback.b, fallback.a) end
+	return Color(tonumber(r) or 255, tonumber(g) or 0, tonumber(b) or 0, tonumber(a) or 255)
+end
+
+function vrmod.SettingsFormatColor(col)
+	if not col then return "255,0,0,255" end
+	return string.format("%d,%d,%d,%d",
+		math.Clamp(math.floor(col.r or 255), 0, 255),
+		math.Clamp(math.floor(col.g or 0), 0, 255),
+		math.Clamp(math.floor(col.b or 0), 0, 255),
+		math.Clamp(math.floor(col.a or 255), 0, 255))
+end
+
+function vrmod.SettingsGetColor(cvar, fallback)
+	local c = GetConVar(cvar)
+	return vrmod.SettingsParseColor(c and c:GetString() or nil, fallback)
+end
+
+function vrmod.SettingsSetColor(cvar, col)
+	if not cvar or not col then return end
+	RunConsoleCommand(cvar, vrmod.SettingsFormatColor(col))
+end
 
 --- Shared action handlers (VR + desktop). Host may wrap close.
 function vrmod.SettingsRunAction(action_id, ctx)

@@ -14,6 +14,9 @@ local rowScroll = 0
 local liveScale = 0.025
 local livePos, liveAng = Vector(2.5, 3, 4), Angle(0, -90, 55)
 
+-- Color editor (same cvars / "r,g,b,a" as Derma DColorMixer)
+local colorEdit = nil -- { cvar, label, col = Color }
+
 local W, H = 560, 640
 local HEADER = 56
 local TAB_H = 36
@@ -21,6 +24,22 @@ local PAD = 12
 local ROW_H = 44
 local FOOTER = 52
 local VISIBLE_ROWS = 8
+
+-- Palette matches classic Derma mixer presets + common VR pointer colors
+local COLOR_PALETTE = {
+	Color(255, 0, 0, 255),
+	Color(255, 128, 0, 255),
+	Color(255, 255, 0, 255),
+	Color(0, 255, 0, 255),
+	Color(0, 255, 255, 255),
+	Color(0, 128, 255, 255),
+	Color(0, 0, 255, 255),
+	Color(255, 0, 255, 255),
+	Color(255, 255, 255, 255),
+	Color(0, 0, 0, 255),
+	Color(255, 70, 100, 255),
+	Color(196, 30, 58, 255),
+}
 
 local function WristPose()
 	if isfunction(VRUtilHandMenuPose) then
@@ -165,6 +184,115 @@ local function tabRowsCount()
 	return math.ceil(n / tabsPerRow)
 end
 
+local function getColorCvar(cvar)
+	if vrmod.SettingsGetColor then return vrmod.SettingsGetColor(cvar) end
+	return Color(255, 0, 0, 255)
+end
+
+local function setColorCvar(cvar, col)
+	if vrmod.SettingsSetColor then
+		vrmod.SettingsSetColor(cvar, col)
+	else
+		RunConsoleCommand(cvar, string.format("%d,%d,%d,%d", col.r, col.g, col.b, col.a))
+	end
+end
+
+local function paintColorEditor(focused, mx, my)
+	buttons = {}
+	local ce = colorEdit
+	if not ce then return end
+	local col = ce.col or getColorCvar(ce.cvar)
+
+	-- Back
+	buttons[#buttons + 1] = { x = PAD, y = 8, w = 80, h = 36, kind = "color_back" }
+	-- Done
+	buttons[#buttons + 1] = { x = W - PAD - 90, y = 8, w = 90, h = 36, kind = "color_done" }
+
+	surface.SetDrawColor(Theme.bg)
+	surface.DrawRect(0, 0, W, H)
+	surface.SetDrawColor(Theme.headerDim)
+	surface.DrawRect(0, 0, W, HEADER)
+	surface.SetDrawColor(Theme.header)
+	surface.DrawRect(0, HEADER - 4, W, 4)
+	draw.SimpleText("COLOR", "DermaLarge", W * 0.5, 10, Theme.header, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	draw.SimpleText(ce.label or ce.cvar, "DermaDefault", W * 0.5, 36, Theme.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+
+	local backHot = focused and mx >= PAD and mx <= PAD + 80 and my >= 8 and my <= 44
+	local doneHot = focused and mx >= W - PAD - 90 and mx <= W - PAD and my >= 8 and my <= 44
+	surface.SetDrawColor(backHot and Theme.rowHot or Theme.row)
+	surface.DrawRect(PAD, 8, 80, 36)
+	draw.SimpleText("◀ BACK", "DermaDefaultBold", PAD + 40, 26, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	surface.SetDrawColor(doneHot and Theme.ok or Theme.header)
+	surface.DrawRect(W - PAD - 90, 8, 90, 36)
+	draw.SimpleText("DONE", "DermaDefaultBold", W - PAD - 45, 26, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+	-- Large swatch (like mixer preview)
+	local swX, swY, swW, swH = PAD, HEADER + 12, W - PAD * 2, 56
+	surface.SetDrawColor(col.r, col.g, col.b, 255)
+	surface.DrawRect(swX, swY, swW, swH)
+	surface.SetDrawColor(Theme.header)
+	surface.DrawOutlinedRect(swX, swY, swW, swH, 2)
+	draw.SimpleText(string.format("%d, %d, %d, %d", col.r, col.g, col.b, col.a), "DermaDefaultBold", W * 0.5, swY + swH * 0.5, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+	-- Palette (Derma SetPalette)
+	local py = swY + swH + 12
+	local pw = 36
+	local gap = 6
+	local cols = 6
+	for i, pcol in ipairs(COLOR_PALETTE) do
+		local ci = (i - 1) % cols
+		local ri = math.floor((i - 1) / cols)
+		local x = PAD + ci * (pw + gap)
+		local y = py + ri * (pw + gap)
+		buttons[#buttons + 1] = { x = x, y = y, w = pw, h = pw, kind = "color_swatch", col = pcol }
+		local hot = focused and mx >= x and mx <= x + pw and my >= y and my <= y + pw
+		surface.SetDrawColor(pcol.r, pcol.g, pcol.b, 255)
+		surface.DrawRect(x, y, pw, pw)
+		if hot then
+			surface.SetDrawColor(Theme.hot)
+			surface.DrawOutlinedRect(x, y, pw, pw, 3)
+		else
+			surface.SetDrawColor(40, 40, 40, 200)
+			surface.DrawOutlinedRect(x, y, pw, pw, 1)
+		end
+	end
+
+	-- RGBA sliders (Derma wangs)
+	local channels = {
+		{ key = "r", label = "R", c = Color(220, 60, 60) },
+		{ key = "g", label = "G", c = Color(60, 200, 80) },
+		{ key = "b", label = "B", c = Color(60, 120, 255) },
+		{ key = "a", label = "A", c = Color(200, 200, 200) },
+	}
+	local sy = py + 2 * (pw + gap) + 16
+	for i, ch in ipairs(channels) do
+		local y = sy + (i - 1) * 48
+		local x0, x1 = PAD + 40, W - PAD - 8
+		buttons[#buttons + 1] = {
+			x = x0, y = y, w = x1 - x0, h = 36,
+			kind = "color_channel", channel = ch.key,
+		}
+		local val = col[ch.key] or 255
+		local t = val / 255
+		draw.SimpleText(ch.label, "DermaDefaultBold", PAD + 16, y + 18, ch.c, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		surface.SetDrawColor(Theme.headerDim)
+		surface.DrawRect(x0, y + 12, x1 - x0, 12)
+		surface.SetDrawColor(ch.c.r, ch.c.g, ch.c.b, 255)
+		surface.DrawRect(x0, y + 12, (x1 - x0) * t, 12)
+		surface.SetDrawColor(Theme.hot)
+		surface.DrawRect(x0 + (x1 - x0) * t - 5, y + 6, 10, 24)
+		draw.SimpleText(tostring(val), "DermaDefault", x1, y + 18, Theme.muted, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+	end
+
+	draw.SimpleText("same convar as Derma DColorMixer", "DermaDefault", W * 0.5, H - 18, Theme.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+	if focused and mx >= 0 and my >= 0 then
+		surface.SetDrawColor(Theme.hot)
+		surface.DrawRect(mx - 2, my - 14, 4, 28)
+		surface.DrawRect(mx - 14, my - 2, 28, 4)
+	end
+end
+
 local function paint()
 	if not open or not isfunction(VRUtilMenuRenderStart) then return end
 	if not (g_VR.menus and g_VR.menus[UID]) then return end
@@ -180,10 +308,15 @@ local function paint()
 	local mx = g_VR.menuCursorX or -1
 	local my = g_VR.menuCursorY or -1
 
-	rebuildButtons()
-
 	if VRUtilMenuRenderStart(UID) == false then return end
 	pcall(function()
+		if colorEdit then
+			paintColorEditor(focused, mx, my)
+			return
+		end
+
+		rebuildButtons()
+
 		surface.SetDrawColor(Theme.bg)
 		surface.DrawRect(0, 0, W, H)
 		surface.SetDrawColor(Theme.headerDim)
@@ -272,6 +405,14 @@ local function paint()
 					surface.SetDrawColor(Theme.headerDim)
 					surface.DrawRect(bx, y + 8, 108, 28)
 					draw.SimpleText(text .. " ▸", "DermaDefaultBold", bx + 54, y + ROW_H * 0.5, Theme.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				elseif row.kind == "color" and row.cvar then
+					local c = getColorCvar(row.cvar)
+					local bx = W - PAD - 52
+					surface.SetDrawColor(c.r, c.g, c.b, 255)
+					surface.DrawRect(bx, y + 8, 40, 28)
+					surface.SetDrawColor(Theme.hot)
+					surface.DrawOutlinedRect(bx, y + 8, 40, 28, 2)
+					draw.SimpleText("▸", "DermaLarge", bx - 16, y + ROW_H * 0.5, Theme.hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				elseif row.kind == "action" then
 					draw.SimpleText("▸", "DermaLarge", W - PAD - 20, y + ROW_H * 0.5, Theme.hot, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 				end
@@ -312,7 +453,32 @@ end
 local function activateAt(mx, my)
 	for _, btn in ipairs(buttons) do
 		if mx >= btn.x and mx <= btn.x + btn.w and my >= btn.y and my <= btn.y + btn.h then
-			if btn.kind == "close" then
+			if btn.kind == "color_back" or btn.kind == "color_done" then
+				if colorEdit and colorEdit.cvar and colorEdit.col then
+					setColorCvar(colorEdit.cvar, colorEdit.col)
+				end
+				colorEdit = nil
+				paint()
+				return
+			elseif btn.kind == "color_swatch" and btn.col and colorEdit then
+				colorEdit.col = Color(btn.col.r, btn.col.g, btn.col.b, colorEdit.col and colorEdit.col.a or 255)
+				setColorCvar(colorEdit.cvar, colorEdit.col)
+				paint()
+				return
+			elseif btn.kind == "color_channel" and colorEdit and btn.channel then
+				local t = math.Clamp((mx - btn.x) / math.max(1, btn.w), 0, 1)
+				local v = math.floor(t * 255 + 0.5)
+				local c0 = colorEdit.col or getColorCvar(colorEdit.cvar)
+				local r, g, b, a = c0.r, c0.g, c0.b, c0.a
+				if btn.channel == "r" then r = v
+				elseif btn.channel == "g" then g = v
+				elseif btn.channel == "b" then b = v
+				else a = v end
+				colorEdit.col = Color(r, g, b, a)
+				setColorCvar(colorEdit.cvar, colorEdit.col)
+				paint()
+				return
+			elseif btn.kind == "close" then
 				vrmod.CubeSettings_Close()
 				return
 			elseif btn.kind == "tab" then
@@ -336,6 +502,13 @@ local function activateAt(mx, my)
 					setFloat(row.cvar, val)
 				elseif row.kind == "combo" then
 					cycleCombo(row)
+				elseif row.kind == "color" and row.cvar then
+					local c = getColorCvar(row.cvar)
+					colorEdit = {
+						cvar = row.cvar,
+						label = row.label,
+						col = Color(c.r, c.g, c.b, c.a),
+					}
 				elseif row.kind == "action" then
 					runRowAction(row)
 				end
@@ -354,6 +527,10 @@ function vrmod.CubeSettings_Close()
 		end
 		return
 	end
+	if colorEdit and colorEdit.cvar and colorEdit.col then
+		setColorCvar(colorEdit.cvar, colorEdit.col)
+	end
+	colorEdit = nil
 	open = false
 	hook.Remove("PreRender", "cube_settings_paint")
 	hook.Remove("VRMod_Input", "cube_settings_input")
@@ -392,6 +569,7 @@ function vrmod.CubeSettings_Open()
 	open = true
 	category = 1
 	rowScroll = 0
+	colorEdit = nil
 	livePos, liveAng, liveScale = WristPose()
 
 	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()

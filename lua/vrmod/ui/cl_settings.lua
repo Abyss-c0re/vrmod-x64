@@ -86,6 +86,46 @@ local function AddRowToForm(parent, row, y)
 		end
 		return y + 32
 	end
+	if row.kind == "color" and row.cvar then
+		-- Same DColorMixer pattern as classic VRMod HUD/UI tab
+		local lbl = vgui.Create("DLabel", parent)
+		lbl:SetText(row.label or row.cvar)
+		lbl:SetDark(true)
+		lbl:SetFont("DermaDefaultBold")
+		lbl:SetPos(20, y)
+		lbl:SizeToContents()
+		y = y + 20
+		local mixer = vgui.Create("DColorMixer", parent)
+		mixer:SetPos(20, y)
+		mixer:SetSize(380, 160)
+		mixer:SetPalette(true)
+		mixer:SetAlphaBar(true)
+		mixer:SetWangs(true)
+		local col = vrmod.SettingsGetColor and vrmod.SettingsGetColor(row.cvar) or Color(255, 0, 0, 255)
+		mixer:SetColor(col)
+		mixer._cvar = row.cvar
+		mixer._silent = false
+		function mixer:ValueChanged(c)
+			if self._silent then return end
+			if vrmod.SettingsSetColor then
+				vrmod.SettingsSetColor(self._cvar, c)
+			else
+				RunConsoleCommand(self._cvar, string.format("%d,%d,%d,%d", c.r, c.g, c.b, c.a))
+			end
+		end
+		function mixer:Think()
+			local c = GetConVar(self._cvar)
+			if not c then return end
+			local s = c:GetString()
+			if self._lastStr == s then return end
+			self._lastStr = s
+			local parsed = vrmod.SettingsParseColor and vrmod.SettingsParseColor(s) or Color(255, 0, 0, 255)
+			self._silent = true
+			self:SetColor(parsed)
+			self._silent = false
+		end
+		return y + 170
+	end
 	if row.kind == "action" then
 		local btn = vgui.Create("DButton", parent)
 		btn:SetText(row.label or "Action")
