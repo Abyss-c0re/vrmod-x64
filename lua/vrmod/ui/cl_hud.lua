@@ -8,13 +8,18 @@ if SERVER then return end
 -- Draw: ONE path — PostDrawTranslucent while g_VR.stereoEye is set.
 --   (No VRUtilRenderMenuSystem wrap — that doubled the plate with menus.)
 -- Theme: Settings → Theme colors on HEALTH/ARMOR/AMMO text.
--- No center crosshair. No decorative rails. mat_queue untouched.
+-- Optional aim crosshair: projects weapon/hand aim onto the plate (not HMD center).
+-- mat_queue untouched.
 -- =============================================================================
 
 local vrScrH = CreateClientConVar("vrmod_ScrH_hud", "0", true, FCVAR_ARCHIVE)
 local vrScrW = CreateClientConVar("vrmod_ScrW_hud", "0", true, FCVAR_ARCHIVE)
 local cv_engine = CreateClientConVar("vrmod_hud_engine", "0", true, FCVAR_ARCHIVE,
 	"1 = also capture engine RenderHUD (can look like a second loose HUD panel)")
+local cv_crosshair = CreateClientConVar("vrmod_hud_crosshair", "0", true, FCVAR_ARCHIVE,
+	"1 = optional aim reticle on HUD plate (weapon muzzle / aim API, not HMD center)")
+local cv_crosshair_src = CreateClientConVar("vrmod_hud_crosshair_src", "muzzle", true, FCVAR_ARCHIVE,
+	"Aim source: muzzle | hand | auto (muzzle then hand; never HMD)")
 
 local function HudRes()
 	local w = vrScrW:GetInt()
@@ -78,7 +83,112 @@ local hudMesh = nil
 local mtx = Matrix()
 local hudBound = false
 local captureN = 0
+local plateScale = 0.05 -- last bound plate scale (world units per RT pixel * scale)
 local _, convarValues = vrmod.GetConvars()
+
+------------------------------------------------------------------------
+-- VR aim: muzzle / hand API — never HMD-center “desktop” aim
+------------------------------------------------------------------------
+local function GetVRAim()
+	local src = string.lower(cv_crosshair_src:GetString() or "muzzle")
+	if src == "" then src = "auto" end
+
+	local function fromMuzzle()
+		local m = g_VR.viewModelMuzzle
+		if m and m.Pos and m.Ang then
+			return m.Pos, m.Ang:Forward(), "muzzle"
+		end
+		return nil
+	end
+
+	local function fromHand()
+		if vrmod.GetRightHandPose then
+			local p, a = vrmod.GetRightHandPose()
+			if p and a and p:LengthSqr() > 0 then
+				return p, a:Forward(), "hand"
+			end
+		end
+		local rh = g_VR.tracking and g_VR.tracking.pose_righthand
+		if rh and rh.pos and rh.ang then
+			return rh.pos, rh.ang:Forward(), "hand"
+		end
+		return nil
+	end
+
+	-- Vehicle: use patched GetAimVector (muzzle-aware), origin from hand if possible
+	local ply = LocalPlayer()
+	if IsValid(ply) and ply:InVehicle() then
+		local dir = ply:GetAimVector()
+		local origin = select(1, fromMuzzle()) or select(1, fromHand()) or ply:EyePos()
+		if dir then return origin, dir, "vehicle" end
+	end
+
+	if src == "hand" then
+		return fromHand()
+	elseif src == "muzzle" then
+		return fromMuzzle() or fromHand()
+	end
+	-- auto
+	return fromMuzzle() or fromHand()
+end
+
+--- Project aim ray onto HUD plate → RT pixel (or nil if miss / off-plate).
+local function AimToHudPixel(aimPos, aimDir, w, h, pScale)
+	local hmd = g_VR.tracking and g_VR.tracking.hmd
+	if not hmd or not hmd.pos or not hmd.ang or not aimPos or not aimDir then return nil end
+
+	local dist = CVFloat("vrmod_huddistance", 60)
+	local planePos = hmd.pos + hmd.ang:Forward() * dist
+	-- Plate faces the HMD: normal points back toward player along -forward of HMD
+	local planeN = hmd.ang:Forward()
+	local denom = aimDir:Dot(planeN)
+	if math.abs(denom) < 1e-5 then return nil end
+	local t = (planePos - aimPos):Dot(planeN) / denom
+	if t < 0.05 or t > 400 then return nil end
+	local hit = aimPos + aimDir * t
+
+	-- Plate local: X≈right, Y≈up (HMD frame at plane center)
+	local rel = WorldToLocal(hit, Angle(), planePos, hmd.ang)
+	local halfW = w * pScale * 0.5
+	local halfH = h * pScale * 0.5
+	if halfW < 0.01 or halfH < 0.01 then return nil end
+	-- Mesh is centered with +Z offset of h*scale/2 in build space; HMD local z is up
+	local u = 0.5 + (rel.y / (w * pScale))
+	local v = 0.5 - (rel.z / (h * pScale))
+	if u < -0.05 or u > 1.05 or v < -0.05 or v > 1.05 then return nil end
+	u = math.Clamp(u, 0, 1)
+	v = math.Clamp(v, 0, 1)
+	return u * w, v * h, hit
+end
+
+local function PaintAimCrosshair(w, h, pScale)
+	if not cv_crosshair:GetBool() then return end
+	local aimPos, aimDir, src = GetVRAim()
+	if not aimPos then return end
+
+	local px, py = AimToHudPixel(aimPos, aimDir, w, h, pScale)
+	if not px then return end
+
+	local T = (vrmod.cube and vrmod.cube.ThemeLive and vrmod.cube.ThemeLive())
+		or (vrmod.cube and vrmod.cube.Theme) or {}
+	local col = T.crimsonHot or T.hot or Color(255, 70, 100, 255)
+	local outline = T.outline or Color(0, 0, 0, 200)
+	local s = 10
+	-- outline
+	surface.SetDrawColor(outline)
+	surface.DrawRect(px - s - 1, py - 1, s * 2 + 2, 3)
+	surface.DrawRect(px - 1, py - s - 1, 3, s * 2 + 2)
+	-- core
+	surface.SetDrawColor(col.r, col.g, col.b, 255)
+	surface.DrawRect(px - s, py, s * 2, 1)
+	surface.DrawRect(px, py - s, 1, s * 2)
+	-- center dot
+	surface.DrawRect(px - 1, py - 1, 3, 3)
+
+	-- tiny source tag (debug-friendly, low alpha)
+	local fontL = (vrmod.cube and vrmod.cube.Font and vrmod.cube.Font("CubeSmall")) or "DermaDefault"
+	draw.SimpleText(src or "aim", fontL, px + 14, py - 2, Color(col.r, col.g, col.b, 120), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+end
 
 local function CVBool(name, default)
 	local c = GetConVar(name)
@@ -155,7 +265,7 @@ local function PaintVitals(w, h)
 	end
 end
 
-local function CaptureHudRT(w, h)
+local function CaptureHudRT(w, h, pScale)
 	render.PushRenderTarget(rt)
 	render.OverrideAlphaWriteEnable(true, true)
 	render.Clear(0, 0, 0, 0, true, true)
@@ -180,6 +290,8 @@ local function CaptureHudRT(w, h)
 		pcall(render.RenderHUD, 0, 0, w, h)
 	end
 	pcall(PaintVitals, w, h)
+	-- Optional aim reticle: weapon muzzle / hand aim projected onto plate
+	pcall(PaintAimCrosshair, w, h, pScale or plateScale)
 	g_VR._renderingHudRT = false
 
 	cam.End2D()
@@ -235,6 +347,7 @@ local function Bind()
 	end
 
 	local scale = math.Clamp(CVFloat("vrmod_hudscale", 0.05), 0.02, 0.12)
+	plateScale = scale
 	local curve = CVFloat("vrmod_hudcurve", 60)
 	local meshName = string.format("%.4f_%.1f_%d_%d", scale, curve, w, h)
 
@@ -271,7 +384,7 @@ local function Bind()
 			if mat then mat:SetTexture("$basetexture", rt) end
 		end
 
-		pcall(CaptureHudRT, rtW, rtH)
+		pcall(CaptureHudRT, rtW, rtH, plateScale)
 		captureN = captureN + 1
 
 		mtx:Identity()
