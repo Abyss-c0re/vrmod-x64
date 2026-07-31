@@ -140,6 +140,24 @@ local function MapMirrorWorld(worldPos, worldAng, srcFeet, srcYaw, dstFeet, dstY
 	return LocalToWorld(relPos, relAng, dstFeet, dstYaw)
 end
 
+-- Legacy name helpers (bone-map UI only — pose path does NOT rename bones)
+local function MirrorBoneName(name)
+	if not name or name == "" then return name end
+	if string.find(name, "_L_", 1, true) then
+		return (string.gsub(name, "_L_", "_R_", 1))
+	end
+	if string.find(name, "_R_", 1, true) then
+		return (string.gsub(name, "_R_", "_L_", 1))
+	end
+	if string.find(name, "Left", 1, true) then
+		return (string.gsub(name, "Left", "Right", 1))
+	end
+	if string.find(name, "Right", 1, true) then
+		return (string.gsub(name, "Right", "Left", 1))
+	end
+	return name
+end
+
 local function ParseBodygroups(str)
 	local t = {}
 	if not str or str == "" then return t end
