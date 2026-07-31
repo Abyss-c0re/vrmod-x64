@@ -45,14 +45,15 @@ if radarMat and not radarMat:IsError() then
 end
 
 -- Cached top-down brush heightmap (buildings + terrain) — no nested world RenderView
-local BMAP_RES = 40
+local BMAP_RES = 52
 local bmap = {
 	frame = -999,
 	origin = Vector(0, 0, 0),
 	range = 0,
 	res = BMAP_RES,
-	-- cells[i] = relative hit Z (or false if open sky)
+	-- cells[i] = absolute hit Z (or false if open sky)
 	cells = {},
+	groundZ = 0, -- min hit Z this sample (local “floor”)
 	wx0 = 0, wy0 = 0, step = 1,
 }
 
@@ -280,10 +281,10 @@ local function SampleBuildingMap(ply, range)
 	range = math.Clamp(range or 1500, 400, 4000)
 	local origin = ply:GetPos()
 	local fn = FrameNumber and FrameNumber() or 0
-	-- Refresh every ~12 frames, or when player moved / range changed
-	local moved = origin:DistToSqr(bmap.origin) > (64 * 64)
-	local rangeChanged = math.abs((bmap.range or 0) - range) > 32
-	if not moved and not rangeChanged and (fn - (bmap.frame or 0)) < 12 then
+	-- Refresh every ~10 frames, or when player moved / range changed
+	local moved = origin:DistToSqr(bmap.origin) > (48 * 48)
+	local rangeChanged = math.abs((bmap.range or 0) - range) > 24
+	if not moved and not rangeChanged and (fn - (bmap.frame or 0)) < 10 then
 		return
 	end
 
@@ -291,8 +292,8 @@ local function SampleBuildingMap(ply, range)
 	local step = (range * 2) / res
 	local wx0 = origin.x - range + step * 0.5
 	local wy0 = origin.y - range + step * 0.5
-	local skyZ = origin.z + math.Clamp(range * 0.75, 500, 2800)
-	local groundZ = origin.z - 1200
+	local skyZ = origin.z + math.Clamp(range * 0.9, 700, 3200)
+	local deepZ = origin.z - 1600
 	local cells = bmap.cells
 	local tr = {
 		mask = MASK_SOLID_BRUSHONLY,
@@ -300,22 +301,25 @@ local function SampleBuildingMap(ply, range)
 		filter = ply,
 	}
 
+	local minZ = math.huge
 	for iy = 0, res - 1 do
 		local wy = wy0 + iy * step
 		for ix = 0, res - 1 do
 			local wx = wx0 + ix * step
 			tr.start = Vector(wx, wy, skyZ)
-			tr.endpos = Vector(wx, wy, groundZ)
+			tr.endpos = Vector(wx, wy, deepZ)
 			local hit = util.TraceLine(tr)
 			local idx = iy * res + ix + 1
 			if hit.Hit and not hit.HitSky then
-				-- relative height vs player (roofs / multi-story stand out)
-				cells[idx] = hit.HitPos.z - origin.z
+				local z = hit.HitPos.z
+				cells[idx] = z
+				if z < minZ then minZ = z end
 			else
 				cells[idx] = false
 			end
 		end
 	end
+	if minZ == math.huge then minZ = origin.z end
 
 	bmap.frame = fn
 	bmap.origin = Vector(origin)
@@ -324,6 +328,18 @@ local function SampleBuildingMap(ply, range)
 	bmap.wx0 = wx0
 	bmap.wy0 = wy0
 	bmap.step = step
+	bmap.groundZ = minZ
+end
+
+-- Height above local ground (from last sample)
+local function CellElev(z)
+	if not z or z == false then return nil end
+	return z - (bmap.groundZ or z)
+end
+
+local function IsBuildingElev(elev)
+	-- Anything clearly above local ground reads as structure
+	return elev and elev >= 40
 end
 
 local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
@@ -333,38 +349,69 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	local step = bmap.step
 	local wx0, wy0 = bmap.wx0, bmap.wy0
 	local r2 = radius * radius
-	-- Cell size on radar plate
-	local cellPx = math.max(2, (radius * 2 / res) * 1.05)
+	-- Slightly oversized cells so roofs read as solid blocks
+	local cellPx = math.max(3, (radius * 2 / res) * 1.15)
 	local half = cellPx * 0.5
+	local cells = bmap.cells
 
+	local function elevAt(ix, iy)
+		if ix < 0 or iy < 0 or ix >= res or iy >= res then return nil end
+		return CellElev(cells[iy * res + ix + 1])
+	end
+
+	-- Pass 1: ground fill (very dark so buildings pop)
 	for iy = 0, res - 1 do
 		local wy = wy0 + iy * step - origin.y
 		for ix = 0, res - 1 do
-			local h = bmap.cells[iy * res + ix + 1]
-			if h == false or h == nil then continue end
+			local z = cells[iy * res + ix + 1]
+			if z == false or z == nil then continue end
+			local elev = CellElev(z)
+			if IsBuildingElev(elev) then continue end
+			local wx = wx0 + ix * step - origin.x
+			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
+			if (u * u + v * v) > r2 then continue end
+			surface.SetDrawColor(6, 14, 12, 210)
+			surface.DrawRect(cx + u - half, cy + v - half, cellPx, cellPx)
+		end
+	end
+
+	-- Pass 2: buildings — high contrast + silhouette edges
+	for iy = 0, res - 1 do
+		local wy = wy0 + iy * step - origin.y
+		for ix = 0, res - 1 do
+			local z = cells[iy * res + ix + 1]
+			if z == false or z == nil then continue end
+			local elev = CellElev(z)
+			if not IsBuildingElev(elev) then continue end
+
 			local wx = wx0 + ix * step - origin.x
 			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
 			if (u * u + v * v) > r2 then continue end
 			local bx, by = cx + u, cy + v
-			-- Ground / floors: dark green-gray; elevated = building roofs (lighter slate)
-			local elev = math.Clamp((h + 24) / 220, 0, 1)
-			if elev < 0.08 then
-				-- ground / low
-				surface.SetDrawColor(18, 32, 26, 170)
-			elseif elev < 0.28 then
-				-- low structure / curb
-				surface.SetDrawColor(35, 48, 42, 190)
-			else
-				-- buildings / multi-story
-				local t = math.Clamp((elev - 0.28) / 0.72, 0, 1)
-				surface.SetDrawColor(
-					55 + t * 90,
-					58 + t * 70,
-					68 + t * 80,
-					210
-				)
-			end
+
+			-- Height band: low walls / tall roofs
+			local t = math.Clamp((elev - 40) / 280, 0, 1)
+			-- Warm Cube crimson → hot pink-white (very readable on dark plate)
+			local r = 150 + t * 105
+			local g = 40 + t * 100
+			local b = 70 + t * 90
+			surface.SetDrawColor(r, g, b, 235)
 			surface.DrawRect(bx - half, by - half, cellPx, cellPx)
+
+			-- Silhouette: bright edge where neighbor is open/ground
+			local edge = false
+			local n = elevAt(ix - 1, iy)
+			if not IsBuildingElev(n) then edge = true end
+			n = elevAt(ix + 1, iy)
+			if not IsBuildingElev(n) then edge = true end
+			n = elevAt(ix, iy - 1)
+			if not IsBuildingElev(n) then edge = true end
+			n = elevAt(ix, iy + 1)
+			if not IsBuildingElev(n) then edge = true end
+			if edge then
+				surface.SetDrawColor(255, 230, 240, 255)
+				surface.DrawOutlinedRect(bx - half, by - half, cellPx, cellPx, 1)
+			end
 		end
 	end
 end
