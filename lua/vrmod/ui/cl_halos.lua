@@ -1,16 +1,10 @@
--- VR pickup / halo.Add outlines that actually show in dual-eye SBS.
+-- VR halo.Add for pickup outlines (stereo SBS-safe).
 --
--- Stock halo clears the full scene RT + full-screen quads → kills the other eye.
--- Fancy private-RT outline paths here went invisible. Pickup needs reliable
--- ignoreZ colour glows (orange left / cyan right), not a perfect bloom clone.
+-- Pickup does: halo.Add(sharedTable, Color(...), ...) then later table.Empty(sharedTable).
+-- We MUST copy entity refs on Add — storing the table pointer means Empty wipes the
+-- queue before draw (halos vanish after pick/drop / next frame).
 --
--- While VR active:
---   1) Intercept halo.Add → queue
---   2) After pickup's PostDrawOpaque (hook name sorts later), draw queue
---   3) Only when stereoEye is left|right
---   4) Simple ignoreZ + debugwhite + additive blend (always visible)
---   5) Soft multi-pass for a bit of "glow" without RTs
--- Restore stock halo module on VR exit.
+-- Draw: one soft tinted pass (ignoreZ). No multi-pass additive (that blew out to white).
 
 if SERVER then return end
 
@@ -21,6 +15,8 @@ local list = {}
 local installed = false
 local stockAdd
 local RenderEnt = NULL
+-- One flush per eye per stereo frame (opaque + translucent both fire)
+local flushedEye = { left = -1, right = -1 }
 
 local function ClearList()
 	for i = #list, 1, -1 do
@@ -45,54 +41,52 @@ local function ResetState()
 	end)
 end
 
+local function CopyEnts(entities)
+	local out = {}
+	local n = 0
+	for _, ent in pairs(entities) do
+		if IsValid(ent) then
+			n = n + 1
+			out[n] = ent
+		end
+	end
+	return out, n
+end
+
 local function DrawEnts(ents)
-	for _, ent in pairs(ents) do
+	for i = 1, #ents do
+		local ent = ents[i]
 		if not IsValid(ent) or ent:GetNoDraw() then continue end
 		RenderEnt = ent
-		-- Bones can be stale mid-frame for phys props
-		if ent.SetupBones then pcall(ent.SetupBones, ent) end
+		if ent.SetupBones then pcall(function() ent:SetupBones() end) end
 		ent:DrawModel(modelFlags)
 	end
 	RenderEnt = NULL
 end
 
---- Always-visible pickup-style glow (no RT, no scene clear).
+--- Single soft coloured pass — keeps orange/cyan, not nuclear white.
 local function DrawEntry(entry)
-	if not entry or not entry.Ents then return end
+	if not entry or not entry.Ents or #entry.Ents < 1 then return end
 
 	local col = entry.Color or color_white
 	local r = (col.r or 255) / 255
 	local g = (col.g or 255) / 255
 	local b = (col.b or 255) / 255
-	local a = (col.a or 255) / 255
+	-- Cap intensity so additive-looking props don't clip to white
+	local strength = 0.42
 	local ignoreZ = entry.IgnoreZ
-	if ignoreZ == nil then ignoreZ = true end -- pickup always wants this
-	local passes = math.max(1, (entry.DrawPasses or 1) + 1)
+	if ignoreZ == nil then ignoreZ = true end
 
 	render.SuppressEngineLighting(true)
 	cam.IgnoreZ(ignoreZ)
 	render.MaterialOverride(mat_white)
 	render.SetColorModulation(r, g, b)
+	render.SetBlend(strength)
 
-	-- Additive so it reads as a "halo" over the prop, not a solid paint
-	if render.OverrideBlend then
-		render.OverrideBlend(
-			true,
-			BLEND_SRC_ALPHA, BLEND_ONE, BLENDFUNC_ADD,
-			BLEND_ZERO, BLEND_ONE, BLENDFUNC_ADD
-		)
-	end
+	cam.Start3D()
+	DrawEnts(entry.Ents)
+	cam.End3D()
 
-	-- A few passes with slight alpha steps = soft glow without blur RT
-	for p = 1, passes do
-		local t = p / passes
-		render.SetBlend(math.Clamp(0.25 + 0.35 * t, 0.2, 0.85) * a)
-		cam.Start3D()
-		DrawEnts(entry.Ents)
-		cam.End3D()
-	end
-
-	if render.OverrideBlend then render.OverrideBlend(false) end
 	render.SetBlend(1)
 	render.SetColorModulation(1, 1, 1)
 	render.MaterialOverride(nil)
@@ -104,8 +98,16 @@ local function FlushHalos()
 	if not g_VR or not g_VR.active then return end
 	local eye = g_VR.stereoEye
 	if eye ~= "left" and eye ~= "right" then return end
+
+	local sf = g_VR.stereoFrame or 0
+	if flushedEye[eye] == sf then
+		-- Already drew this eye; drop any late adds so shared tables can't poison us
+		ClearList()
+		return
+	end
 	if #list < 1 then return end
 
+	flushedEye[eye] = sf
 	hook.Run("PreDrawHalos")
 
 	for i = 1, #list do
@@ -119,7 +121,10 @@ local function Install()
 	if installed then return end
 	if not halo or not isfunction(halo.Add) then return end
 
-	stockAdd = stockAdd or halo.Add
+	-- Capture true stock Add once (never chain our own wrapper)
+	if not stockAdd then
+		stockAdd = halo.Add
+	end
 	ClearList()
 
 	function halo.Add(entities, color, blurx, blury, passes, add, ignorez)
@@ -129,14 +134,15 @@ local function Install()
 			end
 			return
 		end
-		if not istable(entities) or table.IsEmpty(entities) then return end
+		if not istable(entities) then return end
+
+		-- COPY entities — pickup reuses/Empties the same tables every frame
+		local entsCopy, n = CopyEnts(entities)
+		if n < 1 then return end
+
 		list[#list + 1] = {
-			Ents = entities,
-			Color = color,
-			BlurX = blurx or 2,
-			BlurY = blury or 2,
-			DrawPasses = passes or 1,
-			Additive = add ~= false,
+			Ents = entsCopy,
+			Color = color and Color(color.r, color.g, color.b, color.a or 255) or Color(255, 255, 255),
 			IgnoreZ = ignorez,
 		}
 	end
@@ -148,28 +154,30 @@ local function Install()
 		return NULL
 	end
 
-	-- Stock mono renderer clears the SBS RT — must not run in VR
 	hook.Remove("PostDrawEffects", "RenderHalos")
 
-	-- Pickup adds on PostDrawOpaque "vrmod_draw_pickup_halo".
-	-- Run after it (zzz_ sorts later) so the queue is filled this eye.
+	-- After pickup's vrmod_draw_pickup_halo (zzz_ sorts later)
 	hook.Add("PostDrawOpaqueRenderables", "zzz_vrmod_halos", function(depth, sky)
 		if depth or sky then return end
 		FlushHalos()
 	end)
 
-	-- Translucent props / late adds
 	hook.Add("PostDrawTranslucentRenderables", "zzz_vrmod_halos", function(depth, sky)
 		if depth or sky then return end
 		if #list < 1 then return end
 		FlushHalos()
 	end)
 
-	hook.Add("VRMod_PostRender", "vrmod_halos_clear", ClearList)
+	hook.Add("VRMod_PostRender", "vrmod_halos_clear", function()
+		ClearList()
+		flushedEye.left = -1
+		flushedEye.right = -1
+		ResetState()
+	end)
 
 	installed = true
 	if vrmod.logger then
-		vrmod.logger.Info("[halo] Pickup glows installed (simple ignoreZ path)")
+		vrmod.logger.Info("[halo] Pickup glows: copy-on-add, single soft pass")
 	end
 end
 
@@ -185,13 +193,18 @@ local function Uninstall()
 
 	if stockAdd then
 		halo.Add = stockAdd
-		stockAdd = nil
 	end
+	-- Keep stockAdd so re-enter VR doesn't chain wrappers if require fails
+	local savedStock = stockAdd
+	stockAdd = nil
 
 	package.loaded["halo"] = nil
 	local ok = pcall(require, "halo")
-	if not ok and vrmod.logger then
-		vrmod.logger.Warn("[halo] require('halo') failed on exit — reconnect if desktop halos missing")
+	if not ok and savedStock then
+		halo.Add = savedStock
+		hook.Add("PostDrawEffects", "RenderHalos", function()
+			hook.Run("PreDrawHalos")
+		end)
 	end
 
 	installed = false
@@ -207,7 +220,6 @@ hook.Add("VRMod_Exit", "vrmod_halos", function(ply)
 	Uninstall()
 end)
 
--- Ensure install even if Start already fired / lua_refresh mid-session
 hook.Add("VRMod_PreRender", "vrmod_halos_ensure", function()
 	if not g_VR or not g_VR.active then return end
 	if installed then
