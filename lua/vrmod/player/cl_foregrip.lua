@@ -432,7 +432,7 @@ end
 hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
 	if not g_VR or not g_VR.active then return end
 	if action ~= "boolean_left_pickup" then return end
-	if g_VR.menuGrabActive or g_VR.menuResizeActive then
+	if g_VR.menuResizeActive or (g_VR.menuGrabActive and g_VR.menuFocus) then
 		if not pressed and state.gripping then ClearGrip() end
 		return
 	end

@@ -249,11 +249,11 @@ function g_VR.MenuOpen()
 			draw.SimpleText(subtitle, "DermaDefault", 16, 36, Color(200, 150, 165))
 		end
 
-		-- Always-visible UX strip (target audience: VR players, not desktop mid-click)
+		-- Always-visible UX strip (VR players — no console required)
 		local fontHint = (C and C.Font and C.Font("CubeSmall")) or "DermaDefault"
 		local hintCol = T.muted or Color(200, 150, 165)
 		draw.SimpleText(
-			"Point · trigger open  ·  grip move  ·  drop near wrist to dock",
+			"Point · trigger  ·  grip move  ·  3× menu btn = reset panels",
 			fontHint, 256, 512 - 36, hintCol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER
 		)
 
