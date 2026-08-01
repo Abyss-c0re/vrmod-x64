@@ -46,12 +46,13 @@ Sources (live watch):
 - Remove remaining `viewmodel_fov` override (VR draws its own VM path).  
 - Only hard pin: `mat_queue_mode=1`. Soft-skip missing/failed SetString.
 
-### W3 — Glide dead input (P0)
+### W3 — Glide dead input (P0) — *partial in tree*
 **Cube way:** one vehicle input SoT — no “grab wheel” path that lies about throttle.  
 - Audit `sh_vehicles` / Glide hooks after July Glide update.  
 - Prefer **joystick/action-set driving** as default when Glide seat detected; wheel grab as visual/assist only.  
 - If Glide API moved: adapter layer in one file, no forks in tracking.  
-- Cube toast if Glide present but input not binding: “Glide seat — use thumbstick; wheel is optional.”
+- Cube toast if Glide present but input not binding: “Glide seat — use thumbstick; wheel is optional.”  
+- **Landed:** stick preferred over wheel; seat recheck; enter/unbound toasts (`5c29986`). Workshop comment Sobik349 still needs smoke.
 
 ### W4 — Swapped eyes (P1) — *convar + Cube toggle*
 **Cube way:** single bool, no second pose stream.  
@@ -64,16 +65,18 @@ Sources (live watch):
 - Document: use **Border guide**, not Z spam.  
 - Investigate asymmetric UV if right half uses wrong crop.
 
-### W6 — Action manifest (P1)
+### W6 — Action manifest (P1) — *partial in tree*
 **Cube way:** self-heal + honest error.  
 - Resolve `vrmod/vrmod_action_manifest.txt` via GAME/LUA paths; fallback copy path.  
-- On fail: Crimson toast with “module/manifest install” steps, not silent death.
+- On fail: Crimson toast with “module/manifest install” steps, not silent death.  
+- **Landed:** force-rewrite DATA bindings each start + error toast/overlay (`dce6e55`).
 
-### W7 — Desktop OK / HMD black or loading (P1)
+### W7 — Desktop OK / HMD black or loading (P1) — *partial in tree*
 **Cube way:** module dual OUT path (eng IN → blit → submit OUT). Never submit eng id.  
 - Already Linux focus; Windows same law.  
 - Startup self-test: if Submit fails N frames → toast + log `ShareTexture` sizes.  
-- Cube Experience won’t advance past Vision if no stereo frames.
+- Cube Experience won’t advance past Vision if no stereo frames.  
+- **Landed:** RT/share fail toasts + HMD pose self-test toast (`c68696c`). #347 still needs smoke.
 
 ### W8 — Fisheye (P1)
 **Cube way:** usually `viewscale` / FOV scale / wrong projection.  
@@ -100,11 +103,12 @@ Sources (live watch):
 
 ## Implementation order (Cube backlog)
 
-1. **Done / doing:** blocked cvars, swap eyes, SS+4096 crisp, panel2vr + Crimson Cube, border Experience  
-2. **Next:** Glide input SoT after API check  
-3. **Next:** action manifest path heal + startup stereo self-test  
-4. **Then:** hand bullet filter polish; worldmodel single path  
-5. **Track:** OpenXR migration (author intent) as long-horizon module law  
+1. **Done / doing:** blocked cvars, swap eyes, SS+4096 crisp, panel2vr + Crimson Cube, border Experience, primary hand SoT (`vrmod_primary_hand`)  
+2. **Partial:** Glide stick-primary + unbound toast (W3); action-manifest rewrite + toast (W6); ShareTexture/HMD self-test toast (W7)  
+3. **Ship bar:** in-headset smoke of menu-open crash, HUD ghost (#349), hands stuck, primary-hand left — then workshop  
+4. **Then:** hand bullet filter polish; worldmodel single path (W9/W10)  
+5. **Maintenance (research):** quarantine demoted AlgoCube / multi-face cubeui demo / web2vr aliases; strip twin dead IK after avatar smoke — **do not** merge FBT↔charik or force hands onto lerpedFrame without contract rewrite  
+6. **Track:** OpenXR migration (author intent) as long-horizon module law  
 
 ---
 
@@ -115,6 +119,7 @@ vrmod_experience_reset   -- re-run Vision/Posture guide (borders)
 vrmod_border_calibrate   -- vision only
 vrmod_swap_eyes 1        -- inverted stereo
 vrmod_supersample 1.5    -- crisp (restart VR)
+vrmod_primary_hand 0     -- 0=right laser+click (default), 1=left
 vrmod_cube_settings      -- Crimson Cube in VR
 vrmod_panel2vr_status
 ```
