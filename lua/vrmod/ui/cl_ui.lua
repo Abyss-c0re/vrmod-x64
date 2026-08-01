@@ -346,16 +346,44 @@ if CLIENT then
 		return nil, nil
 	end
 
+	-- Forward-declared: focus freeze for stereo (filled in VRUtilRenderMenuSystem)
+	local focusSnap = {
+		frame = -1,
+		uid = false,
+		panel = nil,
+		cursorWorld = nil,
+		cursorX = 0,
+		cursorY = 0,
+		scaleKey = 0,
+	}
+
+	local function InvalidateMenuHit(menu)
+		if not menu then return end
+		menu._hitFrame = -1
+		menu._hitScale = nil
+		menu._hitX, menu._hitY, menu._hitDist, menu._hitWorld = nil, nil, nil, nil
+		-- Force laser remap next eye so close/buttons match new scale immediately
+		menu.lastCursorX, menu.lastCursorY = nil, nil
+	end
+
 	local function EndResize(handName)
 		if not resizeState or resizeState.hand ~= handName then return false end
 		local uid = resizeState.uid
 		local menu = menus[uid]
 		if menu then
 			LockMenuScale(menu, menu.baseScale or menu.scale)
+			-- Resnap pose+scale and clear stale laser UV (was pre-stretch)
+			menu._snapFrame = -1
+			InvalidateMenuHit(menu)
 			vrmod.SaveMenuLayout(uid)
 		end
 		resizeState = nil
 		g_VR.menuResizeActive = false
+		-- Drop focus freeze so next eye rebuilds cursor on new scale
+		focusSnap.frame = -1
+		focusSnap.uid = false
+		focusSnap.panel = nil
+		focusSnap.cursorWorld = nil
 		return true
 	end
 
@@ -395,7 +423,12 @@ if CLIENT then
 		local startDist = resizeState.startDist or 1
 		if startDist < 2 then startDist = 2 end
 		local ns = (resizeState.startScale or 0.03) * (dist / startDist)
+		local prev = menu.baseScale or menu.scale or 0
 		LockMenuScale(menu, ns)
+		if math.abs((menu.baseScale or 0) - prev) > 1e-6 then
+			menu._snapFrame = -1
+			InvalidateMenuHit(menu)
+		end
 	end
 
 	local function ResolveDrawPose(v)
@@ -598,6 +631,7 @@ if CLIENT then
 		cursorWorld = nil,
 		cursorX = 0,
 		cursorY = 0,
+		scaleKey = 0, -- invalidate when any focused menu scale changes
 	}
 
 	function VRUtilRenderMenuSystem()
@@ -608,13 +642,19 @@ if CLIENT then
 		local sf = g_VR.stereoFrame or 0
 		local eye = g_VR.stereoEye
 		-- First eye of the frame solves laser focus; second eye reuses (no double hit tests)
-		local solveFocus = (focusSnap.frame ~= sf) or (eye == "left") or (eye == nil)
+		-- Always re-solve while resizing or if scale changed since freeze (close-btn desync)
+		local mustResolve = g_VR.menuResizeActive
+			or (focusSnap.frame ~= sf)
+			or (eye == "left")
+			or (eye == nil)
+		local solveFocus = mustResolve
 		if solveFocus then
 			g_VR.menuFocus = false
 			focusSnap.frame = sf
 			focusSnap.uid = false
 			focusSnap.panel = nil
 			focusSnap.cursorWorld = nil
+			focusSnap.scaleKey = 0
 		else
 			g_VR.menuFocus = focusSnap.uid
 		end
@@ -695,7 +735,11 @@ if CLIENT then
 			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
 			local resizingThis = resizeState and resizeState.uid == k
 			local wantCursor = v.cursorEnabled or MenuIsResizable(v) or resizingThis
-			if wantCursor and solveFocus and rhPos and rhAng then
+			-- Recompute UV if scale/pose changed (stale UV after stretch → X button miss)
+			local hitStale = (v._hitFrame ~= sf)
+				or not v._hitScale
+				or math.abs((v._hitScale or 0) - drawScale) > 1e-7
+			if wantCursor and (solveFocus or hitStale or resizingThis) and rhPos and rhAng then
 				local dir = rhAng:Forward()
 				local normal = ang:Up()
 				local A = normal:Dot(dir)
@@ -709,9 +753,12 @@ if CLIENT then
 						hitCursorY = -tp.y / drawScale
 						v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
 						v._hitFrame = sf
+						v._hitScale = drawScale
+						v.lastCursorX = hitCursorX
+						v.lastCursorY = hitCursorY
 					end
 				end
-			elseif wantCursor and v._hitFrame == sf then
+			elseif wantCursor and v._hitFrame == sf and v._hitScale and math.abs(v._hitScale - drawScale) <= 1e-7 then
 				hitCursorX, hitCursorY, hitDist, hitWorld = v._hitX, v._hitY, v._hitDist, v._hitWorld
 			end
 
@@ -767,6 +814,7 @@ if CLIENT then
 					focusSnap.cursorWorld = hitWorld
 					focusSnap.cursorX = hitCursorX
 					focusSnap.cursorY = hitCursorY
+					focusSnap.scaleKey = drawScale
 				end
 			end
 		end
@@ -784,9 +832,17 @@ if CLIENT then
 
 		local focus = g_VR.menuFocus
 		if focus and menus[focus] then
-			g_VR.menuCursorX = menus[focus].lastCursorX or focusSnap.cursorX
-			g_VR.menuCursorY = menus[focus].lastCursorY or focusSnap.cursorY
-			local beamEnd = focusSnap.cursorWorld or menus[focus]._hitWorld
+			-- Always prefer live lastCursor (remapped after stretch) over frozen snap UV
+			local lcX = menus[focus].lastCursorX
+			local lcY = menus[focus].lastCursorY
+			if lcX and lcY then
+				g_VR.menuCursorX = lcX
+				g_VR.menuCursorY = lcY
+			else
+				g_VR.menuCursorX = focusSnap.cursorX
+				g_VR.menuCursorY = focusSnap.cursorY
+			end
+			local beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
 			if rhPos and beamEnd then
 				render.SetMaterial(mat_beam)
 				render.DrawBeam(rhPos, beamEnd, 0.1, 0, 1, Color(255, 255, 255, 255))
