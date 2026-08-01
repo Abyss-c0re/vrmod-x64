@@ -33,8 +33,11 @@ BlockOldForegripAddon()
 timer.Simple(0.5, BlockOldForegripAddon)
 timer.Simple(2, BlockOldForegripAddon)
 
--- Hardcoded start range (not archived cvar — old client.vdf "12" killed long grips)
-local GRIP_DISTANCE = 20
+-- Start only when LH is close to RH *and* near the gun body (not free air / mag-hand space).
+-- Old 20u hand-only check stole grips that should be mag/prop grabs.
+local GRIP_DISTANCE = 14
+-- Max distance from mid-gun (RH+VMI + short forward) to claim stock foregrip
+local GRIP_GUN_NEAR = 11
 -- Mild two-hand aim. Must share the SAME gun matrix as LH attach (never unguided-vs-guided split).
 local GUIDE_BLEND = 0.12
 local RELEASE_MULT = 1.5
@@ -388,6 +391,21 @@ local function TryStartGrip()
 		vmi.offsetAng or Angle(),
 		R.pos, R.ang
 	)
+
+	-- Must be near the gun body (foregrip region), not just "hands close in free air".
+	-- Mid-gun ≈ weapon origin + short forward along gun aim (stock two-hand hold).
+	local gunMid = wepWorldPos + wepWorldAng:Forward() * 8
+	if L.pos:Distance(gunMid) > GRIP_GUN_NEAR then return false end
+
+	-- Local-space check: LH should sit along the barrel / support area, not way off-axis
+	local localLH = WorldToLocal(L.pos, Angle(), wepWorldPos, wepWorldAng)
+	if localLH then
+		local radial = math.sqrt(localLH.y * localLH.y + localLH.z * localLH.z)
+		-- HL2 VMI: +x is often along gun; allow a short support segment
+		if radial > 10 then return false end
+		if localLH.x < -4 or localLH.x > 28 then return false end
+	end
+
 	state.offsetPos, state.offsetAng = WorldToLocal(L.pos, L.ang, wepWorldPos, wepWorldAng)
 	state.gripping = true
 	state.wep = wep

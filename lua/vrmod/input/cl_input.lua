@@ -143,19 +143,23 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
 		if g_VR.menuGrabActive then return end
 
-		-- ArcVR two-hand: skip world prop pickup while gripping or about to grip foregrip
+		-- ArcVR: only block world pickup when already gripping FG, or LH is in FG
+		-- (not magwell). Mag eject is handled in ArcVR VRInput before FG.
 		local awep = LocalPlayer():GetActiveWeapon()
 		local arcFG = IsValid(awep) and awep.ArcticVR and awep.ForegripGrabbed
 		local arcNearFG = false
 		if pressed and IsValid(awep) and awep.ArcticVR and awep.TwoHanded and not arcFG then
-			if awep.LeftHandInForegrip then
-				arcNearFG = awep:LeftHandInForegrip(awep.ForegripMins, awep.ForegripMaxs) and true or false
-			elseif awep.LeftHandNearForegrip then
-				arcNearFG = awep:LeftHandNearForegrip(18) and true or false
+			local inMag = awep.LeftHandInMagazineZone and awep:LeftHandInMagazineZone()
+			if not inMag then
+				if awep.LeftHandInForegrip then
+					arcNearFG = awep:LeftHandInForegrip(awep.ForegripMins, awep.ForegripMaxs) and true or false
+				elseif awep.LeftHandNearForegrip then
+					arcNearFG = awep:LeftHandNearForegrip(9) and true or false
+				end
 			end
 		end
 
-		-- Stock two-hand foregrip claims left grip before world prop pickup
+		-- Stock two-hand: only when close to gun body (TryForegripGrab enforces zone)
 		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
