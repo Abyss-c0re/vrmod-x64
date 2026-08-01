@@ -90,45 +90,38 @@ function g_VR.MenuOpen()
 
 	do
 		local mm = g_VR.menus.miscmenu
-		-- Always start hand-docked at default scale unless user had scaleLocked *and*
-		-- a valid free-float layout — crash recovery ignores corrupt float poses.
-		local lay = vrmod.GetMenuLayout and vrmod.GetMenuLayout("miscmenu")
-		local keepFloat = lay and lay.freeFloat and lay.pos and lay.ang
-			and tonumber(lay.scale) and tonumber(lay.scale) >= 0.01 and tonumber(lay.scale) <= 0.12
-		if not keepFloat then
-			mm.scaleLocked = false
-			mm.freeFloat = false
-			mm.attachment = true
-			mm.scale = qmScale
-			mm.baseScale = qmScale
-			mm._lastAssignedScale = qmScale
-			mm.pos = qmPos
-			mm.ang = qmAng
-		elseif not mm.scaleLocked then
-			mm.scale = qmScale
-			mm.baseScale = qmScale
-			mm._lastAssignedScale = qmScale
-		end
+		-- Law: quick menu is ALWAYS wrist-attached (never free-float / grab)
+		mm.scaleLocked = false
+		mm.freeFloat = false
+		mm.attachment = true
+		mm.grabbable = false
+		mm.grabHand = nil
+		mm.grabPos = nil
+		mm.grabAng = nil
+		mm.scale = qmScale
+		mm.baseScale = qmScale
+		mm._lastAssignedScale = qmScale
+		mm.pos = qmPos
+		mm.ang = qmAng
 		mm.cubeMenu = true
-		mm.grabbable = true
 		mm.attachHand = wrist
 		mm.dirty = true
-		if not mm.freeFloat then
-			mm.attachment = true
+		-- Drop any saved free-float so reopen never parks QM in the world
+		if vrmod.ClearMenuLayout then
+			local lay = vrmod.GetMenuLayout and vrmod.GetMenuLayout("miscmenu")
+			if lay and lay.freeFloat then
+				vrmod.ClearMenuLayout("miscmenu")
+			end
 		end
 	end
 
-	-- First-open coaching (once per install) — plain language for VR players
+	-- First-open coaching (once per install)
 	if not cookie.GetNumber("vrmod_hint_qm_v1", 0) or cookie.GetNumber("vrmod_hint_qm_v1", 0) == 0 then
 		cookie.Set("vrmod_hint_qm_v1", "1")
 		if vrmod.Toast then
 			timer.Simple(0.4, function()
 				if not g_VR or not g_VR.active then return end
-				vrmod.Toast("Quick Menu rides your wrist — point with the other hand, trigger to pick", 5, "hint")
-			end)
-			timer.Simple(5.2, function()
-				if not g_VR or not g_VR.active then return end
-				vrmod.Toast("Grip the menu to free-move it · release near your wrist to dock it again", 5, "hint")
+				vrmod.Toast("Quick Menu stays on your wrist — point with the other hand, trigger to pick", 5, "hint")
 			end)
 		end
 	end

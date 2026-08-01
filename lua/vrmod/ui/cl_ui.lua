@@ -433,13 +433,26 @@ if CLIENT then
 		if not e then return false end
 		local applied = false
 		local sc = e.scale and tonumber(e.scale) or nil
+		-- Quick menu: never restore free-float — always wrist
+		local forceHand = (tostring(uid) == "miscmenu")
 		-- Reject corrupt/micro scales that make menus effectively invisible
-		if sc and sc >= SCALE_MIN and sc <= SCALE_MAX then
+		if sc and sc >= SCALE_MIN and sc <= SCALE_MAX and not forceHand then
 			LockMenuScale(menu, sc)
 			applied = true
+		elseif sc and sc >= SCALE_MIN and sc <= SCALE_MAX and forceHand then
+			-- Scale only (still attached)
+			menu.scale = sc
+			menu.baseScale = sc
+			menu._lastAssignedScale = sc
+			applied = true
 		elseif e.scaleLocked and sc and sc > 0 then
-			-- Was locked but out of range — unlock and ignore
 			menu.scaleLocked = false
+		end
+		if forceHand then
+			menu.freeFloat = false
+			menu.attachment = true
+			menu.grabbable = false
+			return applied
 		end
 		-- freeFloat==false means user reattached: keep open-time attachment, only scale above
 		if e.freeFloat and e.pos and e.ang then
