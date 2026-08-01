@@ -264,18 +264,33 @@ local function SolveForegripFrame()
 		return false
 	end
 
-	-- CRITICAL: attach LH to UNGUIDED RH+VMI gun matrix only.
-	-- Guiding gun from device LH then parenting LH to that gun creates a feedback
-	-- loop (LH → aim → gun → attach) that flickers full-body arm IK every frame.
+	-- CRITICAL: attach LH to smoothed UNGUIDED RH+VMI only (no LH→aim→gun feedback).
+	if not state.hasSmoothR then
+		state.smoothRPos:Set(rpos)
+		state.smoothRAng:Set(rang)
+		state.hasSmoothR = true
+	else
+		state.smoothRPos = LerpVector(RH_SMOOTH, state.smoothRPos, rpos)
+		state.smoothRAng = LerpAngle(RH_SMOOTH, state.smoothRAng, rang)
+	end
 	local baseGunPos, baseGunAng = LocalToWorld(
 		vmi.offsetPos or Vector(),
 		vmi.offsetAng or Angle(),
-		rpos, rang
+		state.smoothRPos, state.smoothRAng
 	)
 	local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, baseGunPos, baseGunAng)
+	-- Deadzone: ignore sub-threshold noise (FBT amplifies tiny hand moves)
 	if state.frame >= 0 then
-		attachPos = LerpVector(ATTACH_BLEND, state.leftPos, attachPos)
-		attachAng = LerpAngle(ATTACH_BLEND, state.leftAng, attachAng)
+		local dpos = attachPos:DistToSqr(state.leftPos)
+		local dang = (
+			math.abs(math.AngleDifference(attachAng.p, state.leftAng.p))
+			+ math.abs(math.AngleDifference(attachAng.y, state.leftAng.y))
+			+ math.abs(math.AngleDifference(attachAng.r, state.leftAng.r))
+		)
+		if dpos < ATTACH_POS_EPS_SQR and dang < ATTACH_ANG_EPS then
+			attachPos = Vector(state.leftPos)
+			attachAng = Angle(state.leftAng.p, state.leftAng.y, state.leftAng.r)
+		end
 	end
 
 	-- Guided aim only affects the weapon mesh / laser (not LH parent)
@@ -377,6 +392,9 @@ local function TryStartGrip()
 	state.bonesFrame = -1
 	state.startDist = math.max(dist, 6)
 	state.weaponBox = nil
+	state.smoothRPos:Set(R.pos)
+	state.smoothRAng:Set(R.ang)
+	state.hasSmoothR = true
 	RefreshWeaponBox(wep)
 	g_VR.foregripActive = true
 	return true
