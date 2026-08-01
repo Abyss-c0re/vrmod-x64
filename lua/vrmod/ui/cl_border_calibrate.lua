@@ -190,7 +190,7 @@ function vrmod.BorderCal_Start()
 		end
 
 		-- adjust
-		if vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action) then
+		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
 			nudge(-1)
 			return
 		end

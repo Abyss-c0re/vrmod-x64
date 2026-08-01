@@ -75,7 +75,6 @@ function g_VR.MenuOpen()
 		end
 		mm.cubeMenu = true
 		mm.grabbable = true
-		mm.attachHand = "left"
 		if not mm.freeFloat and not mm.grabHand then
 			mm.attachment = true
 		end
@@ -95,7 +94,6 @@ function g_VR.MenuOpen()
 		end
 		mm.cubeMenu = true
 		mm.grabbable = true
-		mm.attachHand = "left"
 		if not mm.freeFloat then
 			mm.attachment = true
 		end
@@ -265,10 +263,10 @@ function g_VR.MenuOpen()
 
 	paint(-1)
 
-	-- Trigger while open: flip pages without closing (either hand)
+	-- Trigger while open: flip pages without closing
 	hook.Add("VRMod_Input", "vrmod_qm_page_nav", function(action, pressed)
 		if not open or not pressed then return end
-		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
+		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
 		if hoverNav == "prev" then
 			local q = QM()
 			if q and q.PrevPage then q.PrevPage() end
@@ -302,15 +300,8 @@ function g_VR.MenuOpen()
 		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()
 		local hoveredItem = -1
 		hoverNav = nil
-		-- Use last laser UV stored on the menu (PreRender runs before stereo hit-test;
-		-- so this is previous-frame UV — still correct for hover/select).
-		local mx, my = -1, -1
-		if mm._hitX and mm._hitY then
-			mx, my = mm._hitX, mm._hitY
-		elseif g_VR.menuFocus == "miscmenu" or g_VR.menuAiming == "miscmenu" then
-			mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
-		end
-		if mx >= 0 and my >= 0 then
+		local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
+		if g_VR.menuFocus == "miscmenu" then
 			-- Nav hit
 			if mx >= navPrev.x and mx <= navPrev.x + navPrev.w and my >= navPrev.y and my <= navPrev.y + navPrev.h then
 				hoverNav = "prev"

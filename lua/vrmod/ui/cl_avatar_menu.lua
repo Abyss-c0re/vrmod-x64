@@ -611,13 +611,18 @@ function vrmod.AvatarMenu_Open()
 
 	hook.Add("VRMod_Input", "avatar_menu_input", function(action, pressed)
 		if not open then return end
-		-- B / secondary / chat / use always closes (either hand; even if laser focus lost)
-		if pressed and vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
+		-- B / secondary / chat / use always closes (even if laser focus lost)
+		if pressed and (
+			action == "boolean_secondaryfire"
+			or action == "boolean_chat"
+			or action == "boolean_use"
+			or action == "boolean_changeweapon"
+		) then
 			vrmod.AvatarMenu_Close()
 			return
 		end
 		if not pressed then return end
-		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
+		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
 
 		-- Always try UI hit-test if menu exists (don't require menuFocus — free-float lag)
 		local cx, cy = g_VR.menuCursorX, g_VR.menuCursorY

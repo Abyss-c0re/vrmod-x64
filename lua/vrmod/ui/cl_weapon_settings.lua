@@ -505,12 +505,17 @@ function vrmod.WeaponSettings_Open()
 
 	hook.Add("VRMod_Input", "weapon_settings_input", function(action, pressed)
 		if not open then return end
-		if pressed and vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
+		if pressed and (
+			action == "boolean_secondaryfire"
+			or action == "boolean_chat"
+			or action == "boolean_use"
+			or action == "boolean_changeweapon"
+		) then
 			vrmod.WeaponSettings_Close()
 			return
 		end
 		if not pressed then return end
-		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
+		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
 
 		local cx, cy = g_VR.menuCursorX, g_VR.menuCursorY
 		if not (g_VR.menuFocus == UID or (g_VR.menus and g_VR.menus[UID])) then return end

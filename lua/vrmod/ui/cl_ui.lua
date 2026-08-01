@@ -30,28 +30,6 @@ if CLIENT then
 		return s
 	end
 
-	--- Ambidextrous menu primary (LMB): right trigger OR left trigger OR car left
-	function vrmod.IsMenuPrimaryClick(action)
-		return action == "boolean_primaryfire"
-			or action == "boolean_left_primaryfire"
-			or action == "boolean_car_mouse_left"
-	end
-
-	--- Instant menu secondary / cancel (not left trigger — that is primary)
-	function vrmod.IsMenuSecondaryClick(action)
-		return action == "boolean_secondaryfire"
-			or action == "boolean_left_secondaryfire"
-			or action == "boolean_car_mouse_right"
-	end
-
-	--- Close / back on either hand
-	function vrmod.IsMenuCloseAction(action)
-		return vrmod.IsMenuSecondaryClick(action)
-			or action == "boolean_chat"
-			or action == "boolean_use"
-			or action == "boolean_changeweapon"
-	end
-
 	--- Effective 3D2D scale for a menu entry (open scale × global UI scale)
 	function vrmod.GetMenuDrawScale(menu)
 		local base = (menu and (menu.baseScale or menu.scale)) or 0.03
@@ -170,20 +148,6 @@ if CLIENT then
 
 	function VRUtilIsMenuOpen(uid)
 		return menus[uid] ~= nil
-	end
-
-	--- True while any interactive VR menu is open (or laser/grab active).
-	--- Blocks world/pouch grab so grip is for panels, not mags, while UI is up.
-	function vrmod.MenusBlockWorldGrab()
-		if not g_VR or not g_VR.active then return false end
-		if g_VR.menuFocus then return true end
-		if g_VR.menuGrabActive or g_VR.menuResizeActive then return true end
-		if g_VR.menuAiming then return true end -- soft laser near a panel
-		if not menusExist or not menus then return false end
-		for _, m in pairs(menus) do
-			if m and m.cursorEnabled ~= false then return true end
-		end
-		return false
 	end
 
 	--- Hand-local top-left so the panel CENTER sits near the wrist (not a far corner).
@@ -373,15 +337,6 @@ if CLIENT then
 		return HandPoseLive(handName)
 	end
 
-	--- Which hand a wrist-attached menu is parented to (default left).
-	local function MenuAttachHandName(menu)
-		if not menu then return "left" end
-		if menu.attachHand == "right" or menu.attachHand == "left" then
-			return menu.attachHand
-		end
-		return "left"
-	end
-
 	local function MarkConsumed(handName, pressed)
 		consumeStamp.frame = FrameNumber and FrameNumber() or 0
 		consumeStamp.hand = handName
@@ -409,7 +364,7 @@ if CLIENT then
 			local originAng = g_VR.originAngle or Angle()
 			return LocalToWorld(pos, ang, origin, originAng)
 		end
-		local hand = HandPose(MenuAttachHandName(menu))
+		local hand = HandPose("left")
 		if hand and hand.pos and hand.ang then
 			return LocalToWorld(pos, ang, hand.pos, hand.ang)
 		end
@@ -512,7 +467,7 @@ if CLIENT then
 		elseif v.freeFloat or not v.attachment then
 			pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
 		else
-			local hand = HandPose(MenuAttachHandName(v))
+			local hand = HandPose("left")
 			if hand and hand.pos and hand.ang then
 				pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
 			end
@@ -587,43 +542,17 @@ if CLIENT then
 			return false
 		end
 
-		-- Press: laser focus preferred; else proximity grab (hand near panel center)
+		-- Press: laser on a panel (resize works even if grab is disabled)
 		local uid = g_VR.menuFocus
-		if (not uid or uid == false) and g_VR.menuAiming then
-			uid = g_VR.menuAiming
-		end
-		local menu = uid and menus[uid] or nil
-		if not menu then
-			-- Proximity: grab panel if hand is close to its center (no laser lock required)
-			local hand = HandPoseLive(handName)
-			if not hand or not hand.pos then return false end
-			local bestUid, bestD = nil, 28
-			for _, m in ipairs(menuOrder) do
-				if m.grabbable == false then continue end
-				local wPos, wAng = ResolveMenuWorldPose(m)
-				if not wPos or not wAng then continue end
-				local sc = (m.baseScale or m.scale or 0.03) * vrmod.GetUIScale()
-				local cxw = wPos + wAng:Right() * ((m.width or 512) * sc * 0.5)
-					- wAng:Forward() * ((m.height or 512) * sc * 0.5)
-				local d = hand.pos:Distance(cxw)
-				if d < bestD then
-					bestD = d
-					bestUid = m.uid
-					menu = m
-				end
-			end
-			if not menu then return false end
-			uid = bestUid
-		end
+		if not uid or uid == false then return false end
+		local menu = menus[uid]
 		if not menu then return false end
 
 		local cx = menu.lastCursorX or g_VR.menuCursorX or 0
 		local cy = menu.lastCursorY or g_VR.menuCursorY or 0
-		-- Only allow corner resize when we have a real laser UV (not pure proximity)
-		local haveLaserUV = g_VR.menuFocus == uid or g_VR.menuAiming == uid
 
 		-- Corner grip → resize (every window by default); body grip → free-move if grabbable
-		if haveLaserUV and resizeOn and MenuIsResizable(menu) and CursorInResizeCorner(menu, cx, cy) then
+		if resizeOn and MenuIsResizable(menu) and CursorInResizeCorner(menu, cx, cy) then
 			-- Detach to free-float so resize stays put while scaling
 			local wPos, wAng = ResolveMenuWorldPose(menu)
 			if not menu.freeFloat and wPos and wAng then
@@ -732,8 +661,6 @@ if CLIENT then
 	function VRUtilRenderMenuSystem()
 		if not menusExist or #menuOrder == 0 then
 			g_VR.menuFocus = false
-			g_VR.menuAiming = false
-			g_VR.menuPointerHand = nil
 			return
 		end
 		local sf = g_VR.stereoFrame or 0
@@ -747,100 +674,24 @@ if CLIENT then
 		local solveFocus = mustResolve
 		if solveFocus then
 			g_VR.menuFocus = false
-			g_VR.menuPointerHand = nil
 			focusSnap.frame = sf
 			focusSnap.uid = false
 			focusSnap.panel = nil
 			focusSnap.cursorWorld = nil
 			focusSnap.scaleKey = 0
-			focusSnap.hand = nil
-			focusSnap.beamStart = nil
 		else
 			g_VR.menuFocus = focusSnap.uid
-			g_VR.menuPointerHand = focusSnap.hand
 		end
 
 		local menuFocusDist = 99999
 		local menuFocusPanel = nil
 		local menuFocusCursorWorldPos = nil
-		local menuFocusBeamStart = nil
-		local menuFocusHand = nil
 		local tms = render.GetToneMappingScaleLinear()
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
 
-		-- Laser pointers: natural "point" aim (controller tip tilts down) + palm root for beam
-		local pointers = {}
-		local tr = g_VR.tracking
-		-- ~natural VR point: tip ~32° down from controller forward (close-only worked because
-		-- panel filled FOV; at arm's length raw controller forward sails over the panel).
-		local AIM_PITCH = -32
-		local function AddPointer(name, pose)
-			if not pose or not pose.pos or not pose.ang then return end
-			local aimAng = Angle(pose.ang.p, pose.ang.y, pose.ang.r)
-			aimAng:RotateAroundAxis(aimAng:Right(), AIM_PITCH)
-			local fwd = aimAng:Forward()
-			pointers[#pointers + 1] = {
-				name = name,
-				pos = pose.pos + fwd * 3.0,
-				ang = aimAng,
-				root = pose.pos,
-			}
-		end
-		-- Prefer stereo-frozen hands (match panel snap) so laser and draw share one pose
-		do
-			local rh = HandPose("right")
-			local lh = HandPose("left")
-			if rh and rh.pos and rh.ang then
-				AddPointer("right", rh)
-			elseif tr and tr.pose_righthand then
-				AddPointer("right", tr.pose_righthand)
-			end
-			if lh and lh.pos and lh.ang then
-				AddPointer("left", lh)
-			elseif tr and tr.pose_lefthand then
-				AddPointer("left", tr.pose_lefthand)
-			end
-		end
-
-		--- Ray × menu plane → UV + world hit. Double-sided, room-scale.
-		--- Returns raw UV (may be outside panel); caller applies angular pad.
-		local function LaserHitPanel(origin, dir, pos, ang, drawScale)
-			if not origin or not dir or not pos or not ang or not drawScale or drawScale <= 0 then
-				return nil
-			end
-			local normal = ang:Up()
-			local A = normal:Dot(dir)
-			if math.abs(A) < 1e-5 then return nil end
-			local B = normal:Dot(pos - origin)
-			local hitDist = B / A
-			if hitDist < 0.25 or hitDist > 3000 then return nil end
-			local hitWorld = origin + dir * hitDist
-			local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
-			-- 3D2D: +X = Right, +Y screen = -Forward
-			return tp.x / drawScale, -tp.y / drawScale, hitDist, hitWorld
-		end
-
-		--- Angular UV pad: world-space aim error → UV. NEVER clamp to panel fraction
-		--- (that was the "must be close" bug: pad capped at 0.55*size ≈ 280px).
-		local function AimPadUV(hitDist, drawScale, width, height)
-			-- ~12° aim forgiveness + fixed world slack for controller wobble
-			local worldSlack = 8 + hitDist * 0.22
-			local pad = worldSlack / math.max(drawScale, 0.001)
-			pad = math.max(pad, 96)
-			-- Soft ceiling only so one stray ray can't steal focus across the room
-			local maxPad = math.max(width or 512, height or 512) * 2.5
-			if pad > maxPad then pad = maxPad end
-			return pad
-		end
-
-		--- Hand currently anchoring a menu (wrist attach or grab).
-		local function MenuAnchorHand(menu)
-			if not menu then return nil end
-			if menu.grabHand then return menu.grabHand end
-			if menu.freeFloat or menu.attachment == false then return nil end
-			if menu.attachment then return MenuAttachHandName(menu) end
-			return nil
-		end
+		local rh = g_VR.tracking and g_VR.tracking.pose_righthand
+		local rhPos = rh and rh.pos
+		local rhAng = rh and rh.ang
 
 		for _, v in ipairs(menuOrder) do
 			local k = v.uid
@@ -918,77 +769,33 @@ if CLIENT then
 			end
 
 			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
-			local hitHandName, hitBeamStart = nil, nil
 			local resizingThis = resizeState and resizeState.uid == k
 			local wantCursor = v.cursorEnabled or MenuIsResizable(v) or resizingThis
 			-- Recompute UV if scale/pose changed (stale UV after stretch → X button miss)
 			local hitStale = (v._hitFrame ~= sf)
 				or not v._hitScale
 				or math.abs((v._hitScale or 0) - drawScale) > 1e-7
-			if wantCursor and (solveFocus or hitStale or resizingThis) and #pointers > 0 then
-				-- Prefer free hand (not the wrist/grab anchor). If free hand misses,
-				-- fall back to any hand so menus stay usable at arm's length.
-				local anchor = MenuAnchorHand(v)
-				local bestFreeD, bestAnyD = 99999, 99999
-				local freeHit, anyHit = nil, nil
-				for pi = 1, #pointers do
-					local p = pointers[pi]
-					if not p.pos or not p.ang then continue end
-					local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
-					if not (hx and hy and hd) then continue end
-					local cand = {
-						hx = hx, hy = hy, hd = hd, hw = hw,
-						name = p.name, start = p.root or p.pos,
-					}
-					if hd < bestAnyD then
-						bestAnyD = hd
-						anyHit = cand
+			if wantCursor and (solveFocus or hitStale or resizingThis) and rhPos and rhAng then
+				local dir = rhAng:Forward()
+				local normal = ang:Up()
+				local A = normal:Dot(dir)
+				if A < 0 then
+					local B = normal:Dot(pos - rhPos)
+					if B < 0 then
+						hitDist = B / A
+						hitWorld = rhPos + dir * hitDist
+						local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
+						hitCursorX = tp.x / drawScale
+						hitCursorY = -tp.y / drawScale
+						v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
+						v._hitFrame = sf
+						v._hitScale = drawScale
+						v.lastCursorX = hitCursorX
+						v.lastCursorY = hitCursorY
 					end
-					-- Free hand preferred; anchor only counts if deliberately aimed (not wrist-glued)
-					local isAnchor = anchor and p.name == anchor
-					if (not isAnchor or hd >= 4) and hd < bestFreeD then
-						bestFreeD = hd
-						freeHit = cand
-					end
-				end
-				local pick = freeHit or anyHit
-				-- Mild sticky only if previous hand still has a free hit
-				if pick and focusSnap.hand and focusSnap.uid == k and freeHit then
-					for pi = 1, #pointers do
-						local p = pointers[pi]
-						if p.name == focusSnap.hand and p.pos and p.ang then
-							local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
-							if hx and hy and hd and hd <= freeHit.hd * 1.35 + 12 then
-								pick = {
-									hx = hx, hy = hy, hd = hd, hw = hw,
-									name = p.name, start = p.root or p.pos,
-								}
-							end
-							break
-						end
-					end
-				end
-				if pick then
-					hitCursorX, hitCursorY = pick.hx, pick.hy
-					hitDist, hitWorld = pick.hd, pick.hw
-					hitHandName, hitBeamStart = pick.name, pick.start
-					-- Provisional raw UV; focus block overwrites with clamped if accepted
-					v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
-					v._hitHand = hitHandName
-					v._hitBeamStart = hitBeamStart
-					v._hitFrame = sf
-					v._hitScale = drawScale
-					v.lastCursorX = hitCursorX
-					v.lastCursorY = hitCursorY
-				elseif solveFocus then
-					-- Clear stale UV so PreRender menus don't keep a ghost hover
-					v._hitX, v._hitY, v._hitDist, v._hitWorld = nil, nil, nil, nil
-					v._hitHand, v._hitBeamStart = nil, nil
-					v._hitFrame = -1
 				end
 			elseif wantCursor and v._hitFrame == sf and v._hitScale and math.abs(v._hitScale - drawScale) <= 1e-7 then
 				hitCursorX, hitCursorY, hitDist, hitWorld = v._hitX, v._hitY, v._hitDist, v._hitWorld
-				hitHandName, hitBeamStart = v._hitHand, v._hitBeamStart
 			end
 
 			cam.IgnoreZ(true)
@@ -1027,31 +834,23 @@ if CLIENT then
 			cam.IgnoreZ(false)
 
 			if solveFocus and wantCursor and hitCursorX and hitCursorY and hitDist then
-				local pad = AimPadUV(hitDist, drawScale, v.width, v.height)
-				local inside = hitCursorX > -pad and hitCursorY > -pad
-					and hitCursorX < v.width + pad and hitCursorY < v.height + pad
-				local keepResize = resizingThis and hitDist < menuFocusDist + 80
+				local cz = CornerZoneSize(v)
+				local inside = hitCursorX > -cz * 0.2 and hitCursorY > -cz * 0.2
+					and hitCursorX < v.width + cz * 0.2 and hitCursorY < v.height + cz * 0.2
+				local keepResize = resizingThis and hitDist < menuFocusDist + 50
 				if (inside or keepResize) and hitDist < menuFocusDist then
-					-- Cursor for buttons: clamp to panel so slight misses still hit edge slots
-					local curX = math.Clamp(hitCursorX, 0, v.width)
-					local curY = math.Clamp(hitCursorY, 0, v.height)
 					g_VR.menuFocus = k
 					menuFocusDist = hitDist
 					menuFocusPanel = v.panel
-					v.lastCursorX = curX
-					v.lastCursorY = curY
-					v._hitX, v._hitY = curX, curY
+					v.lastCursorX = hitCursorX
+					v.lastCursorY = hitCursorY
 					menuFocusCursorWorldPos = hitWorld
-					menuFocusBeamStart = hitBeamStart
-					menuFocusHand = hitHandName
 					focusSnap.uid = k
 					focusSnap.panel = v.panel
 					focusSnap.cursorWorld = hitWorld
-					focusSnap.cursorX = curX
-					focusSnap.cursorY = curY
+					focusSnap.cursorX = hitCursorX
+					focusSnap.cursorY = hitCursorY
 					focusSnap.scaleKey = drawScale
-					focusSnap.beamStart = hitBeamStart
-					focusSnap.hand = hitHandName
 				end
 			end
 		end
@@ -1059,8 +858,6 @@ if CLIENT then
 		render.SetToneMappingScaleLinear(tms)
 
 		if solveFocus then
-			g_VR.menuPointerHand = menuFocusHand or focusSnap.hand
-			g_VR.menuAiming = g_VR.menuFocus or false -- same as focus after angular pad
 			if focusSnap.panel ~= prevFocusPanel then
 				if IsValid(prevFocusPanel) then prevFocusPanel:SetMouseInputEnabled(false) end
 				if IsValid(focusSnap.panel) then focusSnap.panel:SetMouseInputEnabled(true) end
@@ -1082,21 +879,9 @@ if CLIENT then
 				g_VR.menuCursorY = focusSnap.cursorY
 			end
 			local beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
-			local beamStart = menus[focus]._hitBeamStart or focusSnap.beamStart
-			if not beamStart and g_VR.menuPointerHand == "left" then
-				local lh = tr and tr.pose_lefthand
-				beamStart = lh and lh.pos
-			end
-			if not beamStart then
-				local rh = tr and tr.pose_righthand
-				beamStart = rh and rh.pos
-			end
-			if beamStart and beamEnd then
+			if rhPos and beamEnd then
 				render.SetMaterial(mat_beam)
-				local col = (g_VR.menuPointerHand == "left")
-					and Color(180, 220, 255, 255)
-					or Color(255, 255, 255, 255)
-				render.DrawBeam(beamStart, beamEnd, 0.14, 0, 1, col)
+				render.DrawBeam(rhPos, beamEnd, 0.1, 0, 1, Color(255, 255, 255, 255))
 			end
 		end
 
@@ -1248,183 +1033,106 @@ if CLIENT then
 		end
 	end
 
-	-- Menu mouse (ambidextrous, stable):
-	--   • boolean_primaryfire OR boolean_left_primaryfire → LMB (Derma panels only)
-	--   • Hold either primary ≥ MENU_HOLD_RMB → RMB (context / spawn options)
-	--   • boolean_secondaryfire (either hand) → instant RMB
-	-- Custom 3D2D menus (settings/avatar/QM) handle their own activate — we do NOT
-	-- double-fire gui.InternalMouse there (that caused glitches / double toggles).
-	-- Never PushRenderTarget from input hooks (nested RT = crash under stereo).
-	local MENU_HOLD_RMB = 0.45
-	local menuTrigger = {}
-
-	local function FocusedMenuHasDermaPanel()
-		local uid = g_VR.menuFocus
-		if not uid or uid == false then return false end
-		local m = menus[uid]
-		return m and IsValid(m.panel) and true or false
-	end
-
-	local function DirtyFocusedMenu()
-		-- Mark only — paint happens on the normal PreStereoCapture / paint path
-		local uid = g_VR.menuFocus
-		if not uid or uid == false then return end
-		pcall(function()
-			if vrmod.MarkMenuDirty then vrmod.MarkMenuDirty(uid) end
-		end)
-	end
-
-	local function FireMenuRightClick()
-		if not g_VR.menuFocus or g_VR.menuFocus == false then return end
-		pcall(function()
-			SyncCursorToVR()
-			g_VR._dmenuOpened = false
-			local p = vgui.GetHoveredPanel and vgui.GetHoveredPanel() or nil
-			local m = menus[g_VR.menuFocus]
-			if not IsValid(p) and m and IsValid(m.panel) then
-				local root = m.panel
-				local lx = m.lastCursorX or g_VR.menuCursorX or 0
-				local ly = m.lastCursorY or g_VR.menuCursorY or 0
-				if root.LocalToScreen then
-					local sx, sy = root:LocalToScreen(lx, ly)
-					if sx then
-						input.SetCursorPos(sx, sy)
-						if vgui.GetHoveredPanel then p = vgui.GetHoveredPanel() end
-					end
-				end
-			end
-			local hops = 0
-			while IsValid(p) and hops < 32 do
-				if isfunction(p.DoRightClick) then
-					pcall(function() p:DoRightClick() end)
-					break
-				end
-				if isfunction(p.OpenMenu) then
-					pcall(function() p:OpenMenu() end)
-					break
-				end
-				p = p:GetParent()
-				hops = hops + 1
-			end
-			gui.InternalMousePressed(MOUSE_RIGHT)
-			gui.InternalMouseReleased(MOUSE_RIGHT)
-			heldButtons[MOUSE_RIGHT] = false
-			DirtyFocusedMenu()
-		end)
-	end
-
-	local function ClearMenuTriggers(releaseLmb)
-		for action, st in pairs(menuTrigger) do
-			if releaseLmb and st and st.lmb then
-				pcall(gui.InternalMouseReleased, MOUSE_LEFT)
-				heldButtons[MOUSE_LEFT] = false
-			end
-			menuTrigger[action] = nil
-		end
-	end
-
 	hook.Add("VRMod_Input", "ui", function(action, pressed)
+		-- Panel grab is handled in cl_input (before entity pickup) via vrmod.TryMenuGrab.
+		-- Also handle here so grab works if default input is disabled / reordered.
 		if action == "boolean_left_pickup" or action == "boolean_right_pickup" then
 			local hand = action == "boolean_left_pickup" and "left" or "right"
-			if vrmod.TryMenuGrab and vrmod.TryMenuGrab(hand, pressed) then return end
+			if vrmod.TryMenuGrab(hand, pressed) then return end
 		end
 
-		if not g_VR.menuFocus or g_VR.menuFocus == false then
-			if not pressed and menuTrigger[action] then
-				local st = menuTrigger[action]
-				if st and st.lmb then
-					pcall(gui.InternalMouseReleased, MOUSE_LEFT)
-					heldButtons[MOUSE_LEFT] = false
-				end
-				menuTrigger[action] = nil
-			end
-			return
-		end
-		if g_VR.menuResizeActive or g_VR.menuGrabActive then return end
-
-		local isPrimary = vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)
-		local derma = FocusedMenuHasDermaPanel()
-
-		-- ── Triggers ─────────────────────────────────────────────────────
-		if isPrimary then
-			-- Custom 3D2D menus (settings/avatar/QM): their own hooks handle click.
-			-- Only inject OS mouse for real Derma shells (spawn/context/p2v).
-			if not derma then return end
-
-			if pressed then
-				-- One active trigger only (prevent dual-hand double LMB)
-				ClearMenuTriggers(true)
-				pcall(SyncCursorToVR)
-				menuTrigger[action] = {
-					down = true,
-					t0 = CurTime(),
-					lmb = true,
-					rmbDone = false,
-				}
-				heldButtons[MOUSE_LEFT] = true
-				pcall(gui.InternalMousePressed, MOUSE_LEFT)
-				DirtyFocusedMenu()
-			else
-				local st = menuTrigger[action]
-				menuTrigger[action] = nil
-				if st and st.lmb and not st.rmbDone then
-					pcall(SyncCursorToVR)
-					pcall(gui.InternalMouseReleased, MOUSE_LEFT)
-					heldButtons[MOUSE_LEFT] = false
-					DirtyFocusedMenu()
-				else
-					heldButtons[MOUSE_LEFT] = false
-				end
-			end
-			return
-		end
-
-		-- Instant RMB (secondary either hand)
-		if vrmod.IsMenuSecondaryClick and vrmod.IsMenuSecondaryClick(action) then
-			if pressed then
-				ClearMenuTriggers(true)
-				FireMenuRightClick()
-			end
-			return
-		end
-
-		if action == "boolean_sprint" then
+		if not g_VR.menuFocus then return end
+		-- Don't inject clicks while resizing (corner drag is not a button press)
+		if g_VR.menuResizeActive then return end
+		local mouseButton = nil
+		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
+			mouseButton = MOUSE_LEFT
+		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right"
+			or action == "boolean_left_secondaryfire" then
+			-- Right-click: ContentIcon spawn options, Derma context, etc.
+			mouseButton = MOUSE_RIGHT
+		elseif action == "boolean_sprint" then
+			-- Middle-click for Derma. Reattach only if laser is on the title bar
+			-- (free-float panels used to steal ALL mid-clicks → spawn menu broke).
 			if pressed then
 				local m = menus[g_VR.menuFocus]
 				local cy = (m and m.lastCursorY) or g_VR.menuCursorY or 999
-				if m and m.freeFloat and not g_VR.menuGrabActive and cy >= 0 and cy < 36 then
+				local titleH = 36
+				if m and m.freeFloat and not g_VR.menuGrabActive
+					and cy >= 0 and cy < titleH then
 					vrmod.MenuReattach(g_VR.menuFocus)
 					return
 				end
-				heldButtons[MOUSE_MIDDLE] = true
-				pcall(SyncCursorToVR)
-				pcall(gui.InternalMousePressed, MOUSE_MIDDLE)
-			else
-				heldButtons[MOUSE_MIDDLE] = false
-				pcall(gui.InternalMouseReleased, MOUSE_MIDDLE)
 			end
-			DirtyFocusedMenu()
+			mouseButton = MOUSE_MIDDLE
+		end
+
+		if mouseButton then
+			heldButtons[mouseButton] = pressed
+			SyncCursorToVR()
+
+			-- RIGHT CLICK (spawn ContentIcon menu):
+			-- Derma only calls DoRightClick on mouse *release* when panel.Hovered.
+			-- Laser VR often has Hovered=false on release → menu never opens.
+			-- Fire DoRightClick on press while laser hover is valid; DMenu:Open is
+			-- patched in panel2vr to parent onto the spawn RT.
+			if mouseButton == MOUSE_RIGHT then
+				if pressed then
+					g_VR._dmenuOpened = false
+					local p = vgui.GetHoveredPanel and vgui.GetHoveredPanel() or nil
+					-- Fallback: walk spawn/context children under laser UV
+					if not IsValid(p) and IsValid(menus[g_VR.menuFocus] and menus[g_VR.menuFocus].panel) then
+						local root = menus[g_VR.menuFocus].panel
+						local lx = menus[g_VR.menuFocus].lastCursorX or g_VR.menuCursorX or 0
+						local ly = menus[g_VR.menuFocus].lastCursorY or g_VR.menuCursorY or 0
+						-- Convert root-local laser → screen → find child (VGUI helpers)
+						if root.LocalToScreen then
+							local sx, sy = root:LocalToScreen(lx, ly)
+							if sx and vgui.GetHoveredPanel then
+								input.SetCursorPos(sx, sy)
+								p = vgui.GetHoveredPanel()
+							end
+						end
+					end
+					local hops = 0
+					while IsValid(p) and hops < 32 do
+						if isfunction(p.DoRightClick) then
+							pcall(function() p:DoRightClick() end)
+							break
+						end
+						if isfunction(p.OpenMenu) then
+							pcall(function() p:OpenMenu() end)
+							break
+						end
+						p = p:GetParent()
+						hops = hops + 1
+					end
+					gui.InternalMousePressed(MOUSE_RIGHT)
+				else
+					SyncCursorToVR()
+					gui.InternalMouseReleased(MOUSE_RIGHT)
+				end
+			else
+				if pressed then
+					gui.InternalMousePressed(mouseButton)
+				else
+					gui.InternalMouseReleased(mouseButton)
+				end
+			end
+
+			-- Force-paint focused shell so DMenus appear on RT this frame
+			if g_VR.menuFocus then
+				vrmod.MarkMenuDirty(g_VR.menuFocus)
+				if isfunction(VRUtilMenuRenderPanel) then
+					VRUtilMenuRenderPanel(g_VR.menuFocus, true)
+				end
+			end
 		end
 	end)
 
 	hook.Add("Think", "VRUtil_SyncCursorWhileHeld", function()
-		if not g_VR or not g_VR.active then return end
-		if not g_VR.menuFocus or g_VR.menuFocus == false then
-			ClearMenuTriggers(true)
-			return
-		end
-		pcall(SyncCursorToVR)
-		if not FocusedMenuHasDermaPanel() then return end
-		local now = CurTime()
-		for action, st in pairs(menuTrigger) do
-			if st and st.down and st.lmb and not st.rmbDone and (now - (st.t0 or now)) >= MENU_HOLD_RMB then
-				st.rmbDone = true
-				st.lmb = false
-				pcall(gui.InternalMouseReleased, MOUSE_LEFT)
-				heldButtons[MOUSE_LEFT] = false
-				FireMenuRightClick()
-			end
-		end
+		if not g_VR or not g_VR.menuFocus then return end
+		SyncCursorToVR()
 	end)
 
 	local lastMenuFocus = nil

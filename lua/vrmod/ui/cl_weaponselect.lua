@@ -234,8 +234,9 @@ function VRUtilWeaponMenuOpen()
 	if not g_VR or not g_VR.active or not isfunction(VRUtilMenuOpen) then return end
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return end
+	local hmd = g_VR.tracking and g_VR.tracking.hmd
 	local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-	if not rh or not rh.pos or not rh.ang then return end
+	if not hmd or not hmd.ang or not rh or not rh.pos or not rh.ang then return end
 
 	open = true
 	local selectHolster = false
@@ -284,14 +285,16 @@ function VRUtilWeaponMenuOpen()
 	end
 	if #slotOrder == 0 then state.catIndex = 0 end
 
-	-- Right-hand attach (same local pose family as quickmenu / settings on left).
-	-- Free-float world freeze made the panel drift away → laser felt "must be close".
-	local pos, ang, openScale = Vector(2.5, 3.5, 4), Angle(0, -90, 55), MENU_SCALE
-	if isfunction(VRUtilHandMenuPose) then
-		pos, ang, openScale = VRUtilHandMenuPose(MENU_W, MENU_H, MENU_SCALE, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
-	end
+	-- World placement: Alyx-like in front of hand, slightly tilted
+	local tmpAng = Angle(0, hmd.ang.yaw - 90, 55)
+	local pos, ang = WorldToLocal(
+		rh.pos + rh.ang:Forward() * 9 + tmpAng:Right() * -(MENU_W * MENU_SCALE * 0.35) + tmpAng:Forward() * -4,
+		tmpAng,
+		g_VR.origin or Vector(),
+		g_VR.originAngle or Angle()
+	)
 
-	VRUtilMenuOpen("weaponmenu", MENU_W, MENU_H, nil, true, pos, ang, openScale, true, function()
+	VRUtilMenuOpen("weaponmenu", MENU_W, MENU_H, nil, false, pos, ang, MENU_SCALE, true, function()
 		hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 		open = false
 		local p = LocalPlayer()
@@ -327,21 +330,7 @@ function VRUtilWeaponMenuOpen()
 	local m = g_VR.menus.weaponmenu
 	m.cubeMenu = true
 	m.grabbable = true
-	m.attachHand = "right"
-	-- Always start on right hand; grip still free-floats mid-session.
-	-- Saved freeFloat layout made the panel freeze in world and felt "must be close".
-	m.freeFloat = false
-	m.attachment = true
-	m.grabHand = nil
-	m.grabPos = nil
-	m.grabAng = nil
-	m.pos = pos
-	m.ang = ang
-	if not m.scaleLocked then
-		m.scale = openScale
-		m.baseScale = openScale
-		m._lastAssignedScale = openScale
-	end
+	m.scale = MENU_SCALE
 
 	-- Layout constants
 	local HEADER_H = 52
@@ -391,13 +380,8 @@ function VRUtilWeaponMenuOpen()
 		local C = vrmod.cube
 		local T = Theme()
 		local fonts = Fonts()
-		local wm = g_VR.menus and g_VR.menus.weaponmenu
-		local mx, my = -1, -1
-		if wm and wm._hitX and wm._hitY then
-			mx, my = wm._hitX, wm._hitY
-		elseif g_VR.menuFocus == "weaponmenu" or g_VR.menuAiming == "weaponmenu" then
-			mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
-		end
+		local mx = (g_VR.menuFocus == "weaponmenu") and (g_VR.menuCursorX or -1) or -1
+		local my = (g_VR.menuFocus == "weaponmenu") and (g_VR.menuCursorY or -1) or -1
 
 		-- ── Chrome plate ──────────────────────────────────────────
 		if C and C.DrawChrome then
@@ -533,11 +517,11 @@ function VRUtilWeaponMenuOpen()
 		VRUtilMenuRenderEnd()
 	end
 
-	-- Click categories while menu held open (either hand trigger)
+	-- Click categories while menu held open
 	hook.Add("VRMod_Input", "vrmod_weaponmenu_nav", function(action, pressed)
 		if not open then return end
 		if not pressed then return end
-		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
+		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
 		if g_VR.menuFocus ~= "weaponmenu" then return end
 		if state.hoveredCat > 0 then
 			state.catIndex = state.hoveredCat
@@ -560,9 +544,8 @@ function VRUtilWeaponMenuOpen()
 		local menu = g_VR.menus.weaponmenu
 		menu.cubeMenu = true
 		menu.grabbable = true
-		menu.attachHand = "right"
 		if not menu.freeFloat and not menu.grabHand then
-			menu.attachment = true
+			-- keep world pose unless free-grabbed
 		end
 		paint()
 	end)

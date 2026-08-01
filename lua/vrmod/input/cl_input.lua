@@ -177,11 +177,9 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_left_pickup" then
-		-- WayVR-style panel grab (laser / proximity) consumes grip
+		-- WayVR-style panel grab consumes grip when laser is on a menu
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
 		if g_VR.menuGrabActive then return end
-		-- Any open interactive menu: block world/pouch grab (focus not required)
-		if vrmod.MenusBlockWorldGrab and vrmod.MenusBlockWorldGrab() then return end
 
 		-- ArcVR: only block world pickup when already gripping FG, or LH is in FG
 		-- (not magwell). Mag eject is handled in ArcVR VRInput before FG.
@@ -221,7 +219,6 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	if action == "boolean_right_pickup" then
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("right", pressed) then return end
 		if g_VR.menuGrabActive then return end
-		if vrmod.MenusBlockWorldGrab and vrmod.MenusBlockWorldGrab() then return end
 		if g_VR.avatarSteerTwin then return end
 		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
 		if twin and twin.active and twin.mode == "free" and not g_VR.menuFocus then return end

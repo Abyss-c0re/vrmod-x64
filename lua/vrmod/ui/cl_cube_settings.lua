@@ -713,13 +713,13 @@ function vrmod.CubeSettings_Open()
 
 	hook.Add("VRMod_Input", "cube_settings_input", function(action, pressed)
 		if not open then return end
-		if pressed and vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
+		if pressed and (action == "boolean_secondaryfire" or action == "boolean_chat") then
 			vrmod.CubeSettings_Close()
 			return
 		end
 		if not pressed then return end
 		if g_VR.menuFocus ~= UID then return end
-		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
+		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
 		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
 	end)
 

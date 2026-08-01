@@ -107,7 +107,7 @@ if CLIENT then
 		end
 
 		hook.Add("VRMod_Input", "vrmod_numpad_clickdetect", function(action, pressed)
-			if vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action) then
+			if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
 				justClicked = pressed and not wasClicking
 				wasClicking = pressed
 				FindCtrlNumPadUnderCursor()
