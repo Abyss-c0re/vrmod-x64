@@ -32,13 +32,13 @@ if CLIENT then
 	-- Desired values applied while VR is active.
 	-- Do NOT include cvars on GMod's Blocked_ConCommands list (mat_reduceparticles,
 	-- r_shadowrendertotexture, etc.) — Lua cannot change them without console spam.
-	-- mat_queue_mode is applied from vrmod_mat_queue_mode (0/1/2). Default 1 = safe stereo.
-	-- Mode 2 = Source material queue multithreaded (gmod_mcore + mat system workers).
+	-- mat_queue_mode from vrmod_mat_queue_mode (0/1/2). Mode 2 is first-class:
+	-- set once at VR start, never thrash workers mid-session; submit uses Lua RT size.
 	local function WantedMatQueueMode()
 		local cv = convars and convars.vrmod_mat_queue_mode
 		if not cv and GetConVar then cv = GetConVar("vrmod_mat_queue_mode") end
-		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 1
-		n = math.floor(tonumber(n) or 1)
+		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 2
+		n = math.floor(tonumber(n) or 2)
 		if n < 0 then n = 0 end
 		if n > 2 then n = 2 end
 		return n
@@ -47,8 +47,8 @@ if CLIENT then
 	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
-		-- Filled at VR start from WantedMatQueueMode(); re-read each pin refresh.
-		mat_queue_mode = "1",
+		-- Filled at VR start from WantedMatQueueMode()
+		mat_queue_mode = "2",
 		mat_disable_bloom = "1",
 		mat_disable_fancy_blending = "1",
 		mat_disable_lightwarp = "1",
@@ -65,10 +65,12 @@ if CLIENT then
 		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
 		snd_mute_losefocus = "0",
 	}
-	-- Session pins: re-assert every frame while VR active; restored on exit (unlike old forever-1).
+	-- mat_queue is set ONCE at start (re-SetInt every frame restarts workers → crash).
+	-- Other pins can be re-asserted if needed.
 	local SESSION_PIN_CONVARS = {
-		mat_queue_mode = true,
+		-- mat_queue_mode deliberately NOT here
 	}
+	local matQueueAppliedForSession = false
 	-- Stores original convar values so we can restore them on VR exit
 	local convarOverrides = {}
 
@@ -166,10 +168,20 @@ if CLIENT then
 		convarOverrides = {}
 	end
 
-	-- While VR is active, re-assert session pins if something else changes them.
+	-- Push authoritative SBS RT size to the module (mat_queue 2 cannot query GL size).
+	local function PushKnownSubmitSize()
+		if not isfunction(VRMOD_SetKnownSubmitSize) then return end
+		local w = tonumber(g_VR.rtWidth)
+		local h = tonumber(g_VR.rtHeight)
+		if w and h and w >= 32 and h >= 32 then
+			pcall(VRMOD_SetKnownSubmitSize, w, h)
+		end
+	end
+
+	-- While VR is active: do NOT re-set mat_queue_mode every frame (worker thrash).
 	local function EnsurePinnedConvars()
 		if not g_VR.active then return end
-		RefreshMatQueuePin()
+		PushKnownSubmitSize()
 		for name, _ in pairs(SESSION_PIN_CONVARS) do
 			local want = PERFORMANCE_CONVARS[name]
 			if want ~= nil then
@@ -1090,14 +1102,19 @@ if CLIENT then
 		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
 		RefreshMatQueuePin()
 		for cvar, val in pairs(PERFORMANCE_CONVARS) do
-			overrideConvar(cvar, val)
+			-- mat_queue only once per session
+			if cvar == "mat_queue_mode" then
+				if not matQueueAppliedForSession then
+					overrideConvar(cvar, val)
+					matQueueAppliedForSession = true
+				end
+			else
+				overrideConvar(cvar, val)
+			end
 		end
 		local mq = WantedMatQueueMode()
 		if vrmod.logger then
-			vrmod.logger.Info("mat_queue_mode=%s (vrmod_mat_queue_mode; 0=sync 1=queued 2=multithreaded)", tostring(mq))
-		end
-		if mq >= 2 and vrmod.Toast then
-			vrmod.Toast("mat_queue_mode 2 (multithreaded) — if skybox/HUD flickers, set vrmod_mat_queue_mode 1", 5, "info")
+			vrmod.logger.Info("mat_queue_mode=%s (vrmod_mat_queue_mode; 2=multithreaded, set once)", tostring(mq))
 		end
 	end
 
@@ -1235,6 +1252,8 @@ if CLIENT then
 			end
 		end
 		g_VR._shareTextureOk = okBegin and okFin and true or false
+		-- Authoritative SBS size for OpenXR submit (mat_queue 2 cannot glGetTexLevel)
+		PushKnownSubmitSize()
 		ApplySubmitBounds()
 		BindBorderConvarCallbacks()
 		BindRenderProfileCallbacks()
@@ -1517,6 +1536,7 @@ if CLIENT then
 			if not g_VR.active then return end
 			timer.Remove("vrmod_stereo_selftest")
 			g_VR._stereoSelfTestDone = true
+			matQueueAppliedForSession = false
 			restoreConvarOverrides()
 			VRUtilMenuClose()
 			VRUtilNetworkCleanup()

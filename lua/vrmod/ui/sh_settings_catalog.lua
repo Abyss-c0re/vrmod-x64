@@ -89,10 +89,10 @@ vrmod.SettingsCatalog = {
 			{ kind = "bool", label = "Engine post-processing", cvar = "vrmod_postprocess" },
 			{ kind = "combo", label = "Material queue (mat_queue_mode)", cvar = "vrmod_mat_queue_mode", choices = {
 				{ text = "0 — sync (single-thread)", value = 0 },
-				{ text = "1 — queued (safe stereo)", value = 1 },
-				{ text = "2 — multithreaded", value = 2 },
+				{ text = "1 — queued single-thread", value = 1 },
+				{ text = "2 — multithreaded (default)", value = 2 },
 			}},
-			{ kind = "help", label = "2 = Source mat system workers. If focus flicker/skybox flash, use 1." },
+			{ kind = "help", label = "2 = Source mat workers (recommended). Restart VR after change. Use 1 only if flicker." },
 			{ kind = "bool", label = "Auto render offset", cvar = "vrmod_renderoffset" },
 			{ kind = "help", label = "Disable if rendering glitches" },
 			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },
