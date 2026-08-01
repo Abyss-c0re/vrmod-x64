@@ -187,59 +187,8 @@ local function PopulateFromCatalog(sheet)
 	end
 end
 
-local function TryAddArcVR(sheet)
-	if not ConVarExists("arcticvr_virtualstock") then return end
-	local t = vgui.Create("DScrollPanel", sheet)
-	sheet:AddSheet("ArcVR", t, "icon16/gun.png")
-	local function AddSection(parentList, title, builder)
-		local cat = vgui.Create("DCollapsibleCategory", parentList)
-		cat:SetLabel(title)
-		cat:Dock(TOP)
-		cat:DockMargin(0, 0, 0, 5)
-		cat:SetExpanded(false)
-		local form = vgui.Create("DForm", cat)
-		form:Dock(FILL)
-		form.Header:SetVisible(false)
-		form:InvalidateLayout(true)
-		builder(form)
-		cat:SetContents(form)
-		return cat
-	end
-
-	AddSection(t, "Controls", function(f)
-		f:CheckBox("Grip with reload key", "arcticvr_grip_withreloadkey")
-		f:CheckBox("Magazine bump preload", "arcticvr_mag_bumpreload")
-		f:CheckBox("Alternative frontgrip mode", "arcticvr_grip_alternative_mode")
-		f:NumSlider("Slide magnification", "arcticvr_slide_magnification", 1, 10, 2)
-		f:NumSlider("Grip magnification", "arcticvr_grip_magnification", 1, 10, 2)
-		f:CheckBox("Disable reload with key", "arcticvr_disable_reloadkey")
-		f:CheckBox("Disable grab reload", "arcticvr_disable_grabreload")
-	end)
-	AddSection(t, "Virtual Stock & Fixes", function(f)
-		f:CheckBox("Enable virtual stock", "arcticvr_virtualstock")
-		f:NumSlider("Frontgrip power", "arcticvr_2h_sens", 0, 2, 2)
-		f:CheckBox("Grenade pin enable", "arcticvr_grenade_pin_enable")
-		f:CheckBox("Shoot system fix", "arcticvr_shootsys")
-		f:CheckBox("Misc client fix", "arcticvr_test_cl_misc_fix")
-	end)
-	AddSection(t, "Mag Pouches", function(f)
-		f:NumSlider("Default pouch distance", "arcticvr_defpouchdist", 0, 200, 2)
-		f:CheckBox("Hybrid pouch", "arcticvr_hybridpouch")
-		f:NumSlider("Hybrid pouch distance", "arcticvr_hybridpouchdist", 0, 200, 1)
-		f:CheckBox("Head pouch", "arcticvr_headpouch")
-		f:NumSlider("Head pouch distance", "arcticvr_headpouchdist", 0, 200, 1)
-		f:CheckBox("Infinite pouch range", "arcticvr_infpouch")
-	end)
-	AddSection(t, "Server Settings", function(f)
-		f:CheckBox("Allow reload key (all guns)", "arcticvr_allgun_allow_reloadkey")
-		f:CheckBox("Allow reload key (client)", "arcticvr_allgun_allow_reloadkey_client")
-		f:CheckBox("Bump reload (all guns)", "arcticvr_bumpreload_allgun")
-		f:CheckBox("Bump reload (client)", "arcticvr_bumpreload_allgun_client")
-		f:CheckBox("Normalize default ammo", "arcticvr_defaultammo_normalize")
-		f:CheckBox("Alternate physics bullets", "arcticvr_physical_bullets")
-		f:NumSlider("Mag pickup delay", "arcticvr_net_magtimertime", 0, 1, 2)
-	end)
-end
+-- ArcVR pane is injected by vrmod.GetSettingsCatalog() when ArcVR is mounted.
+-- No separate DPropertySheet sheet — avoids double UI and keeps VR Cube in sync.
 
 function VRUtilOpenMenu()
 	if IsValid(frame) then
@@ -290,24 +239,11 @@ function VRUtilOpenMenu()
 	sheet:Dock(FILL)
 	frame.DPropertySheet = sheet
 
-	-- Same catalog as VR cube settings
+	-- Same catalog as VR cube settings (includes ArcVR when addon is present)
 	PopulateFromCatalog(sheet)
 
-	-- ArcVR if present (optional third-party)
-	if ConVarExists("arcticvr_virtualstock") then
-		TryAddArcVR(sheet)
-	else
-		timer.Create("VRMod_CheckArcVR", 1, 3, function()
-			if not IsValid(sheet) then
-				timer.Remove("VRMod_CheckArcVR")
-				return
-			end
-			if ConVarExists("arcticvr_virtualstock") then
-				timer.Remove("VRMod_CheckArcVR")
-				TryAddArcVR(sheet)
-			end
-		end)
-	end
+	-- Late ArcVR load: if convars appear after menu open, user reopens for ArcVR tab
+	-- (Cube Settings always re-reads GetSettingsCatalog each paint — no rebuild needed)
 
 	-- Extra debug subsystem toggles (dynamic, not in static catalog)
 	do

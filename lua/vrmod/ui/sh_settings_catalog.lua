@@ -270,11 +270,70 @@ vrmod.SettingsCatalog = {
 	},
 }
 
---- Live catalog: injects Quick Menu item rows from layout (status labels update)
+--- True when ArcVR / arcticvr_base addon is loaded (optional third-party).
+function vrmod.IsArcVRPresent()
+	if not CLIENT then return false end
+	if ArcticVR ~= nil then return true end
+	-- Probe common client convars (created in cl_arcticvr_misc / weapon base)
+	if ConVarExists("arcticvr_virtualstock") then return true end
+	if ConVarExists("arcticvr_2h_sens") then return true end
+	if ConVarExists("arcticvr_grip_magnification") then return true end
+	return false
+end
+
+--- ArcVR settings pane (only when addon present). Shared VR Cube + desktop Derma.
+function vrmod.GetArcVRSettingsCategory()
+	return {
+		id = "arcvr",
+		title = "ArcVR",
+		icon = "icon16/gun.png",
+		optional = true,
+		rows = {
+			{ kind = "help", label = "Optional ArcVR companion — only if the addon is mounted" },
+			{ kind = "header", label = "Controls" },
+			{ kind = "bool", label = "Grip with reload key", cvar = "arcticvr_grip_withreloadkey" },
+			{ kind = "bool", label = "Magazine bump preload", cvar = "arcticvr_mag_bumpreload" },
+			{ kind = "bool", label = "Alternative frontgrip mode", cvar = "arcticvr_grip_alternative_mode" },
+			{ kind = "slider", label = "Slide magnification", cvar = "arcticvr_slide_magnification", min = 1, max = 10, decimals = 2 },
+			{ kind = "slider", label = "Grip magnification", cvar = "arcticvr_grip_magnification", min = 1, max = 10, decimals = 2 },
+			{ kind = "bool", label = "Disable reload with key", cvar = "arcticvr_disable_reloadkey" },
+			{ kind = "bool", label = "Disable grab reload", cvar = "arcticvr_disable_grabreload" },
+			{ kind = "header", label = "Virtual stock & fixes" },
+			{ kind = "bool", label = "Enable virtual stock", cvar = "arcticvr_virtualstock" },
+			{ kind = "slider", label = "Frontgrip power (2H sens)", cvar = "arcticvr_2h_sens", min = 0, max = 2, decimals = 2 },
+			{ kind = "bool", label = "Grenade pin enable", cvar = "arcticvr_grenade_pin_enable" },
+			{ kind = "bool", label = "Shoot system fix", cvar = "arcticvr_shootsys" },
+			{ kind = "bool", label = "Misc client fix (foregrip zone)", cvar = "arcticvr_test_cl_misc_fix" },
+			{ kind = "header", label = "Mag pouches" },
+			{ kind = "slider", label = "Default pouch distance", cvar = "arcticvr_defpouchdist", min = 0, max = 200, decimals = 1 },
+			{ kind = "bool", label = "Hybrid pouch", cvar = "arcticvr_hybridpouch" },
+			{ kind = "slider", label = "Hybrid pouch distance", cvar = "arcticvr_hybridpouchdist", min = 0, max = 200, decimals = 1 },
+			{ kind = "bool", label = "Head pouch", cvar = "arcticvr_headpouch" },
+			{ kind = "slider", label = "Head pouch distance", cvar = "arcticvr_headpouchdist", min = 0, max = 200, decimals = 1 },
+			{ kind = "bool", label = "Infinite pouch range", cvar = "arcticvr_infpouch" },
+			{ kind = "header", label = "Server / shared" },
+			{ kind = "bool", label = "Allow reload key (all guns)", cvar = "arcticvr_allgun_allow_reloadkey" },
+			{ kind = "bool", label = "Allow reload key (client)", cvar = "arcticvr_allgun_allow_reloadkey_client" },
+			{ kind = "bool", label = "Bump reload (all guns)", cvar = "arcticvr_bumpreload_allgun" },
+			{ kind = "bool", label = "Bump reload (client)", cvar = "arcticvr_bumpreload_allgun_client" },
+			{ kind = "bool", label = "Normalize default ammo", cvar = "arcticvr_defaultammo_normalize" },
+			{ kind = "bool", label = "Alternate physics bullets", cvar = "arcticvr_physical_bullets" },
+			{ kind = "slider", label = "Mag pickup delay", cvar = "arcticvr_net_magtimertime", min = 0, max = 1, decimals = 2 },
+			{ kind = "header", label = "Gun melee" },
+			{ kind = "slider", label = "Gun melee damage", cvar = "arcticvr_gunmelee_damage", min = 0, max = 100, decimals = 1 },
+			{ kind = "slider", label = "Gun melee velocity threshold", cvar = "arcticvr_gunmelee_velthreshold", min = 0, max = 20, decimals = 1 },
+			{ kind = "slider", label = "Gun melee delay", cvar = "arcticvr_gunmelee_Delay", min = 0, max = 1, decimals = 2 },
+		},
+	}
+end
+
+--- Live catalog: Quick Menu rows + optional ArcVR pane when addon is mounted
 function vrmod.GetSettingsCatalog()
 	local base = vrmod.SettingsCatalog or {}
 	local out = {}
+	local hasArc = false
 	for _, cat in ipairs(base) do
+		if cat.id == "arcvr" then hasArc = true end
 		if cat.id == "quickmenu" and CLIENT and vrmod.QuickMenu and vrmod.QuickMenu.BuildSettingsRows then
 			out[#out + 1] = {
 				id = cat.id,
@@ -284,6 +343,22 @@ function vrmod.GetSettingsCatalog()
 			}
 		else
 			out[#out + 1] = cat
+		end
+	end
+	-- Inject ArcVR before Session (optional third-party)
+	if CLIENT and not hasArc and vrmod.IsArcVRPresent and vrmod.IsArcVRPresent() then
+		local sessionIdx
+		for i, cat in ipairs(out) do
+			if cat.id == "session" then
+				sessionIdx = i
+				break
+			end
+		end
+		local arc = vrmod.GetArcVRSettingsCategory()
+		if sessionIdx then
+			table.insert(out, sessionIdx, arc)
+		else
+			out[#out + 1] = arc
 		end
 	end
 	return out
