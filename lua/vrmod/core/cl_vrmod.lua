@@ -155,6 +155,11 @@ if CLIENT then
 	end
 
 	local function restoreConvarOverrides()
+		-- Drain Source material workers before restoring mat_queue (avoids
+		-- "Illegal termination of worker thread" on VR exit under mode 2).
+		if convarOverrides["mat_queue_mode"] ~= nil then
+			setConvarValue("mat_queue_mode", "0")
+		end
 		for k, v in pairs(convarOverrides) do
 			setConvarValue(k, v)
 		end
@@ -807,20 +812,14 @@ if CLIENT then
 		end)
 	end
 
-	--- Mode 2: drain material queue between L/R eyes so workers don't race one SBS RT.
+	--- Mode 2: light GPU-state barrier between eyes (NO glFinish — that races mat workers
+	--- and caused "Illegal termination of worker thread" + zero-dimension submit spam).
 	local function SyncMatQueueBetweenEyes()
 		if WantedMatQueueMode() < 2 then return end
 		ResetStereoEyeState()
-		if isfunction(VRMOD_GLFinish) then
-			pcall(VRMOD_GLFinish)
-		end
 		pcall(function()
 			if render.SetColorMaterial then render.SetColorMaterial() end
 			render.SetBlend(1)
-			if render.OverrideColorWriteEnable then
-				render.OverrideColorWriteEnable(true, false)
-				render.OverrideColorWriteEnable(false, false)
-			end
 		end)
 	end
 
