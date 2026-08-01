@@ -66,11 +66,12 @@ local function DefaultLayout()
 			{
 				name = "System",
 				items = {
-					{ id = "vehicle_view", col = 0, row = 0 },
-					{ id = "ui_reset", col = 1, row = 0 },
-					{ id = "border_cal", col = 2, row = 0 },
-					{ id = "blacklist", col = 3, row = 0 },
-					{ id = "map", col = 4, row = 0 },
+					{ id = "admin_cleanup", col = 0, row = 0 },
+					{ id = "vehicle_view", col = 1, row = 0 },
+					{ id = "ui_reset", col = 2, row = 0 },
+					{ id = "border_cal", col = 3, row = 0 },
+					{ id = "blacklist", col = 4, row = 0 },
+					{ id = "map", col = 5, row = 0 },
 					{ id = "respawn", col = 0, row = 1 },
 					{ id = "vr_exit", col = 1, row = 1 },
 					{ id = "disconnect", col = 2, row = 1 },
