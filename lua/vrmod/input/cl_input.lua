@@ -142,6 +142,11 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		-- WayVR-style panel grab consumes grip when laser is on a menu
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
 		if g_VR.menuGrabActive then return end
+		-- Two-hand weapon foregrip owns left grip (no world prop pickup while gripping)
+		if g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
+			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
+			return
+		end
 		-- Free twin: grips spin/distance the avatar (not world pickup)
 		if g_VR.avatarSteerTwin then return end
 		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
