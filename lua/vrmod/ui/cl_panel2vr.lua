@@ -34,7 +34,7 @@ W.Theme = {
 	ok = Color(80, 220, 140, 255),
 }
 
--- Placement presets (HL:A-inspired)
+-- Placement presets
 -- attachment: true = local to left hand, false = world origin relative
 W.Place = {
 	-- Left hand — same family as quickmenu / heightmenu (NOT world-float)

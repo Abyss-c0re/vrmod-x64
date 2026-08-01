@@ -1,5 +1,5 @@
 -- =============================================================================
--- Cube Weapon Menu — HL:Alyx inventory language × Crimson Cube chrome
+-- Cube Weapon Menu — Crimson Cube chrome + inventory fan
 --
 -- Large dynamic 3D icons, category rails, glass weapon cards, laser select.
 -- Open on changeweapon press; release selects hovered weapon / holster.
