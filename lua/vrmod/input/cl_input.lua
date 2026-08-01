@@ -142,12 +142,25 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		-- WayVR-style panel grab consumes grip when laser is on a menu
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
 		if g_VR.menuGrabActive then return end
-		-- Two-hand weapon foregrip claims left grip before world prop pickup
+
+		-- ArcVR two-hand: skip world prop pickup while gripping or about to grip foregrip
+		local awep = LocalPlayer():GetActiveWeapon()
+		local arcFG = IsValid(awep) and awep.ArcticVR and awep.ForegripGrabbed
+		local arcNearFG = false
+		if pressed and IsValid(awep) and awep.ArcticVR and awep.TwoHanded and not arcFG then
+			if awep.LeftHandInForegrip then
+				arcNearFG = awep:LeftHandInForegrip(awep.ForegripMins, awep.ForegripMaxs) and true or false
+			elseif awep.LeftHandNearForegrip then
+				arcNearFG = awep:LeftHandNearForegrip(18) and true or false
+			end
+		end
+
+		-- Stock two-hand foregrip claims left grip before world prop pickup
 		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
 		end
-		if g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
+		if arcFG or arcNearFG or g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
 		end
