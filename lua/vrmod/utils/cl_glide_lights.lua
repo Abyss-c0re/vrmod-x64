@@ -1,15 +1,16 @@
 -- Stereo-correct Glide vehicle lights for VR (no Glide source edits).
 --
--- Glide is mono-frame:
---   • DrawLightSprite queues for PreDrawEffects, which wipes the queue once
---   • ProjectedTexture:Update is meant once per frame
---   • Sprite size scales by view direction → L/R eyes differ → flicker
+-- Glide mono-frame quirks:
+--   DrawLightSprite → queue → PreDrawEffects draws once and wipes
+--   ProjectedTexture:Update once per frame
+--   Sprite size scales by view dir (L/R eyes differ → flicker)
 --
--- Cube path:
---   Think/UpdateLights → buffer sprites (no draw)
---   PreStereo → freeze buffer + Update projected headlights ONCE
---   PreRender(eye) → inject frozen sprites (size pre-resolved with HMD, dir nil)
---   PostRender → clear freeze
+-- VR path:
+--   Wrap DrawLightSprite → live buffer while VR active
+--   PreStereo: force UpdateLights → freeze buffer (keep last if empty)
+--            + ProjectedTexture:Update once
+--   PreRender(eye): inject freeze into Glide queue (size pre-resolved, no dir)
+--   PostRender: clear live only
 
 if SERVER then return end
 
@@ -20,11 +21,8 @@ vrmod.utils = vrmod.utils or {}
 local patched = false
 local origDrawLightSprite
 
--- Live capture during vehicle Think
 local live = {}
 local liveCount = 0
-
--- Frozen for this stereo pair (both eyes)
 local freeze = {}
 local freezeCount = 0
 local freezeFrame = -1
@@ -43,12 +41,6 @@ end
 local function ClearLive()
 	for i = 1, liveCount do live[i] = nil end
 	liveCount = 0
-end
-
-local function ClearFreeze()
-	for i = 1, freezeCount do freeze[i] = nil end
-	freezeCount = 0
-	freezeFrame = -1
 end
 
 local function BufferLive(pos, dir, size, color, material)
@@ -75,7 +67,20 @@ local function BufferLive(pos, dir, size, color, material)
 	slot.material = material
 end
 
---- One ProjectedTexture:Update pass per stereo frame (not per eye).
+--- Ask the vehicle to re-emit sprites into our live buffer (Think may not have run yet).
+local function ForceVehicleLightSprites(ent)
+	if not IsValid(ent) then return end
+	local tab = ent:GetTable()
+	if not tab then return end
+	-- Ensure shouldThinkNow so projected light pose path runs
+	tab.shouldThinkNow = true
+	if isfunction(tab.UpdateLights) then
+		pcall(tab.UpdateLights, ent, tab)
+	elseif isfunction(ent.UpdateLights) then
+		pcall(ent.UpdateLights, ent, tab)
+	end
+end
+
 local function UpdateProjectedHeadlightsOnce()
 	local sf = g_VR.stereoFrame or 0
 	if projFrame == sf then return end
@@ -95,26 +100,41 @@ local function UpdateProjectedHeadlightsOnce()
 				light:SetPos(ent:LocalToWorld(data.offset))
 			end
 			if data.angles then
-				light:SetAngles(ent:LocalToWorldAngles(data.angles))
+				light:SetAngles(ent:LocalToWorldAngles(data.angles or Angle(10, 0, 0)))
 			end
 		end
 		light:Update()
 	end
 end
 
---- Snapshot live → freeze; resolve sprite size with HMD so both eyes match.
+--- Copy live → freeze. If live empty, keep previous freeze (never blank lights).
 local function FreezeSpritesForStereo()
 	local sf = g_VR.stereoFrame or 0
-	if freezeFrame == sf then return end
+	if freezeFrame == sf and freezeCount > 0 then return end
 
-	ClearFreeze()
+	local ent = LocalGlideVehicle()
+	-- Always refresh live from the vehicle this stereo frame
+	ClearLive()
+	if IsValid(ent) then
+		ForceVehicleLightSprites(ent)
+	end
+
+	if liveCount < 1 then
+		-- Keep last freeze so we don't go dark mid-blink / lag
+		freezeFrame = sf
+		return
+	end
+
+	-- Rebuild freeze from live
+	for i = 1, freezeCount do freeze[i] = nil end
+	freezeCount = 0
 	freezeFrame = sf
 
 	local eyePos, eyeAng
 	if Glide and isfunction(Glide.GetLocalViewLocation) then
 		eyePos, eyeAng = Glide.GetLocalViewLocation()
 	end
-	if not eyePos and g_VR.tracking and g_VR.tracking.hmd then
+	if (not eyePos or not eyeAng) and g_VR.tracking and g_VR.tracking.hmd then
 		eyePos = g_VR.tracking.hmd.pos
 		eyeAng = g_VR.tracking.hmd.ang
 	end
@@ -130,13 +150,15 @@ local function FreezeSpritesForStereo()
 			freeze[freezeCount] = f
 		end
 		f.pos:Set(s.pos)
-		-- Pre-resolve view falloff once (HMD). Pass no dir to PreDrawEffects so it
-		-- won't re-scale per eye (that was the stereo flicker).
 		local size = s.size or 30
 		if s.hasDir and viewDir and s.dir then
 			local dot = viewDir:Dot(s.dir)
 			dot = (dot - 0.5) * 2
 			size = size * math.max(0, dot)
+		end
+		-- Floor so lights never vanish from grazing angles in VR
+		if size < (s.size or 30) * 0.25 then
+			size = (s.size or 30) * 0.25
 		end
 		f.size = size
 		f.r, f.g, f.b, f.a = s.r, s.g, s.b, s.a
@@ -144,18 +166,19 @@ local function FreezeSpritesForStereo()
 	end
 end
 
---- Feed Glide's mono queue for this eye (origDrawLightSprite, not our buffer wrap).
 local function InjectFrozenSprites()
 	if freezeCount < 1 or not origDrawLightSprite then return end
 	for i = 1, freezeCount do
 		local s = freeze[i]
-		if not s or s.size <= 0.01 then continue end
+		if not s or not s.pos then continue end
+		local size = s.size or 30
+		if size < 0.01 then continue end
 		spriteColorScratch.r = s.r
 		spriteColorScratch.g = s.g
 		spriteColorScratch.b = s.b
 		spriteColorScratch.a = s.a
-		-- dir = nil → PreDrawEffects uses full size (already HMD-scaled)
-		origDrawLightSprite(s.pos, nil, s.size, spriteColorScratch, s.material)
+		-- dir nil: PreDrawEffects won't re-scale per eye
+		origDrawLightSprite(s.pos, nil, size, spriteColorScratch, s.material)
 	end
 end
 
@@ -173,14 +196,12 @@ function vrmod.utils.PatchGlideLights()
 		return origDrawLightSprite(pos, dir, size, color, material)
 	end
 
-	-- Once per stereo pair: freeze sprites + projected lights
 	hook.Add("VRMod_PreStereo", "vrmod_glide_lights_freeze", function()
 		if not g_VR or not g_VR.active then return end
 		FreezeSpritesForStereo()
 		UpdateProjectedHeadlightsOnce()
 	end)
 
-	-- Each eye: re-queue frozen sprites for PreDrawEffects (Glide wipes after each draw)
 	hook.Add("VRMod_PreRender", "vrmod_glide_lights", function(_eye)
 		if not g_VR or not g_VR.active then return end
 		local sf = g_VR.stereoFrame or 0
@@ -194,19 +215,20 @@ function vrmod.utils.PatchGlideLights()
 	hook.Add("VRMod_PostRender", "vrmod_glide_lights", function()
 		if not g_VR or not g_VR.active then return end
 		ClearLive()
-		-- Keep freeze until next PreStereo; clear live so next Think rebuilds clean
 	end)
 
 	hook.Add("VRMod_Exit", "vrmod_glide_lights_cleanup", function(ply)
 		if ply and ply ~= LocalPlayer() then return end
 		ClearLive()
-		ClearFreeze()
+		for i = 1, freezeCount do freeze[i] = nil end
+		freezeCount = 0
+		freezeFrame = -1
 		projFrame = -1
 	end)
 
 	patched = true
 	if vrmod.logger then
-		vrmod.logger.Debug("[Glide] Stereo lights: freeze once / inject per eye")
+		vrmod.logger.Debug("[Glide] Stereo lights: force UpdateLights + freeze/inject")
 	end
 	return true
 end
