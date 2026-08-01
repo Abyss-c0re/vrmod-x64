@@ -1,12 +1,12 @@
 # Workshop monitor — 3442302711
 
-**Fire:** 2026-08-01 ~19:01 local (EEST)  
+**Fire:** 2026-08-01 ~19:31 local (EEST)  
 **Law:** commit every fix · workshop only after smoke · mat_queue=1 · cube_is_source_of_truth · no dual-truth pose · primary-hand SoT
 
 ## Sources
 - Comments: **1256** (unchanged) — top still Kriminull forced walk / no sprint; author Cube prophecy; Батон praise; Benzo praise; jddudeman menu crash
 - Bugs ctp=24: still **349** — #346 fly · #347 black HMD · #348 flicker · #349 HUD ghost
-- Questions: **104** — first page only (old help); no new last-page signal
+- Questions: **104** — not re-paged this fire (counts flat; last fire had no last-page signal)
 - GitHub open: #27 edges · #31 Pimax left black · #29 eye angles · #21 Proton body · #19 2D tutorial
 
 ## Hot / actionable
@@ -24,8 +24,8 @@
 | OpenXR / worldmodels / soft collision | older | Hold / backlog |
 
 ## Actions this fire
-- Re-fetched comments (1256) + bugs last page (349) + QUESTIONS (104) + GH open issues.
-- **No new Workshop/GH signals** vs prior fire (~18:30).
+- Re-fetched comments (1256) + bugs last page (349) + GH open issues.
+- **No new Workshop/GH signals** vs prior fire (~19:01) — second consecutive quiet scan.
 - **No code change** — Kriminull sprint already on `main` (`938b093`); remaining hot items smoke-gated or non-Lua.
 - **No gmpublish** (smoke not verified this session).
 
