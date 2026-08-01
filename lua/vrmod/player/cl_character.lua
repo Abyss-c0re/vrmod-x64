@@ -275,7 +275,13 @@ if CLIENT then
 
 	------------------------------------------------------------------------
 	local up = Vector(0, 0, 1)
+	local charYawStereoFrame = -1
 	local function PreRenderFunc()
+		-- Per-eye hook: only update character yaw once per stereo pair
+		local sf = g_VR.stereoFrame or 0
+		if charYawStereoFrame == sf then return end
+		charYawStereoFrame = sf
+
 		if convars.vrmod_oldcharacteryaw:GetBool() then
 			-- old behavior (unchanged)
 			local _, relativeAng = WorldToLocal(zeroVec, Angle(0, g_VR.tracking.hmd.ang.yaw, 0), zeroVec, Angle(0, g_VR.characterYaw, 0))
@@ -286,6 +292,15 @@ if CLIENT then
 			end
 
 			if g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright then g_VR.characterYaw = g_VR.tracking.hmd.ang.yaw end
+			return
+		end
+
+		-- Foregrip parks LH on the gun next to RH → L–R atan2 is near-singular and
+		-- shakes full-body yaw (reads as left-hand flicker on FBT / avatar).
+		if g_VR.foregripActive then
+			if g_VR.input and (g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright) then
+				g_VR.characterYaw = g_VR.tracking.hmd.ang.yaw
+			end
 			return
 		end
 

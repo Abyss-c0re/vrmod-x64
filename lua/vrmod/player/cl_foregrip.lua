@@ -32,10 +32,13 @@ timer.Simple(2, BlockOldForegripAddon)
 -- Hardcoded start range (not archived cvar — old client.vdf "12" killed long grips)
 local GRIP_DISTANCE = 20
 -- Low blend: high values make gun chase device LH every frame → body LH attach shakes
-local GUIDE_BLEND = 0.22
+local GUIDE_BLEND = 0.18
 local RELEASE_MULT = 1.5
--- Attach damp toward new (lower = stickier LH on gun for FBT body)
-local ATTACH_BLEND = 0.28
+-- RH low-pass for attach parent only (kills controller micro-noise on FBT arm)
+local RH_SMOOTH = 0.14
+-- Deadzone: keep exact previous attach if new is within this (units / degrees)
+local ATTACH_POS_EPS_SQR = 0.04 -- 0.2u
+local ATTACH_ANG_EPS = 0.35
 
 local state = {
 	gripping = false,
@@ -50,6 +53,9 @@ local state = {
 	gunAng = Angle(0, 0, 0),
 	leftPos = Vector(0, 0, 0),
 	leftAng = Angle(0, 0, 0),
+	smoothRPos = Vector(0, 0, 0),
+	smoothRAng = Angle(0, 0, 0),
+	hasSmoothR = false,
 	startDist = 12,
 }
 
@@ -60,6 +66,8 @@ local function ClearGrip()
 	state.wep = NULL
 	state.class = nil
 	state.weaponBox = nil
+	state.hasSmoothR = false
+	g_VR._leftHandSnapFrame = -1
 	local aw = IsValid(LocalPlayer()) and LocalPlayer():GetActiveWeapon() or NULL
 	if not (IsValid(aw) and aw.ArcticVR and aw.ForegripGrabbed) then
 		g_VR.foregripActive = false
