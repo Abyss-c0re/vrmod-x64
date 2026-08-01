@@ -1,6 +1,6 @@
 # Workshop monitor — 3442302711
 
-**Fire:** 2026-08-02 ~01:01 local (EEST)  
+**Fire:** 2026-08-02 ~01:31 local (EEST)  
 **Law:** commit every fix · workshop only after smoke · mat_queue=1 · cube_is_source_of_truth · no dual-truth pose · primary-hand SoT
 
 ## Sources
@@ -26,7 +26,7 @@
 
 ## Actions this fire
 - Re-fetched comments (**1259**) + bugs last page (349) + GH open issues.
-- **No new signals** — zero delta vs 00:31 fire; no new fixable Lua.
+- **No new signals** — zero delta vs 01:01 fire; no new fixable Lua.
 - **No gmpublish** (smoke not verified).
 
 ## Pending smoke (before workshop)
