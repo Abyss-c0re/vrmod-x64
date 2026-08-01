@@ -665,10 +665,18 @@ function vrmod.CubeSettings_Open()
 		if VRUtilOpenMenu then VRUtilOpenMenu() end
 		return
 	end
-	if open then
-		vrmod.CubeSettings_Close()
+	-- Already open: do NOT toggle-close (felt like "press twice to open" from QM)
+	if open and g_VR.menus and g_VR.menus[UID] then
+		g_VR.menus[UID].dirty = true
+		if not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
+			livePos, liveAng, liveScale = WristPose()
+			if vrmod.MenuApplyHandAnchor then
+				vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
+			end
+		end
 		return
 	end
+	open = false -- recover stuck flag without menu table
 	if not isfunction(VRUtilMenuOpen) then return end
 	if not vrmod.SettingsCatalog then
 		if vrmod.logger then vrmod.logger.Warn("SettingsCatalog missing") end

@@ -59,20 +59,20 @@ W.Place = {
 		ang = nil,
 		scale = 0.022,
 	},
-	-- Spawn / context: FOLLOW LEFT HAND (same SoT as quickmenu / settings)
-	-- Not world-float — edge-on strip was broken workbench pose.
+	-- Spawn / context: wrist shell (center is palm-forward, NOT top-left).
+	-- Larger RT (1024×768) needs smaller base scale so physical size matches QM.
 	workbench = {
 		attachment = true,
-		pos = Vector(8, 5, 12),
+		pos = Vector(4, 5, 6), -- center local (HandMenuPose converts → top-left)
 		ang = Angle(0, -90, 55),
-		scale = 0.022,
+		scale = 0.016,
 	},
 	-- Alias: explicit hand large shell
 	hand = {
 		attachment = true,
-		pos = Vector(8, 5, 12),
+		pos = Vector(4, 5, 6),
 		ang = Angle(0, -90, 55),
-		scale = 0.022,
+		scale = 0.016,
 	},
 }
 
@@ -150,20 +150,28 @@ function W.ComputeFloatPose(distance, heightOffset)
 	return pos, ang
 end
 
-function W.ResolvePlace(placeName, override)
+--- placeName + optional pixel size (spawn must use real RT w/h for wrist center)
+function W.ResolvePlace(placeName, override, pixelW, pixelH)
 	local base = table.Copy(W.Place[placeName or "popup"] or W.Place.popup)
 	if override then
 		for k, v in pairs(override) do
 			base[k] = v
 		end
 	end
-	-- Hand shells: convert center → top-left once (same as quickmenu). Never re-run every Think.
+	-- Hand shells: centerLocal → top-left once (same as quickmenu).
 	if base.attachment and (placeName == "hand" or placeName == "workbench" or placeName == "popup" or placeName == "wrist") then
 		local sc = base.scale or 0.022
-		local center = base.pos or Vector(6, 4, 8)
+		-- Center is palm-forward; large shells use Place.hand.pos (not far corner Vector(8,5,12))
+		local center = base.pos or Vector(2.5, 3.5, 4)
+		if placeName == "hand" or placeName == "workbench" then
+			center = base.pos or Vector(4, 5, 6)
+			sc = base.scale or 0.016
+		elseif placeName == "popup" or placeName == "wrist" then
+			center = base.pos or Vector(2.5, 3.5, 4)
+		end
 		local pang = base.ang or Angle(0, -90, 55)
-		local pw = (placeName == "hand" or placeName == "workbench") and 1024 or 512
-		local ph = (placeName == "hand" or placeName == "workbench") and 768 or 512
+		local pw = pixelW or ((placeName == "hand" or placeName == "workbench") and 1024 or 512)
+		local ph = pixelH or ((placeName == "hand" or placeName == "workbench") and 768 or 512)
 		if isfunction(VRUtilHandMenuPose) then
 			local wrist = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
 			local hp, ha, hs = VRUtilHandMenuPose(pw, ph, sc, center, pang, wrist)
@@ -177,6 +185,8 @@ function W.ResolvePlace(placeName, override)
 			base.scale = sc
 		end
 		base.attachment = true
+		base._centerLocal = center
+		base._pixelW, base._pixelH = pw, ph
 	elseif not base.attachment and (not base.pos or not base.ang) then
 		base.pos, base.ang = W.ComputeFloatPose(28, -4)
 		base.attachment = false
@@ -430,7 +440,6 @@ function W.ManifestPanel(panel, opts)
 		or ((kind == "spawnmenu" or kind == "contextmenu") and "hand")
 		or "popup"
 	if placeName == "workbench" then placeName = "hand" end
-	local place = W.ResolvePlace(placeName, opts.placeOverride)
 
 	local pw, ph = panel:GetSize()
 	if not pw or pw < 32 then pw = 512 end
@@ -442,6 +451,8 @@ function W.ManifestPanel(panel, opts)
 		pw, ph = 1024, 768
 	end
 	local w, h = clampSize(opts.width or pw, opts.height or ph)
+	-- Resolve AFTER pixel size is known so wrist top-left matches RT extents
+	local place = W.ResolvePlace(placeName, opts.placeOverride, w, h)
 
 	if panel.SetVisible then panel:SetVisible(true) end
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
@@ -571,8 +582,19 @@ function W.ManifestPanel(panel, opts)
 		persistOpen = isShell,
 	}
 
-	if isfunction(VRUtilMenuRenderPanel) then
-		VRUtilMenuRenderPanel(uid)
+	if g_VR.menus and g_VR.menus[uid] then
+		g_VR.menus[uid].dirty = true
+		-- Force first paint (dirty-only gate would skip a blank RT)
+		if isfunction(VRUtilMenuRenderPanel) then
+			VRUtilMenuRenderPanel(uid, true)
+		end
+		-- Second paint next tick after layout settle (spawn tabs)
+		timer.Simple(0.05, function()
+			if g_VR and g_VR.menus and g_VR.menus[uid] and isfunction(VRUtilMenuRenderPanel) then
+				g_VR.menus[uid].dirty = true
+				VRUtilMenuRenderPanel(uid, true)
+			end
+		end)
 	end
 
 	log("manifest %s uid=%s %dx%d place=%s attach=%s", kind, uid, w, h, placeName, tostring(place.attachment))
@@ -1017,7 +1039,8 @@ function W.OpenSandboxShell(which)
 	})
 
 	if uid and isfunction(VRUtilMenuRenderPanel) then
-		VRUtilMenuRenderPanel(uid)
+		if g_VR.menus and g_VR.menus[uid] then g_VR.menus[uid].dirty = true end
+		VRUtilMenuRenderPanel(uid, true)
 	end
 
 	log("OpenSandboxShell %s uid=%s vis=%s", kind, tostring(uid), tostring(panel:IsVisible()))

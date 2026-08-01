@@ -17,32 +17,34 @@ local function InitializeMenuItems()
 
 	local function openSandboxShell(which)
 		-- Defer so quick-menu close finishes first (nested menu open)
-		-- Spawn/context stay open when QM reopens — close only via X or toggle item
-		timer.Simple(0, function()
+		-- Toggle only when shell is actually visible+bound (not a blank first-open miss)
+		timer.Simple(0.05, function()
 			if not g_VR or not g_VR.active then return end
 			local p2v = vrmod.panel2vr
-			-- Toggle same item: second pick closes that shell only
-			if p2v and p2v.IsShellOpen and p2v.IsShellOpen(which) then
-				if p2v.CloseSandboxShell then p2v.CloseSandboxShell(which) end
-				return
-			end
-			local ok = false
+			local open = false
 			if which == "context" then
 				if p2v and p2v.OpenContextMenu then
-					ok = p2v.OpenContextMenu()
+					open = p2v.OpenContextMenu()
 				elseif vrmod.OpenContextMenuVR then
-					ok = vrmod.OpenContextMenuVR()
+					open = vrmod.OpenContextMenuVR()
 				end
 			else
 				if p2v and p2v.OpenSpawnMenu then
-					ok = p2v.OpenSpawnMenu()
+					open = p2v.OpenSpawnMenu()
 				elseif vrmod.OpenSpawnMenuVR then
-					ok = vrmod.OpenSpawnMenuVR()
+					open = vrmod.OpenSpawnMenuVR()
 				end
 			end
-			if not ok and vrmod.logger then
-				vrmod.logger.Warn("[QM] %s menu open failed (valid=%s)",
-					which, tostring(IsValid(which == "context" and g_ContextMenu or g_SpawnMenu)))
+			-- If open failed (panel late), one more try after sandbox creates it
+			if not open then
+				timer.Simple(0.2, function()
+					if not g_VR or not g_VR.active then return end
+					if which == "context" then
+						if p2v and p2v.OpenContextMenu then p2v.OpenContextMenu() end
+					else
+						if p2v and p2v.OpenSpawnMenu then p2v.OpenSpawnMenu() end
+					end
+				end)
 			end
 		end)
 	end

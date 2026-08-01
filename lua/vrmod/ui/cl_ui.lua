@@ -283,8 +283,10 @@ if CLIENT then
 			centerLocal = Vector(centerLocal.x, -centerLocal.y, centerLocal.z)
 			panelAng = Angle(panelAng.p, -panelAng.y, -panelAng.r)
 		end
-		local halfW = w * scale * 0.5
-		local halfH = h * scale * 0.5
+		-- Half-size must match DRAW scale (base × global UI scale) or dock feels huge/misaligned
+		local drawS = scale * (vrmod.GetUIScale and vrmod.GetUIScale() or 1)
+		local halfW = w * drawS * 0.5
+		local halfH = h * drawS * 0.5
 		-- top-left = center - Right*halfW + Forward*halfH  (Y-down = -Forward)
 		local pos = centerLocal - panelAng:Right() * halfW + panelAng:Forward() * halfH
 		return pos, panelAng, scale
@@ -574,11 +576,12 @@ if CLIENT then
 				and center:Distance(wrist.pos) <= WRIST_SNAP_DIST
 
 			if nearWrist then
-				-- Clean palm pose for that hand (not a skewed free-float offset)
+				-- Clean palm pose: use real RT size + base scale (HandMenuPose applies UI scale to half-size)
 				local lp, la = VRUtilHandMenuPose(
-					menu.width, menu.height,
+					menu.width or 512, menu.height or 512,
 					menu.baseScale or menu.scale or 0.03,
-					nil, nil, wristName
+					(menu.width or 512) >= 800 and Vector(4, 5, 6) or nil,
+					nil, wristName
 				)
 				menu.pos, menu.ang = lp, la
 				menu.freeFloat = false
