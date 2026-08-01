@@ -674,24 +674,61 @@ if CLIENT then
 		local solveFocus = mustResolve
 		if solveFocus then
 			g_VR.menuFocus = false
+			g_VR.menuPointerHand = nil
 			focusSnap.frame = sf
 			focusSnap.uid = false
 			focusSnap.panel = nil
 			focusSnap.cursorWorld = nil
 			focusSnap.scaleKey = 0
+			focusSnap.hand = nil
+			focusSnap.beamStart = nil
 		else
 			g_VR.menuFocus = focusSnap.uid
+			g_VR.menuPointerHand = focusSnap.hand
 		end
 
 		local menuFocusDist = 99999
 		local menuFocusPanel = nil
 		local menuFocusCursorWorldPos = nil
+		local menuFocusBeamStart = nil
+		local menuFocusHand = nil
 		local tms = render.GetToneMappingScaleLinear()
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
 
-		local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-		local rhPos = rh and rh.pos
-		local rhAng = rh and rh.ang
+		-- Laser pointers: right (default) + left so either hand can aim menus
+		local pointers = {}
+		local tr = g_VR.tracking
+		if tr and tr.pose_righthand and tr.pose_righthand.pos and tr.pose_righthand.ang then
+			pointers[#pointers + 1] = {
+				name = "right",
+				pos = tr.pose_righthand.pos,
+				ang = tr.pose_righthand.ang,
+			}
+		end
+		if tr and tr.pose_lefthand and tr.pose_lefthand.pos and tr.pose_lefthand.ang then
+			pointers[#pointers + 1] = {
+				name = "left",
+				pos = tr.pose_lefthand.pos,
+				ang = tr.pose_lefthand.ang,
+			}
+		end
+
+		--- Ray × menu plane → UV cursor (or nil)
+		local function LaserHitPanel(origin, dir, pos, ang, drawScale)
+			if not origin or not dir or not pos or not ang or not drawScale or drawScale <= 0 then
+				return nil
+			end
+			local normal = ang:Up()
+			local A = normal:Dot(dir)
+			if A >= 0 then return nil end -- backface
+			local B = normal:Dot(pos - origin)
+			if B >= 0 then return nil end -- behind ray
+			local hitDist = B / A
+			if hitDist < 0.5 or hitDist > 400 then return nil end
+			local hitWorld = origin + dir * hitDist
+			local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
+			return tp.x / drawScale, -tp.y / drawScale, hitDist, hitWorld
+		end
 
 		for _, v in ipairs(menuOrder) do
 			local k = v.uid
@@ -769,33 +806,37 @@ if CLIENT then
 			end
 
 			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
+			local hitHandName, hitBeamStart = nil, nil
 			local resizingThis = resizeState and resizeState.uid == k
 			local wantCursor = v.cursorEnabled or MenuIsResizable(v) or resizingThis
 			-- Recompute UV if scale/pose changed (stale UV after stretch → X button miss)
 			local hitStale = (v._hitFrame ~= sf)
 				or not v._hitScale
 				or math.abs((v._hitScale or 0) - drawScale) > 1e-7
-			if wantCursor and (solveFocus or hitStale or resizingThis) and rhPos and rhAng then
-				local dir = rhAng:Forward()
-				local normal = ang:Up()
-				local A = normal:Dot(dir)
-				if A < 0 then
-					local B = normal:Dot(pos - rhPos)
-					if B < 0 then
-						hitDist = B / A
-						hitWorld = rhPos + dir * hitDist
-						local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
-						hitCursorX = tp.x / drawScale
-						hitCursorY = -tp.y / drawScale
-						v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
-						v._hitFrame = sf
-						v._hitScale = drawScale
-						v.lastCursorX = hitCursorX
-						v.lastCursorY = hitCursorY
+			if wantCursor and (solveFocus or hitStale or resizingThis) and #pointers > 0 then
+				-- Both hands: keep closest valid hit on this panel
+				local bestD = 99999
+				for pi = 1, #pointers do
+					local p = pointers[pi]
+					local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
+					if hx and hy and hd and hd < bestD then
+						bestD = hd
+						hitCursorX, hitCursorY, hitDist, hitWorld = hx, hy, hd, hw
+						hitHandName, hitBeamStart = p.name, p.pos
 					end
+				end
+				if hitCursorX then
+					v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
+					v._hitHand = hitHandName
+					v._hitBeamStart = hitBeamStart
+					v._hitFrame = sf
+					v._hitScale = drawScale
+					v.lastCursorX = hitCursorX
+					v.lastCursorY = hitCursorY
 				end
 			elseif wantCursor and v._hitFrame == sf and v._hitScale and math.abs(v._hitScale - drawScale) <= 1e-7 then
 				hitCursorX, hitCursorY, hitDist, hitWorld = v._hitX, v._hitY, v._hitDist, v._hitWorld
+				hitHandName, hitBeamStart = v._hitHand, v._hitBeamStart
 			end
 
 			cam.IgnoreZ(true)
@@ -845,12 +886,16 @@ if CLIENT then
 					v.lastCursorX = hitCursorX
 					v.lastCursorY = hitCursorY
 					menuFocusCursorWorldPos = hitWorld
+					menuFocusBeamStart = hitBeamStart
+					menuFocusHand = hitHandName
 					focusSnap.uid = k
 					focusSnap.panel = v.panel
 					focusSnap.cursorWorld = hitWorld
 					focusSnap.cursorX = hitCursorX
 					focusSnap.cursorY = hitCursorY
 					focusSnap.scaleKey = drawScale
+					focusSnap.beamStart = hitBeamStart
+					focusSnap.hand = hitHandName
 				end
 			end
 		end
@@ -858,6 +903,7 @@ if CLIENT then
 		render.SetToneMappingScaleLinear(tms)
 
 		if solveFocus then
+			g_VR.menuPointerHand = menuFocusHand or focusSnap.hand
 			if focusSnap.panel ~= prevFocusPanel then
 				if IsValid(prevFocusPanel) then prevFocusPanel:SetMouseInputEnabled(false) end
 				if IsValid(focusSnap.panel) then focusSnap.panel:SetMouseInputEnabled(true) end
@@ -879,9 +925,22 @@ if CLIENT then
 				g_VR.menuCursorY = focusSnap.cursorY
 			end
 			local beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
-			if rhPos and beamEnd then
+			local beamStart = menus[focus]._hitBeamStart or focusSnap.beamStart
+			if not beamStart and g_VR.menuPointerHand == "left" then
+				local lh = tr and tr.pose_lefthand
+				beamStart = lh and lh.pos
+			end
+			if not beamStart then
+				local rh = tr and tr.pose_righthand
+				beamStart = rh and rh.pos
+			end
+			if beamStart and beamEnd then
 				render.SetMaterial(mat_beam)
-				render.DrawBeam(rhPos, beamEnd, 0.1, 0, 1, Color(255, 255, 255, 255))
+				-- Slight tint so left vs right pointer is readable
+				local col = (g_VR.menuPointerHand == "left")
+					and Color(180, 220, 255, 255)
+					or Color(255, 255, 255, 255)
+				render.DrawBeam(beamStart, beamEnd, 0.1, 0, 1, col)
 			end
 		end
 
