@@ -746,10 +746,21 @@ if CLIENT then
 			local B = normal:Dot(pos - origin)
 			if B >= 0 then return nil end -- behind ray
 			local hitDist = B / A
-			if hitDist < 0.5 or hitDist > 400 then return nil end
+			-- Reject near-zero distance (hand that is *holding* the panel always "hits")
+			if hitDist < 2.5 or hitDist > 400 then return nil end
 			local hitWorld = origin + dir * hitDist
 			local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
 			return tp.x / drawScale, -tp.y / drawScale, hitDist, hitWorld
+		end
+
+		--- Hand currently anchoring a menu (wrist attach or grab) must not be the laser.
+		local function MenuAnchorHand(menu)
+			if not menu then return nil end
+			if menu.grabHand then return menu.grabHand end
+			if menu.freeFloat or menu.attachment == false then return nil end
+			-- Default VR menus attach to left wrist
+			if menu.attachment then return "left" end
+			return nil
 		end
 
 		for _, v in ipairs(menuOrder) do
@@ -836,8 +847,10 @@ if CLIENT then
 				or not v._hitScale
 				or math.abs((v._hitScale or 0) - drawScale) > 1e-7
 			if wantCursor and (solveFocus or hitStale or resizingThis) and #pointers > 0 then
-				-- Both hands: closest hit, but sticky hand wins if still on-panel
-				-- (stops L/R flapping every frame → cursor glitch / focus thrash)
+				-- Dual laser: skip the hand that *owns* the panel (wrist attach / grab).
+				-- That hand always had the shortest hitDist and stole focus from the free hand
+				-- (e.g. right couldn't aim left-wrist Settings).
+				local anchor = MenuAnchorHand(v)
 				local sticky = focusSnap.hand
 				local stickyUid = focusSnap.uid
 				local bestD = 99999
@@ -845,10 +858,13 @@ if CLIENT then
 				for pi = 1, #pointers do
 					local p = pointers[pi]
 					if not p.pos or not p.ang then continue end
+					if anchor and p.name == anchor then continue end
 					local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
 					if hx and hy and hd then
 						local cand = { hx = hx, hy = hy, hd = hd, hw = hw, name = p.name, start = p.pos }
-						if sticky and stickyUid == k and p.name == sticky and hd < bestD * 1.35 + 8 then
+						-- Mild sticky: keep previous free hand if still on this panel and not much worse
+						if sticky and stickyUid == k and p.name == sticky and sticky ~= anchor
+							and hd <= bestD * 1.15 + 4 then
 							stickyHit = cand
 						end
 						if hd < bestD then
@@ -858,7 +874,20 @@ if CLIENT then
 						end
 					end
 				end
-				if stickyHit then
+				-- Free-float with no valid free-hand hit: allow any hand (including former anchor)
+				if not hitCursorX and (v.freeFloat or not v.attachment) then
+					for pi = 1, #pointers do
+						local p = pointers[pi]
+						if not p.pos or not p.ang then continue end
+						local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
+						if hx and hy and hd and hd < bestD then
+							bestD = hd
+							hitCursorX, hitCursorY, hitDist, hitWorld = hx, hy, hd, hw
+							hitHandName, hitBeamStart = p.name, p.pos
+						end
+					end
+				end
+				if stickyHit and stickyHit.hd <= (hitDist or 99999) * 1.2 + 6 then
 					hitCursorX, hitCursorY = stickyHit.hx, stickyHit.hy
 					hitDist, hitWorld = stickyHit.hd, stickyHit.hw
 					hitHandName, hitBeamStart = stickyHit.name, stickyHit.start
