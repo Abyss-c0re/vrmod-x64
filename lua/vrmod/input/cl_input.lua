@@ -177,32 +177,27 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_left_pickup" then
-		-- Stock foregrip first (also polled in Think — works while holding grips)
-		if vrmod.TryForegripGrab then
-			local took = vrmod.TryForegripGrab(pressed and true or false)
-			if took or g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
-				if g_VR.vehicle.wheel_bone then leftGrip = pressed end
-				return
-			end
-		end
-
+		-- Exact pre-breakage order (e91d04d): menu grab → ArcVR probe → stock FG → pickup
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
-		if g_VR.menuGrabActive and g_VR.menuFocus then return end
+		if g_VR.menuGrabActive then return end
 
 		local awep = LocalPlayer():GetActiveWeapon()
 		local arcFG = IsValid(awep) and awep.ArcticVR and awep.ForegripGrabbed
 		local arcNearFG = false
 		if pressed and IsValid(awep) and awep.ArcticVR and awep.TwoHanded and not arcFG then
-			local inMag = awep.LeftHandInMagazineZone and awep:LeftHandInMagazineZone()
-			if not inMag then
-				if awep.LeftHandInForegrip then
-					arcNearFG = awep:LeftHandInForegrip(awep.ForegripMins, awep.ForegripMaxs) and true or false
-				elseif awep.LeftHandNearForegrip then
-					arcNearFG = awep:LeftHandNearForegrip(9) and true or false
-				end
+			if awep.LeftHandInForegrip then
+				arcNearFG = awep:LeftHandInForegrip(awep.ForegripMins, awep.ForegripMaxs) and true or false
+			elseif awep.LeftHandNearForegrip then
+				arcNearFG = awep:LeftHandNearForegrip(18) and true or false
 			end
 		end
-		if arcFG or arcNearFG then
+
+		-- Stock two-hand foregrip claims left grip before world prop pickup
+		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
+			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
+			return
+		end
+		if arcFG or arcNearFG or g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
 		end
