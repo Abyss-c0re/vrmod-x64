@@ -276,11 +276,16 @@ local function WorldToRadar(localPos, yaw, range, radius)
 end
 
 ------------------------------------------------------------------------
--- Building / terrain heightmap (brush traces — shows roofs & walls)
--- Paint is stable: snap world sample rarely; classify vs player feet Z;
--- no stencil; no min-Z (that filled the whole disc pink).
+-- Building heightmap — depth-aware (player Z band only)
+-- Trace only through a vertical slice around the player so underground
+-- never shows surface roofs, and surface never shows deep basements.
 ------------------------------------------------------------------------
-local BUILD_ABOVE = 56 -- units above player feet → structure
+-- Vertical slice relative to feet (Source units)
+local DEPTH_UP = 192   -- sample starts this high above feet
+local DEPTH_DOWN = 72  -- sample ends this far below feet
+-- Structure: hit must sit in this elev window (same depth as player)
+local BUILD_MIN = 40   -- ignore floors / ground at feet
+local BUILD_MAX = 192  -- ignore anything above our slice (surface when underground)
 local BUILD_TALL = 160
 
 local function SampleBuildingMap(ply, range)
@@ -289,24 +294,25 @@ local function SampleBuildingMap(ply, range)
 	range = math.Clamp(range or 1500, 400, 4000)
 	local origin = ply:GetPos()
 	local fn = FrameNumber and FrameNumber() or 0
-	-- Slow refresh — avoids cell flicker. Snap grid to player only when moved far.
 	local moved = origin:DistToSqr(bmap.origin) > (128 * 128)
 	local rangeChanged = math.abs((bmap.range or 0) - range) > 64
-	if bmap.ready and not moved and not rangeChanged and (fn - (bmap.frame or 0)) < 30 then
-		-- Keep playerZ fresh for classification without resampling
+	-- Depth change (stairs / elevators / go underground) forces resample
+	local depthChanged = math.abs(origin.z - (bmap.playerZ or origin.z)) > 40
+	if bmap.ready and not moved and not rangeChanged and not depthChanged
+		and (fn - (bmap.frame or 0)) < 30 then
 		bmap.playerZ = origin.z
 		return
 	end
 
 	local res = BMAP_RES
 	local step = (range * 2) / res
-	-- Snap sample origin to step grid so cells don't crawl when resampling
 	local ox = math.floor(origin.x / step + 0.5) * step
 	local oy = math.floor(origin.y / step + 0.5) * step
 	local wx0 = ox - range + step * 0.5
 	local wy0 = oy - range + step * 0.5
-	local skyZ = origin.z + math.Clamp(range * 0.85, 600, 2800)
-	local deepZ = origin.z - 800
+	-- Depth band only — not sky→abyss (that always hit surface roofs)
+	local bandTop = origin.z + DEPTH_UP
+	local bandBot = origin.z - DEPTH_DOWN
 	local cells = bmap.cells
 	local tr = {
 		mask = MASK_SOLID_BRUSHONLY,
@@ -318,12 +324,20 @@ local function SampleBuildingMap(ply, range)
 		local wy = wy0 + iy * step
 		for ix = 0, res - 1 do
 			local wx = wx0 + ix * step
-			tr.start = Vector(wx, wy, skyZ)
-			tr.endpos = Vector(wx, wy, deepZ)
+			tr.start = Vector(wx, wy, bandTop)
+			tr.endpos = Vector(wx, wy, bandBot)
 			local hit = util.TraceLine(tr)
 			local idx = iy * res + ix + 1
 			if hit.Hit and not hit.HitSky then
-				cells[idx] = hit.HitPos.z
+				local z = hit.HitPos.z
+				local elev = z - origin.z
+				-- Keep only hits in our depth window (structure at this level)
+				if elev >= BUILD_MIN and elev <= BUILD_MAX then
+					cells[idx] = z
+				else
+					-- Floor / open: not a same-level structure
+					cells[idx] = false
+				end
 			else
 				cells[idx] = false
 			end
@@ -341,53 +355,39 @@ local function SampleBuildingMap(ply, range)
 	bmap.ready = true
 end
 
--- Height of surface relative to player feet (stable; not map-min)
-local function CellElev(z, playerZ)
-	if not z or z == false then return nil end
-	return z - (playerZ or 0)
-end
-
-local function IsBuildingElev(elev)
-	return elev ~= nil and elev >= BUILD_ABOVE
-end
-
 local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	if not cv_radar_buildings:GetBool() then return end
 	if not bmap.ready or not bmap.cells or not bmap.step or bmap.step <= 0 then return end
 	local res = bmap.res or BMAP_RES
 	local step = bmap.step
 	local wx0, wy0 = bmap.wx0, bmap.wy0
-	local playerZ = bmap.playerZ or origin.z
-	-- Cell size; keep full square inside circle
+	-- Live feet Z for elev window (same-level only)
+	local playerZ = origin.z
 	local cellPx = math.max(2, math.floor((radius * 2 / res) + 0.5))
 	local half = cellPx * 0.5
 	local maxR = math.max(0, radius - half * 1.42 - 2)
 	local maxR2 = maxR * maxR
 	local cells = bmap.cells
-	-- Paint vs sample origin so map scrolls smoothly without reclass flicker
 	local refX, refY = origin.x, origin.y
 
 	draw.NoTexture()
 
-	-- Buildings only (no full-disc ground flood — that looked solid pink)
 	for iy = 0, res - 1 do
 		local wy = wy0 + iy * step - refY
 		for ix = 0, res - 1 do
 			local z = cells[iy * res + ix + 1]
 			if z == false or z == nil then continue end
-			local elev = CellElev(z, playerZ)
-			if not IsBuildingElev(elev) then continue end
+			local elev = z - playerZ
+			-- Depth filter: drop surface when player went underground (or vice versa)
+			if elev < BUILD_MIN or elev > BUILD_MAX then continue end
 
 			local wx = wx0 + ix * step - refX
 			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
 			if (u * u + v * v) > maxR2 then continue end
 
-			-- Cool slate (readable, not solid crimson disc)
-			local t = math.Clamp((elev - BUILD_ABOVE) / (BUILD_TALL - BUILD_ABOVE), 0, 1)
-			local r = 70 + t * 90
-			local g = 85 + t * 70
-			local b = 100 + t * 80
-			surface.SetDrawColor(r, g, b, 200)
+			local t = math.Clamp((elev - BUILD_MIN) / math.max(1, BUILD_TALL - BUILD_MIN), 0, 1)
+			-- Cool slate (same-level structures only)
+			surface.SetDrawColor(70 + t * 90, 85 + t * 70, 100 + t * 80, 200)
 			surface.DrawRect(cx + u - half, cy + v - half, cellPx, cellPx)
 		end
 	end
@@ -558,17 +558,20 @@ local function PaintRadar(w, h, T)
 	surface.DrawLine(tri[2].x, tri[2].y, tri[3].x, tri[3].y)
 	surface.DrawLine(tri[3].x, tri[3].y, tri[1].x, tri[1].y)
 
-	-- Player radar blips
+	-- Player radar blips (same depth band — hide surface players when underground)
 	local myTeam = ply:Team()
+	local plyDepthMax = math.max(DEPTH_UP, 256)
 	for _, p in ipairs(player.GetAll()) do
 		if not IsValid(p) or p == ply then continue end
 		if not p:Alive() then continue end
-		local delta = p:GetPos() - origin
+		local ppos = p:GetPos()
+		local dz = ppos.z - origin.z
+		if math.abs(dz) > plyDepthMax then continue end
+		local delta = ppos - origin
 		local dist = delta:Length2D()
 		if dist > range then continue end
 		local u, v = WorldToRadar(delta, yaw, range, radius)
 		local bx, by = cx + u, cy + v
-		-- stay inside circle
 		local d2 = u * u + v * v
 		if d2 > radius * radius then
 			local s = radius / math.sqrt(d2)
@@ -576,8 +579,7 @@ local function PaintRadar(w, h, T)
 		end
 		local same = (p:Team() == myTeam)
 		local col = same and Color(100, 200, 255, 255) or Color(255, 90, 90, 255)
-		-- height cue (CS-like): above = outline ring, below = darker
-		local dz = p:GetPos().z - origin.z
+		-- height cue within band: above = ring, below = darker
 		local r = 5
 		if dz > 48 then
 			surface.SetDrawColor(col.r, col.g, col.b, 255)
