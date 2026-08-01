@@ -46,9 +46,10 @@ if CLIENT then
 		r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
 		r_threaded_particles = "1",
 		r_queued_ropes = "1",
-		-- Keep world + model decals on for both eye passes
+		-- Keep world + model decals on for both eye passes (stereo flicker if off/intermittent)
 		r_drawdecals = "1",
 		r_drawmodeldecals = "1",
+		r_drawbatchdecals = "1",
 		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
 		snd_mute_losefocus = "0",
 	}
@@ -765,6 +766,32 @@ if CLIENT then
 		return render.RenderView
 	end
 
+	--- Reset GPU state that PostDrawEffects / halos / HUD can leave dirty between eyes.
+	--- Dirty stencil, DepthRange, or blend is a common source of decal + prop flicker in SBS VR.
+	local function ResetStereoEyeState()
+		pcall(function()
+			render.SetStencilEnable(false)
+			render.SetStencilTestMask(0)
+			render.SetStencilWriteMask(0)
+			render.SetStencilReferenceValue(0)
+			render.SuppressEngineLighting(false)
+			render.SetBlend(1)
+			if render.OverrideDepthEnable then render.OverrideDepthEnable(false, false) end
+			if render.OverrideBlend then render.OverrideBlend(false) end
+			if render.OverrideColorWriteEnable then render.OverrideColorWriteEnable(false) end
+			if render.DepthRange then render.DepthRange(0, 1) end
+			if render.SetColorModulation then render.SetColorModulation(1, 1, 1) end
+			if cam.IgnoreZ then cam.IgnoreZ(false) end
+		end)
+	end
+
+	local function EnsureDecalsEnabled()
+		local d = GetConVar("r_drawdecals")
+		local m = GetConVar("r_drawmodeldecals")
+		if d and d:GetInt() ~= 1 then setConvarValue("r_drawdecals", "1") end
+		if m and m:GetInt() ~= 1 then setConvarValue("r_drawmodeldecals", "1") end
+	end
+
 	--- Engine eye pass only — never WorldPortals_RenderView, never nested RTs.
 	local function SafeRenderView(view)
 		if not view or not view.origin or not view.angles then return end
@@ -776,8 +803,10 @@ if CLIENT then
 		if istable(wp) then
 			wp.drawing = true
 		end
+		ResetStereoEyeState()
 		local rv = GetEngineRenderView()
 		rv(view)
+		ResetStereoEyeState()
 	end
 
 	--- Fill a private eye viewsetup from public g_VR.view SoT + eye-specific fields.
@@ -914,6 +943,7 @@ if CLIENT then
 				end
 			end
 			hook.Call("VRMod_PreStereo", nil)
+			EnsureDecalsEnabled()
 
 			-- LEFT eye — draw only
 			view.origin = g_VR.eyePosLeft
@@ -926,6 +956,9 @@ if CLIENT then
 			hook.Call("VRMod_PreRender", nil, "left")
 			SafeRenderView(viewLeft)
 
+			-- Depth only — never Clear colour (would wipe left-eye world + decals).
+			-- Reset stencil/depth-range so right eye does not inherit halo/HUD state.
+			ResetStereoEyeState()
 			render.ClearDepth(true)
 
 			-- RIGHT eye — draw only (same world pose as left)
@@ -941,6 +974,7 @@ if CLIENT then
 
 			render.SetScissorRect(0, 0, 0, 0, false)
 			g_VR.stereoEye = nil
+			ResetStereoEyeState()
 
 			-- Restore cyclopean public SoT
 			view.origin = cyclopeanOrigin
