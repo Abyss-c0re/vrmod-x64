@@ -140,7 +140,11 @@ if CLIENT then
     hook.Add("VRMod_Input", "VRMod_Keypad_MouseInput", function(action, pressed)
         if not cursorVisible or not IsValid(keypadFocusedEnt) then return end
         local mouseButton = nil
-        if action == "boolean_primaryfire" then mouseButton = MOUSE_LEFT end
+        if vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action) then
+            mouseButton = MOUSE_LEFT
+        elseif action == "boolean_primaryfire" then
+            mouseButton = MOUSE_LEFT
+        end
         if mouseButton then
             if pressed then
                 local hovered = keypadFocusedEnt:GetHoveredElement(cursorPos.x, cursorPos.y)

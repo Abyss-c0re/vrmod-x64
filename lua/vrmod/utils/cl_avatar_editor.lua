@@ -659,16 +659,28 @@ function Session:GetHoverBone()
 	return self.hoverBoneId, self.hoverBoneName, self.hoverBonePos
 end
 
---- Update hover from RH laser each frame (call while Avatar menu open)
+--- Update hover from either hand laser (call while Avatar menu open)
 function Session:UpdateLaserHover()
 	self.hoverBoneId, self.hoverBoneName, self.hoverBonePos = nil, nil, nil
 	if not self:IsValid() or not g_VR.tracking then return end
-	local rh = g_VR.tracking.pose_righthand
-	if not rh or not rh.pos or not rh.ang then return end
-	local id, name, hit = self:RayPickBone(rh.pos, rh.ang:Forward(), 250, 7)
-	self.hoverBoneId = id
-	self.hoverBoneName = name
-	self.hoverBonePos = hit
+	local tr = g_VR.tracking
+	local bestDist = 99999
+	local hands = { tr.pose_righthand, tr.pose_lefthand }
+	for i = 1, 2 do
+		local h = hands[i]
+		if h and h.pos and h.ang then
+			local id, name, hit = self:RayPickBone(h.pos, h.ang:Forward(), 250, 7)
+			if id and hit then
+				local d = h.pos:Distance(hit)
+				if d < bestDist then
+					bestDist = d
+					self.hoverBoneId = id
+					self.hoverBoneName = name
+					self.hoverBonePos = hit
+				end
+			end
+		end
+	end
 end
 
 function Session:SetMode(mode)

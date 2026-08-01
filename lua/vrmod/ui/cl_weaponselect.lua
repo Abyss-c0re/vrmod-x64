@@ -517,11 +517,11 @@ function VRUtilWeaponMenuOpen()
 		VRUtilMenuRenderEnd()
 	end
 
-	-- Click categories while menu held open
+	-- Click categories while menu held open (either hand trigger)
 	hook.Add("VRMod_Input", "vrmod_weaponmenu_nav", function(action, pressed)
 		if not open then return end
 		if not pressed then return end
-		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		if g_VR.menuFocus ~= "weaponmenu" then return end
 		if state.hoveredCat > 0 then
 			state.catIndex = state.hoveredCat

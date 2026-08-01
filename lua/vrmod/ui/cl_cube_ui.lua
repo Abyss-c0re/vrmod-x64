@@ -291,15 +291,15 @@ end
 
 local function onInput(action, pressed)
 	if not session then return end
-	-- Secondary / chat = close (works even without laser lock so you can escape)
-	if pressed and (action == "boolean_secondaryfire" or action == "boolean_chat") then
+	-- Secondary / chat = close (either hand; works without laser lock)
+	if pressed and vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
 		if session.closeOnSecondary ~= false then
 			C.Close()
 		end
 		return
 	end
 	if not pressed then return end
-	if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+	if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 
 	-- Must be laser-locked on our menu for primary acts
 	if g_VR.menuFocus ~= UID then return end

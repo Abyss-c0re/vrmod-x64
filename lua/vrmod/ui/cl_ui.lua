@@ -30,6 +30,28 @@ if CLIENT then
 		return s
 	end
 
+	--- Ambidextrous menu primary (LMB): right trigger OR left trigger OR car left
+	function vrmod.IsMenuPrimaryClick(action)
+		return action == "boolean_primaryfire"
+			or action == "boolean_left_primaryfire"
+			or action == "boolean_car_mouse_left"
+	end
+
+	--- Instant menu secondary / cancel (not left trigger — that is primary)
+	function vrmod.IsMenuSecondaryClick(action)
+		return action == "boolean_secondaryfire"
+			or action == "boolean_left_secondaryfire"
+			or action == "boolean_car_mouse_right"
+	end
+
+	--- Close / back on either hand
+	function vrmod.IsMenuCloseAction(action)
+		return vrmod.IsMenuSecondaryClick(action)
+			or action == "boolean_chat"
+			or action == "boolean_use"
+			or action == "boolean_changeweapon"
+	end
+
 	--- Effective 3D2D scale for a menu entry (open scale × global UI scale)
 	function vrmod.GetMenuDrawScale(menu)
 		local base = (menu and (menu.baseScale or menu.scale)) or 0.03
@@ -1144,9 +1166,7 @@ if CLIENT then
 	end
 
 	local function IsMenuTriggerAction(action)
-		return action == "boolean_primaryfire"
-			or action == "boolean_left_primaryfire"
-			or action == "boolean_car_mouse_left"
+		return vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)
 	end
 
 	hook.Add("VRMod_Input", "ui", function(action, pressed)

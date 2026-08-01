@@ -263,10 +263,10 @@ function g_VR.MenuOpen()
 
 	paint(-1)
 
-	-- Trigger while open: flip pages without closing
+	-- Trigger while open: flip pages without closing (either hand)
 	hook.Add("VRMod_Input", "vrmod_qm_page_nav", function(action, pressed)
 		if not open or not pressed then return end
-		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		if hoverNav == "prev" then
 			local q = QM()
 			if q and q.PrevPage then q.PrevPage() end

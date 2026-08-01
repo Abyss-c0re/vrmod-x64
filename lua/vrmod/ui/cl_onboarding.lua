@@ -232,9 +232,11 @@ local function onInput(action, pressed)
 	if Ex.phase == "vision" or Ex.waitingVision then return end
 
 	if Ex.phase == "welcome" then
-		if action == "boolean_primaryfire" or action == "boolean_use" or action == "boolean_changeweapon" then
+		if (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action))
+			or action == "boolean_use" or action == "boolean_changeweapon" then
 			phaseVision()
-		elseif action == "boolean_secondaryfire" or action == "boolean_left_pickup" or action == "boolean_right_pickup" then
+		elseif (vrmod.IsMenuSecondaryClick and vrmod.IsMenuSecondaryClick(action))
+			or action == "boolean_left_pickup" or action == "boolean_right_pickup" then
 			-- Skip entire experience
 			vrmod.Experience_MarkComplete()
 			toast("Experience skipped", 2)
@@ -244,10 +246,10 @@ local function onInput(action, pressed)
 	end
 
 	if Ex.phase == "posture" then
-		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
+		if vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action) then
 			Ex.choice = 1 -- standing
 			toast("Standing selected · trigger Use to confirm", 2)
-		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right" then
+		elseif vrmod.IsMenuSecondaryClick and vrmod.IsMenuSecondaryClick(action) then
 			Ex.choice = 2 -- seated
 			toast("Seated selected · trigger Use to confirm", 2)
 		elseif action == "boolean_use" or action == "boolean_changeweapon" or action == "boolean_flashlight" then
