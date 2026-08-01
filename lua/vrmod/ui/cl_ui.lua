@@ -20,6 +20,59 @@ if CLIENT then
 	-- Corner resize: grip + pull bottom-right corner to scale a panel.
 	local cv_menu_resize = CreateClientConVar("vrmod_menu_resize", "1", true, FCVAR_ARCHIVE,
 		"Grip + pull panel corner to resize (scale) VR menus", 0, 1)
+	-- Primary hand (SoT): laser + menu LMB. Opposite hand = wrist menus.
+	-- 0 = right (default), 1 = left. Integer so Cube combo + Derma combo share one path.
+	local cv_primary_hand = CreateClientConVar("vrmod_primary_hand", "0", true, FCVAR_ARCHIVE,
+		"VR primary hand: 0=right (laser+click), 1=left. Wrist menus use the other hand.", 0, 1)
+
+	------------------------------------------------------------------------
+	-- Primary hand SoT (single truth — not dual free-for-all lasers)
+	--   Primary   → laser pointer + menu primary click (LMB)
+	--   Secondary → wrist-attached panels (QM, settings, spawn shell)
+	--   Either grip still free-grabs a laser-focused panel
+	------------------------------------------------------------------------
+
+	function vrmod.GetPrimaryHand()
+		local v = cv_primary_hand and cv_primary_hand:GetInt() or 0
+		return (v == 1) and "left" or "right"
+	end
+
+	function vrmod.GetSecondaryHand()
+		return vrmod.GetPrimaryHand() == "left" and "right" or "left"
+	end
+
+	function vrmod.IsPrimaryHand(handName)
+		return handName == vrmod.GetPrimaryHand()
+	end
+
+	--- Wrist hand for a menu: explicit attachHand wins, else secondary (non-primary).
+	function vrmod.GetMenuWristHand(menu)
+		if menu and (menu.attachHand == "left" or menu.attachHand == "right") then
+			return menu.attachHand
+		end
+		return vrmod.GetSecondaryHand()
+	end
+
+	--- Primary-hand trigger → LMB (right fire or left fire depending on setting).
+	function vrmod.IsMenuPrimaryClick(action)
+		if action == "boolean_car_mouse_left" then return true end
+		if vrmod.GetPrimaryHand() == "left" then
+			return action == "boolean_left_primaryfire"
+		end
+		return action == "boolean_primaryfire"
+	end
+
+	--- Secondary / cancel / RMB (either hand secondary + car RMB).
+	function vrmod.IsMenuSecondaryClick(action)
+		return action == "boolean_secondaryfire"
+			or action == "boolean_left_secondaryfire"
+			or action == "boolean_car_mouse_right"
+	end
+
+	function vrmod.IsMenuCloseAction(action)
+		return vrmod.IsMenuSecondaryClick(action)
+			or action == "boolean_chat"
+	end
 
 	function vrmod.GetUIScale()
 		-- Default 1.0 — never silently shrink fonts/menus
@@ -152,13 +205,20 @@ if CLIENT then
 
 	--- Hand-local top-left so the panel CENTER sits near the wrist (not a far corner).
 	-- 3D2D: +X = ang:Right(), +Y cursor = -ang:Forward() (see laser hit test).
-	function VRUtilHandMenuPose(w, h, scale, centerLocal, panelAng)
+	-- forHand: "left"|"right" (default = secondary / wrist hand from primary setting).
+	function VRUtilHandMenuPose(w, h, scale, centerLocal, panelAng, forHand)
 		w = w or 512
 		h = h or 512
 		scale = scale or 0.025
 		panelAng = panelAng or Angle(0, -90, 55)
-		-- Palm-forward center (close, readable)
+		-- Palm-forward center (close, readable) — tuned for left controller local space
 		centerLocal = centerLocal or Vector(2.5, 3.5, 4)
+		forHand = forHand or (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+		if forHand == "right" then
+			-- Mirror across controller forward so the panel faces the user on the right wrist
+			centerLocal = Vector(centerLocal.x, -centerLocal.y, centerLocal.z)
+			panelAng = Angle(panelAng.p, -panelAng.y, -panelAng.r)
+		end
 		local halfW = w * scale * 0.5
 		local halfH = h * scale * 0.5
 		-- top-left = center - Right*halfW + Forward*halfH  (Y-down = -Forward)
@@ -350,6 +410,10 @@ if CLIENT then
 			and consumeStamp.pressed == (pressed and true or false)
 	end
 
+	local function MenuAttachHandName(menu)
+		return vrmod.GetMenuWristHand(menu)
+	end
+
 	local function ResolveMenuWorldPose(menu)
 		if not menu then return nil, nil end
 		local pos, ang = menu.pos, menu.ang
@@ -364,7 +428,7 @@ if CLIENT then
 			local originAng = g_VR.originAngle or Angle()
 			return LocalToWorld(pos, ang, origin, originAng)
 		end
-		local hand = HandPose("left")
+		local hand = HandPose(MenuAttachHandName(menu))
 		if hand and hand.pos and hand.ang then
 			return LocalToWorld(pos, ang, hand.pos, hand.ang)
 		end
@@ -467,7 +531,7 @@ if CLIENT then
 		elseif v.freeFloat or not v.attachment then
 			pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
 		else
-			local hand = HandPose("left")
+			local hand = HandPose(MenuAttachHandName(v))
 			if hand and hand.pos and hand.ang then
 				pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
 			end
@@ -607,7 +671,7 @@ if CLIENT then
 
 	--- Call from menus that re-apply hand pose each paint. Skips when free-floating / grabbed / resizing.
 	--- Never overwrites scale when user locked size (resize / saved layout).
-	function vrmod.MenuApplyHandAnchor(menu, scale, pos, ang)
+	function vrmod.MenuApplyHandAnchor(menu, scale, pos, ang, attachHand)
 		if not menu then return end
 		if scale and not menu.scaleLocked then
 			menu.scale = scale
@@ -621,18 +685,25 @@ if CLIENT then
 		if pos then menu.pos = pos end
 		if ang then menu.ang = ang end
 		menu.attachment = true
+		if attachHand == "left" or attachHand == "right" then
+			menu.attachHand = attachHand
+		elseif not menu.attachHand then
+			menu.attachHand = vrmod.GetSecondaryHand()
+		end
 	end
 
-	--- Snap a free-floating panel back to left-hand attach (optional helper / concommand).
+	--- Snap a free-floating panel back to wrist attach (secondary / attachHand).
 	function vrmod.MenuReattach(uid)
 		local menu = menus[uid or g_VR.menuFocus]
 		if not menu then return false end
 		local wPos, wAng = ResolveMenuWorldPose(menu)
-		local hand = HandPose("left")
+		local wrist = MenuAttachHandName(menu)
+		local hand = HandPose(wrist)
 		if not wPos or not hand or not hand.pos or not hand.ang then return false end
 		menu.pos, menu.ang = WorldToLocal(wPos, wAng, hand.pos, hand.ang)
 		menu.freeFloat = false
 		menu.attachment = true
+		menu.attachHand = wrist
 		menu.grabHand = nil
 		menu.grabPos = nil
 		menu.grabAng = nil
@@ -689,9 +760,12 @@ if CLIENT then
 		local tms = render.GetToneMappingScaleLinear()
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
 
-		local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-		local rhPos = rh and rh.pos
-		local rhAng = rh and rh.ang
+		-- Laser from primary hand only (never dual free-for-all)
+		local primaryName = vrmod.GetPrimaryHand()
+		local laserHand = HandPoseLive(primaryName) or HandPose(primaryName)
+		local laserPos = laserHand and laserHand.pos
+		local laserAng = laserHand and laserHand.ang
+		g_VR.menuPointerHand = primaryName
 
 		for _, v in ipairs(menuOrder) do
 			local k = v.uid
@@ -775,15 +849,15 @@ if CLIENT then
 			local hitStale = (v._hitFrame ~= sf)
 				or not v._hitScale
 				or math.abs((v._hitScale or 0) - drawScale) > 1e-7
-			if wantCursor and (solveFocus or hitStale or resizingThis) and rhPos and rhAng then
-				local dir = rhAng:Forward()
+			if wantCursor and (solveFocus or hitStale or resizingThis) and laserPos and laserAng then
+				local dir = laserAng:Forward()
 				local normal = ang:Up()
 				local A = normal:Dot(dir)
 				if A < 0 then
-					local B = normal:Dot(pos - rhPos)
+					local B = normal:Dot(pos - laserPos)
 					if B < 0 then
 						hitDist = B / A
-						hitWorld = rhPos + dir * hitDist
+						hitWorld = laserPos + dir * hitDist
 						local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
 						hitCursorX = tp.x / drawScale
 						hitCursorY = -tp.y / drawScale
@@ -879,9 +953,13 @@ if CLIENT then
 				g_VR.menuCursorY = focusSnap.cursorY
 			end
 			local beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
-			if rhPos and beamEnd then
+			if laserPos and beamEnd then
 				render.SetMaterial(mat_beam)
-				render.DrawBeam(rhPos, beamEnd, 0.1, 0, 1, Color(255, 255, 255, 255))
+				-- Cool tint when primary is left so it's obvious which hand aims
+				local col = (primaryName == "left")
+					and Color(180, 220, 255, 255)
+					or Color(255, 255, 255, 255)
+				render.DrawBeam(laserPos, beamEnd, 0.1, 0, 1, col)
 			end
 		end
 
@@ -925,6 +1003,8 @@ if CLIENT then
 			resizable = true,
 			scaleLocked = false,
 			freeFloat = not attachment,
+			-- Wrist menus default to secondary (non-primary) hand
+			attachHand = attachment and vrmod.GetSecondaryHand() or nil,
 			grabHand = nil,
 			grabPos = nil,
 			grabAng = nil,
@@ -1045,10 +1125,9 @@ if CLIENT then
 		-- Don't inject clicks while resizing (corner drag is not a button press)
 		if g_VR.menuResizeActive then return end
 		local mouseButton = nil
-		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
+		if vrmod.IsMenuPrimaryClick(action) then
 			mouseButton = MOUSE_LEFT
-		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right"
-			or action == "boolean_left_secondaryfire" then
+		elseif vrmod.IsMenuSecondaryClick(action) then
 			-- Right-click: ContentIcon spawn options, Derma context, etc.
 			mouseButton = MOUSE_RIGHT
 		elseif action == "boolean_sprint" then

@@ -175,6 +175,7 @@ local function markMenu()
 	m.grabbable = true
 	if not m.freeFloat and not m.grabHand then
 		m.attachment = true
+		m.attachHand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
 	end
 end
 
@@ -299,7 +300,7 @@ local function onInput(action, pressed)
 		return
 	end
 	if not pressed then return end
-	if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+	if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 
 	-- Must be laser-locked on our menu for primary acts
 	if g_VR.menuFocus ~= UID then return end

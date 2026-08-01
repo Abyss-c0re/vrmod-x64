@@ -51,9 +51,14 @@ local function Font(name)
 	return "DermaDefault"
 end
 
+local function WristHand()
+	return (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+end
+
 local function WristPose()
+	local wrist = WristHand()
 	if isfunction(VRUtilHandMenuPose) then
-		return VRUtilHandMenuPose(W, H, 0.026, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
+		return VRUtilHandMenuPose(W, H, 0.026, Vector(2.5, 3.5, 4), Angle(0, -90, 55), wrist)
 	end
 	return Vector(2.5, 3, 4), Angle(0, -90, 55), 0.026
 end
@@ -316,11 +321,11 @@ local function paint()
 
 	local m = g_VR.menus[UID]
 	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng)
+		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 	elseif not m.freeFloat and not m.grabHand then
 		if not m.scaleLocked then m.scale = liveScale end
 		m.pos, m.ang = livePos, liveAng
-		m.cubeMenu, m.attachment = true, true
+		m.cubeMenu, m.attachment, m.attachHand = true, true, WristHand()
 	end
 
 	rebuildButtons()
@@ -468,11 +473,12 @@ function vrmod.WeaponSettings_Open()
 	sm.grabbable = true
 	sm.resizable = true
 	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(sm, liveScale, livePos, liveAng)
+		vrmod.MenuApplyHandAnchor(sm, liveScale, livePos, liveAng, WristHand())
 	else
 		if not sm.scaleLocked then sm.scale = liveScale end
 		sm.pos, sm.ang = livePos, liveAng
 		sm.attachment = true
+		sm.attachHand = WristHand()
 	end
 
 	paint()
@@ -492,12 +498,13 @@ function vrmod.WeaponSettings_Open()
 			vrmod.EnsureWeaponViewModelEntry(c)
 		end
 		if vrmod.MenuApplyHandAnchor then
-			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
+			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
 		elseif not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
 			local wm = g_VR.menus[UID]
 			if not wm.scaleLocked then wm.scale = liveScale end
 			wm.pos, wm.ang = livePos, liveAng
 			wm.attachment = true
+			wm.attachHand = WristHand()
 			wm.cubeMenu = true
 		end
 		paint()
@@ -515,7 +522,7 @@ function vrmod.WeaponSettings_Open()
 			return
 		end
 		if not pressed then return end
-		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 
 		local cx, cy = g_VR.menuCursorX, g_VR.menuCursorY
 		if not (g_VR.menuFocus == UID or (g_VR.menus and g_VR.menus[UID])) then return end

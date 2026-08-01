@@ -156,6 +156,11 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Radar build max elev", cvar = "vrmod_hud_radar_build_max", min = 64, max = 512, decimals = 0 },
 			{ kind = "slider", label = "Radar player depth band", cvar = "vrmod_hud_radar_player_depth", min = 64, max = 1024, decimals = 0 },
 			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.75, max = 2.0, decimals = 2 },
+			{ kind = "combo", label = "Primary hand (laser + click)", cvar = "vrmod_primary_hand", choices = {
+				{ text = "Right", value = 0 },
+				{ text = "Left", value = 1 },
+			}},
+			{ kind = "help", label = "Laser + menu click on primary. Wrist menus (QM/settings) ride the other hand." },
 			{ kind = "slider", label = "HUD distance", cvar = "vrmod_huddistance", min = 1, max = 100, decimals = 0 },
 			{ kind = "slider", label = "HUD scale", cvar = "vrmod_hudscale", min = 0.01, max = 0.1, decimals = 2 },
 			{ kind = "slider", label = "HUD curve", cvar = "vrmod_hudcurve", min = -100, max = 100, decimals = 0 },
@@ -582,6 +587,7 @@ function vrmod.SettingsRunAction(action_id, ctx)
 
 	if action_id == "reset_hud" then
 		RunConsoleCommand("vrmod_ui_scale", "1")
+		RunConsoleCommand("vrmod_primary_hand", "0") -- right
 		RunConsoleCommand("vrmod_hud", "1")
 		RunConsoleCommand("vrmod_hudcurve", "60")
 		RunConsoleCommand("vrmod_huddistance", "60")

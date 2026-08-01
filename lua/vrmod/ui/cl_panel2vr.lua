@@ -165,7 +165,9 @@ function W.ResolvePlace(placeName, override)
 		local pw = (placeName == "hand" or placeName == "workbench") and 1024 or 512
 		local ph = (placeName == "hand" or placeName == "workbench") and 768 or 512
 		if isfunction(VRUtilHandMenuPose) then
-			local hp, ha, hs = VRUtilHandMenuPose(pw, ph, sc, center, pang)
+			local wrist = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+			local hp, ha, hs = VRUtilHandMenuPose(pw, ph, sc, center, pang, wrist)
+			base.attachHand = wrist
 			if hp then base.pos = hp end
 			if ha then base.ang = ha end
 			if hs then base.scale = hs end
@@ -482,6 +484,7 @@ function W.ManifestPanel(panel, opts)
 			-- keep parked world pose
 		elseif place.attachment then
 			m.attachment = true
+			if not m.attachHand then m.attachHand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left" end
 			m.freeFloat = false
 			m.pos = place.pos
 			m.ang = place.ang
@@ -623,6 +626,7 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 			end
 			m.cubeMenu = true
 			m.attachment = true
+			if not m.attachHand then m.attachHand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left" end
 		end
 		if not dirty and not opts.alwaysRedraw then return end
 		dirty = false
@@ -819,6 +823,7 @@ function W.InstallHooks()
 						end
 						if not m.freeFloat and not m.grabHand and not g_VR.menuResizeActive then
 							m.attachment = true
+							if not m.attachHand then m.attachHand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left" end
 						end
 					elseif m.cubeMenu and not m.scaleLocked and m.scale and m.scale < 0.03 and m.attachment then
 						m.scale = 0.035

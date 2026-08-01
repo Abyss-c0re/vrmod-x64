@@ -54,9 +54,14 @@ local COLOR_PALETTE = {
 	Color(196, 30, 58, 255),
 }
 
+local function WristHand()
+	return (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+end
+
 local function WristPose()
+	local wrist = WristHand()
 	if isfunction(VRUtilHandMenuPose) then
-		return VRUtilHandMenuPose(W, H, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
+		return VRUtilHandMenuPose(W, H, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55), wrist)
 	end
 	return Vector(2.5, 3, 4), Angle(0, -90, 55), 0.025
 end
@@ -360,13 +365,14 @@ local function paint()
 
 	local m = g_VR.menus[UID]
 	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng)
+		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 	elseif not m.freeFloat and not m.grabHand then
 		if not m.scaleLocked then m.scale = liveScale end
 		m.pos = livePos
 		m.ang = liveAng
 		m.cubeMenu = true
 		m.attachment = true
+		m.attachHand = WristHand()
 	end
 
 	local focused = (g_VR.menuFocus == UID)
@@ -686,7 +692,7 @@ function vrmod.CubeSettings_Open()
 		return
 	end
 	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
+		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
 	else
 		local sm = g_VR.menus[UID]
 		if not sm.scaleLocked then sm.scale = liveScale end
@@ -694,6 +700,7 @@ function vrmod.CubeSettings_Open()
 		sm.ang = liveAng
 		sm.cubeMenu = true
 		sm.attachment = true
+		sm.attachHand = WristHand()
 	end
 
 	paint()
@@ -713,13 +720,13 @@ function vrmod.CubeSettings_Open()
 
 	hook.Add("VRMod_Input", "cube_settings_input", function(action, pressed)
 		if not open then return end
-		if pressed and (action == "boolean_secondaryfire" or action == "boolean_chat") then
+		if pressed and (vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) or action == "boolean_secondaryfire" or action == "boolean_chat") then
 			vrmod.CubeSettings_Close()
 			return
 		end
 		if not pressed then return end
 		if g_VR.menuFocus ~= UID then return end
-		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
 	end)
 

@@ -49,9 +49,14 @@ local HEADER, TAB_H, PAD, ROW_H = 52, 36, 12, 44
 
 local convars = vrmod.GetConvars()
 
+local function WristHand()
+	return (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+end
+
 local function WristPose()
+	local wrist = WristHand()
 	if isfunction(VRUtilHandMenuPose) then
-		return VRUtilHandMenuPose(W, H, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55))
+		return VRUtilHandMenuPose(W, H, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55), wrist)
 	end
 	return Vector(2.5, 3, 4), Angle(0, -90, 55), 0.025
 end
@@ -205,11 +210,11 @@ local function paint()
 	local m = g_VR.menus[UID]
 	if not m.rt then return end
 	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng)
+		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 	elseif not m.freeFloat and not m.grabHand then
 		if not m.scaleLocked then m.scale = liveScale end
 		m.pos, m.ang = livePos, liveAng
-		m.cubeMenu, m.attachment = true, true
+		m.cubeMenu, m.attachment, m.attachHand = true, true, WristHand()
 	end
 
 	local focused = (g_VR.menuFocus == UID)
@@ -575,7 +580,7 @@ function vrmod.AvatarMenu_Open()
 		return
 	end
 	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
+		vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
 	else
 		local am = g_VR.menus[UID]
 		if not am.scaleLocked then am.scale = liveScale end
@@ -583,6 +588,7 @@ function vrmod.AvatarMenu_Open()
 		am.ang = liveAng
 		am.cubeMenu = true
 		am.attachment = true
+		am.attachHand = WristHand()
 	end
 
 	paint()
@@ -597,13 +603,14 @@ function vrmod.AvatarMenu_Open()
 			return
 		end
 		if vrmod.MenuApplyHandAnchor then
-			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng)
+			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
 		elseif not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
 			local am = g_VR.menus[UID]
 			if not am.scaleLocked then am.scale = liveScale end
 			am.pos = livePos
 			am.ang = liveAng
 			am.attachment = true
+		am.attachHand = WristHand()
 			am.cubeMenu = true
 		end
 		paint()
@@ -622,7 +629,7 @@ function vrmod.AvatarMenu_Open()
 			return
 		end
 		if not pressed then return end
-		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 
 		-- Always try UI hit-test if menu exists (don't require menuFocus — free-float lag)
 		local cx, cy = g_VR.menuCursorX, g_VR.menuCursorY

@@ -235,8 +235,11 @@ function VRUtilWeaponMenuOpen()
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return end
 	local hmd = g_VR.tracking and g_VR.tracking.hmd
-	local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-	if not hmd or not hmd.ang or not rh or not rh.pos or not rh.ang then return end
+	local primary = (vrmod.GetPrimaryHand and vrmod.GetPrimaryHand()) or "right"
+	local ph = g_VR.tracking and (
+		primary == "left" and g_VR.tracking.pose_lefthand or g_VR.tracking.pose_righthand
+	)
+	if not hmd or not hmd.ang or not ph or not ph.pos or not ph.ang then return end
 
 	open = true
 	local selectHolster = false
@@ -285,10 +288,10 @@ function VRUtilWeaponMenuOpen()
 	end
 	if #slotOrder == 0 then state.catIndex = 0 end
 
-	-- World placement: Alyx-like in front of hand, slightly tilted
+	-- World placement: Alyx-like in front of primary hand, slightly tilted
 	local tmpAng = Angle(0, hmd.ang.yaw - 90, 55)
 	local pos, ang = WorldToLocal(
-		rh.pos + rh.ang:Forward() * 9 + tmpAng:Right() * -(MENU_W * MENU_SCALE * 0.35) + tmpAng:Forward() * -4,
+		ph.pos + ph.ang:Forward() * 9 + tmpAng:Right() * -(MENU_W * MENU_SCALE * 0.35) + tmpAng:Forward() * -4,
 		tmpAng,
 		g_VR.origin or Vector(),
 		g_VR.originAngle or Angle()
@@ -521,7 +524,7 @@ function VRUtilWeaponMenuOpen()
 	hook.Add("VRMod_Input", "vrmod_weaponmenu_nav", function(action, pressed)
 		if not open then return end
 		if not pressed then return end
-		if action ~= "boolean_primaryfire" and action ~= "boolean_car_mouse_left" then return end
+		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		if g_VR.menuFocus ~= "weaponmenu" then return end
 		if state.hoveredCat > 0 then
 			state.catIndex = state.hoveredCat
