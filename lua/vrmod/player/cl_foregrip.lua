@@ -1,45 +1,35 @@
 if SERVER then return end
 -- =============================================================================
--- Stock / non-VR two-hand foregrip (vrmod-x64)
+-- Stock / non-VR two-hand foregrip
 --
--- MINIMAL reliable path (gVRMod + proven x64):
---   START: left grip + hands within GRIP_DISTANCE + stock weapon
---   HOLD:  guided RH → gun = RH+VMI → LH offset on that gun matrix
---   RELEASE: left grip up only (input), not flaky distance on first frames
+-- CRITICAL: Do NOT timer-remove our own hooks (0_vrmod_foregrip / vrmod_foregrip).
+-- That made grip "start" then never solve — felt like not gripping.
 --
--- No menuGrabActive hard block. No mid-gun radial gates.
--- ArcVR: arcticvr_base only.
+-- Start: left grip held + hands within distance + stock weapon
+-- Hold:  gun = RH+VMI, LH offset on gun matrix (same as drawn viewmodel)
+-- Edge + poll: works without console while holding VR grips
 -- =============================================================================
 
-local function BlockOld()
+-- Only strip *foreign* broken addons — never our hooks
+local function BlockForeignForegrip()
 	for _, pair in ipairs({
 		{ "VRMod_Input", "Foregrip" },
 		{ "VRMod_PreRender", "ForegripTransform" },
 		{ "VRMod_Exit", "ForegripExit" },
-		{ "VRMod_PreStereo", "vrmod_foregrip" },
-		{ "VRMod_PreRender", "vrmod_foregrip" },
-		{ "VRMod_PreStereo", "0_vrmod_foregrip" },
-		{ "VRMod_PreRender", "0_vrmod_foregrip" },
-		{ "VRMod_PreStereo", "1_vrmod_weapon_pose_freeze" },
-		{ "VRMod_PreStereo", "vrmod_weapon_pose_freeze" },
-		{ "VRMod_Input", "vrmod_foregrip" },
-		{ "VRMod_PreRender", "vrmod_foregrip_x64" },
 	}) do
 		local t = hook.GetTable()[pair[1]]
 		if t and t[pair[2]] then hook.Remove(pair[1], pair[2]) end
 	end
 end
-BlockOld()
-timer.Simple(0.5, BlockOld)
-timer.Simple(2, BlockOld)
+BlockForeignForegrip()
+timer.Simple(1, BlockForeignForegrip)
 
--- Generous start (was 12/20 — too easy to miss). Override: vrmod_stock_foregrip_distance
-local cv_dist = CreateClientConVar("vrmod_stock_foregrip_distance", "40", true, FCVAR_ARCHIVE,
-	"Max hand-hand distance to START stock foregrip", 8, 80)
+local cv_dist = CreateClientConVar("vrmod_stock_foregrip_distance", "48", true, FCVAR_ARCHIVE,
+	"Max hand-hand distance to START stock foregrip", 8, 96)
 local cv_blend = CreateClientConVar("vrmod_stock_foregrip_blend", "0.4", true, FCVAR_ARCHIVE,
 	"Aim blend toward support hand 0–1", 0, 1)
-local cv_release = CreateClientConVar("vrmod_stock_foregrip_release", "2.0", true, FCVAR_ARCHIVE,
-	"Release if hands > startDist × this", 1.2, 4)
+local cv_release = CreateClientConVar("vrmod_stock_foregrip_release", "2.2", true, FCVAR_ARCHIVE,
+	"Release if hands > startDist × this", 1.2, 5)
 
 local state = {
 	gripping = false,
@@ -55,7 +45,14 @@ local state = {
 	leftAng = Angle(0, 0, 0),
 	startDist = 16,
 	heldSince = 0,
+	lastFail = "",
+	lastFailT = 0,
 }
+
+local function NoteFail(msg)
+	state.lastFail = msg
+	state.lastFailT = CurTime()
+end
 
 local function ClearGrip()
 	state.gripping = false
@@ -83,7 +80,6 @@ local function IsStockWep(wep)
 end
 
 local function EnsureVMI(wep)
-	-- Always produce a VMI so stock SWEP without viewModelInfo still grips
 	local class = IsValid(wep) and wep:GetClass() or nil
 	if class and g_VR.viewModelInfo and g_VR.viewModelInfo[class] then
 		local e = g_VR.viewModelInfo[class]
@@ -95,10 +91,7 @@ local function EnsureVMI(wep)
 	if g_VR.currentvmi and g_VR.currentvmi.offsetPos and g_VR.currentvmi.offsetAng then
 		return g_VR.currentvmi
 	end
-	g_VR.currentvmi = {
-		offsetPos = Vector(0, 0, 0),
-		offsetAng = Angle(0, 0, 0),
-	}
+	g_VR.currentvmi = { offsetPos = Vector(0, 0, 0), offsetAng = Angle(0, 0, 0) }
 	return g_VR.currentvmi
 end
 
@@ -106,9 +99,7 @@ local function Hands()
 	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
 	local R = g_VR.tracking and g_VR.tracking.pose_righthand
 	if not (L and R and L.pos and R.pos and L.ang and R.ang) then return nil end
-	-- Prefer stereo freeze when ready (same both eyes)
-	local sp = g_VR.stereoPose
-	local sf = g_VR.stereoFrame or 0
+	local sp, sf = g_VR.stereoPose, g_VR.stereoFrame or 0
 	if sp and sp.frame == sf and sp.hasLeft and sp.hasRight and sp.leftPos and sp.rightPos then
 		return sp.leftPos, sp.leftAng, sp.rightPos, sp.rightAng
 	end
@@ -120,9 +111,8 @@ local function Guide(rpos, rang, lpos, lang)
 	if blend <= 0 then return rpos, rang end
 	local toLeft = lpos - rpos
 	local dist = toLeft:Length()
-	if dist < 3 or dist > 80 then return rpos, rang end
-	local target = toLeft:GetNormalized():Angle()
-	local na = LerpAngle(blend, rang, target)
+	if dist < 3 or dist > 100 then return rpos, rang end
+	local na = LerpAngle(blend, rang, toLeft:GetNormalized():Angle())
 	na.r = rang.r
 	return rpos, na
 end
@@ -143,7 +133,6 @@ local function StampLeft(sf, p, a)
 	if not g_VR._leftHandSnapAng then g_VR._leftHandSnapAng = Angle() end
 	g_VR._leftHandSnapPos:Set(p)
 	g_VR._leftHandSnapAng:Set(a)
-
 	if isfunction(vrmod.SetLeftHandPose) then
 		vrmod.SetLeftHandPose(p, a, 0)
 	else
@@ -153,7 +142,6 @@ local function StampLeft(sf, p, a)
 			if L.ang and L.ang.Set then L.ang:Set(a) else L.ang = Angle(a.p, a.y, a.r) end
 		end
 	end
-
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return end
 	local nf = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
@@ -168,22 +156,36 @@ local function StampLeft(sf, p, a)
 	g_VR._charIkUpdated = nil
 end
 
---- START grip (called from cl_input BEFORE menu grab / pickup)
 local function TryStart()
-	if not g_VR or not g_VR.active then return false end
+	if not g_VR or not g_VR.active then
+		NoteFail("vr inactive")
+		return false
+	end
 	if state.gripping then return true end
-	-- Never block on menu flags — only skip while corner-resizing a panel
-	if g_VR.menuResizeActive then return false end
+	-- Only block while corner-resizing a VR panel (holding grip on menu corner)
+	if g_VR.menuResizeActive then
+		NoteFail("menu resize")
+		return false
+	end
 
 	local lpos, lang, rpos, rang = Hands()
-	if not lpos then return false end
+	if not lpos then
+		NoteFail("no hands")
+		return false
+	end
 
 	local wep = LocalPlayer():GetActiveWeapon()
-	if not IsStockWep(wep) then return false end
+	if not IsStockWep(wep) then
+		NoteFail("not stock wep: " .. (IsValid(wep) and wep:GetClass() or "nil"))
+		return false
+	end
 
 	local dist = lpos:Distance(rpos)
-	local maxStart = math.Clamp(cv_dist:GetFloat(), 8, 80)
-	if dist > maxStart then return false end
+	local maxStart = math.Clamp(cv_dist:GetFloat(), 8, 96)
+	if dist > maxStart then
+		NoteFail(string.format("dist %.0f > %.0f", dist, maxStart))
+		return false
+	end
 
 	local vmi = EnsureVMI(wep)
 	local wepPos, wepAng = LocalToWorld(
@@ -200,21 +202,27 @@ local function TryStart()
 	state.startDist = math.max(dist, 8)
 	state.heldSince = CurTime()
 	g_VR.foregripActive = true
+	state.lastFail = "ok"
+	if vrmod.Toast then
+		vrmod.Toast("Foregrip", 1.2, "ok")
+	end
 	return true
 end
 
 function vrmod.TryForegripGrab(pressed)
 	if not g_VR or not g_VR.active then return false end
-	if pressed == false or pressed == nil then
-		-- only release on explicit false (not nil)
-		if pressed == false and state.gripping then
+	if pressed == true then
+		if state.gripping then return true end
+		return TryStart()
+	end
+	if pressed == false then
+		if state.gripping then
 			ClearGrip()
 			return true
 		end
-		return state.gripping
+		return false
 	end
-	if state.gripping then return true end
-	return TryStart()
+	return state.gripping
 end
 
 function vrmod.IsForegripActive()
@@ -235,17 +243,12 @@ local function Solve()
 	end
 
 	local wep = IsValid(state.wep) and state.wep or ply:GetActiveWeapon()
-	if not IsStockWep(wep) then
-		ClearGrip()
-		return
-	end
-	if state.class and wep:GetClass() ~= state.class then
+	if not IsStockWep(wep) or (state.class and wep:GetClass() ~= state.class) then
 		ClearGrip()
 		return
 	end
 
 	local sf = g_VR.stereoFrame or 0
-	-- Same stereo frame: reassert only
 	if state.frame == sf then
 		PublishSnap(sf, state.gunPos, state.gunAng)
 		StampLeft(sf, state.leftPos, state.leftAng)
@@ -258,16 +261,12 @@ local function Solve()
 	end
 
 	local lpos, lang, rpos, rang = Hands()
-	if not lpos then
-		-- tracking glitch: keep grip, don't clear
-		return
-	end
+	if not lpos then return end -- keep grip on tracking glitch
 
-	-- Grace period: don't release for 0.25s after grab (hands settle)
-	local grace = (CurTime() - (state.heldSince or 0)) < 0.25
-	if not grace then
-		local rel = math.Clamp(cv_release:GetFloat(), 1.2, 4)
-		local maxD = math.max(state.startDist * rel, cv_dist:GetFloat() * rel, 36)
+	-- Grace 0.35s after grab so settle doesn't auto-release
+	if (CurTime() - (state.heldSince or 0)) >= 0.35 then
+		local rel = math.Clamp(cv_release:GetFloat(), 1.2, 5)
+		local maxD = math.max(state.startDist * rel, cv_dist:GetFloat() * rel, 40)
 		if lpos:Distance(rpos) > maxD then
 			ClearGrip()
 			return
@@ -302,25 +301,43 @@ local function Solve()
 	if IsValid(vm) then
 		vm:SetPos(gunPos)
 		vm:SetAngles(gunAng)
-		vm:SetupBones()
-		state.bonesFrame = sf
-		local muz = vm:GetAttachment(1)
-		if muz and muz.Pos then
-			g_VR.viewModelMuzzle = muz
-		else
-			g_VR.viewModelMuzzle = {
-				Pos = gunPos + gunAng:Forward() * 14,
-				Ang = Angle(gunAng.p, gunAng.y, gunAng.r),
-			}
+		if state.bonesFrame ~= sf then
+			vm:SetupBones()
+			state.bonesFrame = sf
+			local muz = vm:GetAttachment(1)
+			if muz and muz.Pos then
+				g_VR.viewModelMuzzle = muz
+			else
+				g_VR.viewModelMuzzle = {
+					Pos = gunPos + gunAng:Forward() * 14,
+					Ang = Angle(gunAng.p, gunAng.y, gunAng.r),
+				}
+			end
 		end
 	end
 end
 
--- Input: ONLY path for release/start from this file (cl_input also calls TryForegripGrab first)
+-- Edge input
 hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
 	if not g_VR or not g_VR.active then return end
 	if action ~= "boolean_left_pickup" then return end
 	vrmod.TryForegripGrab(pressed and true or false)
+end)
+
+-- Poll while held (no need to spam edge if module misses a press, and no console in VR)
+hook.Add("Think", "vrmod_foregrip_poll", function()
+	if not g_VR or not g_VR.active then return end
+	local held = g_VR.input and g_VR.input.boolean_left_pickup
+	if held then
+		if not state.gripping then
+			TryStart()
+		end
+	elseif state.gripping then
+		-- Only clear if input table exists and explicitly false (module may omit keys)
+		if g_VR.input and g_VR.input.boolean_left_pickup == false then
+			ClearGrip()
+		end
+	end
 end)
 
 hook.Add("VRMod_PreStereo", "0_vrmod_foregrip", function()
@@ -341,7 +358,6 @@ hook.Add("VRMod_PreRender", "0_vrmod_foregrip", function()
 	end
 end)
 
--- Stock non-grip freeze (both eyes)
 hook.Add("VRMod_PreStereo", "1_vrmod_weapon_pose_freeze", function()
 	if not g_VR or not g_VR.active or state.gripping then return end
 	if vrmod.suppressViewModelUpdates then
@@ -351,8 +367,7 @@ hook.Add("VRMod_PreStereo", "1_vrmod_weapon_pose_freeze", function()
 		return
 	end
 	if vrmod.utils and vrmod.utils.UpdateViewModelPos then
-		local sp = g_VR.stereoPose
-		local sf = g_VR.stereoFrame or 0
+		local sp, sf = g_VR.stereoPose, g_VR.stereoFrame or 0
 		if sp and sp.frame == sf and sp.hasRight then
 			pcall(vrmod.utils.UpdateViewModelPos, sp.rightPos, sp.rightAng, true)
 		else
@@ -372,19 +387,15 @@ hook.Add("PlayerDeath", "vrmod_foregrip", function(ply)
 	if ply == LocalPlayer() then ClearGrip() end
 end)
 
-concommand.Add("vrmod_stock_foregrip_debug", function()
-	local L = g_VR and g_VR.tracking and g_VR.tracking.pose_lefthand
-	local R = g_VR and g_VR.tracking and g_VR.tracking.pose_righthand
-	local wep = IsValid(LocalPlayer()) and LocalPlayer():GetActiveWeapon() or NULL
-	local dist = (L and R and L.pos and R.pos) and L.pos:Distance(R.pos) or -1
-	print(string.format(
-		"[stock-foregrip] gripping=%s dist=%.1f maxStart=%.1f wep=%s stock=%s active=%s vmi=%s",
-		tostring(state.gripping),
-		dist,
-		cv_dist:GetFloat(),
-		IsValid(wep) and wep:GetClass() or "nil",
-		tostring(IsStockWep(wep)),
-		tostring(g_VR and g_VR.foregripActive),
-		tostring(g_VR and g_VR.currentvmi ~= nil)
-	))
+-- VR-friendly fail feedback (no console while holding grips)
+hook.Add("Think", "vrmod_foregrip_fail_toast", function()
+	if not g_VR or not g_VR.active or state.gripping then return end
+	if not (g_VR.input and g_VR.input.boolean_left_pickup) then return end
+	if not state.lastFail or state.lastFail == "" or state.lastFail == "ok" then return end
+	if CurTime() - (state.lastFailT or 0) > 1.5 then return end -- only fresh fails
+	if state._toastAt and CurTime() - state._toastAt < 2.5 then return end
+	if vrmod.Toast then
+		state._toastAt = CurTime()
+		vrmod.Toast("FG: " .. state.lastFail, 2.5, "warn")
+	end
 end)
