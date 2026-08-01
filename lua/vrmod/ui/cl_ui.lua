@@ -172,6 +172,20 @@ if CLIENT then
 		return menus[uid] ~= nil
 	end
 
+	--- True while any interactive VR menu is open (or laser/grab active).
+	--- Blocks world/pouch grab so grip is for panels, not mags, while UI is up.
+	function vrmod.MenusBlockWorldGrab()
+		if not g_VR or not g_VR.active then return false end
+		if g_VR.menuFocus then return true end
+		if g_VR.menuGrabActive or g_VR.menuResizeActive then return true end
+		if g_VR.menuAiming then return true end -- soft laser near a panel
+		if not menusExist or not menus then return false end
+		for _, m in pairs(menus) do
+			if m and m.cursorEnabled ~= false then return true end
+		end
+		return false
+	end
+
 	--- Hand-local top-left so the panel CENTER sits near the wrist (not a far corner).
 	-- 3D2D: +X = ang:Right(), +Y cursor = -ang:Forward() (see laser hit test).
 	function VRUtilHandMenuPose(w, h, scale, centerLocal, panelAng)
@@ -573,17 +587,43 @@ if CLIENT then
 			return false
 		end
 
-		-- Press: laser on a panel (resize works even if grab is disabled)
+		-- Press: laser focus preferred; else proximity grab (hand near panel center)
 		local uid = g_VR.menuFocus
-		if not uid or uid == false then return false end
-		local menu = menus[uid]
+		if (not uid or uid == false) and g_VR.menuAiming then
+			uid = g_VR.menuAiming
+		end
+		local menu = uid and menus[uid] or nil
+		if not menu then
+			-- Proximity: grab panel if hand is close to its center (no laser lock required)
+			local hand = HandPoseLive(handName)
+			if not hand or not hand.pos then return false end
+			local bestUid, bestD = nil, 28
+			for _, m in ipairs(menuOrder) do
+				if m.grabbable == false then continue end
+				local wPos, wAng = ResolveMenuWorldPose(m)
+				if not wPos or not wAng then continue end
+				local sc = (m.baseScale or m.scale or 0.03) * vrmod.GetUIScale()
+				local cxw = wPos + wAng:Right() * ((m.width or 512) * sc * 0.5)
+					- wAng:Forward() * ((m.height or 512) * sc * 0.5)
+				local d = hand.pos:Distance(cxw)
+				if d < bestD then
+					bestD = d
+					bestUid = m.uid
+					menu = m
+				end
+			end
+			if not menu then return false end
+			uid = bestUid
+		end
 		if not menu then return false end
 
 		local cx = menu.lastCursorX or g_VR.menuCursorX or 0
 		local cy = menu.lastCursorY or g_VR.menuCursorY or 0
+		-- Only allow corner resize when we have a real laser UV (not pure proximity)
+		local haveLaserUV = g_VR.menuFocus == uid or g_VR.menuAiming == uid
 
 		-- Corner grip → resize (every window by default); body grip → free-move if grabbable
-		if resizeOn and MenuIsResizable(menu) and CursorInResizeCorner(menu, cx, cy) then
+		if haveLaserUV and resizeOn and MenuIsResizable(menu) and CursorInResizeCorner(menu, cx, cy) then
 			-- Detach to free-float so resize stays put while scaling
 			local wPos, wAng = ResolveMenuWorldPose(menu)
 			if not menu.freeFloat and wPos and wAng then
@@ -692,6 +732,8 @@ if CLIENT then
 	function VRUtilRenderMenuSystem()
 		if not menusExist or #menuOrder == 0 then
 			g_VR.menuFocus = false
+			g_VR.menuAiming = false
+			g_VR.menuPointerHand = nil
 			return
 		end
 		local sf = g_VR.stereoFrame or 0
@@ -726,37 +768,40 @@ if CLIENT then
 		local tms = render.GetToneMappingScaleLinear()
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
 
-		-- Laser pointers: right (default) + left so either hand can aim menus
+		-- Laser pointers: tip slightly forward of controller so origin is not buried in the hand
 		local pointers = {}
 		local tr = g_VR.tracking
-		if tr and tr.pose_righthand and tr.pose_righthand.pos and tr.pose_righthand.ang then
+		local function AddPointer(name, pose)
+			if not pose or not pose.pos or not pose.ang then return end
+			local fwd = pose.ang:Forward()
 			pointers[#pointers + 1] = {
-				name = "right",
-				pos = tr.pose_righthand.pos,
-				ang = tr.pose_righthand.ang,
+				name = name,
+				pos = pose.pos + fwd * 2.5, -- tip offset
+				ang = pose.ang,
+				root = pose.pos, -- beam start at palm/controller
 			}
 		end
-		if tr and tr.pose_lefthand and tr.pose_lefthand.pos and tr.pose_lefthand.ang then
-			pointers[#pointers + 1] = {
-				name = "left",
-				pos = tr.pose_lefthand.pos,
-				ang = tr.pose_lefthand.ang,
-			}
+		if tr then
+			AddPointer("right", tr.pose_righthand)
+			AddPointer("left", tr.pose_lefthand)
 		end
 
-		--- Ray × menu plane → UV cursor (or nil). Generous range for wrist/HMD menus.
+		-- Soft aim (beam only) when ray hits near panel but not hard-focused
+		local softAim = nil -- { uid, dist, world, start, hand, x, y }
+
+		--- Ray × menu plane → UV cursor (or nil). Double-sided, room-scale aim.
 		local function LaserHitPanel(origin, dir, pos, ang, drawScale)
 			if not origin or not dir or not pos or not ang or not drawScale or drawScale <= 0 then
 				return nil
 			end
 			local normal = ang:Up()
 			local A = normal:Dot(dir)
-			if A >= 0 then return nil end -- backface
+			if math.abs(A) < 1e-5 then return nil end -- parallel to plane
 			local B = normal:Dot(pos - origin)
-			if B >= 0 then return nil end -- behind ray
 			local hitDist = B / A
-			-- Min: skip "hand inside panel" ghosts. Max: full room-scale aim (was 400 → felt "must be close")
-			if hitDist < 1.0 or hitDist > 2500 then return nil end
+			-- Allow both faces (wrist menus often face HMD while free hand aims off-axis).
+			-- Min ~0.5 skips origin-inside ghosts; max = room-scale.
+			if hitDist < 0.5 or hitDist > 2500 then return nil end
 			local hitWorld = origin + dir * hitDist
 			local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
 			return tp.x / drawScale, -tp.y / drawScale, hitDist, hitWorld
@@ -865,14 +910,17 @@ if CLIENT then
 					if not p.pos or not p.ang then continue end
 					local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
 					if not (hx and hy and hd) then continue end
-					local cand = { hx = hx, hy = hy, hd = hd, hw = hw, name = p.name, start = p.pos }
+					local cand = {
+						hx = hx, hy = hy, hd = hd, hw = hw,
+						name = p.name, start = p.root or p.pos,
+					}
 					if hd < bestAnyD then
 						bestAnyD = hd
 						anyHit = cand
 					end
-					-- Free hand: not the anchor, or anchor but far enough to be deliberate aim
+					-- Free hand preferred; anchor only counts if deliberately aimed (not wrist-glued)
 					local isAnchor = anchor and p.name == anchor
-					if (not isAnchor or hd >= 6) and hd < bestFreeD then
+					if (not isAnchor or hd >= 4) and hd < bestFreeD then
 						bestFreeD = hd
 						freeHit = cand
 					end
@@ -884,8 +932,11 @@ if CLIENT then
 						local p = pointers[pi]
 						if p.name == focusSnap.hand and p.pos and p.ang then
 							local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
-							if hx and hy and hd and hd <= freeHit.hd * 1.25 + 8 then
-								pick = { hx = hx, hy = hy, hd = hd, hw = hw, name = p.name, start = p.pos }
+							if hx and hy and hd and hd <= freeHit.hd * 1.35 + 12 then
+								pick = {
+									hx = hx, hy = hy, hd = hd, hw = hw,
+									name = p.name, start = p.root or p.pos,
+								}
 							end
 							break
 						end
@@ -945,8 +996,23 @@ if CLIENT then
 
 			if solveFocus and wantCursor and hitCursorX and hitCursorY and hitDist then
 				local cz = CornerZoneSize(v)
-				local inside = hitCursorX > -cz * 0.2 and hitCursorY > -cz * 0.2
-					and hitCursorX < v.width + cz * 0.2 and hitCursorY < v.height + cz * 0.2
+				-- Distance-scaled UV pad: at arm's length small angular error = large UV miss
+				-- (was cz*0.2 only → laser/focus only when hand almost on the panel).
+				local pad = math.max(cz * 0.5, 48 + hitDist * 2.2)
+				pad = math.min(pad, math.max(v.width, v.height) * 0.55)
+				local inside = hitCursorX > -pad and hitCursorY > -pad
+					and hitCursorX < v.width + pad and hitCursorY < v.height + pad
+				-- Soft aim: larger pad for beam + grip-block even when not click-focused
+				local softPad = pad * 1.75 + 40
+				local near = hitCursorX > -softPad and hitCursorY > -softPad
+					and hitCursorX < v.width + softPad and hitCursorY < v.height + softPad
+				if near and (not softAim or hitDist < softAim.dist) then
+					softAim = {
+						uid = k, dist = hitDist, world = hitWorld,
+						start = hitBeamStart, hand = hitHandName,
+						x = hitCursorX, y = hitCursorY,
+					}
+				end
 				local keepResize = resizingThis and hitDist < menuFocusDist + 50
 				if (inside or keepResize) and hitDist < menuFocusDist then
 					g_VR.menuFocus = k
@@ -973,6 +1039,10 @@ if CLIENT then
 
 		if solveFocus then
 			g_VR.menuPointerHand = menuFocusHand or focusSnap.hand
+			g_VR.menuAiming = (not g_VR.menuFocus and softAim and softAim.uid) or false
+			if softAim and not g_VR.menuFocus then
+				g_VR.menuPointerHand = softAim.hand
+			end
 			if focusSnap.panel ~= prevFocusPanel then
 				if IsValid(prevFocusPanel) then prevFocusPanel:SetMouseInputEnabled(false) end
 				if IsValid(focusSnap.panel) then focusSnap.panel:SetMouseInputEnabled(true) end
@@ -982,6 +1052,7 @@ if CLIENT then
 		end
 
 		local focus = g_VR.menuFocus
+		local beamEnd, beamStart, beamHand, beamAlpha
 		if focus and menus[focus] then
 			-- Always prefer live lastCursor (remapped after stretch) over frozen snap UV
 			local lcX = menus[focus].lastCursorX
@@ -993,24 +1064,33 @@ if CLIENT then
 				g_VR.menuCursorX = focusSnap.cursorX
 				g_VR.menuCursorY = focusSnap.cursorY
 			end
-			local beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
-			local beamStart = menus[focus]._hitBeamStart or focusSnap.beamStart
-			if not beamStart and g_VR.menuPointerHand == "left" then
-				local lh = tr and tr.pose_lefthand
-				beamStart = lh and lh.pos
-			end
-			if not beamStart then
-				local rh = tr and tr.pose_righthand
-				beamStart = rh and rh.pos
-			end
-			if beamStart and beamEnd then
-				render.SetMaterial(mat_beam)
-				-- Slight tint so left vs right pointer is readable
-				local col = (g_VR.menuPointerHand == "left")
-					and Color(180, 220, 255, 255)
-					or Color(255, 255, 255, 255)
-				render.DrawBeam(beamStart, beamEnd, 0.1, 0, 1, col)
-			end
+			beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
+			beamStart = menus[focus]._hitBeamStart or focusSnap.beamStart
+			beamHand = g_VR.menuPointerHand
+			beamAlpha = 255
+		elseif softAim then
+			-- Aim assist beam when near panel but not locked for click
+			beamEnd = softAim.world
+			beamStart = softAim.start
+			beamHand = softAim.hand
+			beamAlpha = 140
+			g_VR.menuCursorX = softAim.x
+			g_VR.menuCursorY = softAim.y
+		end
+		if not beamStart and beamHand == "left" then
+			local lh = tr and tr.pose_lefthand
+			beamStart = lh and lh.pos
+		end
+		if not beamStart then
+			local rh = tr and tr.pose_righthand
+			beamStart = rh and rh.pos
+		end
+		if beamStart and beamEnd then
+			render.SetMaterial(mat_beam)
+			local col = (beamHand == "left")
+				and Color(180, 220, 255, beamAlpha or 255)
+				or Color(255, 255, 255, beamAlpha or 255)
+			render.DrawBeam(beamStart, beamEnd, 0.12, 0, 1, col)
 		end
 
 		render.DepthRange(0, 1)
