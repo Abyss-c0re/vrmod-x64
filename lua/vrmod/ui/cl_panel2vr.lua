@@ -113,6 +113,71 @@ local function shellMetrics(kind)
 	return 512, 512, 0.022
 end
 
+------------------------------------------------------------------------
+-- StyledTheme (Glide settings etc.) — desktop ScrH × 850×600 → VR RT
+-- Without this, Glide opens at desktop size and clips on the VR surface.
+------------------------------------------------------------------------
+local styledPatched = false
+local styledOrigScaleSize = nil
+local styledOrigBlur = nil
+
+local function styledDesignScale()
+	-- TabbedFrame design is 850×600 @ 1080p; map into VR popup metrics
+	local pw, ph = shellMetrics("popup")
+	local sx = pw / 850
+	local sy = ph / 600
+	return math.min(sx, sy)
+end
+
+function W.ApplyStyledThemeVRScale()
+	if not StyledTheme then return false end
+	if not styledPatched then
+		styledOrigScaleSize = StyledTheme.ScaleSize
+		styledOrigBlur = StyledTheme.BlurPanel
+		styledPatched = true
+	end
+
+	function StyledTheme.ScaleSize(size)
+		if not (g_VR and g_VR.active) then
+			if styledOrigScaleSize then return styledOrigScaleSize(size) end
+			return math.floor((size / 1080) * (ScrH() or 1080))
+		end
+		local sc = styledDesignScale()
+		return math.max(1, math.floor(size * sc + 0.5))
+	end
+
+	-- Blur samples ScrW via LocalToScreen — garbage under PaintManual RT
+	function StyledTheme.BlurPanel(panel, alpha, density)
+		if g_VR and g_VR.active then return end
+		if styledOrigBlur then return styledOrigBlur(panel, alpha, density) end
+	end
+
+	-- Refresh dimensions + fonts against VR ScaleSize
+	local pw, ph = shellMetrics("popup")
+	hook.Run("StyledTheme_OnResolutionChange", pw, math.max(ph, 720))
+	return true
+end
+
+function W.RestoreStyledThemeDesktop()
+	if not StyledTheme or not styledPatched then return end
+	if styledOrigScaleSize then StyledTheme.ScaleSize = styledOrigScaleSize end
+	if styledOrigBlur then StyledTheme.BlurPanel = styledOrigBlur end
+	hook.Run("StyledTheme_OnResolutionChange", ScrW(), ScrH())
+end
+
+--- Force a Derma frame into the VR RT box (kills MinWidth 850 traps).
+local function forcePanelIntoVRBox(panel, mw, mh)
+	if not IsValid(panel) then return end
+	if panel.SetMinWidth then panel:SetMinWidth(math.min(mw, 320)) end
+	if panel.SetMinHeight then panel:SetMinHeight(math.min(mh, 240)) end
+	if panel.SetMaxWidth then pcall(function() panel:SetMaxWidth(mw) end) end
+	if panel.SetMaxHeight then pcall(function() panel:SetMaxHeight(mh) end) end
+	if panel.Dock then panel:Dock(NODOCK) end
+	if panel.SetSize then panel:SetSize(mw, mh) end
+	if panel.SetPos then panel:SetPos(0, 0) end
+	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+end
+
 function W.IsVR()
 	return g_VR and g_VR.active and g_VR.threePoints
 end
@@ -442,13 +507,21 @@ local function preparePanelForVR(panel, kind)
 		timer.Simple(0.15, restyle)
 		timer.Simple(0.35, restyle)
 	elseif kind == "settings" or kind == "popup" or kind == "panel" then
-		-- Generic Derma: size from VR eye × ui_scale when still desktop-sized
-		local mw, mh = shellMetrics(kind == "settings" and "settings" or "popup")
+		-- Glide Styled_TabbedFrame etc.: always fit VR eye × ui_scale (not ScrH 850×600)
+		W.ApplyStyledThemeVRScale()
+		local metricKind = (kind == "settings") and "settings" or "popup"
+		local mw, mh = shellMetrics(metricKind)
 		local pw, ph = panel:GetSize()
-		if not pw or pw < 64 or pw > mw * 1.5 or not ph or ph < 64 or ph > mh * 1.5 then
-			if panel.SetSize then panel:SetSize(mw, mh) end
+		local cls = string.lower(tostring(panel.ClassName or panel:GetClassName() or ""))
+		local isStyled = cls:find("styled", 1, true) or cls:find("tabbed", 1, true)
+		local title = (panel.GetTitle and tostring(panel:GetTitle() or "")) or ""
+		if title:lower():find("glide", 1, true) then isStyled = true end
+		-- Resize if larger than RT, tiny, or known desktop-scaled theme frame
+		if isStyled or not pw or not ph or pw < 64 or ph < 64 or pw > mw or ph > mh then
+			forcePanelIntoVRBox(panel, mw, mh)
+		else
+			if panel.SetPos then panel:SetPos(0, 0) end
 		end
-		if panel.SetPos then panel:SetPos(0, 0) end
 	end
 end
 
@@ -503,13 +576,13 @@ function W.ManifestPanel(panel, opts)
 		if panel.SetPos then panel:SetPos(0, 0) end
 	elseif kind == "popup" or kind == "panel" then
 		local mw, mh, msc = shellMetrics(kind == "popup" and "popup" or "panel")
-		-- Prefer metrics when panel is still desktop ScrW-ish or tiny
-		if pw > mw * 1.25 or ph > mh * 1.25 or pw < 128 or ph < 128 then
+		shellBaseScale = msc
+		-- Always fit RT: Glide MinWidth 850 was keeping panels wider than the surface
+		if pw > mw or ph > mh or pw < 128 or ph < 128 then
+			forcePanelIntoVRBox(panel, mw, mh)
 			pw, ph = mw, mh
-			shellBaseScale = msc
-			if panel.SetSize then panel:SetSize(pw, ph) end
 		else
-			shellBaseScale = msc
+			if panel.SetPos then panel:SetPos(0, 0) end
 		end
 	end
 	local w, h = clampSize(opts.width or pw, opts.height or ph)
@@ -786,6 +859,14 @@ function W.InstallHooks()
 	hooksInstalled = true
 
 	PatchDMenuOpen()
+	-- Glide / StyledTheme: scale + layout for VR before any context DesktopWindows open
+	if StyledTheme then W.ApplyStyledThemeVRScale() end
+	hook.Add("VRMod_Start", "panel2vr_styled_theme", function()
+		W.ApplyStyledThemeVRScale()
+	end)
+	hook.Add("VRMod_Exit", "panel2vr_styled_theme", function()
+		W.RestoreStyledThemeDesktop()
+	end)
 
 	local meta = getmetatable(vgui.GetWorldPanel())
 	if not meta or not meta.MakePopup then
@@ -820,6 +901,8 @@ function W.InstallHooks()
 		end
 		origMakePopup(panel, ...)
 		if not shouldIntercept(panel) then return end
+		-- Glide/Styled frames size themselves in Init via ScaleSize — keep VR scale live
+		W.ApplyStyledThemeVRScale()
 		timer.Simple(0, function()
 			if not IsValid(panel) or not W.IsVR() then return end
 			if W.IsBound(panel) then return end
@@ -828,6 +911,20 @@ function W.InstallHooks()
 				place = "popup",
 				hint = kind,
 			})
+		end)
+		-- Re-fit after StyledTheme slide-in anim / layout settle
+		timer.Simple(0.12, function()
+			if not IsValid(panel) or not W.IsVR() then return end
+			local mw, mh = shellMetrics("popup")
+			local pw, ph = panel:GetSize()
+			if pw and ph and (pw > mw + 4 or ph > mh + 4) then
+				forcePanelIntoVRBox(panel, mw, mh)
+				local uid = panelUids[panel]
+				if uid and g_VR and g_VR.menus and g_VR.menus[uid] then
+					-- RT already created at open size; keep paint box in panel bounds
+					g_VR.menus[uid].dirty = true
+				end
+			end
 		end)
 	end
 

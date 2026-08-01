@@ -99,8 +99,9 @@ if CLIENT then
 		spawnmenu = { fracW = 0.58, fracH = 0.72, designPhys = 16, minW = 640, minH = 480 },
 		contextmenu = { fracW = 0.36, fracH = 0.62, designPhys = 11, minW = 320, minH = 400 },
 		settings = { fracW = 0.38, fracH = 0.58, designPhys = 12, minW = 380, minH = 460 },
-		popup = { fracW = 0.40, fracH = 0.50, designPhys = 12, minW = 280, minH = 280 },
-		panel = { fracW = 0.40, fracH = 0.50, designPhys = 12, minW = 256, minH = 256 },
+		-- Glide Styled_TabbedFrame design is 850×600 — need enough RT for form rows
+		popup = { fracW = 0.52, fracH = 0.62, designPhys = 14, minW = 420, minH = 360 },
+		panel = { fracW = 0.48, fracH = 0.55, designPhys = 13, minW = 320, minH = 280 },
 	}
 
 	--- One-eye pixel size from the active VR stereo RT (SBS → half width).
@@ -1473,6 +1474,10 @@ end)
 -- Rebuild HUD mesh when UI scale changes; dirty open menus (world scale is live via GetUIScale)
 cvars.AddChangeCallback("vrmod_ui_scale", function()
 	if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+	-- Glide/StyledTheme form metrics track ui_scale via ScaleSize
+	if g_VR and g_VR.active and vrmod.panel2vr and vrmod.panel2vr.ApplyStyledThemeVRScale then
+		vrmod.panel2vr.ApplyStyledThemeVRScale()
+	end
 	if g_VR and g_VR.menus then
 		for uid, m in pairs(g_VR.menus) do
 			if m then
