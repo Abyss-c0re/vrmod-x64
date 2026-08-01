@@ -364,8 +364,8 @@ local function paint()
 	if not (g_VR.menus and g_VR.menus[UID]) then return end
 
 	local m = g_VR.menus[UID]
-	m.paintInterval = m.paintInterval or 10
-	m.paintIntervalFocused = 1
+	m.paintInterval = m.paintInterval or 12
+	m.paintIntervalFocused = 0 -- dirty/cursor only (no full-rate DrawText)
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 	elseif not m.freeFloat and not m.grabHand then

@@ -120,8 +120,36 @@ function vrmod.cube.DrawButton(x, y, w, h, label, hovered, enabled)
 	draw.SimpleText(tostring(label or ""), vrmod.cube.Font("CubeLabel"), x + w * 0.5, y + h * 0.5, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 end
 
+-- Cache split labels — string.Explode + concat every paint caused CUtlRBTree overflow
+-- under long VR sessions (DrawText spam from QM PreRender).
+local _mlCache = {}
+local function SplitLabel2(label)
+	local c = _mlCache[label]
+	if c then return c end
+	local words = string.Explode(" ", label, false)
+	if #words <= 1 then
+		c = { label }
+	else
+		local mid = math.ceil(#words / 2)
+		c = {
+			table.concat(words, " ", 1, mid),
+			table.concat(words, " ", mid + 1),
+		}
+	end
+	-- Cap cache size (avoid unbounded string tables)
+	local n = 0
+	for _ in pairs(_mlCache) do
+		n = n + 1
+		if n > 128 then
+			_mlCache = {}
+			break
+		end
+	end
+	_mlCache[label] = c
+	return c
+end
+
 function vrmod.cube.DrawButtonMultiline(x, y, w, h, label, hovered, enabled)
-	EnsureCubeFonts()
 	local T = (vrmod.cube.ThemeLive and vrmod.cube.ThemeLive()) or vrmod.cube.Theme
 	if not T then return end
 	if enabled == false then
@@ -139,20 +167,16 @@ function vrmod.cube.DrawButtonMultiline(x, y, w, h, label, hovered, enabled)
 		surface.DrawRect(x, y, 4, h)
 	end
 	label = tostring(label or "")
-	local words = string.Explode(" ", label, false)
-	local lines = {}
-	if #words <= 1 then
-		lines = { label }
-	else
-		local mid = math.ceil(#words / 2)
-		lines[1] = table.concat(words, " ", 1, mid)
-		lines[2] = table.concat(words, " ", mid + 1)
-	end
+	local lines = SplitLabel2(label)
 	local lineH = 16
 	local startY = y + h * 0.5 - (#lines * lineH) * 0.5 + 2
-	local font = vrmod.cube.Font("CubeLabel")
-	for i, line in ipairs(lines) do
-		draw.SimpleText(line, font, x + w * 0.5, startY + (i - 1) * lineH, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	-- Prefer engine font for RT paint (custom fonts thrash glyph trees under VR)
+	local font = "DermaDefaultBold"
+	if vrmod.cube.Font then
+		font = vrmod.cube.Font("CubeLabel") or font
+	end
+	for i = 1, #lines do
+		draw.SimpleText(lines[i], font, x + w * 0.5, startY + (i - 1) * lineH, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	end
 end
 

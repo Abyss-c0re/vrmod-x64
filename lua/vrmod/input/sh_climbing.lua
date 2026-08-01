@@ -811,9 +811,12 @@ if CLIENT then
 			if action == "boolean_left_pickup" or action == "boolean_right_pickup" then
 				local hand = action == "boolean_left_pickup" and 1 or 2
 				if pressed then
+					if not g_VR.tracking then return end
 					local handPose = g_VR.tracking[hand == 1 and "pose_lefthand" or "pose_righthand"]
+					if not handPose or not handPose.pos then return end
 					for k = 1, ladderCount do
 						local v = ladders[k]
+						if not v or not v.pos then continue end
 						if (handPose.pos - v.pos):Length2DSqr() < 1024 then
 							local handPosRel = WorldToLocal(handPose.pos, Angle(), v.pos, v.ang)
 							if handPosRel.z > -5 and handPosRel.z < (v.count - 1) * v.spacing + 5 and handPosRel.y > -v.width / 2 and handPosRel.y < v.width / 2 and handPosRel.x > -5 and handPosRel.x < 5 then
@@ -829,39 +832,58 @@ if CLIENT then
 								refOrigin = g_VR.origin
 								vrmod.StopLocomotion()
 								dismounts = v.dismounts
-								hook.Add("VRMod_PreRender", "ladders", function()
-									local curTime = SysTime()
-									if refHand then
-										local refHandPos = g_VR.tracking[refHand == 1 and "pose_lefthand" or "pose_righthand"].pos - g_VR.origin
-										g_VR.origin = refOrigin + refPos - refHandPos
-										local tmp = g_VR.tracking.hmd.pos + Angle(0, g_VR.tracking.hmd.ang.yaw, 0):Forward() * -10
-										tmp.z = g_VR.origin.z
-										LocalPlayer():SetPos(tmp) --this overrides render pos z in the character system, and also affects lighting
-									else
-										local dt = math.min((curTime - originLerpStartTime) * 10, 1)
-										local targetPos = LocalPlayer():GetPos() + Angle(0, g_VR.tracking.hmd.ang.yaw, 0):Forward() * 10
-										targetPos = Vector(g_VR.origin.x + targetPos.x - g_VR.tracking.hmd.pos.x, g_VR.origin.y + targetPos.y - g_VR.tracking.hmd.pos.y, targetPos.z)
-										g_VR.origin = LerpVector(dt, originLerpStartPos, targetPos)
-										if dt == 1 then
-											hook.Remove("VRMod_PreRender", "ladders")
-											vrmod.StartLocomotion()
-										end
-									end
-
-									for k = 1, 2 do
-										local v = targetPoses[k]
-										local dt = math.min((curTime - v.time) * 10, 1)
-										if dt < 1 or v.hold then
-											local controllerPose = g_VR.tracking[v.controllerPoseName]
-											local pos, ang
-											if v.hold then
-												pos, ang = LerpVector(dt, controllerPose.pos, v.pos), LerpAngle(dt, controllerPose.ang, v.ang)
-											else
-												pos, ang = LerpVector(dt, v.pos, controllerPose.pos), LerpAngle(dt, v.ang, controllerPose.ang)
+								-- Once per stereo frame only (left eye) — never both eyes / nil capture
+								hook.Add("VRMod_PreRender", "ladders", function(eye)
+									if eye and eye ~= "left" then return end
+									if not g_VR or not g_VR.tracking then return end
+									local okClimb, errClimb = pcall(function()
+										local curTime = SysTime()
+										local hmd = g_VR.tracking.hmd
+										if not hmd or not hmd.pos or not hmd.ang then return end
+										if refHand then
+											local rh = g_VR.tracking[refHand == 1 and "pose_lefthand" or "pose_righthand"]
+											if not rh or not rh.pos or not refPos or not refOrigin then return end
+											local refHandPos = rh.pos - g_VR.origin
+											g_VR.origin = refOrigin + refPos - refHandPos
+											local tmp = hmd.pos + Angle(0, hmd.ang.yaw, 0):Forward() * -10
+											tmp.z = g_VR.origin.z
+											local ply = LocalPlayer()
+											if IsValid(ply) then
+												ply:SetPos(tmp) -- overrides render pos z in character system
 											end
-
-											v.setHandPoseFunc(pos, ang)
+										else
+											if not originLerpStartTime or not originLerpStartPos then return end
+											local dt = math.min((curTime - originLerpStartTime) * 10, 1)
+											local ply = LocalPlayer()
+											if not IsValid(ply) then return end
+											local targetPos = ply:GetPos() + Angle(0, hmd.ang.yaw, 0):Forward() * 10
+											targetPos = Vector(g_VR.origin.x + targetPos.x - hmd.pos.x, g_VR.origin.y + targetPos.y - hmd.pos.y, targetPos.z)
+											g_VR.origin = LerpVector(dt, originLerpStartPos, targetPos)
+											if dt >= 1 then
+												hook.Remove("VRMod_PreRender", "ladders")
+												if vrmod.StartLocomotion then vrmod.StartLocomotion() end
+											end
 										end
+
+										for k = 1, 2 do
+											local v = targetPoses[k]
+											if not v or not v.time then continue end
+											local dt = math.min((curTime - v.time) * 10, 1)
+											if dt < 1 or v.hold then
+												local controllerPose = g_VR.tracking[v.controllerPoseName]
+												if not controllerPose or not controllerPose.pos or not v.pos then continue end
+												local pos, ang
+												if v.hold then
+													pos, ang = LerpVector(dt, controllerPose.pos, v.pos), LerpAngle(dt, controllerPose.ang, v.ang)
+												else
+													pos, ang = LerpVector(dt, v.pos, controllerPose.pos), LerpAngle(dt, v.ang, controllerPose.ang)
+												end
+												if v.setHandPoseFunc then v.setHandPoseFunc(pos, ang) end
+											end
+										end
+									end)
+									if not okClimb and vrmod.logger then
+										vrmod.logger.Warn("[Climb] PreRender: %s", tostring(errClimb))
 									end
 								end)
 

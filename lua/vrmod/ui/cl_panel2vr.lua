@@ -849,13 +849,13 @@ function W.InstallHooks()
 					-- Heavy shells: slower idle, focused still cursor-driven
 					if info.kind == "spawnmenu" or info.kind == "contextmenu" then
 						m.paintInterval = 12
-						m.paintIntervalFocused = 1
+						m.paintIntervalFocused = 0 -- dirty/cursor only
 					elseif info.html then
-						m.paintInterval = 6
-						m.paintIntervalFocused = 2
-					elseif info.alwaysPaint then
 						m.paintInterval = 8
-						m.paintIntervalFocused = 1
+						m.paintIntervalFocused = 3 -- HTML anims, not full-rate
+					elseif info.alwaysPaint then
+						m.paintInterval = 10
+						m.paintIntervalFocused = 0
 					end
 				end
 				-- Gate inside VRUtilMenuRenderPanel (dirty / cursor / idle)

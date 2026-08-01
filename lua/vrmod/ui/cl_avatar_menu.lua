@@ -209,8 +209,8 @@ local function paint()
 	if not isfunction(VRUtilMenuRenderStart) or not isfunction(VRUtilMenuRenderEnd) then return end
 	local m = g_VR.menus[UID]
 	if not m.rt then return end
-	m.paintInterval = m.paintInterval or 10
-	m.paintIntervalFocused = 1
+	m.paintInterval = m.paintInterval or 12
+	m.paintIntervalFocused = 0
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 	elseif not m.freeFloat and not m.grabHand then

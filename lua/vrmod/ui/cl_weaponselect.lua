@@ -553,9 +553,7 @@ function VRUtilWeaponMenuOpen()
 		local menu = g_VR.menus.weaponmenu
 		menu.cubeMenu = true
 		menu.grabbable = true
-		if not menu.freeFloat and not menu.grabHand then
-			-- keep world pose unless free-grabbed
-		end
+		-- dirty only on hover change (set in paint path via MenuShouldRepaint cursor quantize)
 		paint()
 	end)
 end

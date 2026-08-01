@@ -163,30 +163,31 @@ if CLIENT then
 		local fn = FrameNumber and FrameNumber() or 0
 		local focused = (g_VR.menuFocus == uid)
 
-		-- Cursor motion on the focused panel → dirty (hover/selection)
+		-- Cursor motion on the focused panel → dirty once (not every frame)
 		if focused then
 			local cx, cy = menu.lastCursorX, menu.lastCursorY
 			if cx and cy then
-				if menu._paintCursorX ~= cx or menu._paintCursorY ~= cy then
-					menu._paintCursorX = cx
-					menu._paintCursorY = cy
+				-- quantize UV so tiny laser jitter does not thrash fonts/draw every frame
+				local qx = math.floor((cx or 0) / 4)
+				local qy = math.floor((cy or 0) / 4)
+				if menu._paintQX ~= qx or menu._paintQY ~= qy then
+					menu._paintQX = qx
+					menu._paintQY = qy
 					menu.dirty = true
 					return true
 				end
 			end
-			-- Focused idle: light heartbeat so cursor/anim stay live (~every frame if interval 1)
+			-- Focused heartbeat 0 = dirty-only (default). Set >0 only for animated HTML.
 			local fi = menu.paintIntervalFocused
-			if fi == nil then fi = 1 end
-			if fi > 0 and menu._lastPaintFrame and (fn - menu._lastPaintFrame) >= fi then
-				return true
-			end
-			if fi > 0 and not menu._lastPaintFrame then return true end
+			if fi == nil then fi = 0 end
+			if not menu._lastPaintFrame then return true end
+			if fi > 0 and (fn - menu._lastPaintFrame) >= fi then return true end
 			return false
 		end
 
 		-- Unfocused: optional idle refresh only (0 = never until dirty)
 		local idle = menu.paintInterval
-		if idle == nil then idle = 8 end
+		if idle == nil then idle = 12 end
 		if idle <= 0 then return false end
 		if not menu._lastPaintFrame then return true end
 		return (fn - menu._lastPaintFrame) >= idle
@@ -594,6 +595,9 @@ if CLIENT then
 				e.ang = nil
 				all[tostring(uid)] = e
 				WriteLayouts(all)
+				if vrmod.Toast then
+					vrmod.Toast("Docked to wrist", 1.5, "hint")
+				end
 				if vrmod.logger then
 					vrmod.logger.Debug("[UI] Panel docked to %s wrist uid=%s", wristName, tostring(uid))
 				end
@@ -1134,9 +1138,10 @@ if CLIENT then
 			grabPos = nil,
 			grabAng = nil,
 			dirty = true,
-			-- Cube: unfocused idle heartbeat (0=dirty-only). Focused uses paintIntervalFocused.
-			paintInterval = 10,
-			paintIntervalFocused = 1, -- smooth cursor/hover while laser locked
+			-- Cube: unfocused idle heartbeat (0=dirty-only). Focused: dirty-only by default
+			-- (paintIntervalFocused>0 only for animated HTML — avoids CUtlRBTree overflow).
+			paintInterval = 12,
+			paintIntervalFocused = 0,
 		}
 
 		menuOrder[#menuOrder + 1] = menus[uid]

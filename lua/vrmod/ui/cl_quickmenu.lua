@@ -97,8 +97,24 @@ function g_VR.MenuOpen()
 		mm.cubeMenu = true
 		mm.grabbable = true
 		mm.attachHand = wrist
+		mm.dirty = true
 		if not mm.freeFloat then
 			mm.attachment = true
+		end
+	end
+
+	-- First-open coaching (once per install) — plain language for VR players
+	if not cookie.GetNumber("vrmod_hint_qm_v1", 0) or cookie.GetNumber("vrmod_hint_qm_v1", 0) == 0 then
+		cookie.Set("vrmod_hint_qm_v1", "1")
+		if vrmod.Toast then
+			timer.Simple(0.4, function()
+				if not g_VR or not g_VR.active then return end
+				vrmod.Toast("Quick Menu rides your wrist — point with the other hand, trigger to pick", 5, "hint")
+			end)
+			timer.Simple(5.2, function()
+				if not g_VR or not g_VR.active then return end
+				vrmod.Toast("Grip the menu to free-move it · release near your wrist to dock it again", 5, "hint")
+			end)
 		end
 	end
 
@@ -204,6 +220,14 @@ function g_VR.MenuOpen()
 			draw.SimpleText(subtitle, "DermaDefault", 16, 36, Color(200, 150, 165))
 		end
 
+		-- Always-visible UX strip (target audience: VR players, not desktop mid-click)
+		local fontHint = (C and C.Font and C.Font("CubeSmall")) or "DermaDefault"
+		local hintCol = T.muted or Color(200, 150, 165)
+		draw.SimpleText(
+			"Point · trigger open  ·  grip move  ·  drop near wrist to dock",
+			fontHint, 256, 512 - 36, hintCol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER
+		)
+
 		-- Page nav: geometric chevrons (unicode arrows render as empty squares on Linux)
 		local navY = headerH + 4
 		local navH = 32
@@ -301,8 +325,8 @@ function g_VR.MenuOpen()
 			mm._lastAssignedScale = 0.03
 		end
 		mm.cubeMenu = true
-		mm.paintInterval = mm.paintInterval or 10
-		mm.paintIntervalFocused = 1
+		mm.paintInterval = 12
+		mm.paintIntervalFocused = 0 -- dirty-only (never full-rate font spam)
 
 		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()
 		local hoveredItem = -1
@@ -329,13 +353,18 @@ function g_VR.MenuOpen()
 		end
 		local hoverChanged = false
 		if hoverNav then
-			if prevHoveredItem ~= -1 then hoverChanged = true end
+			if prevHoveredItem ~= -1 or prevHoveredItem == -1 and hoverNav then
+				-- only when nav state toggles
+			end
+			if mm._lastHoverNav ~= hoverNav then hoverChanged = true end
+			mm._lastHoverNav = hoverNav
 			prevHoveredItem = -1
 		else
+			mm._lastHoverNav = nil
 			if prevHoveredItem ~= hoveredItem then hoverChanged = true end
 			prevHoveredItem = hoveredItem
 		end
-		if hoverChanged or g_VR.menuFocus == "miscmenu" then
+		if hoverChanged then
 			mm.dirty = true
 		end
 		paint(hoveredItem)
