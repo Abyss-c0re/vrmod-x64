@@ -434,7 +434,19 @@ if CLIENT then
 	local function ResolveDrawPose(v)
 		local pos, ang
 		if v.grabHand and v.grabPos and v.grabAng then
-			local hand = HandPose(v.grabHand)
+			-- Use frozen grab hand pose when available (stereo-stable during grip)
+			local hand = v._grabHandSnap
+			if not hand or hand.frame ~= (g_VR.stereoFrame or 0) then
+				local live = HandPose(v.grabHand)
+				if live and live.pos and live.ang then
+					hand = {
+						frame = g_VR.stereoFrame or 0,
+						pos = Vector(live.pos),
+						ang = Angle(live.ang.p, live.ang.y, live.ang.r),
+					}
+					v._grabHandSnap = hand
+				end
+			end
 			if hand and hand.pos and hand.ang then
 				pos, ang = LocalToWorld(v.grabPos, v.grabAng, hand.pos, hand.ang)
 			end
@@ -450,11 +462,24 @@ if CLIENT then
 		return pos, ang, drawScale
 	end
 
-	--- Once per stereo frame: solve resize, then freeze pose/scale for BOTH eyes.
+	--- Once per stereo frame: solve resize, freeze grab hand + pose for BOTH eyes.
 	local function SnapshotMenuDrawState()
 		UpdateResizeFromHand()
 		local sf = g_VR.stereoFrame or 0
 		for _, v in ipairs(menuOrder) do
+			-- Freeze grip hand sample for this frame (no L/R drift while dragging panels)
+			if v.grabHand then
+				local live = HandPose(v.grabHand)
+				if live and live.pos and live.ang then
+					v._grabHandSnap = {
+						frame = sf,
+						pos = Vector(live.pos),
+						ang = Angle(live.ang.p, live.ang.y, live.ang.r),
+					}
+				end
+			else
+				v._grabHandSnap = nil
+			end
 			local pos, ang, drawScale = ResolveDrawPose(v)
 			v._snapPos = pos
 			v._snapAng = ang

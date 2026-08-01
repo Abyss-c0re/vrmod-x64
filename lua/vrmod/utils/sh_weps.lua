@@ -61,6 +61,29 @@ end
 --- Viewmodel / gun is a pure slave of g_VR.tracking.pose_righthand (SoT).
 --- Never read rawTracking here — wall collision overrides tracking in place;
 --- raw device energy stays elsewhere for consumers that need unfiltered sample.
+--- Ensure every stock weapon has a VMI so pose/laser never skip the hand slave path.
+local function EnsureCurrentVMI(ply)
+    local vmi = g_VR.currentvmi
+    if vmi and vmi.offsetPos and vmi.offsetAng then return vmi end
+    local wep = IsValid(ply) and ply:GetActiveWeapon() or nil
+    local class = IsValid(wep) and wep:GetClass() or nil
+    if class and g_VR.viewModelInfo and g_VR.viewModelInfo[class] then
+        local entry = g_VR.viewModelInfo[class]
+        if not entry.offsetPos then entry.offsetPos = Vector(0, 0, 0) end
+        if not entry.offsetAng then entry.offsetAng = Angle(0, 0, 0) end
+        g_VR.currentvmi = entry
+        return entry
+    end
+    -- Ephemeral default for unconfigured stock weapons
+    if not g_VR.currentvmi then
+        g_VR.currentvmi = { offsetPos = Vector(0, 0, 0), offsetAng = Angle(0, 0, 0) }
+    else
+        if not g_VR.currentvmi.offsetPos then g_VR.currentvmi.offsetPos = Vector(0, 0, 0) end
+        if not g_VR.currentvmi.offsetAng then g_VR.currentvmi.offsetAng = Angle(0, 0, 0) end
+    end
+    return g_VR.currentvmi
+end
+
 function vrmod.utils.UpdateViewModelPos(pos, ang, override)
     local ply = LocalPlayer()
     if vrmod.suppressViewModelUpdates and not override then
@@ -70,8 +93,7 @@ function vrmod.utils.UpdateViewModelPos(pos, ang, override)
 
     if not IsValid(ply) or not g_VR.active then return end
     if not ply:Alive() then return end
-    local currentvmi = g_VR.currentvmi
-    if not currentvmi then return end
+    local currentvmi = EnsureCurrentVMI(ply)
 
     -- Always prefer tracking SoT (post wall override). Args are optional hints only.
     local hand = g_VR.tracking and g_VR.tracking.pose_righthand
@@ -88,16 +110,30 @@ end
 
 function vrmod.utils.UpdateViewModel()
     local vm = g_VR.viewModel
-    local vmi = g_VR.currentvmi
+    if not IsValid(vm) then
+        -- Fall back to engine viewmodel for stock weapons
+        local ply = LocalPlayer()
+        if IsValid(ply) then
+            vm = ply:GetViewModel()
+            if IsValid(vm) then g_VR.viewModel = vm end
+        end
+    end
     if not IsValid(vm) then return end
-    -- Cube: gun mesh always follows tracking SoT (same tables ArcVR/hands read)
+
+    local vmi = g_VR.currentvmi or EnsureCurrentVMI(LocalPlayer())
     local hand = g_VR.tracking and g_VR.tracking.pose_righthand
+
     if vmi and vmi.useWorldModel and hand and hand.pos and hand.ang then
         local handPos, handAng = hand.pos, hand.ang
         local off = vmi.offsetPos or Vector()
         local oang = vmi.offsetAng or Angle()
         local pos = handPos + handAng:Forward() * off.x + handAng:Right() * off.y + handAng:Up() * off.z
-        local ang = handAng + oang
+        local ang = Angle(handAng.p, handAng.y, handAng.r)
+        ang:RotateAroundAxis(ang:Right(), oang.p or 0)
+        ang:RotateAroundAxis(ang:Up(), oang.y or 0)
+        ang:RotateAroundAxis(ang:Forward(), oang.r or 0)
+        g_VR.viewModelPos = pos
+        g_VR.viewModelAng = ang
         vm:SetPos(pos)
         vm:SetAngles(ang)
         vm:SetupBones()
@@ -114,27 +150,30 @@ function vrmod.utils.UpdateViewModel()
         end
     end
 
-    -- Muzzle attachment: prefer #1, then any attachment with "muzzle" in name.
-    -- Non-VR weapons often lack a valid att #1 after hand pose → leave nil for laser fallback.
+    -- Muzzle: attachment near hand, else synthesize tip from gun pose (stock weapons)
     local muz = vm:GetAttachment(1)
-    if (not muz or not muz.Pos) and vm.GetAttachments then
+    if (not muz or not muz.Pos) and isfunction(vm.GetAttachments) then
         local atts = vm:GetAttachments()
         if istable(atts) then
             for _, a in ipairs(atts) do
                 local n = string.lower(tostring(a.name or ""))
                 local id = a.id or a.ID
-                if id and (n:find("muzzle", 1, true) or n:find("laser", 1, true)) then
+                if id and (n:find("muzzle", 1, true) or n:find("laser", 1, true) or n:find("muzzle_flash", 1, true)) then
                     muz = vm:GetAttachment(id)
                     if muz and muz.Pos then break end
                 end
             end
         end
     end
-    -- Validate near right hand (stale/world-origin attachments cause laser desync)
     if muz and muz.Pos and hand and hand.pos then
-        if muz.Pos:DistToSqr(hand.pos) > (150 * 150) then
-            muz = nil
+        if muz.Pos:DistToSqr(hand.pos) > (100 * 100) then
+            muz = nil -- stale/world-origin att
         end
+    end
+    -- Synthesize muzzle table for laser if attachment missing
+    if (not muz or not muz.Pos) and g_VR.viewModelPos and g_VR.viewModelAng then
+        local tip = g_VR.viewModelPos + g_VR.viewModelAng:Forward() * 14
+        muz = { Pos = tip, Ang = Angle(g_VR.viewModelAng.p, g_VR.viewModelAng.y, g_VR.viewModelAng.r) }
     end
     g_VR.viewModelMuzzle = muz
 end

@@ -1,14 +1,11 @@
 if SERVER then return end
 
 -- =============================================================================
--- Weapon laser pointer — stereo-stable for VR + non-VR weapons
+-- Weapon laser pointer — stereo-stable, attached to stock + VR guns
 --
--- Desync causes (fixed):
---   • PostDrawTranslucent runs twice (L/R eyes) with live GetAttachment → different rays
---   • Non-VR viewmodels often have bad/missing attachment #1 after hand pose
---   • Skybox / depth passes re-drew the beam
---
--- SoT: freeze start+hit once per g_VR.stereoFrame; both eyes draw the same segment.
+-- Laser start/dir freeze once per stereoFrame (both eyes share one segment).
+-- Stock weapons: always slave gun pose first, then muzzle from gun matrix
+-- (not a free-floating hand ray that looks "detached").
 -- =============================================================================
 
 local laserColor = Color(255, 0, 0, 255)
@@ -44,7 +41,6 @@ vrmod.AddCallbackedConvar("vrmod_laser_color", nil, "255,0,0,255", nil, "", nil,
 	UpdateLaserColor(newValue)
 end)
 
--- Once-per-stereo-frame freeze (shared L/R)
 local snap = {
 	frame = -1,
 	startPos = nil,
@@ -59,53 +55,66 @@ local function HandPose()
 	return nil
 end
 
---- Resolve muzzle for VR and non-VR weapons.
---- Prefer viewModel attachment when it is near the right hand; else hand ray.
+local function IsArcVRWeapon(class)
+	if not class then return false end
+	class = string.lower(class)
+	return class:StartWith("arcticvr") or class:find("avrmag_", 1, true) ~= nil
+end
+
+--- Muzzle + aim for laser — always from gun pose after UpdateViewModel.
 local function ResolveMuzzle()
 	local hand = HandPose()
 	if not hand then return nil, nil end
 
-	-- Refresh bones / attachment from current gun pose when possible
-	if vrmod.utils and vrmod.utils.UpdateViewModel then
+	-- Force stock/VR gun onto hand SoT before reading attachments
+	if vrmod.utils and vrmod.utils.UpdateViewModelPos then
+		pcall(vrmod.utils.UpdateViewModelPos, hand.pos, hand.ang, true)
+	elseif vrmod.utils and vrmod.utils.UpdateViewModel then
 		pcall(vrmod.utils.UpdateViewModel)
 	end
 
-	local muzzle = g_VR.viewModelMuzzle
-	local vmi = g_VR.currentvmi
-	local useAtt = muzzle and muzzle.Pos and muzzle.Ang
-
-	-- Non-VR / broken attachments: reject if muzzle is far from hand (desync source)
-	if useAtt then
-		local d2 = muzzle.Pos:DistToSqr(hand.pos)
-		if d2 > (120 * 120) then
-			useAtt = false
-		end
+	local wep = LocalPlayer():GetActiveWeapon()
+	local class = IsValid(wep) and wep:GetClass() or ""
+	local vmi = g_VR.currentvmi or (g_VR.viewModelInfo and g_VR.viewModelInfo[class]) or {}
+	local gunPos = g_VR.viewModelPos
+	local gunAng = g_VR.viewModelAng
+	if not gunPos or not gunAng then
+		gunPos, gunAng = hand.pos, hand.ang
 	end
 
+	local muz = g_VR.viewModelMuzzle
 	local startPos, dir
-	if useAtt then
-		startPos = muzzle.Pos
-		if vmi and vmi.wrongMuzzleAng then
-			dir = hand.ang:Forward()
-		else
-			dir = muzzle.Ang:Forward()
-			-- If attachment forward is nonsense (points back into hand), fall back to hand
-			local toHand = hand.pos - startPos
-			if toHand:LengthSqr() > 1 and dir:Dot(toHand:GetNormalized()) > 0.55 then
-				dir = hand.ang:Forward()
-			end
+
+	-- Prefer attachment position if it sits near the gun origin (not world-stale)
+	local attOk = muz and muz.Pos and gunPos and muz.Pos:DistToSqr(gunPos) < (80 * 80)
+	if attOk then
+		startPos = muz.Pos
+	else
+		-- Stock tip: slightly ahead of posed gun
+		startPos = gunPos + gunAng:Forward() * 12
+	end
+
+	-- Aim direction: gun matrix (or hand if wrongMuzzleAng / broken att)
+	if vmi.wrongMuzzleAng then
+		dir = hand.ang:Forward()
+	elseif attOk and muz.Ang and IsArcVRWeapon(class) then
+		-- ArcVR: trust attachment angles more often
+		dir = muz.Ang:Forward()
+		local back = hand.pos - startPos
+		if back:LengthSqr() > 4 and dir:Dot(back:GetNormalized()) > 0.5 then
+			dir = gunAng:Forward()
 		end
 	else
-		-- Hand-forward fallback (stable for bare tools / bad c_ models)
-		local off = (vmi and vmi.offsetPos) or Vector(4, 0, 0)
-		startPos = hand.pos
-			+ hand.ang:Forward() * (off.x ~= 0 and math.abs(off.x) * 0.25 + 3 or 4)
-			+ hand.ang:Right() * (off.y or 0) * 0.1
-			+ hand.ang:Up() * (off.z or 0) * 0.1
-		dir = hand.ang:Forward()
+		-- Stock weapons: gun pose forward = laser dir (attachment ang is often wrong)
+		dir = gunAng:Forward()
 	end
 
 	if not startPos or not dir then return nil, nil end
+	-- Final attach check: start must be near hand/gun (no free-floating beam)
+	if startPos:DistToSqr(hand.pos) > (120 * 120) then
+		startPos = gunPos + gunAng:Forward() * 10
+		dir = gunAng:Forward()
+	end
 	return startPos, dir
 end
 
@@ -122,11 +131,15 @@ local function EnsureSnap()
 		return false
 	end
 
-	local endPos = startPos + dir * 10000
 	local tr = util.TraceLine({
 		start = startPos,
-		endpos = endPos,
-		filter = LocalPlayer(),
+		endpos = startPos + dir * 10000,
+		filter = function(ent)
+			if ent == LocalPlayer() then return false end
+			if ent == g_VR.viewModel or ent == g_VR.worldModelVM then return false end
+			if ent == g_VR.heldEntityLeft or ent == g_VR.heldEntityRight then return false end
+			return true
+		end,
 		mask = MASK_SHOT,
 	})
 
@@ -139,16 +152,14 @@ local function EnsureSnap()
 end
 
 local function getFlickerWidth()
-	-- Use stereoFrame so L/R share the same width (no per-eye sin desync)
-	local t = (g_VR.stereoFrame or 0) * 0.15 + CurTime() * 40
-	return 0.05 + math.abs(math.sin(t)) * 0.05
+	local t = (g_VR.stereoFrame or 0) * 0.15
+	return 0.05 + math.abs(math.sin(t)) * 0.04
 end
 
 local function drawLaser(depth, sky)
 	if depth or sky then return end
 	if not g_VR or not g_VR.active then return end
 	if g_VR.menuFocus then return end
-	-- Only during stereo eye passes (same freeze both eyes)
 	if not g_VR.stereoEye then return end
 
 	local wep = LocalPlayer():GetActiveWeapon()
@@ -160,16 +171,13 @@ local function drawLaser(depth, sky)
 	local startPos, hitPos = snap.startPos, snap.hitPos
 	if not startPos or not hitPos then return end
 
-	local function ScaleAlpha(col, scale)
-		return Color(col.r, col.g, col.b, math.Clamp(col.a * scale, 0, 255))
-	end
-
 	render.SetMaterial(LaserMaterial)
 	render.DrawBeam(startPos, hitPos, getFlickerWidth(), 0, 1, laserColor)
 	render.SetMaterial(GlowSprite)
-	render.DrawSprite(startPos, 1, 1, laserColor)
+	render.DrawSprite(startPos, 1.2, 1.2, laserColor)
 	if snap.hit and snap.hitNormal then
-		render.DrawSprite(hitPos + snap.hitNormal * 1, 8, 8, ScaleAlpha(laserColor, 1.2))
+		local c = Color(laserColor.r, laserColor.g, laserColor.b, math.min(255, laserColor.a + 40))
+		render.DrawSprite(hitPos + snap.hitNormal, 8, 8, c)
 	end
 end
 
@@ -187,10 +195,11 @@ concommand.Add("vrmod_togglelaserpointer", function()
 	setLaserEnabled(not enabled)
 end)
 
--- Snapshot early so both eyes share the same ray (even if draw order varies)
+-- Snap after tracking + viewmodel pose (PreStereo is after ApplyPoseModifiers in frame)
 hook.Add("VRMod_PreStereo", "vrmod_laser_snap", function()
 	if not g_VR or not g_VR.active then return end
-	if not GetConVar("vrmod_laserpointer") or not GetConVar("vrmod_laserpointer"):GetBool() then return end
+	local cv = GetConVar("vrmod_laserpointer")
+	if not cv or not cv:GetBool() then return end
 	if g_VR.menuFocus then return end
 	EnsureSnap()
 end)
@@ -198,8 +207,8 @@ end)
 hook.Add("VRMod_Start", "laserOn", function()
 	timer.Simple(0.1, function()
 		if GetConVar("vrmod_laserpointer"):GetBool() then setLaserEnabled(true) end
-		local laserColorConvar = GetConVar("vrmod_laser_color")
-		if laserColorConvar then UpdateLaserColor(laserColorConvar:GetString()) end
+		local c = GetConVar("vrmod_laser_color")
+		if c then UpdateLaserColor(c:GetString()) end
 	end)
 end)
 

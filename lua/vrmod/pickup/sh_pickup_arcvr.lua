@@ -21,34 +21,46 @@ local function init()
 			ent.VRPickupLocalPos = Vector(localPos)
 			ent.VRPickupLocalAng = Angle(localAng.p, localAng.y, localAng.r)
 
+			-- Stereo-stable hold pose: compute once per stereoFrame (not per eye).
+			-- Per-eye SetPos/SetupBones from live hand caused L/R desync while gripping.
 			ent.RenderOverride = function(self)
 				if not IsValid(self) then return end
-				local useLeft = self.VRPickupLeftHand
-				local lpos = self.VRPickupLocalPos or vector_origin
-				local lang = self.VRPickupLocalAng or angle_zero
-				local handPos, handAng
+				local sf = (g_VR and g_VR.stereoFrame) or (FrameNumber and FrameNumber()) or 0
+				if self._vrHoldFrame ~= sf or not self._vrHoldPos or not self._vrHoldAng then
+					local useLeft = self.VRPickupLeftHand
+					local lpos = self.VRPickupLocalPos or vector_origin
+					local lang = self.VRPickupLocalAng or angle_zero
+					local handPos, handAng
 
-				-- Local player: always use live tracking (net frame can lag / be relative mismatch)
-				if ply == LocalPlayer() and g_VR.tracking then
-					local pose = useLeft and g_VR.tracking.pose_lefthand or g_VR.tracking.pose_righthand
-					if not pose or not pose.pos then return end
-					handPos, handAng = pose.pos, pose.ang
-				else
-					local netData = g_VR.net[steamid]
-					if not netData or not netData.lerpedFrame then return end
-					local frame = netData.lerpedFrame
-					if useLeft then
-						handPos, handAng = frame.lefthandPos, frame.lefthandAng
+					if ply == LocalPlayer() and g_VR and g_VR.tracking then
+						local pose = useLeft and g_VR.tracking.pose_lefthand or g_VR.tracking.pose_righthand
+						if not pose or not pose.pos then return end
+						handPos, handAng = pose.pos, pose.ang
 					else
-						handPos, handAng = frame.righthandPos, frame.righthandAng
+						local netData = g_VR and g_VR.net and g_VR.net[steamid]
+						if not netData or not netData.lerpedFrame then return end
+						local frame = netData.lerpedFrame
+						if useLeft then
+							handPos, handAng = frame.lefthandPos, frame.lefthandAng
+						else
+							handPos, handAng = frame.righthandPos, frame.righthandAng
+						end
+						if not handPos or not handAng then return end
 					end
-					if not handPos or not handAng then return end
+
+					local wpos, wang = LocalToWorld(lpos, lang, handPos, handAng)
+					self._vrHoldFrame = sf
+					self._vrHoldPos = wpos
+					self._vrHoldAng = wang
 				end
 
-				local wpos, wang = LocalToWorld(lpos, lang, handPos, handAng)
-				self:SetPos(wpos)
-				self:SetAngles(wang)
-				self:SetupBones()
+				self:SetPos(self._vrHoldPos)
+				self:SetAngles(self._vrHoldAng)
+				-- SetupBones once per frame only (second eye reuses matrices)
+				if self._vrHoldBonesFrame ~= sf then
+					self:SetupBones()
+					self._vrHoldBonesFrame = sf
+				end
 				self:DrawModel()
 			end
 
