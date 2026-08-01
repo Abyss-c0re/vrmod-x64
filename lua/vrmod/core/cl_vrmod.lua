@@ -414,7 +414,8 @@ if CLIENT then
 		end
 
 		-- 2) Value collapse: L/R nearly same world pos but raw is separated → un-stick
-		if L and R and L.pos and R.pos and rL and rR and rL.pos and rR.pos then
+		-- Skip while stock foregrip owns left hand (attach may sit near RH on short guns).
+		if not g_VR.foregripActive and L and R and L.pos and R.pos and rL and rR and rL.pos and rR.pos then
 			local trackDist = L.pos:DistToSqr(R.pos)
 			local rawDist = rL.pos:DistToSqr(rR.pos)
 			if trackDist < 4 and rawDist > 36 then -- <2u glued, raw >6u apart
