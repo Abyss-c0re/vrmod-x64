@@ -30,6 +30,17 @@ local cv_radar_range = CreateClientConVar("vrmod_hud_radar_range", "1500", true,
 	"Radar world range (Source units)", 400, 4000)
 local cv_radar_size = CreateClientConVar("vrmod_hud_radar_size", "200", true, FCVAR_ARCHIVE,
 	"Radar diameter on HUD plate (px)", 120, 320)
+-- Depth band (Source units relative to feet) — underground vs surface filtering
+local cv_radar_depth_up = CreateClientConVar("vrmod_hud_radar_depth_up", "192", true, FCVAR_ARCHIVE,
+	"Radar sample height above feet (buildings in this band)", 48, 512)
+local cv_radar_depth_down = CreateClientConVar("vrmod_hud_radar_depth_down", "72", true, FCVAR_ARCHIVE,
+	"Radar sample depth below feet", 16, 256)
+local cv_radar_build_min = CreateClientConVar("vrmod_hud_radar_build_min", "40", true, FCVAR_ARCHIVE,
+	"Min elev above feet to draw as building (ignore floors)", 8, 128)
+local cv_radar_build_max = CreateClientConVar("vrmod_hud_radar_build_max", "192", true, FCVAR_ARCHIVE,
+	"Max elev above feet for buildings (hides higher floors/surface)", 64, 512)
+local cv_radar_player_depth = CreateClientConVar("vrmod_hud_radar_player_depth", "256", true, FCVAR_ARCHIVE,
+	"Max vertical distance for other player blips", 64, 1024)
 
 local RADAR_RT_SZ = 256
 local radarRT = GetRenderTarget("vrmod_hud_radar_3d", RADAR_RT_SZ, RADAR_RT_SZ, false)
