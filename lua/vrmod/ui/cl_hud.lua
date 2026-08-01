@@ -41,6 +41,13 @@ local cv_radar_build_max = CreateClientConVar("vrmod_hud_radar_build_max", "192"
 	"Max elev above feet for buildings (hides higher floors/surface)", 64, 512)
 local cv_radar_player_depth = CreateClientConVar("vrmod_hud_radar_player_depth", "256", true, FCVAR_ARCHIVE,
 	"Max vertical distance for other player blips", 64, 1024)
+-- Quality tiers (Cube: amortize work; never 2k traces in one stereo frame)
+local cv_radar_quality = CreateClientConVar("vrmod_hud_radar_quality", "1", true, FCVAR_ARCHIVE,
+	"Building map quality: 0=low 1=med 2=high (grid + traces/frame)", 0, 2)
+local cv_radar_budget = CreateClientConVar("vrmod_hud_radar_budget", "48", true, FCVAR_ARCHIVE,
+	"Max building TraceLines per PreStereoCapture tick", 8, 128)
+local cv_radar_3d_interval = CreateClientConVar("vrmod_hud_radar_3d_interval", "30", true, FCVAR_ARCHIVE,
+	"Frames between 3D radar ortho captures", 10, 120)
 
 local RADAR_RT_SZ = 256
 local radarRT = GetRenderTarget("vrmod_hud_radar_3d", RADAR_RT_SZ, RADAR_RT_SZ, false)
@@ -55,21 +62,50 @@ if radarMat and not radarMat:IsError() then
 	radarMat:SetTexture("$basetexture", radarRT)
 end
 
--- Cached top-down brush heightmap (buildings + terrain) — no nested world RenderView
--- Classification uses player feet Z (stable). Min-of-sample ground made the whole disc
--- paint solid pink when any deep pit existed.
-local BMAP_RES = 44
+-- =============================================================================
+-- Building heightmap — time-sliced (modern amortize-across-frames)
+--
+-- Old path: 44×44 = 1936 TraceLine in ONE frame → hard hitch.
+-- New path: progressive fill with budget; double-buffer so paint never blanks;
+-- center-first spiral priority (interesting cells first); disc-skip corners.
+-- =============================================================================
+local QUALITY_RES = { [0] = 24, [1] = 32, [2] = 40 }
+
 local bmap = {
 	frame = -999,
 	origin = Vector(0, 0, 0),
 	range = 0,
-	res = BMAP_RES,
-	-- cells[i] = absolute hit Z (or false if open sky)
+	res = 32,
+	-- Display buffer (always paint this)
 	cells = {},
+	-- Fill buffer (job writes here, swap on complete)
+	cellsNext = {},
 	playerZ = 0,
 	wx0 = 0, wy0 = 0, step = 1,
 	ready = false,
+	-- Progressive job
+	job = nil,
 }
+
+-- Reused TraceLine table (no alloc per cell)
+local trReuse = {
+	mask = MASK_SOLID_BRUSHONLY,
+	collisiongroup = COLLISION_GROUP_WORLD,
+	filter = NULL,
+	start = Vector(),
+	endpos = Vector(),
+}
+local vStart = trReuse.start
+local vEnd = trReuse.endpos
+
+local function BmapRes()
+	local q = math.floor(math.Clamp(cv_radar_quality:GetInt(), 0, 2))
+	return QUALITY_RES[q] or 32
+end
+
+local function BmapBudget()
+	return math.floor(math.Clamp(cv_radar_budget:GetInt(), 8, 128))
+end
 
 local function HudRes()
 	local w = vrScrW:GetInt()
@@ -305,9 +341,10 @@ end
 local function InvalidateBuildingMap()
 	bmap.ready = false
 	bmap.frame = -999
+	bmap.job = nil
 end
 
--- Resample when depth cvars change
+-- Resample when depth / quality cvars change
 for _, name in ipairs({
 	"vrmod_hud_radar_depth_up",
 	"vrmod_hud_radar_depth_down",
@@ -315,86 +352,182 @@ for _, name in ipairs({
 	"vrmod_hud_radar_build_max",
 	"vrmod_hud_radar_buildings",
 	"vrmod_hud_radar_range",
+	"vrmod_hud_radar_quality",
 }) do
 	cvars.AddChangeCallback(name, function()
 		InvalidateBuildingMap()
 	end, "vrmod_radar_depth_" .. name)
 end
 
+--- Spiral order from center (priority fill — near-player cells first).
+local function BuildSpiralOrder(res)
+	local order = {}
+	local n = res * res
+	local visited = {}
+	local function push(ix, iy)
+		if ix < 0 or iy < 0 or ix >= res or iy >= res then return end
+		local k = iy * res + ix
+		if visited[k] then return end
+		visited[k] = true
+		order[#order + 1] = k
+	end
+	local cx = math.floor((res - 1) * 0.5)
+	local cy = math.floor((res - 1) * 0.5)
+	local x, y = cx, cy
+	push(x, y)
+	local leg = 1
+	local dx, dy = 1, 0
+	while #order < n do
+		for _ = 1, 2 do
+			for _ = 1, leg do
+				x, y = x + dx, y + dy
+				push(x, y)
+				if #order >= n then return order end
+			end
+			dx, dy = -dy, dx -- turn left
+		end
+		leg = leg + 1
+	end
+	return order
+end
+
+local spiralCache = {}
+local function SpiralOrder(res)
+	if not spiralCache[res] then spiralCache[res] = BuildSpiralOrder(res) end
+	return spiralCache[res]
+end
+
+--- Start / continue amortized heightfield job. Budget traces per call.
 local function SampleBuildingMap(ply, range)
-	if not cv_radar_buildings:GetBool() then return end
+	if not cv_radar_buildings:GetBool() then
+		bmap.job = nil
+		return
+	end
 	if not IsValid(ply) then return end
 	range = math.Clamp(range or 1500, 400, 4000)
 	local depthUp, depthDown, buildMin, buildMax = RadarDepthParams()
 	local origin = ply:GetPos()
 	local fn = FrameNumber and FrameNumber() or 0
-	local moved = origin:DistToSqr(bmap.origin) > (128 * 128)
-	local rangeChanged = math.abs((bmap.range or 0) - range) > 64
-	-- Depth change (stairs / elevators / go underground) forces resample
-	local depthChanged = math.abs(origin.z - (bmap.playerZ or origin.z)) > 40
-	if bmap.ready and not moved and not rangeChanged and not depthChanged
-		and (fn - (bmap.frame or 0)) < 30 then
-		bmap.playerZ = origin.z
-		return
-	end
+	local res = BmapRes()
+	local job = bmap.job
 
-	local res = BMAP_RES
-	local step = (range * 2) / res
-	local ox = math.floor(origin.x / step + 0.5) * step
-	local oy = math.floor(origin.y / step + 0.5) * step
-	local wx0 = ox - range + step * 0.5
-	local wy0 = oy - range + step * 0.5
-	-- Depth band only — not sky→abyss (that always hit surface roofs)
-	local bandTop = origin.z + depthUp
-	local bandBot = origin.z - depthDown
-	local cells = bmap.cells
-	local tr = {
-		mask = MASK_SOLID_BRUSHONLY,
-		collisiongroup = COLLISION_GROUP_WORLD,
-		filter = ply,
-	}
-
-	for iy = 0, res - 1 do
-		local wy = wy0 + iy * step
-		for ix = 0, res - 1 do
-			local wx = wx0 + ix * step
-			tr.start = Vector(wx, wy, bandTop)
-			tr.endpos = Vector(wx, wy, bandBot)
-			local hit = util.TraceLine(tr)
-			local idx = iy * res + ix + 1
-			if hit.Hit and not hit.HitSky then
-				local z = hit.HitPos.z
-				local elev = z - origin.z
-				-- Keep only hits in our depth window (structure at this level)
-				if elev >= buildMin and elev <= buildMax then
-					cells[idx] = z
-				else
-					cells[idx] = false
-				end
-			else
-				cells[idx] = false
-			end
+	-- Restart job if parameters diverged mid-fill
+	if job then
+		if math.abs((job.range or 0) - range) > 64
+			or math.abs(origin.z - (job.playerZ or origin.z)) > 48
+			or job.res ~= res then
+			job = nil
+			bmap.job = nil
 		end
 	end
 
-	bmap.frame = fn
-	bmap.origin = Vector(ox, oy, origin.z)
-	bmap.playerZ = origin.z
-	bmap.range = range
-	bmap.res = res
-	bmap.wx0 = wx0
-	bmap.wy0 = wy0
-	bmap.step = step
-	bmap.buildMin = buildMin
-	bmap.buildMax = buildMax
-	bmap.ready = true
+	-- Idle: only start a new pass when dirty / stale
+	if not job then
+		local moved = origin:DistToSqr(bmap.origin) > (160 * 160)
+		local rangeChanged = math.abs((bmap.range or 0) - range) > 64
+		local depthChanged = math.abs(origin.z - (bmap.playerZ or origin.z)) > 48
+		local stale = (fn - (bmap.frame or 0)) > 90
+		if bmap.ready and not moved and not rangeChanged and not depthChanged and not stale then
+			bmap.playerZ = origin.z
+			return
+		end
+
+		local step = (range * 2) / res
+		local ox = math.floor(origin.x / step + 0.5) * step
+		local oy = math.floor(origin.y / step + 0.5) * step
+		local wx0 = ox - range + step * 0.5
+		local wy0 = oy - range + step * 0.5
+		local cellsNext = bmap.cellsNext
+		local n = res * res
+		for i = 1, n do cellsNext[i] = false end
+		job = {
+			res = res,
+			range = range,
+			step = step,
+			wx0 = wx0,
+			wy0 = wy0,
+			ox = ox, oy = oy,
+			playerZ = origin.z,
+			bandTop = origin.z + depthUp,
+			bandBot = origin.z - depthDown,
+			buildMin = buildMin,
+			buildMax = buildMax,
+			order = SpiralOrder(res),
+			cursor = 1,
+			cellsNext = cellsNext,
+			halfRes = res * 0.5,
+		}
+		bmap.job = job
+	end
+
+	trReuse.filter = ply
+	local bandTop, bandBot = job.bandTop, job.bandBot
+	local jBuildMin, jBuildMax = job.buildMin, job.buildMax
+	local playerZ = job.playerZ
+	local step, wx0, wy0 = job.step, job.wx0, job.wy0
+	local resJ = job.res
+	local halfRes = job.halfRes
+	local halfRes2 = (halfRes + 0.75) * (halfRes + 0.75)
+	local cellsNext = job.cellsNext
+	local order = job.order
+	local budget = BmapBudget()
+	local cursor = job.cursor
+	local n = #order
+
+	while budget > 0 and cursor <= n do
+		local cell = order[cursor]
+		cursor = cursor + 1
+		local ix = cell % resJ
+		local iy = math.floor(cell / resJ)
+		local cdx = (ix + 0.5) - halfRes
+		local cdy = (iy + 0.5) - halfRes
+		local idx = iy * resJ + ix + 1
+		if (cdx * cdx + cdy * cdy) > halfRes2 then
+			cellsNext[idx] = false
+		else
+			local wx = wx0 + ix * step
+			local wy = wy0 + iy * step
+			vStart.x, vStart.y, vStart.z = wx, wy, bandTop
+			vEnd.x, vEnd.y, vEnd.z = wx, wy, bandBot
+			local hit = util.TraceLine(trReuse)
+			budget = budget - 1
+			if hit.Hit and not hit.HitSky then
+				local z = hit.HitPos.z
+				local elev = z - playerZ
+				if elev >= jBuildMin and elev <= jBuildMax then
+					cellsNext[idx] = z
+				else
+					cellsNext[idx] = false
+				end
+			else
+				cellsNext[idx] = false
+			end
+		end
+	end
+	job.cursor = cursor
+
+	if cursor > n then
+		-- Swap buffers (O(1) pointer swap) — keep last good map until then
+		bmap.cells, bmap.cellsNext = job.cellsNext, bmap.cells
+		bmap.frame = fn
+		bmap.origin.x, bmap.origin.y, bmap.origin.z = job.ox, job.oy, job.playerZ
+		bmap.playerZ = job.playerZ
+		bmap.range = job.range
+		bmap.res = job.res
+		bmap.wx0, bmap.wy0, bmap.step = job.wx0, job.wy0, job.step
+		bmap.buildMin, bmap.buildMax = job.buildMin, job.buildMax
+		bmap.ready = true
+		bmap.job = nil
+	else
+		bmap.playerZ = origin.z
+	end
 end
 
 local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	if not cv_radar_buildings:GetBool() then return end
 	if not bmap.ready or not bmap.cells or not bmap.step or bmap.step <= 0 then return end
 	local _, _, buildMin, buildMax = RadarDepthParams()
-	local res = bmap.res or BMAP_RES
+	local res = bmap.res or BmapRes()
 	local step = bmap.step
 	local wx0, wy0 = bmap.wx0, bmap.wy0
 	local playerZ = origin.z
@@ -405,6 +538,9 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	local cells = bmap.cells
 	local refX, refY = origin.x, origin.y
 	local tallSpan = math.max(1, buildMax - buildMin)
+	-- Precompute yaw rotation (avoid Vector alloc per cell)
+	local c, s = math.cos(math.rad(-yaw)), math.sin(math.rad(-yaw))
+	local invRange = radius / math.max(range, 1)
 
 	draw.NoTexture()
 
@@ -414,11 +550,13 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 			local z = cells[iy * res + ix + 1]
 			if z == false or z == nil then continue end
 			local elev = z - playerZ
-			-- Depth filter: drop surface when player went underground (or vice versa)
 			if elev < buildMin or elev > buildMax then continue end
 
 			local wx = wx0 + ix * step - refX
-			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
+			local rx = wx * c - wy * s
+			local ry = wx * s + wy * c
+			local u = rx * invRange
+			local v = (-ry) * invRange
 			if (u * u + v * v) > maxR2 then continue end
 
 			local t = math.Clamp((elev - buildMin) / tallSpan, 0, 1)
@@ -431,6 +569,14 @@ end
 -- Guard: never nest RenderView while stereo SBS RT is active (map-wide flicker).
 -- Also restore fog / clip state — short radar zfar used to leak into eye views
 -- and clip the whole world (player “render distance” collapse).
+-- 3D capture state — dirty only when view actually changed
+local radar3d = {
+	frame = -999,
+	origin = Vector(0, 0, 0),
+	yaw = 0,
+	range = 0,
+}
+
 local function CaptureRadar3D(ply, range)
 	if not cv_radar_3d:GetBool() or not radarRT then return false end
 	if not IsValid(ply) then return false end
@@ -439,6 +585,16 @@ local function CaptureRadar3D(ply, range)
 
 	local pos = ply:GetPos()
 	local yaw = RadarYaw(ply)
+	local fn = FrameNumber and FrameNumber() or 0
+	local interval = math.floor(math.Clamp(cv_radar_3d_interval:GetInt(), 10, 120))
+	local moved = pos:DistToSqr(radar3d.origin) > (96 * 96)
+	local yawChanged = math.abs(math.AngleDifference(yaw, radar3d.yaw)) > 8
+	local rangeChanged = math.abs((radar3d.range or 0) - range) > 64
+	local stale = (fn - (radar3d.frame or 0)) >= interval
+	if not moved and not yawChanged and not rangeChanged and not stale then
+		return true -- keep last photo
+	end
+
 	-- Higher camera so building roofs read clearly
 	local height = math.Clamp(range * 1.1, 600, 3200)
 
@@ -498,6 +654,12 @@ local function CaptureRadar3D(ply, range)
 		if render.DepthRange then render.DepthRange(0, 1) end
 	end)
 
+	if ok then
+		radar3d.frame = fn
+		radar3d.origin.x, radar3d.origin.y, radar3d.origin.z = pos.x, pos.y, pos.z
+		radar3d.yaw = yaw
+		radar3d.range = range
+	end
 	return ok
 end
 
@@ -821,8 +983,7 @@ local function Bind()
 	end
 
 	-- Radar world data BEFORE stereo RT is pushed (see cl_vrmod).
-	-- Buildings: rare grid sample. 3D photo: rare (every-frame RenderView = flicker).
-	local radar3dFrame = -999
+	-- Buildings: time-sliced TraceLine budget. 3D: dirty + interval (never every frame).
 	hook.Add("VRMod_PreStereoCapture", "vrmod_radar_world", function()
 		if not g_VR or not g_VR.active then return end
 		if not cv_radar:GetBool() then return end
@@ -833,11 +994,7 @@ local function Bind()
 			pcall(SampleBuildingMap, ply, range)
 		end
 		if cv_radar_3d:GetBool() then
-			local fn = FrameNumber and FrameNumber() or 0
-			if (fn - radar3dFrame) >= 20 then
-				radar3dFrame = fn
-				pcall(CaptureRadar3D, ply, range)
-			end
+			pcall(CaptureRadar3D, ply, range)
 		end
 	end)
 
