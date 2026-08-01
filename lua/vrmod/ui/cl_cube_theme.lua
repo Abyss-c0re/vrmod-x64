@@ -74,13 +74,14 @@ end
 if not vrmod.cube.Font then
 	function vrmod.cube.Font(name)
 		EnsureCubeFonts()
-		if not name then return "DermaDefault" end
+		if not name or name == "" then return "DermaDefault" end
+		local resolved = FONT_ALIAS[name] or FONT_ALIAS[string.lower(tostring(name))] or name
 		local ok, w = pcall(function()
-			surface.SetFont(name)
+			surface.SetFont(resolved)
 			return surface.GetTextSize("W")
 		end)
-		if ok and w and w > 0 then return name end
-		return FONT_FALLBACK[name] or "DermaDefault"
+		if ok and w and w > 0 then return resolved end
+		return FONT_FALLBACK[resolved] or FONT_FALLBACK[name] or "DermaDefault"
 	end
 end
 
