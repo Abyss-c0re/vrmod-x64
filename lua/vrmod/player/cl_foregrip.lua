@@ -6,6 +6,10 @@ if SERVER then return end
 --
 -- Start: left grip + hands within distance (no currentvmi hard-gate).
 -- Solve once on VRMod_PreStereo from stereoPose hands; eyes only stamp.
+--
+-- SoT while gripping:
+--   smooth RH → mild guide (device LH aim only) → gun = RH+VMI → LH = grip offset on gun
+-- Gun mesh and left hand ALWAYS share that gun matrix (no unguided attach / guided mesh split).
 -- =============================================================================
 
 local function BlockOldForegripAddon()
@@ -31,14 +35,14 @@ timer.Simple(2, BlockOldForegripAddon)
 
 -- Hardcoded start range (not archived cvar — old client.vdf "12" killed long grips)
 local GRIP_DISTANCE = 20
--- Low blend: high values make gun chase device LH every frame → body LH attach shakes
-local GUIDE_BLEND = 0.18
+-- Mild two-hand aim. Must share the SAME gun matrix as LH attach (never unguided-vs-guided split).
+local GUIDE_BLEND = 0.12
 local RELEASE_MULT = 1.5
--- RH low-pass for attach parent only (kills controller micro-noise on FBT arm)
-local RH_SMOOTH = 0.14
--- Deadzone: keep exact previous attach if new is within this (units / degrees)
-local ATTACH_POS_EPS_SQR = 0.04 -- 0.2u
-local ATTACH_ANG_EPS = 0.35
+-- RH low-pass (parent of gun+attach) kills controller micro-noise on FBT arm
+local RH_SMOOTH = 0.16
+-- Deadzone on final gun matrix (hand is derived from gun — one SoT)
+local GUN_POS_EPS_SQR = 0.04 -- 0.2u
+local GUN_ANG_EPS = 0.35
 
 local state = {
 	gripping = false,
@@ -264,7 +268,8 @@ local function SolveForegripFrame()
 		return false
 	end
 
-	-- CRITICAL: attach LH to smoothed UNGUIDED RH+VMI only (no LH→aim→gun feedback).
+	-- One SoT: smoothed RH → (optional mild guide) → gun = RH+VMI → LH = offset on gun.
+	-- Prior split (attach on unguided, mesh on guided) left the hand floating while the gun moved.
 	if not state.hasSmoothR then
 		state.smoothRPos:Set(rpos)
 		state.smoothRAng:Set(rang)
@@ -273,49 +278,34 @@ local function SolveForegripFrame()
 		state.smoothRPos = LerpVector(RH_SMOOTH, state.smoothRPos, rpos)
 		state.smoothRAng = LerpAngle(RH_SMOOTH, state.smoothRAng, rang)
 	end
-	local baseGunPos, baseGunAng = LocalToWorld(
+
+	-- Guide uses device LH direction only (from frozen stereoPose — not tracking attach).
+	-- Same parent for mesh and hand; no unguided/guided fork.
+	local handPos, handAng = GetGuidedWeaponPose(
+		state.smoothRPos, state.smoothRAng, lpos, lang, state.weaponBox
+	)
+	local gunPos, gunAng = LocalToWorld(
 		vmi.offsetPos or Vector(),
 		vmi.offsetAng or Angle(),
-		state.smoothRPos, state.smoothRAng
+		handPos, handAng
 	)
-	local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, baseGunPos, baseGunAng)
-	-- Deadzone: ignore sub-threshold noise (FBT amplifies tiny hand moves)
+
+	-- Deadzone the GUN (hand is re-derived from it — keeps glue + kills micro-shake)
 	if state.frame >= 0 then
-		local dpos = attachPos:DistToSqr(state.leftPos)
+		local dpos = gunPos:DistToSqr(state.gunPos)
 		local dang = (
-			math.abs(math.AngleDifference(attachAng.p, state.leftAng.p))
-			+ math.abs(math.AngleDifference(attachAng.y, state.leftAng.y))
-			+ math.abs(math.AngleDifference(attachAng.r, state.leftAng.r))
+			math.abs(math.AngleDifference(gunAng.p, state.gunAng.p))
+			+ math.abs(math.AngleDifference(gunAng.y, state.gunAng.y))
+			+ math.abs(math.AngleDifference(gunAng.r, state.gunAng.r))
 		)
-		if dpos < ATTACH_POS_EPS_SQR and dang < ATTACH_ANG_EPS then
-			attachPos = Vector(state.leftPos)
-			attachAng = Angle(state.leftAng.p, state.leftAng.y, state.leftAng.r)
+		if dpos < GUN_POS_EPS_SQR and dang < GUN_ANG_EPS then
+			gunPos = Vector(state.gunPos.x, state.gunPos.y, state.gunPos.z)
+			gunAng = Angle(state.gunAng.p, state.gunAng.y, state.gunAng.r)
 		end
 	end
 
-	-- Guided aim only affects the weapon mesh / laser (not LH parent)
-	local guidedPos, guidedAng = GetGuidedWeaponPose(rpos, rang, lpos, lang, state.weaponBox)
-	local R = g_VR.tracking and g_VR.tracking.pose_righthand
-	local savedPos, savedAng
-	if R and R.pos and R.ang then
-		savedPos = Vector(R.pos)
-		savedAng = Angle(R.ang.p, R.ang.y, R.ang.r)
-		if R.pos.Set then R.pos:Set(guidedPos) else R.pos = guidedPos end
-		if R.ang.Set then R.ang:Set(guidedAng) else R.ang = guidedAng end
-	end
-	if vrmod.utils and vrmod.utils.UpdateViewModelPos then
-		pcall(vrmod.utils.UpdateViewModelPos, guidedPos, guidedAng, true)
-	end
-	if R and savedPos and savedAng then
-		if R.pos.Set then R.pos:Set(savedPos) else R.pos = savedPos end
-		if R.ang.Set then R.ang:Set(savedAng) else R.ang = savedAng end
-	end
-
-	local gunPos = g_VR.viewModelPos
-	local gunAng = g_VR.viewModelAng
-	if not gunPos or not gunAng then
-		gunPos, gunAng = LocalToWorld(vmi.offsetPos or Vector(), vmi.offsetAng or Angle(), guidedPos, guidedAng)
-	end
+	-- LH glued to the matrix we actually draw
+	local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, gunPos, gunAng)
 
 	state.gunPos:Set(gunPos)
 	state.gunAng:Set(gunAng)
@@ -323,6 +313,20 @@ local function SolveForegripFrame()
 	state.leftAng:Set(attachAng)
 	state.frame = sf
 	state.bonesFrame = -1
+
+	-- Write gun SoT without mutating tracking RH (body RH stays device/smooth)
+	g_VR.viewModelPos = Vector(gunPos.x, gunPos.y, gunPos.z)
+	g_VR.viewModelAng = Angle(gunAng.p, gunAng.y, gunAng.r)
+	local vm = g_VR.viewModel
+	if not IsValid(vm) then
+		local lp = LocalPlayer()
+		if IsValid(lp) then vm = lp:GetViewModel() end
+		if IsValid(vm) then g_VR.viewModel = vm end
+	end
+	if IsValid(vm) then
+		vm:SetPos(state.gunPos)
+		vm:SetAngles(state.gunAng)
+	end
 
 	PublishSnap(sf, state.gunPos, state.gunAng)
 	g_VR.foregripActive = true
