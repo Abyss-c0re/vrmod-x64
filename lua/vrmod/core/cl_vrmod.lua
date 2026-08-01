@@ -1021,12 +1021,18 @@ if CLIENT then
 		local err = vrmod.GetStartupError()
 		if err then
 			vrmod.logger.Err("Failed to start: " .. err)
+			if vrmod.Toast then
+				vrmod.Toast("VR start blocked: " .. tostring(err), 8, "error")
+			end
 			return false
 		end
 
 		VRMOD_Shutdown() -- ensure clean state
 		if VRMOD_Init() == false then
 			vrmod.logger.Err("Init failed")
+			if vrmod.Toast then
+				vrmod.Toast("VR_Init failed — SteamVR/OpenXR running? Check module version.", 8, "error")
+			end
 			return false
 		end
 		return true
@@ -1133,8 +1139,18 @@ if CLIENT then
 			(dp.passEyeArgs and eyeW) or nil,
 			(dp.passEyeArgs and eyeH) or nil
 		)
-		if not okBegin and vrmod.logger then
-			vrmod.logger.Err("ShareTextureBegin failed: %s", tostring(errBegin))
+		if not okBegin then
+			if vrmod.logger then
+				vrmod.logger.Err("ShareTextureBegin failed: %s (eye %sx%s rt %sx%s)",
+					tostring(errBegin), tostring(eyeW), tostring(eyeH),
+					tostring(g_VR.rtWidth), tostring(g_VR.rtHeight))
+			end
+			if vrmod.Toast then
+				vrmod.Toast(string.format(
+					"ShareTexture begin failed (%sx%s) — HMD may stay black. Lower supersample / check module.",
+					tostring(g_VR.rtWidth), tostring(g_VR.rtHeight)
+				), 8, "error")
+			end
 		end
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
 		-- Filtered RT (no UNFILTERABLE). SS only applied when module can match OUT size.
@@ -1148,9 +1164,19 @@ if CLIENT then
 		})
 
 		local okFin, errFin = SafeShareTextureFinish()
-		if not okFin and vrmod.logger then
-			vrmod.logger.Err("ShareTextureFinish failed: %s", tostring(errFin))
+		if not okFin then
+			if vrmod.logger then
+				vrmod.logger.Err("ShareTextureFinish failed: %s (rt %sx%s)",
+					tostring(errFin), tostring(g_VR.rtWidth), tostring(g_VR.rtHeight))
+			end
+			if vrmod.Toast then
+				vrmod.Toast(string.format(
+					"ShareTexture finish failed (rt %sx%s) — desktop OK / HMD black often means this. Restart SteamVR + GMod.",
+					tostring(g_VR.rtWidth), tostring(g_VR.rtHeight)
+				), 8, "error")
+			end
 		end
+		g_VR._shareTextureOk = okBegin and okFin and true or false
 		ApplySubmitBounds()
 		BindBorderConvarCallbacks()
 		BindRenderProfileCallbacks()
@@ -1430,6 +1456,8 @@ if CLIENT then
 	local function SetupShutdownHooks()
 		function VRUtilClientExit()
 			if not g_VR.active then return end
+			timer.Remove("vrmod_stereo_selftest")
+			g_VR._stereoSelfTestDone = true
 			restoreConvarOverrides()
 			VRUtilMenuClose()
 			VRUtilNetworkCleanup()
@@ -1483,6 +1511,9 @@ if CLIENT then
 			if vrmod.logger then
 				vrmod.logger.Err("SetupRenderTargets failed: %s", errRT)
 			end
+			if vrmod.Toast then
+				vrmod.Toast("Render targets failed — cannot start VR eyes. Check console / module.", 8, "error")
+			end
 			return
 		end
 		-- Actions may fail (manifest path) — never block eyes/HUD
@@ -1509,6 +1540,33 @@ if CLIENT then
 				if g_VR.active and vrmod.RefreshHUD then vrmod.RefreshHUD() end
 			end)
 		end
+		-- Cube W7: early stereo / tracking self-check (toast once if HMD silent)
+		g_VR._stereoSelfTestDone = false
+		timer.Create("vrmod_stereo_selftest", 2.5, 1, function()
+			if not g_VR or not g_VR.active or g_VR._stereoSelfTestDone then return end
+			g_VR._stereoSelfTestDone = true
+			local hmd = g_VR.tracking and g_VR.tracking.hmd
+			local hasHmd = hmd and hmd.pos and true or false
+			if not hasHmd then
+				if vrmod.Toast then
+					vrmod.Toast(
+						"No HMD pose after start — PC may show game while headset stays black/loading. Restart SteamVR; check cable/HMD.",
+						8,
+						"error"
+					)
+				end
+				if vrmod.logger then
+					vrmod.logger.Err("Stereo self-test: no HMD tracking rt=%sx%s shareOk=%s",
+						tostring(g_VR.rtWidth), tostring(g_VR.rtHeight), tostring(g_VR._shareTextureOk))
+				end
+			elseif g_VR._shareTextureOk == false and vrmod.Toast then
+				vrmod.Toast(
+					"Stereo share was unhealthy at start — if HMD is black, restart SteamVR + lower supersample.",
+					6,
+					"hint"
+				)
+			end
+		end)
 		vrmod.logger.Info("Started VR session (nested RenderView lock active) rt=%sx%s", g_VR.rtWidth, g_VR.rtHeight)
 	end
 end
