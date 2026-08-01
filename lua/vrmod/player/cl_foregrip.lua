@@ -1,15 +1,16 @@
 if SERVER then return end
 -- =============================================================================
--- Stock / non-VR two-hand foregrip — stereo-stable
+-- Stock / non-VR two-hand foregrip (vrmod-x64)
 --
+-- Behavior matches gVRMod / World-Line style:
+--   start: left grip + hands within GRIP_DISTANCE + stock weapon
+--   gun  = guided RH + VMI  (via UpdateViewModelPos — same path as draw)
+--   LH   = fixed offset on g_VR.viewModelPos/Ang (must match mesh)
+--
+-- x64 additions (do not change the gun/hand matrix math):
+--   solve once per stereo frame from stereoPose; both eyes only re-stamp
+--   EnsureVMI so unconfigured stock SWEPs still grip
 -- ArcVR weapons are handled by arcticvr_base (skip here).
---
--- Start: left grip + hands within distance (no currentvmi hard-gate).
--- Solve once on VRMod_PreStereo from stereoPose hands; eyes only stamp.
---
--- SoT while gripping:
---   smooth RH → mild guide (device LH aim only) → gun = RH+VMI → LH = grip offset on gun
--- Gun mesh and left hand ALWAYS share that gun matrix (no unguided attach / guided mesh split).
 -- =============================================================================
 
 local function BlockOldForegripAddon()
@@ -17,10 +18,12 @@ local function BlockOldForegripAddon()
 		{ "VRMod_Input", "Foregrip" },
 		{ "VRMod_PreRender", "ForegripTransform" },
 		{ "VRMod_Exit", "ForegripExit" },
-		-- Prior hook names (lua_refresh would double-register otherwise)
 		{ "VRMod_PreStereo", "vrmod_foregrip" },
 		{ "VRMod_PreRender", "vrmod_foregrip" },
-		{ "VRMod_PreStereo", "vrmod_weapon_pose_freeze" },
+		{ "VRMod_PreStereo", "0_vrmod_foregrip" },
+		{ "VRMod_PreRender", "0_vrmod_foregrip" },
+		{ "VRMod_PreStereo", "1_vrmod_weapon_pose_freeze" },
+		{ "VRMod_Input", "vrmod_foregrip" },
 	}) do
 		local t = hook.GetTable()[pair[1]]
 		if t and t[pair[2]] then hook.Remove(pair[1], pair[2]) end
@@ -33,19 +36,10 @@ BlockOldForegripAddon()
 timer.Simple(0.5, BlockOldForegripAddon)
 timer.Simple(2, BlockOldForegripAddon)
 
--- Start only when LH is close to RH *and* near the gun body (not free air / mag-hand space).
--- Old 20u hand-only check stole grips that should be mag/prop grabs.
-local GRIP_DISTANCE = 14
--- Max distance from mid-gun (RH+VMI + short forward) to claim stock foregrip
-local GRIP_GUN_NEAR = 11
--- Mild two-hand aim. Must share the SAME gun matrix as LH attach (never unguided-vs-guided split).
-local GUIDE_BLEND = 0.12
-local RELEASE_MULT = 1.5
--- RH low-pass (parent of gun+attach) kills controller micro-noise on FBT arm
-local RH_SMOOTH = 0.16
--- Deadzone on final gun matrix (hand is derived from gun — one SoT)
-local GUN_POS_EPS_SQR = 0.04 -- 0.2u
-local GUN_ANG_EPS = 0.35
+-- gVRMod defaults (reliable stock start — do not gate on mid-gun radial)
+local GRIP_DISTANCE = 20
+local GUIDE_BLEND = 0.45
+local RELEASE_MULT = 1.35
 
 local state = {
 	gripping = false,
@@ -60,9 +54,6 @@ local state = {
 	gunAng = Angle(0, 0, 0),
 	leftPos = Vector(0, 0, 0),
 	leftAng = Angle(0, 0, 0),
-	smoothRPos = Vector(0, 0, 0),
-	smoothRAng = Angle(0, 0, 0),
-	hasSmoothR = false,
 	startDist = 12,
 }
 
@@ -73,7 +64,6 @@ local function ClearGrip()
 	state.wep = NULL
 	state.class = nil
 	state.weaponBox = nil
-	state.hasSmoothR = false
 	g_VR._leftHandSnapFrame = -1
 	local aw = IsValid(LocalPlayer()) and LocalPlayer():GetActiveWeapon() or NULL
 	if not (IsValid(aw) and aw.ArcticVR and aw.ForegripGrabbed) then
@@ -110,6 +100,27 @@ local function EnsureVMI(wep)
 	return g_VR.currentvmi
 end
 
+--- Same gun matrix math as vrmod.utils.UpdateViewModel (LocalToWorld vs useWorldModel).
+local function GunWorldFromHand(handPos, handAng, vmi)
+	vmi = vmi or g_VR.currentvmi
+	if not handPos or not handAng or not vmi then return nil, nil end
+	if vmi.useWorldModel then
+		local off = vmi.offsetPos or Vector()
+		local oang = vmi.offsetAng or Angle()
+		local pos = handPos + handAng:Forward() * off.x + handAng:Right() * off.y + handAng:Up() * off.z
+		local ang = Angle(handAng.p, handAng.y, handAng.r)
+		ang:RotateAroundAxis(ang:Right(), oang.p or 0)
+		ang:RotateAroundAxis(ang:Up(), oang.y or 0)
+		ang:RotateAroundAxis(ang:Forward(), oang.r or 0)
+		return pos, ang
+	end
+	return LocalToWorld(
+		vmi.offsetPos or Vector(),
+		vmi.offsetAng or Angle(),
+		handPos, handAng
+	)
+end
+
 local function RefreshWeaponBox(wep)
 	state.weaponBox = nil
 	if not (vrmod.utils and vrmod.utils.GetWeaponMeleeParams) then return end
@@ -137,14 +148,15 @@ local function StereoHands()
 	return L.pos, L.ang, R.pos, R.ang
 end
 
+-- gVRMod two-hand aim (same constants / structure)
 local function GetGuidedWeaponPose(rightPos, rightAng, leftPos, leftAng, box)
 	if GUIDE_BLEND <= 0 then return rightPos, rightAng end
 	local toLeft = leftPos - rightPos
 	local dist = toLeft:Length()
-	local maxDist = (box and box.reach and box.reach * 1.55) or 32
-	maxDist = math.max(maxDist, state.startDist * RELEASE_MULT, 28)
+	local maxDist = (box and box.reach and box.reach * 1.55) or 26
+	maxDist = math.max(maxDist, state.startDist * RELEASE_MULT, 26)
 	if dist > maxDist or dist < 0.05 then return rightPos, rightAng end
-	local minDist = 4.5
+	local minDist = 5.5
 	if box and box.mins then
 		minDist = math.max(math.abs(box.mins.y or 0), 4.5)
 	end
@@ -161,14 +173,10 @@ local function PublishSnap(sf, gunPos, gunAng)
 	if not g_VR._weaponSnapAng then g_VR._weaponSnapAng = Angle() end
 	g_VR._weaponSnapPos:Set(gunPos)
 	g_VR._weaponSnapAng:Set(gunAng)
-	-- Assign copies into draw SoT (do not alias same userdata for later overwrites)
 	g_VR.viewModelPos = Vector(gunPos)
 	g_VR.viewModelAng = Angle(gunAng.p, gunAng.y, gunAng.r)
 end
 
---- Stereo-stable left hand for FBT / avatar IK / body draw.
---- Writes COPIES into tracking + lerpedFrame (never alias state vectors into them).
---- Forces FBT bone solve to re-run if it already used device hands this FrameNumber.
 local function StampLeftStable(sf)
 	local p = state.leftPos
 	local a = state.leftAng
@@ -179,6 +187,11 @@ local function StampLeftStable(sf)
 	if not g_VR._leftHandSnapAng then g_VR._leftHandSnapAng = Angle() end
 	g_VR._leftHandSnapPos:Set(p)
 	g_VR._leftHandSnapAng:Set(a)
+
+	-- Official API when present (gVRMod path)
+	if isfunction(vrmod.SetLeftHandPose) then
+		pcall(vrmod.SetLeftHandPose, p, a)
+	end
 
 	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
 	if L and L.pos and L.ang then
@@ -191,27 +204,25 @@ local function StampLeftStable(sf)
 	local tab = g_VR.net and g_VR.net[ply:SteamID()]
 	local nf = tab and tab.lerpedFrame
 	if nf then
-		-- Fresh vectors — SetLeftHandPose used to alias state.leftPos into net frame
 		nf.lefthandPos = Vector(p.x, p.y, p.z)
 		nf.lefthandAng = Angle(a.p, a.y, a.r)
 	end
 
-	-- FBT freezes once per FrameNumber; if it already ran with device LH, re-solve
 	if vrmod_fbt and vrmod_fbt.characterInfo then
 		local info = vrmod_fbt.characterInfo[ply:SteamID()]
 		if info then info.frameNumber = -1 end
 	end
-
-	-- Non-FBT character IK: allow one more UpdateIK this frame with attach hands
 	if g_VR._charIkUpdated then
 		g_VR._charIkUpdated = nil
 	end
 end
 
---- Per-eye: only re-assert frozen LH (same matrix both eyes; no recompute).
 local function ReassertLeftSnap(sf)
 	if g_VR._leftHandSnapFrame ~= sf or not g_VR._leftHandSnapPos then return end
 	local p, a = g_VR._leftHandSnapPos, g_VR._leftHandSnapAng
+	if isfunction(vrmod.SetLeftHandPose) then
+		pcall(vrmod.SetLeftHandPose, p, a)
+	end
 	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
 	if L and L.pos and L.ang then
 		if L.pos.Set then L.pos:Set(p) else L.pos = Vector(p) end
@@ -229,6 +240,7 @@ local function ReassertLeftSnap(sf)
 	end
 end
 
+--- Core gVRMod solve: UpdateViewModelPos → LH offset on actual viewModelPos/Ang
 local function SolveForegripFrame()
 	if not state.gripping then return false end
 
@@ -258,56 +270,42 @@ local function SolveForegripFrame()
 
 	local lpos, lang, rpos, rang = StereoHands()
 	if not lpos or not rpos then
-		return false -- keep grip one frame if tracking glitch
+		return false
 	end
 
-	local maxDist = state.startDist * RELEASE_MULT
+	-- gVRMod release: box reach or default 20
+	local maxDist = 20
 	if state.weaponBox and state.weaponBox.reach then
-		maxDist = math.max(maxDist, state.weaponBox.reach * RELEASE_MULT)
+		maxDist = state.weaponBox.reach * RELEASE_MULT
 	end
-	maxDist = math.max(maxDist, 28)
+	maxDist = math.max(maxDist, state.startDist * RELEASE_MULT, 20)
 	if lpos:Distance(rpos) > maxDist then
 		ClearGrip()
 		return false
 	end
 
-	-- One SoT: smoothed RH → (optional mild guide) → gun = RH+VMI → LH = offset on gun.
-	-- Prior split (attach on unguided, mesh on guided) left the hand floating while the gun moved.
-	if not state.hasSmoothR then
-		state.smoothRPos:Set(rpos)
-		state.smoothRAng:Set(rang)
-		state.hasSmoothR = true
+	local guidedPos, guidedAng = GetGuidedWeaponPose(rpos, rang, lpos, lang, state.weaponBox)
+
+	-- Draw path = official viewmodel pipeline (collision / useWorldModel / SetupBones)
+	if vrmod.utils and vrmod.utils.UpdateViewModelPos then
+		pcall(vrmod.utils.UpdateViewModelPos, guidedPos, guidedAng, true)
 	else
-		state.smoothRPos = LerpVector(RH_SMOOTH, state.smoothRPos, rpos)
-		state.smoothRAng = LerpAngle(RH_SMOOTH, state.smoothRAng, rang)
-	end
-
-	-- Guide uses device LH direction only (from frozen stereoPose — not tracking attach).
-	-- Same parent for mesh and hand; no unguided/guided fork.
-	local handPos, handAng = GetGuidedWeaponPose(
-		state.smoothRPos, state.smoothRAng, lpos, lang, state.weaponBox
-	)
-	local gunPos, gunAng = LocalToWorld(
-		vmi.offsetPos or Vector(),
-		vmi.offsetAng or Angle(),
-		handPos, handAng
-	)
-
-	-- Deadzone the GUN (hand is re-derived from it — keeps glue + kills micro-shake)
-	if state.frame >= 0 then
-		local dpos = gunPos:DistToSqr(state.gunPos)
-		local dang = (
-			math.abs(math.AngleDifference(gunAng.p, state.gunAng.p))
-			+ math.abs(math.AngleDifference(gunAng.y, state.gunAng.y))
-			+ math.abs(math.AngleDifference(gunAng.r, state.gunAng.r))
-		)
-		if dpos < GUN_POS_EPS_SQR and dang < GUN_ANG_EPS then
-			gunPos = Vector(state.gunPos.x, state.gunPos.y, state.gunPos.z)
-			gunAng = Angle(state.gunAng.p, state.gunAng.y, state.gunAng.r)
+		local gp, ga = GunWorldFromHand(guidedPos, guidedAng, vmi)
+		if gp then
+			g_VR.viewModelPos = gp
+			g_VR.viewModelAng = ga
 		end
 	end
 
-	-- LH glued to the matrix we actually draw
+	-- Mesh SoT after UpdateViewModel — never a parallel LocalToWorld that can diverge
+	local gunPos = g_VR.viewModelPos
+	local gunAng = g_VR.viewModelAng
+	if not gunPos or not gunAng then
+		gunPos, gunAng = GunWorldFromHand(guidedPos, guidedAng, vmi)
+	end
+	if not gunPos or not gunAng then return false end
+
+	-- LH glued to the matrix we actually draw (gVRMod: LocalToWorld offset on viewModel*)
 	local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, gunPos, gunAng)
 
 	state.gunPos:Set(gunPos)
@@ -316,20 +314,6 @@ local function SolveForegripFrame()
 	state.leftAng:Set(attachAng)
 	state.frame = sf
 	state.bonesFrame = -1
-
-	-- Write gun SoT without mutating tracking RH (body RH stays device/smooth)
-	g_VR.viewModelPos = Vector(gunPos.x, gunPos.y, gunPos.z)
-	g_VR.viewModelAng = Angle(gunAng.p, gunAng.y, gunAng.r)
-	local vm = g_VR.viewModel
-	if not IsValid(vm) then
-		local lp = LocalPlayer()
-		if IsValid(lp) then vm = lp:GetViewModel() end
-		if IsValid(vm) then g_VR.viewModel = vm end
-	end
-	if IsValid(vm) then
-		vm:SetPos(state.gunPos)
-		vm:SetAngles(state.gunAng)
-	end
 
 	PublishSnap(sf, state.gunPos, state.gunAng)
 	g_VR.foregripActive = true
@@ -341,31 +325,32 @@ local function ApplyFrozenGunDraw()
 	if not state.gripping then return end
 	local sf = g_VR.stereoFrame or 0
 	if state.frame ~= sf then return end
+
+	PublishSnap(sf, state.gunPos, state.gunAng)
+
 	local vm = g_VR.viewModel
 	if not IsValid(vm) then
 		local ply = LocalPlayer()
 		if IsValid(ply) then vm = ply:GetViewModel() end
 		if IsValid(vm) then g_VR.viewModel = vm end
 	end
-	if not IsValid(vm) then return end
-
-	PublishSnap(sf, state.gunPos, state.gunAng)
-	vm:SetPos(state.gunPos)
-	vm:SetAngles(state.gunAng)
-	if state.bonesFrame ~= sf then
-		vm:SetupBones()
-		state.bonesFrame = sf
-		local muz = vm:GetAttachment(1)
-		if muz and muz.Pos and muz.Pos:DistToSqr(state.gunPos) < (100 * 100) then
-			g_VR.viewModelMuzzle = muz
-		else
-			g_VR.viewModelMuzzle = {
-				Pos = state.gunPos + state.gunAng:Forward() * 14,
-				Ang = Angle(state.gunAng.p, state.gunAng.y, state.gunAng.r),
-			}
+	if IsValid(vm) then
+		vm:SetPos(state.gunPos)
+		vm:SetAngles(state.gunAng)
+		if state.bonesFrame ~= sf then
+			vm:SetupBones()
+			state.bonesFrame = sf
+			local muz = vm:GetAttachment(1)
+			if muz and muz.Pos and muz.Pos:DistToSqr(state.gunPos) < (100 * 100) then
+				g_VR.viewModelMuzzle = muz
+			else
+				g_VR.viewModelMuzzle = {
+					Pos = state.gunPos + state.gunAng:Forward() * 14,
+					Ang = Angle(state.gunAng.p, state.gunAng.y, state.gunAng.r),
+				}
+			end
 		end
 	end
-	-- Same frozen LH both eyes (FBT/avatar read tracking + lerpedFrame)
 	ReassertLeftSnap(sf)
 end
 
@@ -384,28 +369,12 @@ local function TryStartGrip()
 	local dist = L.pos:Distance(R.pos)
 	if dist > GRIP_DISTANCE then return false end
 
-	-- Always ensure VMI — stock guns often have no preconfigured entry
+	-- gVRMod: hands close + stock wep only (EnsureVMI so missing currentvmi still works)
 	local vmi = EnsureVMI(wep)
-	local wepWorldPos, wepWorldAng = LocalToWorld(
-		vmi.offsetPos or Vector(),
-		vmi.offsetAng or Angle(),
-		R.pos, R.ang
-	)
+	local wepWorldPos, wepWorldAng = GunWorldFromHand(R.pos, R.ang, vmi)
+	if not wepWorldPos or not wepWorldAng then return false end
 
-	-- Must be near the gun body (foregrip region), not just "hands close in free air".
-	-- Mid-gun ≈ weapon origin + short forward along gun aim (stock two-hand hold).
-	local gunMid = wepWorldPos + wepWorldAng:Forward() * 8
-	if L.pos:Distance(gunMid) > GRIP_GUN_NEAR then return false end
-
-	-- Local-space check: LH should sit along the barrel / support area, not way off-axis
-	local localLH = WorldToLocal(L.pos, Angle(), wepWorldPos, wepWorldAng)
-	if localLH then
-		local radial = math.sqrt(localLH.y * localLH.y + localLH.z * localLH.z)
-		-- HL2 VMI: +x is often along gun; allow a short support segment
-		if radial > 10 then return false end
-		if localLH.x < -4 or localLH.x > 28 then return false end
-	end
-
+	-- Offset against the *same* matrix the mesh will use (fixes grip ≠ viewmodel)
 	state.offsetPos, state.offsetAng = WorldToLocal(L.pos, L.ang, wepWorldPos, wepWorldAng)
 	state.gripping = true
 	state.wep = wep
@@ -414,15 +383,11 @@ local function TryStartGrip()
 	state.bonesFrame = -1
 	state.startDist = math.max(dist, 6)
 	state.weaponBox = nil
-	state.smoothRPos:Set(R.pos)
-	state.smoothRAng:Set(R.ang)
-	state.hasSmoothR = true
 	RefreshWeaponBox(wep)
 	g_VR.foregripActive = true
 	return true
 end
 
---- cl_input calls this before prop pickup.
 function vrmod.TryForegripGrab(pressed)
 	if not g_VR or not g_VR.active then return false end
 	if not pressed then
@@ -444,7 +409,6 @@ function vrmod.HasUniversalForegrip()
 	return false
 end
 
--- Direct input path (works even if cl_input order changes)
 hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
 	if not g_VR or not g_VR.active then return end
 	if action ~= "boolean_left_pickup" then return end
@@ -455,7 +419,6 @@ hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
 	vrmod.TryForegripGrab(pressed)
 end)
 
--- Name sorts before twin_force_ik / avatar pose so LH snap is ready for FBT body
 hook.Add("VRMod_PreStereo", "0_vrmod_foregrip", function()
 	if not g_VR or not g_VR.active then return end
 	if state.gripping then SolveForegripFrame() end
