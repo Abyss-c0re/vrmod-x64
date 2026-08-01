@@ -32,6 +32,9 @@ vrmod.SettingsCatalog = {
 		rows = {
 			{ kind = "bool", label = "Smooth turning", cvar = "vrmod_smoothturn" },
 			{ kind = "slider", label = "Smooth turn rate", cvar = "vrmod_smoothturnrate", min = 1, max = 1000, decimals = 0 },
+			{ kind = "bool", label = "Auto-sprint (full stick)", cvar = "vrmod_autosprint" },
+			{ kind = "slider", label = "Auto-sprint threshold", cvar = "vrmod_autosprint_threshold", min = 0.5, max = 1.0, decimals = 2 },
+			{ kind = "help", label = "Sprint also: left stick click (Quest/Index) or grip (Vive)" },
 			{ kind = "bool", label = "Teleportation (Server)", cvar = "vrmod_allow_teleport" },
 			{ kind = "bool", label = "Teleportation (Client)", cvar = "vrmod_allow_teleport_client" },
 			{ kind = "bool", label = "Teleport with left hand", cvar = "vrmod_teleport_use_left" },

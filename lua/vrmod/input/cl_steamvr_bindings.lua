@@ -1684,15 +1684,12 @@ g_VR.bindings_knuckles = [[
                      "output": "/actions/main/in/vector2_walkdirection"
                   },
                   "click": {
-                     "output": "/actions/main/in/boolean_walk"
+                     "output": "/actions/main/in/boolean_sprint"
                   }
                },
                "mode": "joystick",
                "parameters": {
-                  "deadzone_pct": "20",
-                  "click_activate_threshold": "0.1",
-                  "click_deactivate_threshold": "0.05",
-                  "force_input": "position"
+                  "deadzone_pct": "20"
                },
                "path": "/user/hand/left/input/thumbstick"
             },
@@ -1899,20 +1896,6 @@ g_VR.bindings_cosmos = [[
                },
                "mode" : "button",
                "path" : "/user/hand/left/input/grip"
-            },
-            {
-               "inputs" : {
-                  "click" : {
-                     "output" : "/actions/main/in/boolean_walk"
-                  }
-               },
-               "mode" : "button",
-               "parameters" : {
-                  "click_activate_threshold" : "0.1",
-                  "click_deactivate_threshold" : "0.05",
-                  "force_input" : "position"
-               },
-               "path" : "/user/hand/left/input/joystick"
             },
             {
                "inputs" : {

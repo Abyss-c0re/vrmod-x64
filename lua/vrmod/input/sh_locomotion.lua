@@ -107,10 +107,21 @@ function VRUtilresetVehicleView()
 end
 
 -- Locomotion start/stop
+-- Cube SoT: clear stuck desktop movement keys so Workshop "forced walk / no sprint"
+-- cannot pin the player after a previous +walk / +speed desync.
+local function clearStuckMoveKeys()
+	local p = LocalPlayer()
+	if not IsValid(p) then return end
+	p:ConCommand("-walk")
+	p:ConCommand("-speed")
+	p:ConCommand("-duck")
+end
+
 local function start()
 	local ply = LocalPlayer()
 	local followVec = zeroVec
 	originVehicleLocalPos, originVehicleLocalAng = zeroVec, zeroAng
+	clearStuckMoveKeys()
 	-- Snap-turn config
 	local snapTurnAngle = 45
 	local snapThreshold = 0.5
@@ -221,32 +232,65 @@ local function start()
 		local mt = ply:GetMoveType()
 		-- Duck from physical HMD height OR button crouch offset (looking up while
 		-- button-crouched used to clear height duck and allow full sprint — #10).
-		local duckFromHeight = g_VR.tracking.hmd.pos.z < g_VR.origin.z + convarValues.crouchThreshold
+		local crouchTh = convarValues.crouchThreshold or 40
+		local headZ = g_VR.tracking.hmd.pos.z
+		local originZ = g_VR.origin.z
+		local duckFromHeight = headZ < originZ + crouchTh
 		local duckFromButton = (g_VR.crouchOffsetZ or 0) < -1
 		local duck = duckFromHeight or duckFromButton
+
+		-- Stick magnitude (action space, pre-curve): auto-sprint at high deflection.
+		local stick = g_VR.input.vector2_walkdirection or zeroVec
+		local stickMag = math.sqrt(stick.x * stick.x + stick.y * stick.y)
+		local autoSprint = (convarValues.autoSprint ~= false) and stickMag >= (convarValues.autoSprintThreshold or 0.82)
+		-- Sprint: button OR full-stick auto; never while button-crouched / deep height duck.
+		-- Shallow height-duck (borderline threshold) must not kill sprint — Workshop "forced walk".
+		local deepHeightDuck = headZ < originZ + crouchTh * 0.55
+		local canSprint = not duckFromButton and not deepHeightDuck
+		local wantSprint = canSprint and (g_VR.input.boolean_sprint or autoSprint)
+
 		local buttons = cmd:GetButtons()
+		-- Strip stuck desktop walk/speed bits; VR owns locomotion for this frame.
+		buttons = bit.band(buttons, bit.bnot(bit.bor(IN_WALK, IN_SPEED)))
 		if g_VR.input.boolean_jump then
 			buttons = bit.bor(buttons, IN_JUMP, IN_DUCK) -- crouch-jump
 		end
-		if g_VR.input.boolean_sprint then
+		if wantSprint then
 			buttons = bit.bor(buttons, IN_SPEED)
 		end
 		if mt == MOVETYPE_LADDER then
 			buttons = bit.bor(buttons, IN_FORWARD)
 		end
-		if duck then
+		-- Height duck only when not sprinting (deep crouch still ducks via deepHeightDuck path).
+		if duckFromButton or (duckFromHeight and not wantSprint) then
 			buttons = bit.bor(buttons, IN_DUCK)
+		elseif g_VR.input.boolean_jump then
+			-- jump already added IN_DUCK above
 		end
 		cmd:SetButtons(buttons)
 		local va = g_VR.currentvmi and g_VR.currentvmi.wrongMuzzleAng and g_VR.tracking.pose_righthand.ang or g_VR.viewModelMuzzle and g_VR.viewModelMuzzle.Ang or g_VR.tracking.hmd.ang
 		cmd:SetViewAngles(va:Forward():Angle())
 		if mt == MOVETYPE_NOCLIP then
-			cmd:SetForwardMove(math.abs(g_VR.input.vector2_walkdirection.y) > 0.5 and g_VR.input.vector2_walkdirection.y or 0)
-			cmd:SetSideMove(math.abs(g_VR.input.vector2_walkdirection.x) > 0.5 and g_VR.input.vector2_walkdirection.x or 0)
+			cmd:SetForwardMove(math.abs(stick.y) > 0.5 and stick.y or 0)
+			cmd:SetSideMove(math.abs(stick.x) > 0.5 and stick.x or 0)
 			return
 		end
 
-		local jv = LocalToWorld(Vector(g_VR.input.vector2_walkdirection.y * math.abs(g_VR.input.vector2_walkdirection.y), -g_VR.input.vector2_walkdirection.x * math.abs(g_VR.input.vector2_walkdirection.x), 0) * ply:GetMaxSpeed() * 0.9, zeroAng, zeroVec, Angle(0, convarValues.controllerOriented and g_VR.tracking.pose_lefthand.ang.yaw or g_VR.tracking.hmd.ang.yaw, 0))
+		-- Speed SoT: GetMaxSpeed() is lagging one frame behind IN_SPEED and collapses
+		-- under stuck +walk. Prefer run speed; floor to walk only when intentionally ducked.
+		local runSpd = ply:GetRunSpeed()
+		local walkSpd = ply:GetWalkSpeed()
+		local maxSpd
+		if duckFromButton or (duckFromHeight and not wantSprint) then
+			maxSpd = math.min(ply:GetMaxSpeed(), walkSpd > 0 and walkSpd or runSpd)
+		elseif wantSprint then
+			maxSpd = math.max(ply:GetMaxSpeed(), runSpd)
+		else
+			maxSpd = math.max(ply:GetMaxSpeed(), walkSpd, runSpd * 0.85)
+		end
+		if maxSpd < 1 then maxSpd = runSpd > 0 and runSpd or 200 end
+
+		local jv = LocalToWorld(Vector(stick.y * math.abs(stick.y), -stick.x * math.abs(stick.x), 0) * maxSpd * 0.9, zeroAng, zeroVec, Angle(0, convarValues.controllerOriented and g_VR.tracking.pose_lefthand.ang.yaw or g_VR.tracking.hmd.ang.yaw, 0))
 		local wr = WorldToLocal(followVec + jv, zeroAng, zeroVec, Angle(0, va.yaw, 0))
 		cmd:SetForwardMove(wr.x)
 		cmd:SetSideMove(-wr.y)
@@ -259,6 +303,7 @@ local function stop()
 	hook.Remove("PreRender", "vrmod_locomotion")
 	hook.Remove("VRMod_PreRender", "teleport")
 	if IsValid(tpBeamEnt) then tpBeamEnt:Remove() end
+	clearStuckMoveKeys()
 	vrmod.RemoveInGameMenuItem("Map Browser")
 	vrmod.RemoveInGameMenuItem("Reset Vehicle View")
 end
