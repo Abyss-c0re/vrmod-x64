@@ -103,28 +103,39 @@ function vrmod_fbt.Init(ply)
 	end
 
 	info.fingerboneids = fingerboneids
-	-- Validate required bones
-	g_VR.errorText = ply == LocalPlayer() and "" or g_VR.errorText
+	-- Soft-validate required bones (no crash / no hard abort)
+	local optional = { leftWrist = true, rightWrist = true, leftUlna = true, rightUlna = true }
+	local missing = {}
+	if ply == LocalPlayer() then g_VR.errorText = "" end
 	for k, v in pairs(boneids) do
-		if v == -1 and not table.HasValue({"leftWrist", "rightWrist", "leftUlna", "rightUlna"}, k) then
-			g_VR.errorText = ply == LocalPlayer() and "Missing bone: " .. k or g_VR.errorText
-			tmpPlayerModel:Remove()
-			vrmod_fbt.characterInfo[steamid] = nil
-			vrmod.logger.Err("FBT Init failed for %s - missing bone: %s", steamid, k)
-			return false
+		if v == -1 and not optional[k] then
+			missing[#missing + 1] = k
 		end
+	end
+	info.incompatible = #missing > 0
+	info.ikReady = #missing == 0
+	if #missing > 0 then
+		if ply == LocalPlayer() then
+			g_VR.errorText = "FBT limited — missing bone(s): " .. missing[1]
+		end
+		vrmod.logger.Warn("FBT Init soft-fail %s missing=%s", steamid, table.concat(missing, ", "))
+		-- Keep info so we don't re-spam; disable FBT active flag
+		if g_VR.fbtActive then g_VR.fbtActive[steamid] = false end
+		tmpPlayerModel:Remove()
+		info.modelName = pmname
+		return true
 	end
 
 	info.modelName = pmname
 	-- Build full bone info table
 	local boneinfo = {}
 	info.boneinfo = boneinfo
-	local boneCount = tmpPlayerModel:GetBoneCount()
+	local boneCount = tmpPlayerModel:GetBoneCount() or 0
 	info.boneCount = boneCount
 	for i = 0, boneCount - 1 do
 		local parent = tmpPlayerModel:GetBoneParent(i)
 		local mtx = tmpPlayerModel:GetBoneMatrix(i) or Matrix()
-		local mtxParent = tmpPlayerModel:GetBoneMatrix(parent) or mtx
+		local mtxParent = (isnumber(parent) and parent >= 0 and tmpPlayerModel:GetBoneMatrix(parent)) or mtx
 		local relativePos, relativeAng = WorldToLocal(mtx:GetTranslation(), mtx:GetAngles(), mtxParent:GetTranslation(), mtxParent:GetAngles())
 		boneinfo[i] = {
 			name = tmpPlayerModel:GetBoneName(i),
@@ -138,18 +149,32 @@ function vrmod_fbt.Init(ply)
 		}
 	end
 
+	local function mtxLen(a, b, fallback)
+		if not isnumber(a) or a < 0 or not isnumber(b) or b < 0 then return fallback end
+		local ma, mb = tmpPlayerModel:GetBoneMatrix(a), tmpPlayerModel:GetBoneMatrix(b)
+		if not ma or not mb then return fallback end
+		return (ma:GetTranslation() - mb:GetTranslation()):Length()
+	end
+
 	-- Measure limb lengths (using left side, assuming symmetry)
-	info.upperLegLen = (tmpPlayerModel:GetBoneMatrix(boneids.leftCalf):GetTranslation() - tmpPlayerModel:GetBoneMatrix(boneids.leftThigh):GetTranslation()):Length()
-	info.lowerLegLen = (tmpPlayerModel:GetBoneMatrix(boneids.leftFoot):GetTranslation() - tmpPlayerModel:GetBoneMatrix(boneids.leftCalf):GetTranslation()):Length()
-	info.clavicleLen = (tmpPlayerModel:GetBoneMatrix(boneids.leftUpperArm):GetTranslation() - tmpPlayerModel:GetBoneMatrix(boneids.leftClavicle):GetTranslation()):Length()
-	info.upperArmLen = (tmpPlayerModel:GetBoneMatrix(boneids.leftForearm):GetTranslation() - tmpPlayerModel:GetBoneMatrix(boneids.leftUpperArm):GetTranslation()):Length()
-	info.lowerArmLen = (tmpPlayerModel:GetBoneMatrix(boneids.leftHand):GetTranslation() - tmpPlayerModel:GetBoneMatrix(boneids.leftForearm):GetTranslation()):Length()
+	info.upperLegLen = mtxLen(boneids.leftCalf, boneids.leftThigh, 16)
+	info.lowerLegLen = mtxLen(boneids.leftFoot, boneids.leftCalf, 16)
+	info.clavicleLen = mtxLen(boneids.leftUpperArm, boneids.leftClavicle, 8)
+	info.upperArmLen = mtxLen(boneids.leftForearm, boneids.leftUpperArm, 12)
+	info.lowerArmLen = mtxLen(boneids.leftHand, boneids.leftForearm, 12)
 	-- Default angles
-	_, info.defaultToNeutralClavicleAng = WorldToLocal(vrmod_fbt.zeroVec, Angle(0, 90, 90), vrmod_fbt.zeroVec, tmpPlayerModel:GetBoneMatrix(boneids.leftClavicle):GetAngles())
-	info.defaultLeftFootAngles = tmpPlayerModel:GetBoneMatrix(boneids.leftFoot):GetAngles()
-	info.defaultRightFootAngles = tmpPlayerModel:GetBoneMatrix(boneids.rightFoot):GetAngles()
+	local clavMtx = tmpPlayerModel:GetBoneMatrix(boneids.leftClavicle)
+	if clavMtx then
+		_, info.defaultToNeutralClavicleAng = WorldToLocal(vrmod_fbt.zeroVec, Angle(0, 90, 90), vrmod_fbt.zeroVec, clavMtx:GetAngles())
+	else
+		info.defaultToNeutralClavicleAng = Angle()
+	end
+	local lf = tmpPlayerModel:GetBoneMatrix(boneids.leftFoot)
+	local rf = tmpPlayerModel:GetBoneMatrix(boneids.rightFoot)
+	info.defaultLeftFootAngles = lf and lf:GetAngles() or Angle()
+	info.defaultRightFootAngles = rf and rf:GetAngles() or Angle()
 	-- Build spine bend lookup tables
-	vrmod_fbt.BuildSpineBendTables(info, boneids, boneinfo, tmpPlayerModel)
+	pcall(vrmod_fbt.BuildSpineBendTables, info, boneids, boneinfo, tmpPlayerModel)
 	tmpPlayerModel:Remove()
 	vrmod.logger.Info("FBT Init succeeded for %s (model: %s)", steamid, pmname)
 	return true

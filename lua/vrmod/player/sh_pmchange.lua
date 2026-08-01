@@ -12,7 +12,16 @@ if CLIENT then
 		net.Receive("vrmod_pmchange", function()
 			local ply = player.GetBySteamID(net.ReadString())
 			local model = net.ReadString()
-			if ply then ply.vrmod_pm = model end
+			if not IsValid(ply) then return end
+			ply.vrmod_pm = model
+			-- Local player: full character/FBT/twin reload so new skeleton is mapped
+			if ply == LocalPlayer() and g_VR and g_VR.active then
+				if g_VR.ReloadCharacterSystem then
+					pcall(g_VR.ReloadCharacterSystem, ply, "pmchange")
+				elseif g_VR.StartCharacterSystem then
+					pcall(g_VR.StartCharacterSystem, ply, true)
+				end
+			end
 		end)
 	elseif SERVER then
 		if cv_allowpmchg:GetBool() then

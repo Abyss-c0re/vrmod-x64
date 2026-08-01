@@ -251,19 +251,23 @@ local fontsDensityId = nil
 
 function F.RefreshFonts()
 	local d = F.Density()
-	local face = "Roboto"
-	if system.IsLinux and system.IsLinux() then face = "DejaVu Sans" end
+	-- Prefer faces that don't emit FreeType "bitmap.width is 0 for ch:32" on Linux
+	local faces = { "Roboto", "Arial", "Tahoma", "Verdana", "Trebuchet MS", "DejaVu Sans", "Liberation Sans" }
+	if system.IsLinux and system.IsLinux() then
+		faces = { "Liberation Sans", "DejaVu Sans", "FreeSans", "Arial", "Trebuchet MS", "Roboto" }
+	end
 	local specs = {
-		CubeTitle = { font = face, size = d.title, weight = 800, antialias = true, extended = true },
-		CubeLabel = { font = face, size = d.label, weight = 700, antialias = true, extended = true },
-		CubeSmall = { font = face, size = d.small, weight = 500, antialias = true, extended = true },
-		CubeHuge  = { font = face, size = math.floor(d.title * 1.4 + 4), weight = 900, antialias = true, extended = true },
+		CubeTitle = { size = math.max(12, d.title or 22), weight = 800, antialias = true, extended = true },
+		CubeLabel = { size = math.max(10, d.label or 15), weight = 700, antialias = true, extended = true },
+		CubeSmall = { size = math.max(9, d.small or 12), weight = 500, antialias = true, extended = true },
+		CubeHuge  = { size = math.max(14, math.floor((d.title or 22) * 1.4 + 4)), weight = 900, antialias = true, extended = true },
 	}
 	for name, spec in pairs(specs) do
-		local ok = pcall(surface.CreateFont, name, spec)
-		if not ok then
-			spec.font = "Arial"
+		local ok = false
+		for _, face in ipairs(faces) do
+			spec.font = face
 			ok = pcall(surface.CreateFont, name, spec)
+			if ok then break end
 		end
 		if not ok then
 			spec.font = "Trebuchet MS"

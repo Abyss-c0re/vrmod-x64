@@ -48,12 +48,18 @@ if CLIENT then
 	local updatedPlayers = {}
 	g_VR.fbtActive = g_VR.fbtActive or {} -- Per-player FBT active flag, set by sh_character_fbt.lua
 	local function RecursiveBoneTable2(ent, parentbone, infotab, ordertab, notfirst)
-		local bones = notfirst and ent:GetChildBones(parentbone) or {parentbone}
-		for k, v in pairs(bones) do
+		-- Incomplete PMs often lack clavicles — never crash on nil/-1 roots
+		if not isnumber(parentbone) or parentbone < 0 then return end
+		if not IsValid(ent) then return end
+		local bones = notfirst and ent:GetChildBones(parentbone) or { parentbone }
+		if not istable(bones) then return end
+		for _, v in pairs(bones) do
+			if not isnumber(v) or v < 0 then continue end
 			local n = ent:GetBoneName(v)
 			local boneparent = ent:GetBoneParent(v)
-			local parentmat = ent:GetBoneMatrix(boneparent)
+			local parentmat = isnumber(boneparent) and boneparent >= 0 and ent:GetBoneMatrix(boneparent) or nil
 			local childmat = ent:GetBoneMatrix(v)
+			if not parentmat or not childmat then continue end
 			local parentpos, parentang = parentmat:GetTranslation(), parentmat:GetAngles()
 			local childpos, childang = childmat:GetTranslation(), childmat:GetAngles()
 			local relpos, relang = WorldToLocal(childpos, childang, parentpos, parentang)
@@ -68,14 +74,36 @@ if CLIENT then
 				targetMatrix = Matrix(),
 				overrideAng = nil
 			}
-
 			ordertab[#ordertab + 1] = v
 		end
-
-		for k, v in pairs(bones) do
-			RecursiveBoneTable2(ent, v, infotab, ordertab, true)
+		for _, v in pairs(bones) do
+			if isnumber(v) and v >= 0 then
+				RecursiveBoneTable2(ent, v, infotab, ordertab, true)
+			end
 		end
 	end
+
+	local function BoneDist(ent, a, b, fallback)
+		if not isnumber(a) or a < 0 or not isnumber(b) or b < 0 then return fallback end
+		local ok, pa, pb = pcall(function()
+			local p1 = ent:GetBonePosition(a)
+			local p2 = ent:GetBonePosition(b)
+			return p1, p2
+		end)
+		if not ok or not pa or not pb then return fallback end
+		local d = pa:Distance(pb)
+		if not d or d < 0.5 or d ~= d then return fallback end
+		return d
+	end
+
+	-- Bones required for VR body IK (wrists/ulnas optional)
+	local REQUIRED_BONES = {
+		"b_leftClavicle", "b_leftUpperarm", "b_leftForearm", "b_leftHand",
+		"b_rightClavicle", "b_rightUpperarm", "b_rightForearm", "b_rightHand",
+		"b_leftCalf", "b_leftThigh", "b_leftFoot",
+		"b_rightCalf", "b_rightThigh", "b_rightFoot",
+		"b_head", "b_spine",
+	}
 
 	-- Body IK SoT: vrmod.charik (shared with avatar twin + flip). No dual math.
 	local function UpdateIK(ply)
@@ -83,6 +111,8 @@ if CLIENT then
 		local net = g_VR.net[steamid]
 		local charinfo = characterInfo[steamid]
 		if not net or not charinfo or not net.lerpedFrame then return end
+		-- Incomplete skeleton: never run full arm IK (prevents nil bone math)
+		if charinfo.incompatible or charinfo.ikReady == false then return end
 		local frame = net.lerpedFrame
 		if lastFrames[steamid] and vrmod.utils.FramesAreEqual(frame, lastFrames[steamid]) then return end
 
@@ -116,12 +146,17 @@ if CLIENT then
 		lastFrames[steamid] = vrmod.utils.CopyFrame(frame)
 	end
 
-	local function CharacterInit(ply)
+	local function CharacterInit(ply, force)
+		if not IsValid(ply) then return false end
 		local steamid = ply:SteamID()
+		if not steamid then return false end
 		g_VR.cache = g_VR.cache or {}
 		g_VR.cache[steamid] = g_VR.cache[steamid] or {}
-		local pmname = ply:GetModel()
-		if characterInfo[steamid] and characterInfo[steamid].modelName == pmname then return end
+		local pmname = ply.vrmod_pm or ply:GetModel() or ""
+		if pmname == "" then return false end
+		if not force and characterInfo[steamid] and characterInfo[steamid].modelName == pmname then
+			return true
+		end
 		if ply == LocalPlayer() then
 			timer.Create("vrutil_timer_validatefingertracking", 0.1, 0, function()
 				if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and g_VR.tracking.pose_lefthand.simulatedPos == nil and g_VR.tracking.pose_righthand.simulatedPos == nil then
@@ -141,31 +176,69 @@ if CLIENT then
 			end)
 		end
 
+		-- Drop previous callback before rebuild
+		if characterInfo[steamid] and characterInfo[steamid].boneCallback and IsValid(ply) then
+			pcall(function()
+				ply:RemoveCallback("BuildBonePositions", characterInfo[steamid].boneCallback)
+			end)
+		end
+
 		characterInfo[steamid] = {
 			preRenderPos = Vector(0, 0, 0),
 			renderPos = Vector(0, 0, 0),
-			characterHeadToHmdDist = 0,
-			characterEyeHeight = 0,
-			bones = {},
+			characterHeadToHmdDist = DEFAULT_HEAD_TO_HMD_DIST,
+			characterEyeHeight = DEFAULT_EYE_HEIGHT,
+			bones = { fingers = {} },
 			boneinfo = {},
 			boneorder = {},
 			player = ply,
 			boneCallback = 0,
 			verticalCrouchOffset = 0,
 			horizontalCrouchOffset = 0,
+			ikReady = false,
+			incompatible = false,
+			missingBones = {},
+			-- Safe limb defaults if PM is incomplete
+			clavicleLen = 8,
+			upperArmLen = 12,
+			lowerArmLen = 12,
+			upperLegLen = 16,
+			lowerLegLen = 16,
+			spineZ = 40,
+			spineLen = 26,
 		}
 
-		ply:SetLOD(0)
-		local cm = ClientsideModel(pmname)
-		cm:SetPos(LocalPlayer():GetPos())
-		cm:SetAngles(Angle(0, 0, 0))
-		cm:SetupBones()
-		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_L_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
-		RecursiveBoneTable2(cm, cm:LookupBone("ValveBiped.Bip01_R_Clavicle"), characterInfo[steamid].boneinfo, characterInfo[steamid].boneorder)
-		for bone, data in pairs(characterInfo[steamid].boneinfo) do
-			data.targetMatrix = Matrix()
-			data.pos = Vector()
-			data.ang = Angle()
+		local ci = characterInfo[steamid]
+		pcall(function() ply:SetLOD(0) end)
+
+		local cm
+		local okCm, cmOrErr = pcall(ClientsideModel, pmname)
+		if okCm and IsValid(cmOrErr) then
+			cm = cmOrErr
+		else
+			if ply == LocalPlayer() then
+				g_VR.errorText = "Could not load player model for VR body IK"
+			end
+			vrmod.logger.Warn("CharacterInit: ClientsideModel failed for %s (%s)", steamid, tostring(pmname))
+			ci.incompatible = true
+			ci.modelName = pmname
+			return true -- no crash; system runs without IK
+		end
+
+		pcall(function()
+			cm:SetPos(IsValid(LocalPlayer()) and LocalPlayer():GetPos() or Vector())
+			cm:SetAngles(Angle(0, 0, 0))
+			cm:SetupBones()
+		end)
+
+		local lClav = cm:LookupBone("ValveBiped.Bip01_L_Clavicle")
+		local rClav = cm:LookupBone("ValveBiped.Bip01_R_Clavicle")
+		pcall(RecursiveBoneTable2, cm, lClav, ci.boneinfo, ci.boneorder)
+		pcall(RecursiveBoneTable2, cm, rClav, ci.boneinfo, ci.boneorder)
+		for _, data in pairs(ci.boneinfo) do
+			data.targetMatrix = data.targetMatrix or Matrix()
+			data.pos = data.pos or Vector()
+			data.ang = data.ang or Angle()
 			data.lastPos = nil
 			data.lastAng = nil
 			data.overrideAng = nil
@@ -194,42 +267,64 @@ if CLIENT then
 			b_spine = "ValveBiped.Bip01_Spine",
 		}
 
-		characterInfo[steamid].bones = {
-			fingers = {cm:LookupBone("ValveBiped.Bip01_L_Finger0") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger01") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger02") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger1") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger11") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger12") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger2") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger21") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger22") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger3") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger31") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger32") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger4") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger41") or -1, cm:LookupBone("ValveBiped.Bip01_L_Finger42") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger0") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger01") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger02") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger1") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger11") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger12") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger2") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger21") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger22") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger3") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger31") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger32") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger4") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger41") or -1, cm:LookupBone("ValveBiped.Bip01_R_Finger42") or -1,}
+		local fingerNames = {
+			"ValveBiped.Bip01_L_Finger0", "ValveBiped.Bip01_L_Finger01", "ValveBiped.Bip01_L_Finger02",
+			"ValveBiped.Bip01_L_Finger1", "ValveBiped.Bip01_L_Finger11", "ValveBiped.Bip01_L_Finger12",
+			"ValveBiped.Bip01_L_Finger2", "ValveBiped.Bip01_L_Finger21", "ValveBiped.Bip01_L_Finger22",
+			"ValveBiped.Bip01_L_Finger3", "ValveBiped.Bip01_L_Finger31", "ValveBiped.Bip01_L_Finger32",
+			"ValveBiped.Bip01_L_Finger4", "ValveBiped.Bip01_L_Finger41", "ValveBiped.Bip01_L_Finger42",
+			"ValveBiped.Bip01_R_Finger0", "ValveBiped.Bip01_R_Finger01", "ValveBiped.Bip01_R_Finger02",
+			"ValveBiped.Bip01_R_Finger1", "ValveBiped.Bip01_R_Finger11", "ValveBiped.Bip01_R_Finger12",
+			"ValveBiped.Bip01_R_Finger2", "ValveBiped.Bip01_R_Finger21", "ValveBiped.Bip01_R_Finger22",
+			"ValveBiped.Bip01_R_Finger3", "ValveBiped.Bip01_R_Finger31", "ValveBiped.Bip01_R_Finger32",
+			"ValveBiped.Bip01_R_Finger4", "ValveBiped.Bip01_R_Finger41", "ValveBiped.Bip01_R_Finger42",
 		}
+		ci.bones.fingers = {}
+		for i = 1, #fingerNames do
+			ci.bones.fingers[i] = cm:LookupBone(fingerNames[i]) or -1
+		end
 
+		local missing = {}
 		if ply == LocalPlayer() then g_VR.errorText = "" end
 		for k, v in pairs(boneNames) do
-			local bone = cm:LookupBone(v) or -1
-			characterInfo[steamid].bones[k] = bone
-			if bone == -1 and not string.find(k, "Wrist") and not string.find(k, "Ulna") then
-				if ply == LocalPlayer() then g_VR.errorText = "Incompatible player model. Missing bone " .. v end
-				cm:Remove()
-				g_VR.StopCharacterSystem(steamid)
-				vrmod.logger.Err("CharacterInit failed for " .. steamid)
-				return false
+			local bone = cm:LookupBone(v)
+			if not isnumber(bone) then bone = -1 end
+			ci.bones[k] = bone
+			if bone < 0 and not string.find(k, "Wrist", 1, true) and not string.find(k, "Ulna", 1, true) then
+				missing[#missing + 1] = v
 			end
 		end
 
-		characterInfo[steamid].modelName = pmname
-		local claviclePos = cm:GetBonePosition(characterInfo[steamid].bones.b_leftClavicle)
-		local upperPos = cm:GetBonePosition(characterInfo[steamid].bones.b_leftUpperarm)
-		local lowerPos = cm:GetBonePosition(characterInfo[steamid].bones.b_leftForearm)
-		local handPos = cm:GetBonePosition(characterInfo[steamid].bones.b_leftHand)
-		local thighPos = cm:GetBonePosition(characterInfo[steamid].bones.b_leftThigh)
-		local calfPos = cm:GetBonePosition(characterInfo[steamid].bones.b_leftCalf)
-		local footPos = cm:GetBonePosition(characterInfo[steamid].bones.b_leftFoot)
-		local spinePos = cm:GetBonePosition(characterInfo[steamid].bones.b_spine)
-		characterInfo[steamid].clavicleLen = claviclePos:Distance(upperPos)
-		characterInfo[steamid].upperArmLen = upperPos:Distance(lowerPos)
-		characterInfo[steamid].lowerArmLen = lowerPos:Distance(handPos)
-		characterInfo[steamid].upperLegLen = thighPos:Distance(calfPos)
-		characterInfo[steamid].lowerLegLen = calfPos:Distance(footPos)
-		characterInfo[steamid].characterEyeHeight = DEFAULT_EYE_HEIGHT
-		characterInfo[steamid].characterHeadToHmdDist = DEFAULT_HEAD_TO_HMD_DIST
-		characterInfo[steamid].spineZ = spinePos.z - cm:GetPos().z
-		characterInfo[steamid].spineLen = (cm:GetPos().z + characterInfo[steamid].characterEyeHeight) - spinePos.z
-		cm:Remove()
+		ci.missingBones = missing
+		ci.incompatible = #missing > 0
+		ci.ikReady = #missing == 0
+		if #missing > 0 then
+			local msg = "Incompatible player model (missing " .. #missing .. " bones, e.g. " .. missing[1] .. "). VR body IK limited."
+			if ply == LocalPlayer() then g_VR.errorText = msg end
+			vrmod.logger.Warn("CharacterInit soft-fail %s model=%s missing=%s", steamid, pmname, table.concat(missing, ", "))
+			-- Do NOT StopCharacterSystem / return false — no crash, degraded IK only
+		end
+
+		ci.modelName = pmname
+		local b = ci.bones
+		ci.clavicleLen = BoneDist(cm, b.b_leftClavicle, b.b_leftUpperarm, 8)
+		ci.upperArmLen = BoneDist(cm, b.b_leftUpperarm, b.b_leftForearm, 12)
+		ci.lowerArmLen = BoneDist(cm, b.b_leftForearm, b.b_leftHand, 12)
+		ci.upperLegLen = BoneDist(cm, b.b_leftThigh, b.b_leftCalf, 16)
+		ci.lowerLegLen = BoneDist(cm, b.b_leftCalf, b.b_leftFoot, 16)
+		ci.characterEyeHeight = DEFAULT_EYE_HEIGHT
+		ci.characterHeadToHmdDist = DEFAULT_HEAD_TO_HMD_DIST
+		if isnumber(b.b_spine) and b.b_spine >= 0 then
+			local okSp, spinePos = pcall(function() return cm:GetBonePosition(b.b_spine) end)
+			if okSp and spinePos then
+				local baseZ = cm:GetPos().z
+				ci.spineZ = spinePos.z - baseZ
+				ci.spineLen = math.max(4, (baseZ + ci.characterEyeHeight) - spinePos.z)
+			end
+		end
+
+		if IsValid(cm) then cm:Remove() end
+		return true
 	end
 
 	------------------------------------------------------------------------
@@ -371,9 +466,10 @@ if CLIENT then
 		end
 		local frame = netTab.lerpedFrame
 		local sf = g_VR.stereoFrame or 0
+		local canIK = not ci.incompatible and ci.ikReady ~= false
 
 		-- Stock foregrip: force frame LH to frozen attach before any IK
-		if g_VR.foregripActive and g_VR._leftHandSnapFrame == sf
+		if canIK and g_VR.foregripActive and g_VR._leftHandSnapFrame == sf
 			and g_VR._leftHandSnapPos and g_VR._leftHandSnapAng then
 			frame.lefthandPos = Vector(g_VR._leftHandSnapPos.x, g_VR._leftHandSnapPos.y, g_VR._leftHandSnapPos.z)
 			frame.lefthandAng = Angle(g_VR._leftHandSnapAng.p, g_VR._leftHandSnapAng.y, g_VR._leftHandSnapAng.r)
@@ -381,7 +477,7 @@ if CLIENT then
 		end
 
 		-- Head fully visible for a clean snap
-		local headBone = ci.bones.b_head
+		local headBone = ci.bones and ci.bones.b_head
 		if isnumber(headBone) and headBone >= 0 then
 			ply:ManipulateBoneScale(headBone, Vector(1, 1, 1))
 			ply:ManipulateBonePosition(headBone, zeroVec)
@@ -404,41 +500,44 @@ if CLIENT then
 
 		ply:SetupBones()
 
-		-- FBT body: use FBT arm IK (not charik) so twin matches real body + foregrip
-		local useFbt = g_VR.fbtActive and g_VR.fbtActive[steamid] and vrmod_fbt
-			and vrmod_fbt.characterInfo and vrmod_fbt.characterInfo[steamid]
-			and vrmod_fbt.CalculateBonePositions
-		if useFbt then
-			local info = vrmod_fbt.characterInfo[steamid]
-			info.frameNumber = -1
-			pcall(vrmod_fbt.CalculateBonePositions, ply)
-			if info.boneinfo and info.boneCount then
-				for i = 0, info.boneCount - 1 do
-					local bi = info.boneinfo[i]
-					if bi and bi.targetMatrix and ply:GetBoneMatrix(i) then
-						ply:SetBoneMatrix(i, bi.targetMatrix)
+		-- Incomplete PMs: skip body IK solve (still publish idle pose for twin)
+		if canIK then
+			-- FBT body: use FBT arm IK (not charik) so twin matches real body + foregrip
+			local useFbt = g_VR.fbtActive and g_VR.fbtActive[steamid] and vrmod_fbt
+				and vrmod_fbt.characterInfo and vrmod_fbt.characterInfo[steamid]
+				and vrmod_fbt.CalculateBonePositions
+			if useFbt then
+				local info = vrmod_fbt.characterInfo[steamid]
+				info.frameNumber = -1
+				pcall(vrmod_fbt.CalculateBonePositions, ply)
+				if info.boneinfo and info.boneCount then
+					for i = 0, info.boneCount - 1 do
+						local bi = info.boneinfo[i]
+						if bi and bi.targetMatrix and ply:GetBoneMatrix(i) then
+							ply:SetBoneMatrix(i, bi.targetMatrix)
+						end
 					end
 				end
-			end
-		else
-			pcall(UpdateIK, ply)
-			if ci.boneorder and ci.boneinfo then
-				for i = 1, #ci.boneorder do
-					local bone = ci.boneorder[i]
-					local bd = ci.boneinfo[bone]
-					if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
-						ply:SetBoneMatrix(bone, bd.targetMatrix)
+			else
+				pcall(UpdateIK, ply)
+				if ci.boneorder and ci.boneinfo then
+					for i = 1, #ci.boneorder do
+						local bone = ci.boneorder[i]
+						local bd = ci.boneinfo[bone]
+						if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
+							ply:SetBoneMatrix(bone, bd.targetMatrix)
+						end
 					end
 				end
-			end
-			ply:InvalidateBoneCache()
-			ply:SetupBones()
-			if ci.boneorder and ci.boneinfo then
-				for i = 1, #ci.boneorder do
-					local bone = ci.boneorder[i]
-					local bd = ci.boneinfo[bone]
-					if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
-						ply:SetBoneMatrix(bone, bd.targetMatrix)
+				ply:InvalidateBoneCache()
+				ply:SetupBones()
+				if ci.boneorder and ci.boneinfo then
+					for i = 1, #ci.boneorder do
+						local bone = ci.boneorder[i]
+						local bd = ci.boneinfo[bone]
+						if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
+							ply:SetBoneMatrix(bone, bd.targetMatrix)
+						end
 					end
 				end
 			end
@@ -603,13 +702,18 @@ if CLIENT then
 	end
 
 	------------------------------------------------------------------------
-	function g_VR.StartCharacterSystem(ply)
-		if not IsValid(ply) then return end
+	function g_VR.StartCharacterSystem(ply, force)
+		if not IsValid(ply) then return false end
 		local steamid = ply:SteamID()
-		if CharacterInit(ply) == false then return end
-		if not g_VR.net or not g_VR.net[steamid] then return end
+		local ok = CharacterInit(ply, force)
+		if ok == false then return false end
+		if not g_VR.net or not g_VR.net[steamid] then return false end
 		if characterInfo and characterInfo[steamid] then
-			if characterInfo[steamid].boneCallback then ply:RemoveCallback("BuildBonePositions", characterInfo[steamid].boneCallback) end
+			if characterInfo[steamid].boneCallback then
+				pcall(function()
+					ply:RemoveCallback("BuildBonePositions", characterInfo[steamid].boneCallback)
+				end)
+			end
 			characterInfo[steamid].boneCallback = ply:AddCallback("BuildBonePositions", BoneCallbackFunc)
 			if ply == LocalPlayer() then
 				hook.Remove("VRMod_PreRender", "vrutil_hook_calcplyrenderpos")
@@ -625,7 +729,48 @@ if CLIENT then
 			hook.Remove("DoAnimationEvent", "vrutil_hook_doanimationevent")
 			hook.Add("DoAnimationEvent", "vrutil_hook_doanimationevent", DoAnimationEventFunc)
 			activePlayers[steamid] = true
+			return true
 		end
+		return false
+	end
+
+	--- Full character + FBT + twin snap reload after PM apply (player or twin→player).
+	function g_VR.ReloadCharacterSystem(ply, reason)
+		if not IsValid(ply) then return false end
+		if not g_VR or not g_VR.active then return false end
+		local sid = ply:SteamID()
+		if not sid then return false end
+		if vrmod.logger then
+			vrmod.logger.Info("ReloadCharacterSystem %s (%s)", sid, tostring(reason or "pm"))
+		end
+		-- Invalidate caches so Init always rebuilds
+		if characterInfo[sid] then characterInfo[sid].modelName = nil end
+		if vrmod_fbt and vrmod_fbt.characterInfo and vrmod_fbt.characterInfo[sid] then
+			vrmod_fbt.characterInfo[sid].modelName = nil
+		end
+		if g_VR.fbtActive then g_VR.fbtActive[sid] = nil end
+
+		pcall(g_VR.StopCharacterSystem, sid)
+
+		timer.Simple(0, function()
+			if not IsValid(ply) or not g_VR or not g_VR.active then return end
+			pcall(g_VR.StartCharacterSystem, ply, true)
+			if vrmod_fbt and vrmod_fbt.Init then
+				pcall(vrmod_fbt.Init, ply)
+			end
+			timer.Simple(0.05, function()
+				if not IsValid(ply) or not g_VR or not g_VR.active then return end
+				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+					pcall(vrmod.character.ForceLocalIKAndPublish)
+				end
+			end)
+		end)
+		return true
+	end
+
+	vrmod.character = vrmod.character or {}
+	vrmod.character.Reload = function(ply, reason)
+		return g_VR.ReloadCharacterSystem(ply or LocalPlayer(), reason)
 	end
 
 	function g_VR.StopCharacterSystem(steamid)

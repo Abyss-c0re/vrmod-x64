@@ -395,7 +395,7 @@ function Session:SetModel(path, opts)
 	self.hideHands = false
 	self:_applyHideBones()
 
-	-- Restart player IK + snap (same as ApplyToPlayer) so new skeleton maps cleanly
+	-- Preview twin model change: refresh snap from live player IK (no full player reload)
 	timer.Simple(0, function()
 		if not self.active then return end
 		if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
@@ -403,7 +403,7 @@ function Session:SetModel(path, opts)
 		end
 	end)
 	if vrmod.logger then
-		vrmod.logger.Info("[Avatar] twin model → %s (preview, IK refresh)", path)
+		vrmod.logger.Info("[Avatar] twin model → %s (preview, bone cache refresh)", path)
 	end
 	return true
 end
@@ -474,51 +474,41 @@ function Session:ApplyToPlayer()
 
 	-- 1) Apply looks immediately on client player
 	pcall(ApplyLooksToEnt, ply, path, skin, bodyMap)
+	ply.vrmod_pm = path
 
-	-- 2) Tear down + rebuild character IK (same path as VRMod_Start)
-	--    New skeleton → new boneorder/boneinfo lengths; required after PM change.
-	local sid = ply:SteamID()
-	timer.Simple(0, function()
-		if not IsValid(ply) or not g_VR or not g_VR.active then return end
-		if g_VR.StopCharacterSystem then
-			pcall(g_VR.StopCharacterSystem, sid)
-		end
-	end)
+	-- 2) Full character/FBT reload (safe for incomplete PMs — soft IK fail, no crash)
+	if g_VR.ReloadCharacterSystem then
+		pcall(g_VR.ReloadCharacterSystem, ply, "avatar_apply")
+	elseif vrmod.character and vrmod.character.Reload then
+		pcall(vrmod.character.Reload, ply, "avatar_apply")
+	end
 
-	timer.Simple(0.08, function()
+	-- 3) Twin follows after reload settles
+	timer.Simple(0.15, function()
 		if not IsValid(ply) or not g_VR or not g_VR.active then return end
-		-- Re-apply after stop (stop clears bone callbacks / manip)
 		pcall(ApplyLooksToEnt, ply, path, skin, bodyMap)
 		ply.vrmod_pm = path
-
-		if g_VR.StartCharacterSystem then
-			pcall(g_VR.StartCharacterSystem, ply)
+		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
+		if twin and twin:IsValid() then
+			if path and twin.SetModel then
+				twin:SetModel(path, { persist = true, keepLooks = true })
+			end
+			if twin.SetSkin then twin:SetSkin(skin) end
+			if IsValid(twin.ent) and bodyMap then
+				ApplyBodygroups(twin.ent, bodyMap)
+			end
+			twin.hideHead = false
+			twin.hideHands = false
+			if twin._applyHideBones then twin:_applyHideBones() end
+			if twin._cacheBones then twin:_cacheBones() end
+			if twin._measureArms then twin:_measureArms() end
 		end
-
-		timer.Simple(0.05, function()
-			if not IsValid(ply) or not g_VR or not g_VR.active then return end
-			-- Force one full IK solve + twin snap (player logic)
-			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
-				pcall(vrmod.character.ForceLocalIKAndPublish)
-			end
-			-- Twin follows new player model (persist = saved)
-			local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
-			if twin and twin:IsValid() then
-				if path and twin.SetModel then
-					twin:SetModel(path, { persist = true, keepLooks = true })
-				end
-				if twin.SetSkin then twin:SetSkin(skin) end
-				if IsValid(twin.ent) and bodyMap then
-					ApplyBodygroups(twin.ent, bodyMap)
-				end
-				twin.hideHead = false
-				twin.hideHands = false
-				if twin._applyHideBones then twin:_applyHideBones() end
-			end
-			if vrmod.logger then
-				vrmod.logger.Info("[Avatar] character IK reloaded after apply PM=%s", tostring(name or path))
-			end
-		end)
+		if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+			pcall(vrmod.character.ForceLocalIKAndPublish)
+		end
+		if vrmod.logger then
+			vrmod.logger.Info("[Avatar] character IK reloaded after apply PM=%s", tostring(name or path))
+		end
 	end)
 
 	if vrmod.logger then
