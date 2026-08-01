@@ -741,13 +741,66 @@ if CLIENT then
 		return true
 	end
 
+	local function IsSandboxShellUid(uid)
+		return uid == "p2v_spawnmenu" or uid == "p2v_contextmenu"
+			or (uid and string.StartWith(tostring(uid), "p2v_"))
+	end
+
+	--- Re-pin hand shell top-left for current scale (HandMenuPose half-size must match).
+	local function ReposeHandMenu(menu)
+		if not menu or menu.freeFloat or menu.grabHand then return end
+		if not isfunction(VRUtilHandMenuPose) then return end
+		local wrist = MenuAttachHandName(menu)
+		local center = menu._centerLocal
+		local lp, la = VRUtilHandMenuPose(
+			menu.width or 512, menu.height or 512,
+			menu.baseScale or menu.scale or 0.03,
+			center, menu._panelAng, wrist
+		)
+		if lp then menu.pos = lp end
+		if la then menu.ang = la end
+		menu.attachment = true
+		menu.attachHand = wrist
+	end
+
+	--- Keep free-float world *center* fixed when scale changes (TL would slide UV under laser).
+	local function AdjustFreeFloatForScale(menu, oldBase, newBase)
+		if not menu or not menu.pos or not menu.ang then return end
+		if not (menu.freeFloat or not menu.attachment) then return end
+		oldBase = tonumber(oldBase) or 0.03
+		newBase = tonumber(newBase) or oldBase
+		if math.abs(oldBase - newBase) < 1e-8 then return end
+		local uiS = vrmod.GetUIScale()
+		local w = menu.width or 512
+		local h = menu.height or 512
+		local wPos, wAng = ResolveMenuWorldPose(menu)
+		if not wPos or not wAng then return end
+		local oldD = oldBase * uiS
+		local newD = newBase * uiS
+		local center = wPos + wAng:Right() * (w * oldD * 0.5) - wAng:Forward() * (h * oldD * 0.5)
+		local newTL = center - wAng:Right() * (w * newD * 0.5) + wAng:Forward() * (h * newD * 0.5)
+		local origin = g_VR.origin or Vector()
+		local originAng = g_VR.originAngle or Angle()
+		menu.pos, menu.ang = WorldToLocal(newTL, wAng, origin, originAng)
+	end
+
 	local function EndResize(handName)
 		if not resizeState or resizeState.hand ~= handName then return false end
 		local uid = resizeState.uid
 		local menu = menus[uid]
 		if menu then
 			LockMenuScale(menu, menu.baseScale or menu.scale)
-			-- Resnap pose+scale and clear stale laser UV (was pre-stretch)
+			-- Hand shells: stay attached and re-pose for new half-size (click UV must match draw)
+			if resizeState.keepAttached or (not menu.freeFloat and menu.attachment) then
+				menu.freeFloat = false
+				menu.attachment = true
+				ReposeHandMenu(menu)
+			end
+			if IsValid(menu.panel) and menu.panel.SetMouseInputEnabled then
+				menu.panel:SetMouseInputEnabled(true)
+			end
+			menu.cursorEnabled = true
+			menu.dirty = true
 			menu._snapFrame = -1
 			InvalidateMenuHit(menu)
 			vrmod.SaveMenuLayout(uid)
@@ -759,6 +812,7 @@ if CLIENT then
 		focusSnap.uid = false
 		focusSnap.panel = nil
 		focusSnap.cursorWorld = nil
+		focusSnap.scaleKey = 0
 		return true
 	end
 
@@ -841,25 +895,41 @@ if CLIENT then
 		return true
 	end
 
-	--- Resize from grip-hand distance to panel origin (stereo-safe; no per-eye laser).
+	--- Resize from grip-hand distance (stereo-safe; no per-eye laser).
 	local function UpdateResizeFromHand()
 		if not resizeState then return end
 		local menu = menus[resizeState.uid]
 		if not menu then return end
 		local hand = HandPose(resizeState.hand)
 		if not hand or not hand.pos then return end
-		local origin = resizeState.origin
-		if not origin then return end
-		local dist = hand.pos:Distance(origin)
 		local startDist = resizeState.startDist or 1
 		if startDist < 2 then startDist = 2 end
-		local ns = (resizeState.startScale or 0.03) * (dist / startDist)
-		local prev = menu.baseScale or menu.scale or 0
-		LockMenuScale(menu, ns)
-		if math.abs((menu.baseScale or 0) - prev) > 1e-6 then
-			menu._snapFrame = -1
-			InvalidateMenuHit(menu)
+		local dist
+		if resizeState.keepAttached then
+			-- Hand shell: scale from grip↔wrist span (stable while panel re-poses on palm)
+			local wrist = HandPose(MenuAttachHandName(menu))
+			if not wrist or not wrist.pos then return end
+			dist = hand.pos:Distance(wrist.pos)
+		else
+			-- Free float: grip distance to fixed world center at grab start
+			local origin = resizeState.origin
+			if not origin then return end
+			dist = hand.pos:Distance(origin)
 		end
+		local ns = (resizeState.startScale or 0.03) * (dist / startDist)
+		ns = math.Clamp(ns, SCALE_MIN, SCALE_MAX)
+		local prev = menu.baseScale or menu.scale or 0
+		if math.abs(ns - prev) < 1e-7 then return end
+		LockMenuScale(menu, ns)
+		if resizeState.keepAttached then
+			menu.freeFloat = false
+			menu.attachment = true
+			ReposeHandMenu(menu)
+		else
+			AdjustFreeFloatForScale(menu, prev, ns)
+		end
+		menu._snapFrame = -1
+		InvalidateMenuHit(menu)
 	end
 
 	--- World pose for a menu. Uses stereo-frozen hands only (never mutates mid-eye).
@@ -972,8 +1042,14 @@ if CLIENT then
 		-- Corner grip → resize (every window by default); body grip → free-move if grabbable
 		if resizeOn and MenuIsResizable(menu) and CursorInResizeCorner(menu, cx, cy) then
 			local wPos, wAng = ResolveMenuWorldPose(menu)
-			-- Detach to free-float while scaling — except hand-locked QM
-			if not qmHandLocked and not menu.freeFloat and wPos and wAng then
+			local hand = HandPose(handName)
+			if not wPos or not wAng or not hand or not hand.pos then return false end
+
+			-- Spawn/context (+ other hand-attached shells): stay on wrist and re-pose each tick.
+			-- Free-floating detaches content under the laser → "unclickable after resize".
+			local keepAttached = (not qmHandLocked)
+				and menu.attachment and not menu.freeFloat and not menu.grabHand
+			if not keepAttached and not qmHandLocked and not menu.freeFloat and wPos and wAng then
 				local origin = g_VR.origin or Vector()
 				local originAng = g_VR.originAngle or Angle()
 				menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
@@ -981,24 +1057,30 @@ if CLIENT then
 				menu.attachment = false
 				wPos, wAng = ResolveMenuWorldPose(menu)
 			end
-			local hand = HandPose(handName)
-			if not wPos or not hand or not hand.pos then return false end
-			local startDist = hand.pos:Distance(wPos)
+			if not wPos then return false end
+
+			local uiS = vrmod.GetUIScale()
+			local drawS = (menu.baseScale or menu.scale or 0.03) * uiS
+			local mw, mh = menu.width or 512, menu.height or 512
+			local center = wPos + wAng:Right() * (mw * drawS * 0.5) - wAng:Forward() * (mh * drawS * 0.5)
+			local startDist = hand.pos:Distance(center)
 			if startDist < 2 then startDist = 2 end
 			resizeState = {
 				uid = uid,
 				hand = handName,
 				startScale = menu.baseScale or menu.scale or 0.03,
-				origin = Vector(wPos), -- panel TL world (fixed while resizing)
+				origin = Vector(center), -- scale from panel center (not TL)
 				startDist = startDist,
+				keepAttached = keepAttached and true or false,
 			}
 			menu.scaleLocked = true
 			menu.resizable = true
+			menu.cursorEnabled = true
 			g_VR.menuResizeActive = true
 			MarkConsumed(handName, pressed)
 			if vrmod.logger then
-				vrmod.logger.Debug("[UI] Panel resize start uid=%s hand=%s scale=%.4f",
-					tostring(uid), handName, resizeState.startScale)
+				vrmod.logger.Debug("[UI] Panel resize start uid=%s hand=%s scale=%.4f attach=%s",
+					tostring(uid), handName, resizeState.startScale, tostring(keepAttached))
 			end
 			return true
 		end
