@@ -13,6 +13,10 @@ local function BlockOldForegripAddon()
 		{ "VRMod_Input", "Foregrip" },
 		{ "VRMod_PreRender", "ForegripTransform" },
 		{ "VRMod_Exit", "ForegripExit" },
+		-- Prior hook names (lua_refresh would double-register otherwise)
+		{ "VRMod_PreStereo", "vrmod_foregrip" },
+		{ "VRMod_PreRender", "vrmod_foregrip" },
+		{ "VRMod_PreStereo", "vrmod_weapon_pose_freeze" },
 	}) do
 		local t = hook.GetTable()[pair[1]]
 		if t and t[pair[2]] then hook.Remove(pair[1], pair[2]) end
@@ -27,8 +31,11 @@ timer.Simple(2, BlockOldForegripAddon)
 
 -- Hardcoded start range (not archived cvar — old client.vdf "12" killed long grips)
 local GRIP_DISTANCE = 20
-local GUIDE_BLEND = 0.45
+-- Low blend: high values make gun chase device LH every frame → body LH attach shakes
+local GUIDE_BLEND = 0.22
 local RELEASE_MULT = 1.5
+-- Attach damp toward new (lower = stickier LH on gun for FBT body)
+local ATTACH_BLEND = 0.28
 
 local state = {
 	gripping = false,
@@ -249,9 +256,22 @@ local function SolveForegripFrame()
 		return false
 	end
 
-	local guidedPos, guidedAng = GetGuidedWeaponPose(rpos, rang, lpos, lang, state.weaponBox)
+	-- CRITICAL: attach LH to UNGUIDED RH+VMI gun matrix only.
+	-- Guiding gun from device LH then parenting LH to that gun creates a feedback
+	-- loop (LH → aim → gun → attach) that flickers full-body arm IK every frame.
+	local baseGunPos, baseGunAng = LocalToWorld(
+		vmi.offsetPos or Vector(),
+		vmi.offsetAng or Angle(),
+		rpos, rang
+	)
+	local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, baseGunPos, baseGunAng)
+	if state.frame >= 0 then
+		attachPos = LerpVector(ATTACH_BLEND, state.leftPos, attachPos)
+		attachAng = LerpAngle(ATTACH_BLEND, state.leftAng, attachAng)
+	end
 
-	-- Write guided hands into tracking for any reader, then restore (stereo-safe)
+	-- Guided aim only affects the weapon mesh / laser (not LH parent)
+	local guidedPos, guidedAng = GetGuidedWeaponPose(rpos, rang, lpos, lang, state.weaponBox)
 	local R = g_VR.tracking and g_VR.tracking.pose_righthand
 	local savedPos, savedAng
 	if R and R.pos and R.ang then
@@ -274,12 +294,6 @@ local function SolveForegripFrame()
 		gunPos, gunAng = LocalToWorld(vmi.offsetPos or Vector(), vmi.offsetAng or Angle(), guidedPos, guidedAng)
 	end
 
-	local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, gunPos, gunAng)
-	-- Dampen micro-jitter from tracking/guide noise (FBT body amplifies LH shake)
-	if state.frame >= 0 and state.leftPos and state.leftAng then
-		attachPos = LerpVector(0.45, state.leftPos, attachPos)
-		attachAng = LerpAngle(0.45, state.leftAng, attachAng)
-	end
 	state.gunPos:Set(gunPos)
 	state.gunAng:Set(gunAng)
 	state.leftPos:Set(attachPos)
@@ -393,17 +407,18 @@ hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
 	vrmod.TryForegripGrab(pressed)
 end)
 
-hook.Add("VRMod_PreStereo", "vrmod_foregrip", function()
+-- Name sorts before twin_force_ik / avatar pose so LH snap is ready for FBT body
+hook.Add("VRMod_PreStereo", "0_vrmod_foregrip", function()
 	if not g_VR or not g_VR.active then return end
 	if state.gripping then SolveForegripFrame() end
 end)
 
-hook.Add("VRMod_PreRender", "vrmod_foregrip", function()
+hook.Add("VRMod_PreRender", "0_vrmod_foregrip", function()
 	if state.gripping then ApplyFrozenGunDraw() end
 end)
 
 -- Non-grip stock freeze (both eyes same matrix). Never re-solve ArcVR.
-hook.Add("VRMod_PreStereo", "vrmod_weapon_pose_freeze", function()
+hook.Add("VRMod_PreStereo", "1_vrmod_weapon_pose_freeze", function()
 	if not g_VR or not g_VR.active then return end
 	if state.gripping then return end
 

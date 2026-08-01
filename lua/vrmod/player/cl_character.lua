@@ -340,6 +340,7 @@ if CLIENT then
 
 	--- Always solve local player IK + publish snap when twin is open.
 	-- PrePlayerDraw often does NOT run in VR first-person → twin got idle/T-pose bones.
+	-- Must run AFTER 0_vrmod_foregrip so lefthand is attach snap for stock two-hand.
 	local function ForceLocalIKAndPublish()
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not g_VR.active then return false end
@@ -354,6 +355,15 @@ if CLIENT then
 			if not ci then return false end
 		end
 		local frame = netTab.lerpedFrame
+		local sf = g_VR.stereoFrame or 0
+
+		-- Stock foregrip: force frame LH to frozen attach before any IK
+		if g_VR.foregripActive and g_VR._leftHandSnapFrame == sf
+			and g_VR._leftHandSnapPos and g_VR._leftHandSnapAng then
+			frame.lefthandPos = Vector(g_VR._leftHandSnapPos.x, g_VR._leftHandSnapPos.y, g_VR._leftHandSnapPos.z)
+			frame.lefthandAng = Angle(g_VR._leftHandSnapAng.p, g_VR._leftHandSnapAng.y, g_VR._leftHandSnapAng.r)
+			lastFrames[steamid] = nil -- don't skip UpdateIK via FramesAreEqual
+		end
 
 		-- Head fully visible for a clean snap
 		local headBone = ci.bones.b_head
@@ -378,30 +388,52 @@ if CLIENT then
 		end
 
 		ply:SetupBones()
-		pcall(UpdateIK, ply)
-		if ci.boneorder and ci.boneinfo then
-			for i = 1, #ci.boneorder do
-				local bone = ci.boneorder[i]
-				local bd = ci.boneinfo[bone]
-				if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
-					ply:SetBoneMatrix(bone, bd.targetMatrix)
+
+		-- FBT body: use FBT arm IK (not charik) so twin matches real body + foregrip
+		local useFbt = g_VR.fbtActive and g_VR.fbtActive[steamid] and vrmod_fbt
+			and vrmod_fbt.characterInfo and vrmod_fbt.characterInfo[steamid]
+			and vrmod_fbt.CalculateBonePositions
+		if useFbt then
+			local info = vrmod_fbt.characterInfo[steamid]
+			info.frameNumber = -1
+			pcall(vrmod_fbt.CalculateBonePositions, ply)
+			if info.boneinfo and info.boneCount then
+				for i = 0, info.boneCount - 1 do
+					local bi = info.boneinfo[i]
+					if bi and bi.targetMatrix and ply:GetBoneMatrix(i) then
+						ply:SetBoneMatrix(i, bi.targetMatrix)
+					end
 				end
 			end
-		end
-		-- Refresh full skeleton after arm matrix write
-		ply:InvalidateBoneCache()
-		ply:SetupBones()
-		if ci.boneorder and ci.boneinfo then
-			for i = 1, #ci.boneorder do
-				local bone = ci.boneorder[i]
-				local bd = ci.boneinfo[bone]
-				if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
-					ply:SetBoneMatrix(bone, bd.targetMatrix)
+		else
+			pcall(UpdateIK, ply)
+			if ci.boneorder and ci.boneinfo then
+				for i = 1, #ci.boneorder do
+					local bone = ci.boneorder[i]
+					local bd = ci.boneinfo[bone]
+					if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
+						ply:SetBoneMatrix(bone, bd.targetMatrix)
+					end
+				end
+			end
+			ply:InvalidateBoneCache()
+			ply:SetupBones()
+			if ci.boneorder and ci.boneinfo then
+				for i = 1, #ci.boneorder do
+					local bone = ci.boneorder[i]
+					local bd = ci.boneinfo[bone]
+					if bone and bd and bd.targetMatrix and ply:GetBoneMatrix(bone) then
+						ply:SetBoneMatrix(bone, bd.targetMatrix)
+					end
 				end
 			end
 		end
 
 		if vrmod.avatar and vrmod.avatar.PublishPlayerPose then
+			-- Allow a fresh twin snap this stereo frame (foregrip may have just moved LH)
+			if g_VR.avatarPoseSnap and g_VR.avatarPoseSnap.stereoFrame == sf then
+				g_VR.avatarPoseSnap.stereoFrame = -1
+			end
 			pcall(vrmod.avatar.PublishPlayerPose, ply, frame)
 		end
 		-- Restore gameplay pos (same as PostPlayerDraw)
@@ -414,8 +446,9 @@ if CLIENT then
 	vrmod.character = vrmod.character or {}
 	vrmod.character.ForceLocalIKAndPublish = ForceLocalIKAndPublish
 
-	-- Twin open: ONE player IK + pose publish per stereo frame (before either eye)
-	hook.Add("VRMod_PreStereo", "vrmod_twin_force_ik", function()
+	-- Twin open: ONE player IK + pose publish per stereo frame (after 0_vrmod_foregrip)
+	hook.Remove("VRMod_PreStereo", "vrmod_twin_force_ik") -- old name
+	hook.Add("VRMod_PreStereo", "1_vrmod_twin_force_ik", function()
 		if not TwinOpenLocal() then return end
 		pcall(ForceLocalIKAndPublish)
 	end)
