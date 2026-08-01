@@ -81,17 +81,27 @@ local function InitializeMenuItems()
 	-- Row 2
 	add("Flashlight", 0, 1, function() LocalPlayer():ConCommand("impulse 100") end, true, nil, "flashlight")
 	add("Laser pointer", 1, 1, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end, true, nil, "laser")
-	add("Toggle Noclip", 2, 1, function() LocalPlayer():ConCommand("noclip") end, true, nil, "noclip")
-	add("Undo", 3, 1, function() LocalPlayer():ConCommand("gmod_undo") end, true, nil, "undo")
-	add("Cleanup", 4, 1, function() LocalPlayer():ConCommand("gmod_cleanup") end, true, nil, "cleanup")
-	add("Admin Cleanup", 5, 1, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
+	add("Weapon VR", 2, 1, function()
+		timer.Simple(0, function()
+			if not g_VR or not g_VR.active then return end
+			if vrmod.WeaponSettings_Open then
+				vrmod.WeaponSettings_Open()
+			else
+				RunConsoleCommand("vrmod_weapon_settings")
+			end
+		end)
+	end, true, "hold pose / laser / muzzle", "weapon_vr")
+	add("Toggle Noclip", 3, 1, function() LocalPlayer():ConCommand("noclip") end, true, nil, "noclip")
+	add("Undo", 4, 1, function() LocalPlayer():ConCommand("gmod_undo") end, true, nil, "undo")
+	add("Cleanup", 5, 1, function() LocalPlayer():ConCommand("gmod_cleanup") end, true, nil, "cleanup")
+	add("Admin Cleanup", 0, 2, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
 
-	-- Row 3 / system (page 2 via layout)
-	add("Reset Vehicle View", 0, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
-	add("UI Reset", 1, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end, true, nil, "ui_reset")
-	add("Border Cal", 2, 2, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
-	add("Toggle blacklist weapon", 3, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
-	add("Map Browser", 4, 2, function()
+	-- Row 3 / system (page 2 via layout) — col0 is Admin Cleanup above
+	add("Reset Vehicle View", 1, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
+	add("UI Reset", 2, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end, true, nil, "ui_reset")
+	add("Border Cal", 3, 2, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
+	add("Toggle blacklist weapon", 4, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
+	add("Map Browser", 5, 2, function()
 		local window = VRUtilCreateMapBrowserWindow()
 		hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
 			hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")

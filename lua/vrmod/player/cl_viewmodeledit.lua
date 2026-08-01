@@ -106,8 +106,76 @@ if CLIENT then
 		},
 	}
 
+	local function SerializeViewModelInfo(tbl)
+		local out = {}
+		for k, v in pairs(tbl or {}) do
+			if k == "autoOffsetAddPos" and isvector(v) then
+				out.autoOffsetAddPos = { v.x, v.y, v.z }
+			elseif istable(v) then
+				local e = {}
+				if v.offsetPos then
+					e.offsetPos = { v.offsetPos.x or v.offsetPos[1] or 0, v.offsetPos.y or v.offsetPos[2] or 0, v.offsetPos.z or v.offsetPos[3] or 0 }
+				end
+				if v.offsetAng then
+					e.offsetAng = { v.offsetAng.p or v.offsetAng[1] or 0, v.offsetAng.y or v.offsetAng[2] or 0, v.offsetAng.r or v.offsetAng[3] or 0 }
+				end
+				if v.wrongMuzzleAng ~= nil then e.wrongMuzzleAng = v.wrongMuzzleAng and true or false end
+				if v.noLaser ~= nil then e.noLaser = v.noLaser and true or false end
+				if v.useWorldModel ~= nil then e.useWorldModel = v.useWorldModel and true or false end
+				out[k] = e
+			end
+		end
+		return out
+	end
+
 	local function SaveViewModelConfig()
-		file.Write(CONFIG_PATH, util.TableToJSON(g_VR.viewModelInfo, true))
+		if not file.IsDir("vrmod", "DATA") then file.CreateDir("vrmod") end
+		file.Write(CONFIG_PATH, util.TableToJSON(SerializeViewModelInfo(g_VR.viewModelInfo), true) or "{}")
+	end
+
+	--- Public API for Cube VR weapon settings menu
+	function vrmod.SaveWeaponViewModelConfig()
+		SaveViewModelConfig()
+		return true
+	end
+
+	function vrmod.EnsureWeaponViewModelEntry(class)
+		if not class or class == "" then return nil end
+		g_VR.viewModelInfo = g_VR.viewModelInfo or {}
+		if not g_VR.viewModelInfo[class] then
+			g_VR.viewModelInfo[class] = {
+				offsetPos = Vector(0, 0, 0),
+				offsetAng = Angle(0, 0, 0),
+				wrongMuzzleAng = false,
+				noLaser = false,
+				useWorldModel = false,
+			}
+		else
+			local d = g_VR.viewModelInfo[class]
+			if not d.offsetPos then d.offsetPos = Vector(0, 0, 0) end
+			if not d.offsetAng then d.offsetAng = Angle(0, 0, 0) end
+		end
+		return g_VR.viewModelInfo[class]
+	end
+
+	function vrmod.GetWeaponViewModelEntry(class)
+		if not class then return nil end
+		return g_VR.viewModelInfo and g_VR.viewModelInfo[class]
+	end
+
+	function vrmod.ApplyWeaponViewModelLive(class)
+		if not class or not g_VR then return end
+		local d = g_VR.viewModelInfo and g_VR.viewModelInfo[class]
+		if not d then return end
+		local wep = LocalPlayer():GetActiveWeapon()
+		if IsValid(wep) and wep:GetClass() == class then
+			g_VR.currentvmi = d
+			if vrmod.utils and vrmod.utils.UpdateViewModelPos then
+				pcall(vrmod.utils.UpdateViewModelPos)
+			elseif vrmod.utils and vrmod.utils.UpdateViewModel then
+				pcall(vrmod.utils.UpdateViewModel)
+			end
+		end
 	end
 
 	-- Custom deep copy function to handle Vector and Angle
@@ -425,9 +493,21 @@ Are you sure you want to continue?]]
 		cancelButton.DoClick = function() frame:Close() end
 	end
 
-	-- GUI
+	-- GUI: Cube VR menu in headset, classic Derma on desktop
 	concommand.Add("vrmod_weaponconfig", function()
 		if not g_VR.viewModelInfo then LoadViewModelConfig() end
+		if g_VR and g_VR.active and vrmod.WeaponSettings_Open then
+			vrmod.WeaponSettings_Open()
+			return
+		end
 		CreateWeaponConfigGUI()
+	end)
+
+	concommand.Add("vrmod_weaponsettings", function()
+		if g_VR and g_VR.active and vrmod.WeaponSettings_Open then
+			vrmod.WeaponSettings_Open()
+		else
+			RunConsoleCommand("vrmod_weaponconfig")
+		end
 	end)
 end
