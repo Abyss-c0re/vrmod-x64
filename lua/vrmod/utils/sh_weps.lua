@@ -114,5 +114,26 @@ function vrmod.utils.UpdateViewModel()
         end
     end
 
-    g_VR.viewModelMuzzle = vm:GetAttachment(1)
+    -- Muzzle attachment: prefer #1, then any attachment with "muzzle" in name.
+    -- Non-VR weapons often lack a valid att #1 after hand pose → leave nil for laser fallback.
+    local muz = vm:GetAttachment(1)
+    if (not muz or not muz.Pos) and vm.GetAttachments then
+        local atts = vm:GetAttachments()
+        if istable(atts) then
+            for _, a in ipairs(atts) do
+                local n = string.lower(tostring(a.name or ""))
+                if n:find("muzzle", 1, true) or n:find("laser", 1, true) then
+                    muz = vm:GetAttachment(a.id or a.id)
+                    if muz and muz.Pos then break end
+                end
+            end
+        end
+    end
+    -- Validate near right hand (stale/world-origin attachments cause laser desync)
+    if muz and muz.Pos and hand and hand.pos then
+        if muz.Pos:DistToSqr(hand.pos) > (150 * 150) then
+            muz = nil
+        end
+    end
+    g_VR.viewModelMuzzle = muz
 end
