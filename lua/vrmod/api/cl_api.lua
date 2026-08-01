@@ -86,14 +86,16 @@ if CLIENT then
         end
 
         g_VR.moduleVersion = g_VR.moduleVersion or 0
+        -- Modules are NOT on Workshop — always GitHub releases (Workshop desc links go stale).
+        local moduleDownload = "https://github.com/Abyss-c0re/vrmod-module-master/releases"
         if g_VR.moduleVersion == 0 then
             if not file.Exists(moduleFile, "GAME") then
-                error = "Module not installed.\nPlease follow the workshop instructions to install the module."
+                error = "Module not installed.\nDownload modules.zip:\n" .. moduleDownload .. "\nExtract into garrysmod/ (lua/bin + bin)."
             else
                 error = "Failed to load module.\nModule file exists but could not be loaded. Check antivirus or permissions."
             end
         elseif g_VR.moduleVersion < requiredVersion then
-            error = "Module update required.\nRun the installer or re-download from the workshop.\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
+            error = "Module update required.\nDownload latest modules.zip (not Workshop):\n" .. moduleDownload .. "\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
         else
             if g_VR.moduleVersion < latestVersion then
                 print(string.format(
