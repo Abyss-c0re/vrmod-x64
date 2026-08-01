@@ -288,21 +288,44 @@ end
 
 ------------------------------------------------------------------------
 -- Building heightmap — depth-aware (player Z band only)
--- Trace only through a vertical slice around the player so underground
--- never shows surface roofs, and surface never shows deep basements.
+-- Convars: vrmod_hud_radar_depth_up/down, build_min/max, player_depth
 ------------------------------------------------------------------------
--- Vertical slice relative to feet (Source units)
-local DEPTH_UP = 192   -- sample starts this high above feet
-local DEPTH_DOWN = 72  -- sample ends this far below feet
--- Structure: hit must sit in this elev window (same depth as player)
-local BUILD_MIN = 40   -- ignore floors / ground at feet
-local BUILD_MAX = 192  -- ignore anything above our slice (surface when underground)
-local BUILD_TALL = 160
+local function RadarDepthParams()
+	local depthUp = math.Clamp(cv_radar_depth_up:GetFloat(), 48, 512)
+	local depthDown = math.Clamp(cv_radar_depth_down:GetFloat(), 16, 256)
+	local buildMin = math.Clamp(cv_radar_build_min:GetFloat(), 8, 128)
+	local buildMax = math.Clamp(cv_radar_build_max:GetFloat(), 64, 512)
+	if buildMax < buildMin + 16 then buildMax = buildMin + 16 end
+	-- Sample band must cover structure window
+	if depthUp < buildMax then depthUp = buildMax end
+	local playerDepth = math.Clamp(cv_radar_player_depth:GetFloat(), 64, 1024)
+	return depthUp, depthDown, buildMin, buildMax, playerDepth
+end
+
+local function InvalidateBuildingMap()
+	bmap.ready = false
+	bmap.frame = -999
+end
+
+-- Resample when depth cvars change
+for _, name in ipairs({
+	"vrmod_hud_radar_depth_up",
+	"vrmod_hud_radar_depth_down",
+	"vrmod_hud_radar_build_min",
+	"vrmod_hud_radar_build_max",
+	"vrmod_hud_radar_buildings",
+	"vrmod_hud_radar_range",
+}) do
+	cvars.AddChangeCallback(name, function()
+		InvalidateBuildingMap()
+	end, "vrmod_radar_depth_" .. name)
+end
 
 local function SampleBuildingMap(ply, range)
 	if not cv_radar_buildings:GetBool() then return end
 	if not IsValid(ply) then return end
 	range = math.Clamp(range or 1500, 400, 4000)
+	local depthUp, depthDown, buildMin, buildMax = RadarDepthParams()
 	local origin = ply:GetPos()
 	local fn = FrameNumber and FrameNumber() or 0
 	local moved = origin:DistToSqr(bmap.origin) > (128 * 128)
@@ -322,8 +345,8 @@ local function SampleBuildingMap(ply, range)
 	local wx0 = ox - range + step * 0.5
 	local wy0 = oy - range + step * 0.5
 	-- Depth band only — not sky→abyss (that always hit surface roofs)
-	local bandTop = origin.z + DEPTH_UP
-	local bandBot = origin.z - DEPTH_DOWN
+	local bandTop = origin.z + depthUp
+	local bandBot = origin.z - depthDown
 	local cells = bmap.cells
 	local tr = {
 		mask = MASK_SOLID_BRUSHONLY,
@@ -343,10 +366,9 @@ local function SampleBuildingMap(ply, range)
 				local z = hit.HitPos.z
 				local elev = z - origin.z
 				-- Keep only hits in our depth window (structure at this level)
-				if elev >= BUILD_MIN and elev <= BUILD_MAX then
+				if elev >= buildMin and elev <= buildMax then
 					cells[idx] = z
 				else
-					-- Floor / open: not a same-level structure
 					cells[idx] = false
 				end
 			else
@@ -363,16 +385,18 @@ local function SampleBuildingMap(ply, range)
 	bmap.wx0 = wx0
 	bmap.wy0 = wy0
 	bmap.step = step
+	bmap.buildMin = buildMin
+	bmap.buildMax = buildMax
 	bmap.ready = true
 end
 
 local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	if not cv_radar_buildings:GetBool() then return end
 	if not bmap.ready or not bmap.cells or not bmap.step or bmap.step <= 0 then return end
+	local _, _, buildMin, buildMax = RadarDepthParams()
 	local res = bmap.res or BMAP_RES
 	local step = bmap.step
 	local wx0, wy0 = bmap.wx0, bmap.wy0
-	-- Live feet Z for elev window (same-level only)
 	local playerZ = origin.z
 	local cellPx = math.max(2, math.floor((radius * 2 / res) + 0.5))
 	local half = cellPx * 0.5
@@ -380,6 +404,7 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 	local maxR2 = maxR * maxR
 	local cells = bmap.cells
 	local refX, refY = origin.x, origin.y
+	local tallSpan = math.max(1, buildMax - buildMin)
 
 	draw.NoTexture()
 
@@ -390,14 +415,13 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 			if z == false or z == nil then continue end
 			local elev = z - playerZ
 			-- Depth filter: drop surface when player went underground (or vice versa)
-			if elev < BUILD_MIN or elev > BUILD_MAX then continue end
+			if elev < buildMin or elev > buildMax then continue end
 
 			local wx = wx0 + ix * step - refX
 			local u, v = WorldToRadar(Vector(wx, wy, 0), yaw, range, radius)
 			if (u * u + v * v) > maxR2 then continue end
 
-			local t = math.Clamp((elev - BUILD_MIN) / math.max(1, BUILD_TALL - BUILD_MIN), 0, 1)
-			-- Cool slate (same-level structures only)
+			local t = math.Clamp((elev - buildMin) / tallSpan, 0, 1)
 			surface.SetDrawColor(70 + t * 90, 85 + t * 70, 100 + t * 80, 200)
 			surface.DrawRect(cx + u - half, cy + v - half, cellPx, cellPx)
 		end
@@ -571,7 +595,7 @@ local function PaintRadar(w, h, T)
 
 	-- Player radar blips (same depth band — hide surface players when underground)
 	local myTeam = ply:Team()
-	local plyDepthMax = math.max(DEPTH_UP, 256)
+	local _, _, _, _, plyDepthMax = RadarDepthParams()
 	for _, p in ipairs(player.GetAll()) do
 		if not IsValid(p) or p == ply then continue end
 		if not p:Alive() then continue end

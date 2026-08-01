@@ -513,6 +513,12 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_hud_visible_quickmenukey", "0")
 		RunConsoleCommand("vrmod_beam_color", "255,0,0,255")
 		RunConsoleCommand("vrmod_laser_color", "255,0,0,255")
+		RunConsoleCommand("vrmod_hud_radar_buildings", "1")
+		RunConsoleCommand("vrmod_hud_radar_depth_up", "192")
+		RunConsoleCommand("vrmod_hud_radar_depth_down", "72")
+		RunConsoleCommand("vrmod_hud_radar_build_min", "40")
+		RunConsoleCommand("vrmod_hud_radar_build_max", "192")
+		RunConsoleCommand("vrmod_hud_radar_player_depth", "256")
 		if CLIENT then
 			if vrmod.ApplyBeamColor then vrmod.ApplyBeamColor("255,0,0,255") end
 			if vrmod.ApplyLaserColor then vrmod.ApplyLaserColor("255,0,0,255") end
