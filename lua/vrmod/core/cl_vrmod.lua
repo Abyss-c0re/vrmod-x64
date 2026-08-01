@@ -32,11 +32,23 @@ if CLIENT then
 	-- Desired values applied while VR is active.
 	-- Do NOT include cvars on GMod's Blocked_ConCommands list (mat_reduceparticles,
 	-- r_shadowrendertotexture, etc.) — Lua cannot change them without console spam.
+	-- mat_queue_mode is applied from vrmod_mat_queue_mode (0/1/2). Default 1 = safe stereo.
+	-- Mode 2 = Source material queue multithreaded (gmod_mcore + mat system workers).
+	local function WantedMatQueueMode()
+		local cv = convars and convars.vrmod_mat_queue_mode
+		if not cv and GetConVar then cv = GetConVar("vrmod_mat_queue_mode") end
+		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 1
+		n = math.floor(tonumber(n) or 1)
+		if n < 0 then n = 0 end
+		if n > 2 then n = 2 end
+		return n
+	end
+
 	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
-		-- ALWAYS "1" in VR. Never change, never restore on exit.
-		mat_queue_mode = "1", --never change
+		-- Filled at VR start from WantedMatQueueMode(); re-read each pin refresh.
+		mat_queue_mode = "1",
 		mat_disable_bloom = "1",
 		mat_disable_fancy_blending = "1",
 		mat_disable_lightwarp = "1",
@@ -53,9 +65,9 @@ if CLIENT then
 		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
 		snd_mute_losefocus = "0",
 	}
-	-- Convars that must stay at their PERFORMANCE value forever once VR sets them.
-	local NEVER_RESTORE_CONVARS = {
-		mat_queue_mode = true, -- always "1"; never change in VR or on exit
+	-- Session pins: re-assert every frame while VR active; restored on exit (unlike old forever-1).
+	local SESSION_PIN_CONVARS = {
+		mat_queue_mode = true,
 	}
 	-- Stores original convar values so we can restore them on VR exit
 	local convarOverrides = {}
@@ -92,7 +104,7 @@ if CLIENT then
 	-- 0) Helper functions
 	-- Only ConVar setters — never RunConsoleCommand (GMod blacklists many engine cvars
 	-- and prints "Command is blocked!" even when pcall'd).
-	-- mat_queue_mode must be "1" for VR flicker fix (queued single-thread). Not 0, not 2, not -1.
+	-- mat_queue_mode: 0 sync · 1 queued single-thread (safe) · 2 multithreaded (opt-in).
 	local function setConvarValue(name, value)
 		local cv = GetConVar(name)
 		if not cv then return false end
@@ -127,14 +139,16 @@ if CLIENT then
 		return false
 	end
 
+	local function RefreshMatQueuePin()
+		PERFORMANCE_CONVARS.mat_queue_mode = tostring(WantedMatQueueMode())
+	end
+
 	local function overrideConvar(name, value)
 		local cv = GetConVar(name)
 		if not cv then return end
 		local previous = cv:GetString()
 		if not setConvarValue(name, value) then return end
-		-- Pinned cvars: apply value only, never restore previous
-		if NEVER_RESTORE_CONVARS[name] then return end
-		-- Only remember originals for cvars we actually changed
+		-- Remember original so VR exit can restore (including mat_queue_mode).
 		if convarOverrides[name] == nil then
 			convarOverrides[name] = previous
 		end
@@ -142,25 +156,16 @@ if CLIENT then
 
 	local function restoreConvarOverrides()
 		for k, v in pairs(convarOverrides) do
-			if not NEVER_RESTORE_CONVARS[k] then
-				setConvarValue(k, v)
-			end
+			setConvarValue(k, v)
 		end
 		convarOverrides = {}
-		-- Re-assert pinned VR cvars after restore (mat_queue_mode must stay 1)
-		for name, _ in pairs(NEVER_RESTORE_CONVARS) do
-			local pinned = PERFORMANCE_CONVARS[name]
-			if pinned ~= nil then
-				setConvarValue(name, pinned)
-			end
-		end
 	end
 
-	-- While VR is active, force pinned cvars every frame if something else changes them.
-	-- Flicker / skybox flash / HUD tearing → mat_queue_mode must be 1 the whole session.
+	-- While VR is active, re-assert session pins if something else changes them.
 	local function EnsurePinnedConvars()
 		if not g_VR.active then return end
-		for name, _ in pairs(NEVER_RESTORE_CONVARS) do
+		RefreshMatQueuePin()
+		for name, _ in pairs(SESSION_PIN_CONVARS) do
 			local want = PERFORMANCE_CONVARS[name]
 			if want ~= nil then
 				local cv = GetConVar(name)
@@ -575,8 +580,25 @@ if CLIENT then
 		end
 	end
 
+	-- OpenXR: optional Lua remaps (cl_openxr_bindings) over native GetActions.
+	local function ApplyOpenXRBindings(input, changed)
+		input = input or {}
+		changed = type(changed) == "table" and changed or {}
+		if not (vrmod.bindings and vrmod.bindings.Apply and vrmod.bindings.GetSources) then
+			return input, changed
+		end
+		local sources = vrmod.bindings.GetSources()
+		if not sources then return input, changed end
+		local ok, a, b = pcall(vrmod.bindings.Apply, input, changed, sources)
+		if ok and type(a) == "table" then
+			return a, type(b) == "table" and b or changed
+		end
+		return input, changed
+	end
+
 	local function HandleInput()
 		local input, changed = VRMOD_GetActions()
+		input, changed = ApplyOpenXRBindings(input, changed)
 		g_VR.input = input or {}
 		g_VR.changedInputs = type(changed) == "table" and changed or {}
 		for k, v in pairs(g_VR.changedInputs) do
@@ -785,6 +807,23 @@ if CLIENT then
 		end)
 	end
 
+	--- Mode 2: drain material queue between L/R eyes so workers don't race one SBS RT.
+	local function SyncMatQueueBetweenEyes()
+		if WantedMatQueueMode() < 2 then return end
+		ResetStereoEyeState()
+		if isfunction(VRMOD_GLFinish) then
+			pcall(VRMOD_GLFinish)
+		end
+		pcall(function()
+			if render.SetColorMaterial then render.SetColorMaterial() end
+			render.SetBlend(1)
+			if render.OverrideColorWriteEnable then
+				render.OverrideColorWriteEnable(true, false)
+				render.OverrideColorWriteEnable(false, false)
+			end
+		end)
+	end
+
 	local function EnsureDecalsEnabled()
 		local d = GetConVar("r_drawdecals")
 		local m = GetConVar("r_drawmodeldecals")
@@ -963,6 +1002,8 @@ if CLIENT then
 			-- Reset stencil/depth-range so right eye does not inherit halo/HUD state.
 			ResetStereoEyeState()
 			render.ClearDepth(true)
+			-- mat_queue_mode 2: serialize material workers before second eye
+			SyncMatQueueBetweenEyes()
 
 			-- RIGHT eye — draw only (same world pose as left)
 			view.origin = g_VR.eyePosRight
@@ -1048,8 +1089,16 @@ if CLIENT then
 	local function OverridePerformanceConvars()
 		-- Keep skybox flag in sync with current settings at start time
 		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
+		RefreshMatQueuePin()
 		for cvar, val in pairs(PERFORMANCE_CONVARS) do
 			overrideConvar(cvar, val)
+		end
+		local mq = WantedMatQueueMode()
+		if vrmod.logger then
+			vrmod.logger.Info("mat_queue_mode=%s (vrmod_mat_queue_mode; 0=sync 1=queued 2=multithreaded)", tostring(mq))
+		end
+		if mq >= 2 and vrmod.Toast then
+			vrmod.Toast("mat_queue_mode 2 (multithreaded) — if skybox/HUD flickers, set vrmod_mat_queue_mode 1", 5, "info")
 		end
 	end
 
@@ -1064,6 +1113,10 @@ if CLIENT then
 		local renderOffset = convars.vrmod_renderoffset:GetBool()
 		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
+		-- OpenXR OpenGL: flip GL RT V into compositor (Linux). Windows D3D path usually false.
+		if isfunction(VRMOD_SetRTTextureFlip) then
+			VRMOD_SetRTTextureFlip(not system.IsWindows())
+		end
 	end
 
 	-- Live update: UV bounds only (offsets/scale factor)
@@ -1261,6 +1314,7 @@ if CLIENT then
 		if isfunction(VRMOD_GetActions) then
 			local okA, a, b = pcall(VRMOD_GetActions)
 			if okA then
+				a, b = ApplyOpenXRBindings(a, b)
 				g_VR.input, g_VR.changedInputs = a, b
 			else
 				g_VR.input, g_VR.changedInputs = g_VR.input or {}, g_VR.changedInputs or {}
@@ -1360,7 +1414,7 @@ if CLIENT then
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			if DrawErrorOverlay() then return true end
 
-			-- mat_queue_mode must stay "1" for every VR frame (never change)
+			-- Keep session mat_queue_mode (0/1/2) if another addon fights it
 			EnsurePinnedConvars()
 
 			-- Keep World Portals suppressed for the entire VR frame (do not restore mid-frame)

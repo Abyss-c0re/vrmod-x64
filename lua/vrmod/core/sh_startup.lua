@@ -68,6 +68,9 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset", -1.0, 1.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
+    -- mat_queue_mode while VR is active: 0=sync, 1=queued single-thread (safe default), 2=queued multithreaded.
+    -- Mode 2 enables Source material-system multithreading; stereo path flushes between eyes.
+    vrmod.AddCallbackedConvar("vrmod_mat_queue_mode", nil, "1", FCVAR_ARCHIVE, "VR mat_queue_mode: 0 sync, 1 queued (safe), 2 multithreaded", 0, 2, tonumber)
     vrmod.AddCallbackedConvar("vrmod_skybox", nil, "0", nil, nil, nil, nil, tobool, function(val) RunConsoleCommand("r_3dsky", val and "1" or "0") end)
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")

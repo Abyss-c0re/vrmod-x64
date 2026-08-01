@@ -63,16 +63,17 @@ vrmod.SettingsCatalog = {
 		},
 	},
 	{
-		-- Workshop: Батон — "Where did you move the Bindings tab?"
-		-- Cube SoT: one Bindings pane (action editor + SteamVR pointer); not buried only under Controls.
+		-- gVRMod OpenXR: primary rebind is vrmod_bindingeditor (not SteamVR UI).
+		-- Custom named actions still use vrmod_actioneditor.
 		id = "bindings",
 		title = "Bindings",
 		icon = "icon16/keyboard.png",
 		rows = {
-			{ kind = "help", label = "Custom input actions (was the old Bindings tab)" },
+			{ kind = "help", label = "OpenXR controller rebind (gVRMod — replaces SteamVR binding UI)" },
+			{ kind = "action", label = "Open OpenXR binding editor", cmd = "vrmod_bindingeditor" },
+			{ kind = "help", label = "Custom named console actions" },
 			{ kind = "action", label = "Open action editor", cmd = "vrmod_actioneditor" },
-			{ kind = "help", label = "SteamVR rebind: Settings → Controllers → Manage Controller Bindings → Garry's Mod" },
-			{ kind = "help", label = "Default binding files rewrite to data/vrmod/ on VR start" },
+			{ kind = "help", label = "OpenXR binds: data/vrmod/vrmod_openxr_bindings.json" },
 		},
 	},
 	{
@@ -86,6 +87,12 @@ vrmod.SettingsCatalog = {
 				{ text = "right eye", value = 3 },
 			}},
 			{ kind = "bool", label = "Engine post-processing", cvar = "vrmod_postprocess" },
+			{ kind = "combo", label = "Material queue (mat_queue_mode)", cvar = "vrmod_mat_queue_mode", choices = {
+				{ text = "0 — sync (single-thread)", value = 0 },
+				{ text = "1 — queued (safe stereo)", value = 1 },
+				{ text = "2 — multithreaded", value = 2 },
+			}},
+			{ kind = "help", label = "2 = Source mat system workers. If focus flicker/skybox flash, use 1." },
 			{ kind = "bool", label = "Auto render offset", cvar = "vrmod_renderoffset" },
 			{ kind = "help", label = "Disable if rendering glitches" },
 			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },
