@@ -2,6 +2,7 @@
 -- Cube Weapon Menu — inventory fan
 --
 -- Large dynamic 3D icons, category rails, glass weapon cards, laser select.
+-- Subsections paginate (3 cards / page) with chevron arrows when overflow.
 -- Open on changeweapon press; release selects hovered weapon / holster.
 -- =============================================================================
 if SERVER then return end
@@ -14,6 +15,8 @@ local DEFAULT_MODEL = "models/dav0r/hoverball.mdl"
 
 local MENU_W, MENU_H = 640, 560
 local MENU_SCALE = 0.022
+local PAGE_SIZE = 3 -- cards per page (fit stage without clip)
+local ARROW_W, ARROW_H = 40, 80
 
 local slotNames = {
 	[0] = "MELEE",
@@ -276,8 +279,12 @@ function VRUtilWeaponMenuOpen()
 
 	local state = {
 		catIndex = 1,
+		page = 1,
+		pageByCat = {}, -- remember page when switching categories
 		hoveredCat = -1,
-		hoveredItem = -1,
+		hoveredItem = -1, -- global index into current category items
+		hoveredPrev = false,
+		hoveredNext = false,
 		hoveredHolster = false,
 		selectedSlot = activeSlot,
 	}
@@ -285,6 +292,19 @@ function VRUtilWeaponMenuOpen()
 		if s == activeSlot then state.catIndex = i break end
 	end
 	if #slotOrder == 0 then state.catIndex = 0 end
+	-- Open on the page that holds the active weapon
+	do
+		local bag = slotMap[activeSlot]
+		if bag and activeClass then
+			for i, item in ipairs(bag.items) do
+				if item.class == activeClass then
+					state.page = math.max(1, math.ceil(i / PAGE_SIZE))
+					state.pageByCat[state.catIndex] = state.page
+					break
+				end
+			end
+		end
+	end
 
 	-- World placement: Alyx-like in front of primary hand, slightly tilted
 	local tmpAng = Angle(0, hmd.ang.yaw - 90, 55)
@@ -342,7 +362,9 @@ function VRUtilWeaponMenuOpen()
 	local PAD = 16
 	local CARD_W, CARD_H = 148, 200
 	local CARD_GAP = 14
+	local ARROW_GUTTER = ARROW_W + 8 -- leave room so cards never cover arrows
 	local HOLSTER_W, HOLSTER_H = 120, 40
+	local DOT_Y_OFF = 8 -- page dots below card row
 
 	local function currentItems()
 		local slotId = slotOrder[state.catIndex]
@@ -351,14 +373,40 @@ function VRUtilWeaponMenuOpen()
 		return bag and bag.items or {}
 	end
 
-	local function layoutCards(items)
-		local n = #items
+	local function pageCount(n)
+		return math.max(1, math.ceil(math.max(n, 0) / PAGE_SIZE))
+	end
+
+	local function clampPage()
+		local n = #currentItems()
+		local pages = pageCount(n)
+		state.page = math.Clamp(tonumber(state.page) or 1, 1, pages)
+		if state.catIndex > 0 then
+			state.pageByCat[state.catIndex] = state.page
+		end
+		return pages
+	end
+
+	--- Visible slice + global start index (1-based into category items)
+	local function pageSlice()
+		local items = currentItems()
+		local pages = clampPage()
+		local start = (state.page - 1) * PAGE_SIZE + 1
+		local slice = {}
+		for i = start, math.min(start + PAGE_SIZE - 1, #items) do
+			slice[#slice + 1] = { item = items[i], global = i }
+		end
+		return items, slice, start, pages
+	end
+
+	local function layoutCards(slice)
+		local n = #slice
 		if n == 0 then return {} end
-		local stageW = MENU_W - PAD * 2
+		local stageW = MENU_W - PAD * 2 - ARROW_GUTTER * 2
 		local stageH = MENU_H - STAGE_Y - DETAIL_H - FOOTER_H - 8
 		local totalW = n * CARD_W + math.max(0, n - 1) * CARD_GAP
-		local startX = PAD + math.max(0, (stageW - totalW) * 0.5)
-		local baseY = STAGE_Y + math.max(0, (stageH - CARD_H) * 0.5)
+		local startX = PAD + ARROW_GUTTER + math.max(0, (stageW - totalW) * 0.5)
+		local baseY = STAGE_Y + math.max(0, (stageH - CARD_H) * 0.5) - 6
 		-- Alyx fan: slight arc — middle cards sit lower, edges higher
 		local out = {}
 		local mid = (n + 1) * 0.5
@@ -373,6 +421,30 @@ function VRUtilWeaponMenuOpen()
 			}
 		end
 		return out
+	end
+
+	--- Geometric chevrons (unicode ◀▶ are empty squares on many Linux fonts)
+	local function drawPageArrow(x, y, w, h, dir, enabled, hot, C, T)
+		if C and C.DrawArrowBtn then
+			C.DrawArrowBtn(x, y, w, h, dir, hot, enabled)
+			return
+		end
+		local bg = not enabled and Color(30, 12, 16, 180)
+			or hot and (T.btnHover or Color(100, 22, 38, 255))
+			or (T.btn or Color(55, 14, 24, 250))
+		surface.SetDrawColor(bg.r, bg.g, bg.b, bg.a or 250)
+		surface.DrawRect(x, y, w, h)
+		local edge = (enabled and (hot and (T.crimsonHot or Color(255, 70, 100)) or (T.crimson or Color(196, 30, 58))))
+			or (T.crimsonDim or Color(80, 20, 30))
+		surface.SetDrawColor(edge.r, edge.g, edge.b, enabled and 255 or 120)
+		surface.DrawOutlinedRect(x, y, w, h, hot and enabled and 2 or 1)
+		if C and C.DrawChevron then
+			C.DrawChevron(x + w * 0.5, y + h * 0.5, 14, dir, enabled and color_white or (T.muted or Color(120, 80, 90)))
+		else
+			local glyph = dir == "left" and "<" or ">"
+			draw.SimpleText(glyph, "DermaLarge", x + w * 0.5, y + h * 0.5,
+				enabled and color_white or (T.muted or Color(120, 80, 90)), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
 	end
 
 	local function paint()
@@ -438,19 +510,36 @@ function VRUtilWeaponMenuOpen()
 		surface.SetDrawColor((T.bgGlass or Color(22, 10, 16, 230)).r, 8, 10, 120)
 		surface.DrawRect(PAD, STAGE_Y - 4, MENU_W - PAD * 2, stageBottom - STAGE_Y + 4)
 
-		-- ── Weapon cards (Alyx fan) ────────────────────────────────
-		local items = currentItems()
-		local cards = layoutCards(items)
+		-- ── Weapon cards (Alyx fan, paginated) ─────────────────────
+		local items, slice, _pageStart, pages = pageSlice()
+		local cards = layoutCards(slice)
 		state.hoveredItem = -1
+		state.hoveredPrev = false
+		state.hoveredNext = false
+
+		local stageH = stageBottom - STAGE_Y
+		local arrowY = STAGE_Y + math.max(0, (stageH - ARROW_H) * 0.5) - 10
+		local prevX = PAD
+		local nextX = MENU_W - PAD - ARROW_W
+		local canPrev = pages > 1 and state.page > 1
+		local canNext = pages > 1 and state.page < pages
+		if pages > 1 then
+			state.hoveredPrev = canPrev and Hit(mx, my, prevX, arrowY, ARROW_W, ARROW_H)
+			state.hoveredNext = canNext and Hit(mx, my, nextX, arrowY, ARROW_W, ARROW_H)
+			drawPageArrow(prevX, arrowY, ARROW_W, ARROW_H, "left", canPrev, state.hoveredPrev, C, T)
+			drawPageArrow(nextX, arrowY, ARROW_W, ARROW_H, "right", canNext, state.hoveredNext, C, T)
+		end
+
 		if #items == 0 then
 			draw.SimpleText("no weapons in this group", fonts.label, MENU_W * 0.5, STAGE_Y + 100,
 				T.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		else
-			for i, item in ipairs(items) do
+			for i, entry in ipairs(slice) do
+				local item = entry.item
 				local r = cards[i]
 				if not r then continue end
 				local hot = Hit(mx, my, r.x, r.y, r.w, r.h)
-				if hot then state.hoveredItem = i end
+				if hot then state.hoveredItem = entry.global end
 				local isActive = activeClass and item.class == activeClass
 				-- Hover scale (Alyx pop)
 				local dx, dy, dw, dh = r.x, r.y, r.w, r.h
@@ -463,6 +552,24 @@ function VRUtilWeaponMenuOpen()
 				end
 				DrawWeaponCard(dx, dy, dw, dh, item, hot, isActive, ply, fonts, T, C)
 			end
+
+			-- Page dots under the fan (laser-readable)
+			if pages > 1 then
+				local dotR = 5
+				local gap = 14
+				local totalDots = pages * (dotR * 2) + (pages - 1) * gap
+				local dx0 = (MENU_W - totalDots) * 0.5
+				local dyDots = stageBottom - 18 - DOT_Y_OFF
+				for p = 1, pages do
+					local cx = dx0 + (p - 1) * (dotR * 2 + gap) + dotR
+					local sel = p == state.page
+					local col = sel and (T.crimsonHot or Color(255, 70, 100)) or (T.crimsonDim or Color(120, 20, 40))
+					surface.SetDrawColor(col.r, col.g, col.b, sel and 255 or 160)
+					-- filled disc via small rects (no circle helper guaranteed)
+					local s = sel and (dotR + 1) or dotR
+					surface.DrawRect(cx - s, dyDots - s, s * 2, s * 2)
+				end
+			end
 		end
 
 		-- ── Detail / action bar ───────────────────────────────────
@@ -472,7 +579,7 @@ function VRUtilWeaponMenuOpen()
 		surface.SetDrawColor((T.crimson or Color(196, 30, 58)).r, (T.crimson or Color(196, 30, 58)).g, (T.crimson or Color(196, 30, 58)).b, 200)
 		surface.DrawRect(0, dy, MENU_W, 2)
 
-		local focusItem = items[state.hoveredItem]
+		local focusItem = state.hoveredItem > 0 and items[state.hoveredItem] or nil
 		local title = "Point · release to equip"
 		local sub = "grip to free-move panel"
 		local clip, total, alt = -1, -1, -1
@@ -481,13 +588,23 @@ function VRUtilWeaponMenuOpen()
 			clip, total, alt = GetWeaponAmmo(focusItem.wep, ply)
 			sub = "AMMO  " .. FormatAmmo(clip, total)
 			if alt and alt > 0 then sub = sub .. "    ALT  " .. tostring(alt) end
+		elseif state.hoveredPrev then
+			title = "PREVIOUS"
+			sub = string.format("page %d → %d", state.page, state.page - 1)
+		elseif state.hoveredNext then
+			title = "NEXT"
+			sub = string.format("page %d → %d", state.page, state.page + 1)
 		elseif state.hoveredHolster then
 			title = "HOLSTER"
 			sub = "stow active weapon"
 		elseif #items > 0 then
 			local slotId = slotOrder[state.catIndex]
 			title = slotNames[slotId] or "WEAPONS"
-			sub = string.format("%d ready", #items)
+			if pages > 1 then
+				sub = string.format("%d ready · page %d / %d", #items, state.page, pages)
+			else
+				sub = string.format("%d ready", #items)
+			end
 		end
 
 		draw.SimpleText(title, fonts.title, PAD + 4, dy + 12, T.crimson or Color(196, 30, 58), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
@@ -524,7 +641,7 @@ function VRUtilWeaponMenuOpen()
 		VRUtilMenuRenderEnd()
 	end
 
-	-- Click categories while menu held open
+	-- Click categories / page arrows while menu held open
 	hook.Add("VRMod_Input", "vrmod_weaponmenu_nav", function(action, pressed)
 		if not open then return end
 		if not pressed then return end
@@ -533,6 +650,27 @@ function VRUtilWeaponMenuOpen()
 		if state.hoveredCat > 0 then
 			state.catIndex = state.hoveredCat
 			state.hoveredItem = -1
+			state.page = state.pageByCat[state.catIndex] or 1
+			clampPage()
+			return
+		end
+		if state.hoveredPrev then
+			local pages = clampPage()
+			if state.page > 1 then
+				state.page = state.page - 1
+				state.pageByCat[state.catIndex] = state.page
+				state.hoveredItem = -1
+			end
+			return
+		end
+		if state.hoveredNext then
+			local pages = clampPage()
+			if state.page < pages then
+				state.page = state.page + 1
+				state.pageByCat[state.catIndex] = state.page
+				state.hoveredItem = -1
+			end
+			return
 		end
 		if state.hoveredHolster then
 			selectHolster = true
