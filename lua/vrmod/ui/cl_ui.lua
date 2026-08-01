@@ -741,11 +741,6 @@ if CLIENT then
 		return true
 	end
 
-	local function IsSandboxShellUid(uid)
-		return uid == "p2v_spawnmenu" or uid == "p2v_contextmenu"
-			or (uid and string.StartWith(tostring(uid), "p2v_"))
-	end
-
 	--- Re-pin hand shell top-left for current scale (HandMenuPose half-size must match).
 	local function ReposeHandMenu(menu)
 		if not menu or menu.freeFloat or menu.grabHand then return end
@@ -1063,13 +1058,20 @@ if CLIENT then
 			local drawS = (menu.baseScale or menu.scale or 0.03) * uiS
 			local mw, mh = menu.width or 512, menu.height or 512
 			local center = wPos + wAng:Right() * (mw * drawS * 0.5) - wAng:Forward() * (mh * drawS * 0.5)
-			local startDist = hand.pos:Distance(center)
+			local startDist
+			if keepAttached then
+				local wrist = HandPose(MenuAttachHandName(menu))
+				if not wrist or not wrist.pos then return false end
+				startDist = hand.pos:Distance(wrist.pos)
+			else
+				startDist = hand.pos:Distance(center)
+			end
 			if startDist < 2 then startDist = 2 end
 			resizeState = {
 				uid = uid,
 				hand = handName,
 				startScale = menu.baseScale or menu.scale or 0.03,
-				origin = Vector(center), -- scale from panel center (not TL)
+				origin = Vector(center), -- free-float: fixed world center
 				startDist = startDist,
 				keepAttached = keepAttached and true or false,
 			}
