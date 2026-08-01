@@ -255,7 +255,29 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_spawnmenu" then
+		-- 3× tap within ~1s → reset all window poses/sizes/anchors (then reopen QM)
 		if pressed then
+			g_VR._qmTapTimes = g_VR._qmTapTimes or {}
+			local taps = g_VR._qmTapTimes
+			local now = SysTime()
+			local window = 1.0
+			while #taps > 0 and (now - taps[1]) > window do
+				table.remove(taps, 1)
+			end
+			taps[#taps + 1] = now
+			if #taps >= 3 then
+				g_VR._qmTapTimes = {}
+				if g_VR.MenuClose then pcall(g_VR.MenuClose) end
+				if vrmod.ResetAllWindowLayouts then
+					vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
+				elseif isfunction(RunConsoleCommand) then
+					RunConsoleCommand("vrmod_reset_window_layouts")
+				end
+				if vrmod.Toast then
+					vrmod.Toast("3× menu — layouts reset to wrist defaults", 3, "ok")
+				end
+				return
+			end
 			g_VR.MenuOpen()
 			if cl_hudonlykey:GetBool() then LocalPlayer():ConCommand("vrmod_hud 1") end
 		else

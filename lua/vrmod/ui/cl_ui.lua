@@ -20,16 +20,19 @@ if CLIENT then
 	-- Corner resize: grip + pull bottom-right corner to scale a panel.
 	local cv_menu_resize = CreateClientConVar("vrmod_menu_resize", "1", true, FCVAR_ARCHIVE,
 		"Grip + pull panel corner to resize (scale) VR menus", 0, 1)
-	-- Primary hand (SoT): laser + menu LMB. Opposite hand = wrist menus.
+	-- Primary hand (SoT): laser + menu LMB. Opposite hand = default wrist menus.
 	-- 0 = right (default), 1 = left. Integer so Cube combo + Derma combo share one path.
 	local cv_primary_hand = CreateClientConVar("vrmod_primary_hand", "0", true, FCVAR_ARCHIVE,
 		"VR primary hand: 0=right (laser+click), 1=left. Wrist menus use the other hand.", 0, 1)
+	-- Quick menu attach: 0=left, 1=right, 2=free float
+	local cv_qm_attach = CreateClientConVar("vrmod_qm_attach", "0", true, FCVAR_ARCHIVE,
+		"Quick menu attach: 0=left hand, 1=right hand, 2=free float", 0, 2)
 
 	------------------------------------------------------------------------
 	-- Primary hand SoT (single truth — not dual free-for-all lasers)
 	--   Primary   → laser pointer + menu primary click (LMB)
-	--   Secondary → wrist-attached panels (QM, settings, spawn shell)
-	--   Either grip still free-grabs a laser-focused panel
+	--   Secondary → default wrist for non-QM panels
+	--   QM attach → vrmod_qm_attach (left / right / free float)
 	------------------------------------------------------------------------
 
 	function vrmod.GetPrimaryHand()
@@ -45,8 +48,32 @@ if CLIENT then
 		return handName == vrmod.GetPrimaryHand()
 	end
 
-	--- Wrist hand for a menu: explicit attachHand wins, else secondary (non-primary).
+	--- Quick menu mode: "left" | "right" | "float"
+	function vrmod.GetQuickMenuAttachMode()
+		local v = cv_qm_attach and cv_qm_attach:GetInt() or 0
+		if v == 1 then return "right" end
+		if v == 2 then return "float" end
+		return "left"
+	end
+
+	--- True if QM is free-float (not hand-locked)
+	function vrmod.IsQuickMenuFreeFloat()
+		return vrmod.GetQuickMenuAttachMode() == "float"
+	end
+
+	--- Hand for QM when attached (nil if free float)
+	function vrmod.GetQuickMenuHand()
+		local m = vrmod.GetQuickMenuAttachMode()
+		if m == "float" then return nil end
+		return m -- "left" or "right"
+	end
+
+	--- Wrist hand for a menu: explicit attachHand wins; miscmenu uses qm_attach; else secondary.
 	function vrmod.GetMenuWristHand(menu)
+		if menu and menu.uid == "miscmenu" then
+			local h = vrmod.GetQuickMenuHand()
+			if h then return h end
+		end
 		if menu and (menu.attachHand == "left" or menu.attachHand == "right") then
 			return menu.attachHand
 		end
@@ -403,17 +430,21 @@ if CLIENT then
 		if not menu then return false end
 		local sc = menu.baseScale or menu.scale or 0.03
 		local all = ReadLayouts()
+		-- QM only saves free-float pose when attach mode is free float
+		local isQM = (tostring(uid) == "miscmenu")
+		local qmFloat = isQM and vrmod.IsQuickMenuFreeFloat and vrmod.IsQuickMenuFreeFloat()
+		local allowFloat = (not isQM) or qmFloat
 		local entry = {
 			scale = sc,
 			scaleLocked = menu.scaleLocked and true or false,
-			freeFloat = (menu.freeFloat or not menu.attachment) and true or false,
+			freeFloat = allowFloat and (menu.freeFloat or not menu.attachment) and true or false,
 			width = menu.width,
 			height = menu.height,
 		}
-		if menu.pos then
+		if allowFloat and menu.pos and entry.freeFloat then
 			entry.pos = { x = menu.pos.x, y = menu.pos.y, z = menu.pos.z }
 		end
-		if menu.ang then
+		if allowFloat and menu.ang and entry.freeFloat then
 			entry.ang = { p = menu.ang.p, y = menu.ang.y, r = menu.ang.r }
 		end
 		all[tostring(uid)] = entry
@@ -433,32 +464,30 @@ if CLIENT then
 		if not e then return false end
 		local applied = false
 		local sc = e.scale and tonumber(e.scale) or nil
-		-- Quick menu: never restore free-float — always wrist
-		local forceHand = (tostring(uid) == "miscmenu")
-		-- Reject corrupt/micro scales that make menus effectively invisible
-		if sc and sc >= SCALE_MIN and sc <= SCALE_MAX and not forceHand then
-			LockMenuScale(menu, sc)
-			applied = true
-		elseif sc and sc >= SCALE_MIN and sc <= SCALE_MAX and forceHand then
-			-- Scale only (still attached)
-			menu.scale = sc
-			menu.baseScale = sc
-			menu._lastAssignedScale = sc
-			applied = true
-		elseif e.scaleLocked and sc and sc > 0 then
-			menu.scaleLocked = false
-		end
-		if forceHand then
+		local isQM = (tostring(uid) == "miscmenu")
+		local qmFloat = isQM and vrmod.IsQuickMenuFreeFloat and vrmod.IsQuickMenuFreeFloat()
+		-- Hand-locked QM: scale only, never free-float restore
+		if isQM and not qmFloat then
+			if sc and sc >= SCALE_MIN and sc <= SCALE_MAX then
+				menu.scale = sc
+				menu.baseScale = sc
+				menu._lastAssignedScale = sc
+				applied = true
+			end
 			menu.freeFloat = false
 			menu.attachment = true
 			menu.grabbable = false
 			return applied
 		end
-		-- freeFloat==false means user reattached: keep open-time attachment, only scale above
+		if sc and sc >= SCALE_MIN and sc <= SCALE_MAX then
+			LockMenuScale(menu, sc)
+			applied = true
+		elseif e.scaleLocked and sc and sc > 0 then
+			menu.scaleLocked = false
+		end
 		if e.freeFloat and e.pos and e.ang then
 			local px, py, pz = e.pos.x or e.pos[1], e.pos.y or e.pos[2], e.pos.z or e.pos[3]
 			local ap, ay, ar = e.ang.p or e.ang[1], e.ang.y or e.ang[2], e.ang.r or e.ang[3]
-			-- NaN / absurd world offsets → ignore (menu "gone")
 			local okPos = px and py and pz and math.abs(px) < 1e5 and math.abs(py) < 1e5 and math.abs(pz) < 1e5
 			if okPos and ap and ay and ar and (not sc or (sc >= SCALE_MIN and sc <= SCALE_MAX)) then
 				menu.pos = Vector(px, py, pz)
@@ -928,11 +957,23 @@ if CLIENT then
 		local cx = menu.lastCursorX or g_VR.menuCursorX or 0
 		local cy = menu.lastCursorY or g_VR.menuCursorY or 0
 
+		-- Hand-locked quick menu: no free-float grab; free-float mode allows grab
+		local isQM = (uid == "miscmenu")
+		local qmHandLocked = isQM and not (vrmod.IsQuickMenuFreeFloat and vrmod.IsQuickMenuFreeFloat())
+		if qmHandLocked then
+			menu.freeFloat = false
+			menu.attachment = true
+			menu.grabbable = false
+			menu.grabHand = nil
+		elseif isQM then
+			menu.grabbable = true
+		end
+
 		-- Corner grip → resize (every window by default); body grip → free-move if grabbable
 		if resizeOn and MenuIsResizable(menu) and CursorInResizeCorner(menu, cx, cy) then
-			-- Detach to free-float so resize stays put while scaling
 			local wPos, wAng = ResolveMenuWorldPose(menu)
-			if not menu.freeFloat and wPos and wAng then
+			-- Detach to free-float while scaling — except hand-locked QM
+			if not qmHandLocked and not menu.freeFloat and wPos and wAng then
 				local origin = g_VR.origin or Vector()
 				local originAng = g_VR.originAngle or Angle()
 				menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
@@ -963,7 +1004,7 @@ if CLIENT then
 		end
 
 		if not grabOn then return false end
-		if menu.grabbable == false then return false end
+		if qmHandLocked or menu.grabbable == false then return false end
 
 		local wPos, wAng = ResolveMenuWorldPose(menu)
 		local hand = HandPose(handName)

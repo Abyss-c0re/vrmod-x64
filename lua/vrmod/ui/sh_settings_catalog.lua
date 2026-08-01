@@ -160,7 +160,12 @@ vrmod.SettingsCatalog = {
 				{ text = "Right", value = 0 },
 				{ text = "Left", value = 1 },
 			}},
-			{ kind = "help", label = "Laser + menu click on primary. Wrist menus (QM/settings) ride the other hand." },
+			{ kind = "combo", label = "Quick menu attach", cvar = "vrmod_qm_attach", choices = {
+				{ text = "Left hand", value = 0 },
+				{ text = "Right hand", value = 1 },
+				{ text = "Free float", value = 2 },
+			}},
+			{ kind = "help", label = "Laser + click on primary. QM attach: left, right, or free float. 3× tap menu button = reset all poses." },
 			{ kind = "slider", label = "HUD distance", cvar = "vrmod_huddistance", min = 1, max = 100, decimals = 0 },
 			{ kind = "slider", label = "HUD scale", cvar = "vrmod_hudscale", min = 0.01, max = 0.1, decimals = 2 },
 			{ kind = "slider", label = "HUD curve", cvar = "vrmod_hudcurve", min = -100, max = 100, decimals = 0 },

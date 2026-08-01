@@ -45,23 +45,39 @@ function g_VR.MenuOpen()
 	hoverNav = nil
 
 	local qmW, qmH, qmScale = 512, 512, 0.025
-	local wrist = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+	local attachMode = (vrmod.GetQuickMenuAttachMode and vrmod.GetQuickMenuAttachMode()) or "left"
+	local useFloat = attachMode == "float"
+	local wrist = (not useFloat and vrmod.GetQuickMenuHand and vrmod.GetQuickMenuHand())
+		or (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand())
+		or "left"
 	local qmPos, qmAng = Vector(2.5, 3, 4), Angle(0, -90, 55)
-	if isfunction(VRUtilHandMenuPose) then
+	if useFloat then
+		-- Default free-float: in front of HMD (origin-relative)
+		if g_VR.tracking and g_VR.tracking.hmd then
+			local hmd = g_VR.tracking.hmd
+			local yawOnly = Angle(0, hmd.ang.yaw, 0)
+			local worldPos = hmd.pos + yawOnly:Forward() * 22 + Vector(0, 0, -4)
+			local worldAng = Angle(0, yawOnly.yaw + 180, 90)
+			if g_VR.origin and g_VR.originAngle then
+				qmPos, qmAng = WorldToLocal(worldPos, worldAng, g_VR.origin, g_VR.originAngle)
+			else
+				qmPos, qmAng = worldPos, worldAng
+			end
+		end
+		qmScale = 0.025
+	elseif isfunction(VRUtilHandMenuPose) then
 		qmPos, qmAng, qmScale = VRUtilHandMenuPose(qmW, qmH, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55), wrist)
 	end
 
 	local okOpen, errOpen = pcall(function()
-		VRUtilMenuOpen("miscmenu", qmW, qmH, nil, true, qmPos, qmAng, qmScale, true, function()
+		VRUtilMenuOpen("miscmenu", qmW, qmH, nil, not useFloat, qmPos, qmAng, qmScale, true, function()
 			hook.Remove("PreRender", "vrutil_hook_renderigm")
 			hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
 			open = false
 			local sel = prevHoveredItem
 			local nav = hoverNav
 			hoverNav = nil
-			-- Page nav on close shouldn't fire items
 			if nav then return end
-			-- Run after miscmenu is fully closed so nested VRUtilMenuOpen works
 			if sel > 0 and pageEntries[sel] then
 				local fn = pageEntries[sel].func
 				if isfunction(fn) then
@@ -90,38 +106,43 @@ function g_VR.MenuOpen()
 
 	do
 		local mm = g_VR.menus.miscmenu
-		-- Law: quick menu is ALWAYS wrist-attached (never free-float / grab)
-		mm.scaleLocked = false
-		mm.freeFloat = false
-		mm.attachment = true
-		mm.grabbable = false
-		mm.grabHand = nil
-		mm.grabPos = nil
-		mm.grabAng = nil
+		mm.cubeMenu = true
+		mm.dirty = true
 		mm.scale = qmScale
 		mm.baseScale = qmScale
 		mm._lastAssignedScale = qmScale
-		mm.pos = qmPos
-		mm.ang = qmAng
-		mm.cubeMenu = true
-		mm.attachHand = wrist
-		mm.dirty = true
-		-- Drop any saved free-float so reopen never parks QM in the world
-		if vrmod.ClearMenuLayout then
-			local lay = vrmod.GetMenuLayout and vrmod.GetMenuLayout("miscmenu")
-			if lay and lay.freeFloat then
-				vrmod.ClearMenuLayout("miscmenu")
+		if useFloat then
+			mm.freeFloat = true
+			mm.attachment = false
+			mm.grabbable = true
+			mm.attachHand = nil
+			mm.pos = qmPos
+			mm.ang = qmAng
+			-- Restore last free-float pose if saved
+			if vrmod.ApplyMenuLayout then
+				vrmod.ApplyMenuLayout("miscmenu", mm)
 			end
+		else
+			mm.freeFloat = false
+			mm.attachment = true
+			mm.grabbable = false
+			mm.grabHand = nil
+			mm.grabPos = nil
+			mm.grabAng = nil
+			mm.attachHand = wrist
+			mm.pos = qmPos
+			mm.ang = qmAng
+			mm.scaleLocked = false
 		end
 	end
 
 	-- First-open coaching (once per install)
-	if not cookie.GetNumber("vrmod_hint_qm_v1", 0) or cookie.GetNumber("vrmod_hint_qm_v1", 0) == 0 then
-		cookie.Set("vrmod_hint_qm_v1", "1")
+	if not cookie.GetNumber("vrmod_hint_qm_v2", 0) or cookie.GetNumber("vrmod_hint_qm_v2", 0) == 0 then
+		cookie.Set("vrmod_hint_qm_v2", "1")
 		if vrmod.Toast then
 			timer.Simple(0.4, function()
 				if not g_VR or not g_VR.active then return end
-				vrmod.Toast("Quick Menu stays on your wrist — point with the other hand, trigger to pick", 5, "hint")
+				vrmod.Toast("Quick Menu: left/right hand or free float in Settings · 3× tap menu = reset poses", 6, "hint")
 			end)
 		end
 	end
@@ -327,10 +348,18 @@ function g_VR.MenuOpen()
 			return
 		end
 		local mm = g_VR.menus.miscmenu
+		-- Pin every frame: never free-float / grab away from wrist
+		mm.freeFloat = false
+		mm.attachment = true
+		mm.grabbable = false
+		mm.grabHand = nil
+		if not mm.attachHand then
+			mm.attachHand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+		end
 		if not mm.scaleLocked then
-			mm.scale = 0.03
-			mm.baseScale = 0.03
-			mm._lastAssignedScale = 0.03
+			mm.scale = 0.025
+			mm.baseScale = 0.025
+			mm._lastAssignedScale = 0.025
 		end
 		mm.cubeMenu = true
 		mm.paintInterval = 12
