@@ -885,6 +885,33 @@ if CLIENT then
 			-- Twin IK, HUD RT capture, menu pose snapshot — never on
 			-- VRMod_PreRender(left) only. Both eyes then only DRAW.
 			-- ============================================================
+			-- Freeze hand samples for the whole stereo pair (grip/laser/UI).
+			-- Live tracking must not be re-read between left and right eyes.
+			do
+				local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+				local R = g_VR.tracking and g_VR.tracking.pose_righthand
+				g_VR.stereoPose = g_VR.stereoPose or {}
+				local sp = g_VR.stereoPose
+				sp.frame = g_VR.stereoFrame
+				if L and L.pos and L.ang then
+					sp.leftPos = sp.leftPos or Vector()
+					sp.leftAng = sp.leftAng or Angle()
+					sp.leftPos:Set(L.pos)
+					sp.leftAng:Set(L.ang)
+					sp.hasLeft = true
+				else
+					sp.hasLeft = false
+				end
+				if R and R.pos and R.ang then
+					sp.rightPos = sp.rightPos or Vector()
+					sp.rightAng = sp.rightAng or Angle()
+					sp.rightPos:Set(R.pos)
+					sp.rightAng:Set(R.ang)
+					sp.hasRight = true
+				else
+					sp.hasRight = false
+				end
+			end
 			hook.Call("VRMod_PreStereo", nil)
 
 			-- LEFT eye — draw only

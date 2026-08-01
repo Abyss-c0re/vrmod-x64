@@ -50,6 +50,12 @@ local snap = {
 }
 
 local function HandPose()
+	-- Prefer stereo-frozen right hand (same both eyes)
+	local sp = g_VR and g_VR.stereoPose
+	local sf = g_VR and g_VR.stereoFrame or 0
+	if sp and sp.frame == sf and sp.hasRight then
+		return { pos = sp.rightPos, ang = sp.rightAng }
+	end
 	local hand = g_VR and g_VR.tracking and g_VR.tracking.pose_righthand
 	if hand and hand.pos and hand.ang then return hand end
 	return nil

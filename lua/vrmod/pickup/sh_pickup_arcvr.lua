@@ -21,8 +21,7 @@ local function init()
 			ent.VRPickupLocalPos = Vector(localPos)
 			ent.VRPickupLocalAng = Angle(localAng.p, localAng.y, localAng.r)
 
-			-- Stereo-stable hold pose: compute once per stereoFrame (not per eye).
-			-- Per-eye SetPos/SetupBones from live hand caused L/R desync while gripping.
+			-- Stereo-stable hold pose: one world matrix per stereoFrame for both eyes.
 			ent.RenderOverride = function(self)
 				if not IsValid(self) then return end
 				local sf = (g_VR and g_VR.stereoFrame) or (FrameNumber and FrameNumber()) or 0
@@ -32,11 +31,21 @@ local function init()
 					local lang = self.VRPickupLocalAng or angle_zero
 					local handPos, handAng
 
-					if ply == LocalPlayer() and g_VR and g_VR.tracking then
+					-- Prefer frame-frozen stereoPose (set before either eye draws)
+					local sp = g_VR and g_VR.stereoPose
+					if ply == LocalPlayer() and sp and sp.frame == sf then
+						if useLeft and sp.hasLeft then
+							handPos, handAng = sp.leftPos, sp.leftAng
+						elseif (not useLeft) and sp.hasRight then
+							handPos, handAng = sp.rightPos, sp.rightAng
+						end
+					end
+					if not handPos and ply == LocalPlayer() and g_VR and g_VR.tracking then
 						local pose = useLeft and g_VR.tracking.pose_lefthand or g_VR.tracking.pose_righthand
 						if not pose or not pose.pos then return end
 						handPos, handAng = pose.pos, pose.ang
-					else
+					end
+					if not handPos then
 						local netData = g_VR and g_VR.net and g_VR.net[steamid]
 						if not netData or not netData.lerpedFrame then return end
 						local frame = netData.lerpedFrame
@@ -45,21 +54,23 @@ local function init()
 						else
 							handPos, handAng = frame.righthandPos, frame.righthandAng
 						end
-						if not handPos or not handAng then return end
 					end
+					if not handPos or not handAng then return end
 
 					local wpos, wang = LocalToWorld(lpos, lang, handPos, handAng)
+					if not self._vrHoldPos then self._vrHoldPos = Vector() end
+					if not self._vrHoldAng then self._vrHoldAng = Angle() end
+					self._vrHoldPos:Set(wpos)
+					self._vrHoldAng:Set(wang)
 					self._vrHoldFrame = sf
-					self._vrHoldPos = wpos
-					self._vrHoldAng = wang
-				end
-
-				self:SetPos(self._vrHoldPos)
-				self:SetAngles(self._vrHoldAng)
-				-- SetupBones once per frame only (second eye reuses matrices)
-				if self._vrHoldBonesFrame ~= sf then
+					self:SetPos(self._vrHoldPos)
+					self:SetAngles(self._vrHoldAng)
 					self:SetupBones()
 					self._vrHoldBonesFrame = sf
+				else
+					-- Second eye: same matrix, no re-SetupBones
+					self:SetPos(self._vrHoldPos)
+					self:SetAngles(self._vrHoldAng)
 				end
 				self:DrawModel()
 			end

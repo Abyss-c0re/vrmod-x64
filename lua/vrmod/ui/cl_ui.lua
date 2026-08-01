@@ -305,11 +305,27 @@ if CLIENT then
 	-- Same-frame multi-hook idempotency (ui + defaultinput both call TryMenuGrab)
 	local consumeStamp = { frame = -1, hand = nil, pressed = nil }
 
-	local function HandPose(handName)
+	--- Live tracking hand (input / grab start only).
+	local function HandPoseLive(handName)
 		if not g_VR.tracking then return nil end
 		if handName == "left" then return g_VR.tracking.pose_lefthand end
 		if handName == "right" then return g_VR.tracking.pose_righthand end
 		return nil
+	end
+
+	--- Stereo-frozen hand for draw/grab pose (same L+R eyes). Falls back to live.
+	local function HandPose(handName)
+		local sp = g_VR.stereoPose
+		local sf = g_VR.stereoFrame or 0
+		if sp and sp.frame == sf then
+			if handName == "left" and sp.hasLeft then
+				return { pos = sp.leftPos, ang = sp.leftAng }
+			end
+			if handName == "right" and sp.hasRight then
+				return { pos = sp.rightPos, ang = sp.rightAng }
+			end
+		end
+		return HandPoseLive(handName)
 	end
 
 	local function MarkConsumed(handName, pressed)
