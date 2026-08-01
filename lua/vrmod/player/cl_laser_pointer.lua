@@ -72,18 +72,28 @@ local function ResolveMuzzle()
 	local hand = HandPose()
 	if not hand then return nil, nil end
 
-	-- Force stock/VR gun onto hand SoT before reading attachments
-	if vrmod.utils and vrmod.utils.UpdateViewModelPos then
-		pcall(vrmod.utils.UpdateViewModelPos, hand.pos, hand.ang, true)
-	elseif vrmod.utils and vrmod.utils.UpdateViewModel then
-		pcall(vrmod.utils.UpdateViewModel)
-	end
-
 	local wep = LocalPlayer():GetActiveWeapon()
 	local class = IsValid(wep) and wep:GetClass() or ""
 	local vmi = g_VR.currentvmi or (g_VR.viewModelInfo and g_VR.viewModelInfo[class]) or {}
-	local gunPos = g_VR.viewModelPos
-	local gunAng = g_VR.viewModelAng
+	local sf = g_VR.stereoFrame or 0
+	local gunPos, gunAng
+
+	-- Prefer stereo-frozen weapon snap (foregrip guided aim / PreStereo freeze).
+	-- Do not re-solve from raw RH — that undoes two-hand aim mid-draw.
+	if g_VR._weaponSnapFrame == sf and g_VR._weaponSnapPos and g_VR._weaponSnapAng then
+		gunPos, gunAng = g_VR._weaponSnapPos, g_VR._weaponSnapAng
+		g_VR.viewModelPos = gunPos
+		g_VR.viewModelAng = gunAng
+	else
+		-- Force stock/VR gun onto hand SoT before reading attachments
+		if vrmod.utils and vrmod.utils.UpdateViewModelPos then
+			pcall(vrmod.utils.UpdateViewModelPos, hand.pos, hand.ang, true)
+		elseif vrmod.utils and vrmod.utils.UpdateViewModel then
+			pcall(vrmod.utils.UpdateViewModel)
+		end
+		gunPos = g_VR.viewModelPos
+		gunAng = g_VR.viewModelAng
+	end
 	if not gunPos or not gunAng then
 		gunPos, gunAng = hand.pos, hand.ang
 	end

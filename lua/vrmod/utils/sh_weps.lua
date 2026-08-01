@@ -95,20 +95,30 @@ function vrmod.utils.UpdateViewModelPos(pos, ang, override)
     if not ply:Alive() then return end
     local currentvmi = EnsureCurrentVMI(ply)
 
-    -- Always prefer tracking SoT (post wall override). Args are optional hints only.
-    local hand = g_VR.tracking and g_VR.tracking.pose_righthand
-    if hand and hand.pos and hand.ang then
-        pos, ang = hand.pos, hand.ang
+    -- override=true + pos/ang: use those hands (foregrip guided aim).
+    -- Otherwise prefer tracking SoT (post wall override); args are optional hints.
+    local handPos, handAng
+    if override and pos and ang then
+        handPos, handAng = pos, ang
+    else
+        local hand = g_VR.tracking and g_VR.tracking.pose_righthand
+        if hand and hand.pos and hand.ang then
+            handPos, handAng = hand.pos, hand.ang
+        else
+            handPos, handAng = pos, ang
+        end
     end
-    if not pos or not ang then return end
+    if not handPos or not handAng then return end
 
-    local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos or Vector(), currentvmi.offsetAng or Angle(), pos, ang)
+    local offsetPos, offsetAng = LocalToWorld(currentvmi.offsetPos or Vector(), currentvmi.offsetAng or Angle(), handPos, handAng)
     g_VR.viewModelPos = offsetPos
     g_VR.viewModelAng = offsetAng
-    vrmod.utils.UpdateViewModel()
+    -- Pass the same hand so UpdateViewModel does not re-read tracking and stomp guided pose
+    vrmod.utils.UpdateViewModel(handPos, handAng)
 end
 
-function vrmod.utils.UpdateViewModel()
+--- Optional handPos/handAng: pose from these instead of tracking (guided foregrip).
+function vrmod.utils.UpdateViewModel(handPos, handAng)
     local vm = g_VR.viewModel
     if not IsValid(vm) then
         -- Fall back to engine viewmodel for stock weapons
@@ -122,9 +132,11 @@ function vrmod.utils.UpdateViewModel()
 
     local vmi = g_VR.currentvmi or EnsureCurrentVMI(LocalPlayer())
     local hand = g_VR.tracking and g_VR.tracking.pose_righthand
+    if not (handPos and handAng) and hand and hand.pos and hand.ang then
+        handPos, handAng = hand.pos, hand.ang
+    end
 
-    if vmi and vmi.useWorldModel and hand and hand.pos and hand.ang then
-        local handPos, handAng = hand.pos, hand.ang
+    if vmi and vmi.useWorldModel and handPos and handAng then
         local off = vmi.offsetPos or Vector()
         local oang = vmi.offsetAng or Angle()
         local pos = handPos + handAng:Forward() * off.x + handAng:Right() * off.y + handAng:Up() * off.z
@@ -138,8 +150,8 @@ function vrmod.utils.UpdateViewModel()
         vm:SetAngles(ang)
         vm:SetupBones()
     else
-        if hand and hand.pos and hand.ang and vmi then
-            local offsetPos, offsetAng = LocalToWorld(vmi.offsetPos or Vector(), vmi.offsetAng or Angle(), hand.pos, hand.ang)
+        if handPos and handAng and vmi then
+            local offsetPos, offsetAng = LocalToWorld(vmi.offsetPos or Vector(), vmi.offsetAng or Angle(), handPos, handAng)
             g_VR.viewModelPos = offsetPos
             g_VR.viewModelAng = offsetAng
         end
