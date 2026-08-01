@@ -1,20 +1,21 @@
 # Workshop monitor — 3442302711
 
-**Fire:** 2026-08-01 ~22:01 local (EEST)  
+**Fire:** 2026-08-01 ~23:31 local (EEST)  
 **Law:** commit every fix · workshop only after smoke · mat_queue=1 · cube_is_source_of_truth · no dual-truth pose · primary-hand SoT
 
 ## Sources
-- Comments: **1258** (+2 vs 1256) — **Батон** Bindings tab missing; **Батон** new menu UX + Discord ask; Kriminull sprint still top-ish
+- Comments: **1259** (+1 vs 1258) — **Doom Slayer** author reply to Батон (no Discord / non-linear / GitHub install); prior: Батон Bindings + menu UX; Kriminull sprint
 - Bugs ctp=24: still **349** — #346 fly · #347 black HMD · #348 flicker · #349 HUD ghost
-- Questions: **104** — not re-paged (bugs/comments were the delta)
+- Questions: **104** — not re-paged
 - GitHub open: #27 edges · #31 Pimax left black · #29 eye angles · #21 Proton body · #19 2D tutorial
 
 ## Hot / actionable
 
 | Report | Source | Verdict |
 |--------|--------|---------|
-| **Bindings tab gone** | **Батон** (~24m) | **Fixed this fire** — restore Settings catalog tab `Bindings` + action editor; Controls points there |
-| New menu inconvenient / Discord? | Батон (~19m) | **Help/ignore** — UX opinion + product ask, not pure-Lua bug |
+| Author: no Discord; use GitHub | Doom Slayer (~16m) | **Ignore** — author policy reply, not a bug |
+| **Bindings tab gone** | Батон | **Fixed in tree** (`35c1b17`) — Settings catalog Bindings tab — **needs smoke** |
+| New menu inconvenient / Discord? | Батон | **Help/ignore** — UX opinion; author answered |
 | Forced walk / cannot sprint | Kriminull | **Fixed in tree** (`938b093`) — **needs smoke** |
 | Menu open crash (~2s) | jddudeman | **Already fixed** RT + QM harden — smoke |
 | Hands stuck / PM glitch | Galaxynex; Cookie | **Already fixed** hands + stock FG — smoke |
@@ -24,10 +25,9 @@
 | Black HMD / fly-away | #347 #346 | Module/driver/calib — not pure Lua |
 
 ## Actions this fire
-- Re-fetched comments (**1258**) + bugs last page (349) + GH open issues.
-- **Code fix:** Settings catalog — dedicated **Bindings** tab (`vrmod_actioneditor` + SteamVR help); Controls no longer buries the only entry.
-- Commit + **push origin/main**.
-- **No gmpublish** until smoke of pending stack (+ Bindings tab findable).
+- Re-fetched comments (**1259**) + bugs last page (349) + GH open issues.
+- **No new fixable Lua** — +1 author reply only; Bindings already on main (`35c1b17`).
+- **No gmpublish** (smoke not verified).
 
 ## Pending smoke (before workshop)
 1. Enter VR → full stick = sprint (no button) · stick-click still sprints  
