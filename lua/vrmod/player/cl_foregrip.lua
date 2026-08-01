@@ -1,15 +1,18 @@
 if SERVER then return end
 -- =============================================================================
--- Foregrip (two-hand weapon aim) — stereo-stable, logic-complete
+-- Universal foregrip (two-hand weapon aim) — ArcVR + stock/non-VR SWEPs
+--
+-- VRMod owns grip state + stereo snap for every weapon:
+--   • stock / non-VR: guided RH→LH aim on PreStereo
+--   • ArcVR (TwoHanded): bone-zone grab, GripForegrip/UngripFinger state;
+--     pose stays in AVR_GunTracking (recoil, pump, stock, attachments)
 --
 -- Frame order (cl_vrmod PerformRenderViews):
---   stereoFrame++ → stereoPose freeze (raw hands) → VRMod_PreStereo
---     → foregrip Solve once → write gun snap
---   left eye / right eye: only stamp frozen gun + left-hand attach
+--   UpdateTracking → VRMod_Tracking (ArcVR gun track) → stereoPose freeze
+--   → VRMod_PreStereo (snap publish / stock guide) → eyes draw only
 --
--- Ownership:
---   cl_input calls vrmod.TryForegripGrab before world prop pickup (like menu grab).
---   VRMod_Input hook remains as a fallback if default input is reordered.
+-- Ownership: cl_input → TryForegripGrab before world prop pickup.
+-- ArcVR defers its own left-grip foregrip branch when this module is present.
 -- =============================================================================
 
 local function BlockOldForegripAddon()
@@ -28,15 +31,21 @@ end
 BlockOldForegripAddon()
 timer.Simple(1, BlockOldForegripAddon)
 
+local cv_enable = CreateClientConVar("vrmod_foregrip_enabled", "1", true, FCVAR_ARCHIVE,
+	"Universal two-hand foregrip for stock + ArcVR weapons", 0, 1)
 local cv_dist = CreateClientConVar("vrmod_foregrip_distance", "12", true, FCVAR_ARCHIVE,
-	"Max hand distance to start two-hand grip", 4, 40)
+	"Max hand distance to start stock two-hand grip", 4, 40)
 local cv_blend = CreateClientConVar("vrmod_foregrip_blend", "0.45", true, FCVAR_ARCHIVE,
-	"Aim blend toward support hand (0–1)", 0, 1)
+	"Stock aim blend toward support hand (0–1)", 0, 1)
 local cv_release = CreateClientConVar("vrmod_foregrip_release", "1.35", true, FCVAR_ARCHIVE,
 	"Release multiplier × max(weapon reach, start distance)", 1.05, 3)
 
+local MODE_STOCK = "stock"
+local MODE_ARCVR = "arcvr"
+
 local state = {
 	gripping = false,
+	mode = MODE_STOCK,
 	offsetPos = Vector(0, 0, 0),
 	offsetAng = Angle(0, 0, 0),
 	wep = NULL,
@@ -52,8 +61,29 @@ local state = {
 	startDist = 12,
 }
 
+local function NotifyArcVRUngrip(wep)
+	wep = wep or state.wep
+	if IsValid(wep) and wep.ArcticVR and wep.ForegripGrabbed and isfunction(wep.UngripForegrip) then
+		pcall(wep.UngripForegrip, wep)
+	elseif IsValid(wep) and wep.ArcticVR then
+		wep.ForegripGrabbed = false
+	end
+end
+
+local function NotifyArcVRGrip(wep)
+	if IsValid(wep) and wep.ArcticVR and isfunction(wep.GripForegrip) then
+		pcall(wep.GripForegrip, wep)
+	elseif IsValid(wep) and wep.ArcticVR then
+		wep.ForegripGrabbed = true
+	end
+end
+
 local function ClearGrip(reason)
+	if state.gripping and state.mode == MODE_ARCVR then
+		NotifyArcVRUngrip(state.wep)
+	end
 	state.gripping = false
+	state.mode = MODE_STOCK
 	state.frame = -1
 	state.bonesFrame = -1
 	state.wep = NULL
@@ -66,13 +96,25 @@ local function ClearGrip(reason)
 	end
 end
 
+local function IsArcVRWeapon(wep)
+	return IsValid(wep) and wep.ArcticVR and not wep.ArcticVRNade
+end
+
 local function IsValidForegripWeapon(wep)
 	if not IsValid(wep) then return false end
 	local class = string.lower(wep:GetClass() or "")
 	if class == "" or class == "weapon_vrmod_empty" then return false end
 	if class:find("weapon_fists", 1, true) then return false end
-	if class:StartWith("arcticvr") or class:StartWith("avrmag_") then return false end
-	-- Must be able to pose a viewmodel
+	if class:StartWith("avrmag_") then return false end
+	if wep.ArcticVRNade then return false end
+
+	-- ArcVR two-handers (pose backend stays in ArcVR gun tracking)
+	if IsArcVRWeapon(wep) then
+		return wep.TwoHanded and true or false
+	end
+
+	-- Stock / non-VR: must pose a viewmodel
+	if class:StartWith("arcticvr") then return false end -- unknown arctic class without flag
 	if vrmod.utils and vrmod.utils.IsValidWep and not vrmod.utils.IsValidWep(wep) then
 		return false
 	end
@@ -91,7 +133,6 @@ local function EnsureVMI(wep)
 		g_VR.currentvmi = e
 		return e
 	end
-	-- Ephemeral only if nothing else owns currentvmi
 	if not g_VR.currentvmi then
 		g_VR.currentvmi = { offsetPos = Vector(0, 0, 0), offsetAng = Angle(0, 0, 0) }
 	else
@@ -102,7 +143,6 @@ local function EnsureVMI(wep)
 end
 
 local function SoftReach(reach)
-	-- DEFAULT_REACH is ~5 (melee hand proxy). Too small for two-hand release vs start=12.
 	local def = (vrmod and vrmod.DEFAULT_REACH) or 5
 	if not reach or reach <= def + 0.01 then
 		return math.max(20, cv_dist:GetFloat())
@@ -122,12 +162,15 @@ local function RefreshWeaponBox(ply, wep)
 	}
 end
 
---- Release distance must never be tighter than the distance that allowed start.
 local function ReleaseMaxDist()
 	local reach = (state.weaponBox and state.weaponBox.reach) or SoftReach(nil)
 	local mult = math.Clamp(cv_release:GetFloat(), 1.05, 3)
 	local fromReach = reach * mult
 	local fromStart = (state.startDist or cv_dist:GetFloat()) * mult
+	-- ArcVR foregrips sit farther out — give them more slack
+	if state.mode == MODE_ARCVR then
+		fromReach = math.max(fromReach, 28 * mult)
+	end
 	return math.max(fromReach, fromStart, cv_dist:GetFloat() * mult)
 end
 
@@ -146,11 +189,10 @@ local function GetGuidedWeaponPose(rightPos, rightAng, leftPos, leftAng, box)
 	if dist < minDist then return rightPos, rightAng end
 	local targetAng = toLeft:GetNormalized():Angle()
 	local newAng = LerpAngle(blend, rightAng, targetAng)
-	newAng.r = rightAng.r -- keep roll from RH for stability
+	newAng.r = rightAng.r
 	return rightPos, newAng
 end
 
---- Raw hands for this stereo frame (never guided).
 local function StereoHands()
 	local sp = g_VR.stereoPose
 	local sf = g_VR.stereoFrame or 0
@@ -163,8 +205,14 @@ local function StereoHands()
 	return L.pos, L.ang, R.pos, R.ang
 end
 
+local function LiveHands()
+	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+	local R = g_VR.tracking and g_VR.tracking.pose_righthand
+	if not (L and R and L.pos and R.pos and L.ang and R.ang) then return nil end
+	return L.pos, L.ang, R.pos, R.ang
+end
+
 local function GripStillHeld()
-	-- Edge-detect can miss release; require continuous left grip when input is known.
 	local inp = g_VR and g_VR.input
 	if not inp then return state.gripping end
 	local v = inp.boolean_left_pickup
@@ -183,7 +231,26 @@ local function PublishWeaponSnap(sf, gunPos, gunAng)
 	g_VR.viewModelAng = g_VR._weaponSnapAng
 end
 
+local function StampLeftHand(sf)
+	if vrmod.SetLeftHandPose then
+		vrmod.SetLeftHandPose(state.leftPos, state.leftAng, 0)
+	elseif g_VR.tracking and g_VR.tracking.pose_lefthand then
+		local L = g_VR.tracking.pose_lefthand
+		if L.pos.Set then L.pos:Set(state.leftPos) else L.pos = state.leftPos end
+		if L.ang.Set then L.ang:Set(state.leftAng) else L.ang = state.leftAng end
+	end
+	local sp = g_VR.stereoPose
+	if sp and sp.frame == sf then
+		if not sp.leftPos then sp.leftPos = Vector() end
+		if not sp.leftAng then sp.leftAng = Angle() end
+		sp.leftPos:Set(state.leftPos)
+		sp.leftAng:Set(state.leftAng)
+		sp.hasLeft = true
+	end
+end
+
 local function CanStartGripContext()
+	if not cv_enable:GetBool() then return false end
 	if not g_VR or not g_VR.active then return false end
 	if g_VR.menuFocus or g_VR.menuGrabActive or g_VR.menuResizeActive then return false end
 	if g_VR.avatarSteerTwin then return false end
@@ -193,55 +260,88 @@ local function CanStartGripContext()
 	return true
 end
 
---- Solve two-hand pose ONCE per stereo frame.
-local function SolveForegripFrame()
-	if not state.gripping then return false end
+--- ArcVR: hand inside SWEP foregrip bone OBB (same test as arcticvr_base).
+local function ArcVRHandInForegrip(wep)
+	if not IsValid(wep) or not wep.TwoHanded then return false end
+	-- Don't steal slide / belt / dust-cover grabs
+	if wep.SlideGrabbed or wep.BeltGrabbed or wep.DustCoverGrabbed then return false end
+	if wep.ForegripOnPivot and wep.ChamberOpen then return false end
 
-	if not GripStillHeld() then
-		ClearGrip("grip released")
+	local mag = 1
+	local cv = GetConVar("arcticvr_grip_magnification")
+	if cv then mag = math.max(cv:GetFloat(), 0.25) end
+
+	local mins = wep.ForegripMins or Vector(-4, -3, -4)
+	local maxs = wep.ForegripMaxs or Vector(4, 3, 4)
+	if isvector(mins) then mins = mins * mag end
+	if isvector(maxs) then maxs = maxs * mag end
+
+	local bone = 0
+	if wep.BoneIndices and wep.BoneIndices.foregrip then
+		bone = wep.BoneIndices.foregrip
+	end
+
+	if isfunction(wep.LeftHandInMaxs) then
+		local ok, hit = pcall(wep.LeftHandInMaxs, wep, bone, mins, maxs)
+		if ok then return hit and true or false end
+	end
+
+	-- Fallback: hand near world foregrip offset from gun
+	local vm = g_VR.viewModel
+	if not IsValid(vm) then return false end
+	local off = wep.ForegripOffset or Vector(0, 0, 0)
+	local fgWorld = LocalToWorld(off, Angle(0, 0, 0), vm:GetPos(), vm:GetAngles())
+	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+	if not (L and L.pos) then return false end
+	return L.pos:DistToSqr(fgWorld) < (10 * 10)
+end
+
+--- ArcVR backend: pose already solved on VRMod_Tracking; freeze snap + LH for both eyes.
+local function SolveArcVRFrame(sf, lpos, lang, rpos)
+	local maxDist = ReleaseMaxDist()
+	if lpos:Distance(rpos) > maxDist then
+		ClearGrip("hands too far")
 		return false
 	end
 
-	local ply = LocalPlayer()
-	if not IsValid(ply) or not ply:Alive() then
-		ClearGrip("dead")
-		return false
-	end
-
-	local wep = IsValid(state.wep) and state.wep or ply:GetActiveWeapon() or NULL
-	if not IsValidForegripWeapon(wep) then
-		ClearGrip("invalid weapon")
-		return false
-	end
-	if state.class and wep:GetClass() ~= state.class then
-		ClearGrip("weapon switched")
-		return false
-	end
-
-	-- Menu / panel grab wins
-	if g_VR.menuGrabActive or g_VR.menuResizeActive then
-		ClearGrip("menu grab")
-		return false
-	end
-
-	local vmi = EnsureVMI(wep)
-	local sf = g_VR.stereoFrame or 0
-	if state.frame == sf then
-		-- Already solved this frame — re-publish snaps + re-stamp LH
-		PublishWeaponSnap(sf, state.gunPos, state.gunAng)
-		if vrmod.SetLeftHandPose then
-			vrmod.SetLeftHandPose(state.leftPos, state.leftAng, 0)
+	-- Prefer gun matrix ArcVR just wrote; fall back to VM entity
+	local gunPos = g_VR.viewModelPos
+	local gunAng = g_VR.viewModelAng
+	if not gunPos or not gunAng then
+		local vm = g_VR.viewModel
+		if IsValid(vm) then
+			gunPos, gunAng = vm:GetPos(), vm:GetAngles()
+		else
+			return false
 		end
-		return true
 	end
 
-	local lpos, lang, rpos, rang = StereoHands()
-	if not lpos or not rpos then
-		ClearGrip("no hands")
-		return false
-	end
+	-- LH already placed by AVR_GunTracking; use live/stereo left
+	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+	local leftPos = (L and L.pos) or lpos
+	local leftAng = (L and L.ang) or lang
 
-	-- Lazy weapon box
+	state.gunPos:Set(gunPos)
+	state.gunAng:Set(gunAng)
+	state.leftPos:Set(leftPos)
+	state.leftAng:Set(leftAng)
+	state.frame = sf
+	state.bonesFrame = -1
+
+	PublishWeaponSnap(sf, state.gunPos, state.gunAng)
+	g_VR.foregripActive = true
+	StampLeftHand(sf)
+	-- Keep SWEP flag in sync if something cleared it
+	local wep = state.wep
+	if IsValid(wep) and wep.ArcticVR and not wep.ForegripGrabbed then
+		NotifyArcVRGrip(wep)
+	end
+	return true
+end
+
+--- Stock backend: guide aim from frozen stereo hands once per frame.
+local function SolveStockFrame(sf, lpos, lang, rpos, rang, wep, vmi)
+	local ply = LocalPlayer()
 	if not state.weaponBox and state.boxTries < 8 then
 		state.boxTries = state.boxTries + 1
 		RefreshWeaponBox(ply, wep)
@@ -254,9 +354,6 @@ local function SolveForegripFrame()
 	end
 
 	local guidedPos, guidedAng = GetGuidedWeaponPose(rpos, rang, lpos, lang, state.weaponBox)
-
-	-- Pose gun from guided RH without mutating tracking SoT
-	-- (UpdateViewModelPos override=true uses these hands and does not stomp)
 	if vrmod.utils and vrmod.utils.UpdateViewModelPos then
 		pcall(vrmod.utils.UpdateViewModelPos, guidedPos, guidedAng, true)
 	end
@@ -279,29 +376,63 @@ local function SolveForegripFrame()
 
 	PublishWeaponSnap(sf, state.gunPos, state.gunAng)
 	g_VR.foregripActive = true
-
-	-- Left hand on foregrip (mutates tracking LH for this frame's draw)
-	if vrmod.SetLeftHandPose then
-		vrmod.SetLeftHandPose(state.leftPos, state.leftAng, 0)
-	elseif g_VR.tracking and g_VR.tracking.pose_lefthand then
-		local L = g_VR.tracking.pose_lefthand
-		if L.pos.Set then L.pos:Set(state.leftPos) else L.pos = state.leftPos end
-		if L.ang.Set then L.ang:Set(state.leftAng) else L.ang = state.leftAng end
-	end
-	-- Keep stereoPose left in sync for systems that read freeze after us
-	local sp = g_VR.stereoPose
-	if sp and sp.frame == sf then
-		if not sp.leftPos then sp.leftPos = Vector() end
-		if not sp.leftAng then sp.leftAng = Angle() end
-		sp.leftPos:Set(state.leftPos)
-		sp.leftAng:Set(state.leftAng)
-		sp.hasLeft = true
-	end
-
+	StampLeftHand(sf)
 	return true
 end
 
---- Per-eye: stamp frozen gun only.
+local function SolveForegripFrame()
+	if not state.gripping then return false end
+	if not cv_enable:GetBool() then
+		ClearGrip("disabled")
+		return false
+	end
+
+	if not GripStillHeld() then
+		ClearGrip("grip released")
+		return false
+	end
+
+	local ply = LocalPlayer()
+	if not IsValid(ply) or not ply:Alive() then
+		ClearGrip("dead")
+		return false
+	end
+
+	local wep = IsValid(state.wep) and state.wep or ply:GetActiveWeapon() or NULL
+	if not IsValidForegripWeapon(wep) then
+		ClearGrip("invalid weapon")
+		return false
+	end
+	if state.class and wep:GetClass() ~= state.class then
+		ClearGrip("weapon switched")
+		return false
+	end
+	if g_VR.menuGrabActive or g_VR.menuResizeActive then
+		ClearGrip("menu grab")
+		return false
+	end
+
+	local sf = g_VR.stereoFrame or 0
+	if state.frame == sf then
+		PublishWeaponSnap(sf, state.gunPos, state.gunAng)
+		StampLeftHand(sf)
+		return true
+	end
+
+	local lpos, lang, rpos, rang = StereoHands()
+	if not lpos or not rpos then
+		ClearGrip("no hands")
+		return false
+	end
+
+	if state.mode == MODE_ARCVR then
+		return SolveArcVRFrame(sf, lpos, lang, rpos)
+	end
+
+	local vmi = EnsureVMI(wep)
+	return SolveStockFrame(sf, lpos, lang, rpos, rang, wep, vmi)
+end
+
 local function ApplyFrozenGunDraw()
 	if not state.gripping or not state.gunPos then return end
 	local sf = g_VR.stereoFrame or 0
@@ -329,10 +460,7 @@ local function ApplyFrozenGunDraw()
 			}
 		end
 	end
-	-- Re-apply LH attach each eye so nothing overwrites between eyes
-	if vrmod.SetLeftHandPose then
-		vrmod.SetLeftHandPose(state.leftPos, state.leftAng, 0)
-	end
+	StampLeftHand(sf)
 end
 
 local function TryStartGrip()
@@ -341,16 +469,23 @@ local function TryStartGrip()
 
 	local lpos, lang, rpos, rang = StereoHands()
 	if not lpos then
-		local L = g_VR.tracking and g_VR.tracking.pose_lefthand
-		local R = g_VR.tracking and g_VR.tracking.pose_righthand
-		if not (L and R and L.pos and R.pos and L.ang and R.ang) then return false end
-		lpos, lang, rpos, rang = L.pos, L.ang, R.pos, R.ang
+		lpos, lang, rpos, rang = LiveHands()
 	end
+	if not lpos then return false end
+
 	local wep = LocalPlayer():GetActiveWeapon()
 	if not IsValidForegripWeapon(wep) then return false end
-	local dist = lpos:Distance(rpos)
-	if dist > cv_dist:GetFloat() then return false end
 
+	local mode = MODE_STOCK
+	if IsArcVRWeapon(wep) then
+		mode = MODE_ARCVR
+		if not ArcVRHandInForegrip(wep) then return false end
+	else
+		local dist = lpos:Distance(rpos)
+		if dist > cv_dist:GetFloat() then return false end
+	end
+
+	local dist = lpos:Distance(rpos)
 	local vmi = EnsureVMI(wep)
 	local wepWorldPos, wepWorldAng = LocalToWorld(
 		vmi.offsetPos or Vector(),
@@ -359,6 +494,7 @@ local function TryStartGrip()
 	)
 	state.offsetPos, state.offsetAng = WorldToLocal(lpos, lang, wepWorldPos, wepWorldAng)
 	state.gripping = true
+	state.mode = mode
 	state.wep = wep
 	state.class = wep:GetClass()
 	state.frame = -1
@@ -366,23 +502,49 @@ local function TryStartGrip()
 	state.boxTries = 0
 	state.weaponBox = nil
 	state.startDist = math.max(dist, 4)
-	RefreshWeaponBox(LocalPlayer(), wep)
+	if mode == MODE_STOCK then
+		RefreshWeaponBox(LocalPlayer(), wep)
+	else
+		-- ArcVR: long guns — soft box from foregrip offset length
+		local off = wep.ForegripOffset
+		local reach = (off and off:Length()) or 16
+		state.weaponBox = {
+			mins = wep.ForegripMins or Vector(-4, -4, -4),
+			maxs = wep.ForegripMaxs or Vector(4, 4, 4),
+			reach = math.max(reach, 16),
+			radius = 4,
+		}
+		NotifyArcVRGrip(wep)
+	end
 	g_VR.foregripActive = true
 	return true
 end
 
---- Called from default input before entity pickup. Returns true if grip was consumed.
-function vrmod.TryForegripGrab(pressed)
+--- ArcVR / UI: true while this module owns two-hand grip input.
+function vrmod.HasUniversalForegrip()
+	return cv_enable:GetBool()
+end
+
+--- opts.fromArcVR: ArcVR already ran slide/mag/belt priority; allow start.
+--- Without it, ArcVR weapons only release / keep-active here so prop pickup
+--- is not claimed before arcticvr_base VRInput can grab the slide.
+function vrmod.TryForegripGrab(pressed, opts)
 	if not g_VR or not g_VR.active then return false end
+	if not cv_enable:GetBool() then return false end
+	opts = opts or {}
 	if not pressed then
 		if state.gripping then
 			ClearGrip("input release")
-			return true -- consumed release (do not also drop a prop we never grabbed)
+			return true
 		end
 		return false
 	end
 	if state.gripping then
-		return true -- already owning left grip
+		return true
+	end
+	local wep = LocalPlayer():GetActiveWeapon()
+	if IsArcVRWeapon(wep) and not opts.fromArcVR then
+		return false
 	end
 	return TryStartGrip()
 end
@@ -391,14 +553,16 @@ function vrmod.IsForegripActive()
 	return state.gripping and true or false
 end
 
+function vrmod.GetForegripMode()
+	return state.gripping and state.mode or nil
+end
+
 hook.Add("VRMod_Input", "vrmod_foregrip", function(action, pressed)
 	if not g_VR or not g_VR.active then return end
 	if action ~= "boolean_left_pickup" then return end
-	-- Fallback if cl_input did not claim first (hook order / disabled default input)
 	vrmod.TryForegripGrab(pressed)
 end)
 
--- Before either eye: solve grip + freeze gun
 hook.Add("VRMod_PreStereo", "vrmod_foregrip", function()
 	if not g_VR or not g_VR.active then return end
 	if state.gripping then
@@ -406,20 +570,27 @@ hook.Add("VRMod_PreStereo", "vrmod_foregrip", function()
 	end
 end)
 
--- Each eye: stamp same frozen gun
 hook.Add("VRMod_PreRender", "vrmod_foregrip", function()
 	if state.gripping then
 		ApplyFrozenGunDraw()
 	end
 end)
 
--- Non-grip weapon freeze (stock stereo) when not two-handing
+-- Non-grip weapon freeze when not two-handing (stock + ArcVR one-hand pose already in tracking)
 hook.Add("VRMod_PreStereo", "vrmod_weapon_pose_freeze", function()
 	if not g_VR or not g_VR.active then return end
 	if state.gripping then return end
 	if vrmod.utils and vrmod.utils.UpdateViewModelPos then
 		local sp = g_VR.stereoPose
 		local sf = g_VR.stereoFrame or 0
+		-- ArcVR sets suppressViewModelUpdates and already posed on Tracking —
+		-- only re-apply when not suppressed, or publish existing matrix.
+		if vrmod.suppressViewModelUpdates then
+			if g_VR.viewModelPos and g_VR.viewModelAng then
+				PublishWeaponSnap(sf, g_VR.viewModelPos, g_VR.viewModelAng)
+			end
+			return
+		end
 		if sp and sp.frame == sf and sp.hasRight then
 			pcall(vrmod.utils.UpdateViewModelPos, sp.rightPos, sp.rightAng, true)
 		else
