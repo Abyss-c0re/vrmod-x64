@@ -768,43 +768,69 @@ if CLIENT then
 		local tms = render.GetToneMappingScaleLinear()
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
 
-		-- Laser pointers: tip slightly forward of controller so origin is not buried in the hand
+		-- Laser pointers: natural "point" aim (controller tip tilts down) + palm root for beam
 		local pointers = {}
 		local tr = g_VR.tracking
+		-- ~natural VR point: tip ~32° down from controller forward (close-only worked because
+		-- panel filled FOV; at arm's length raw controller forward sails over the panel).
+		local AIM_PITCH = -32
 		local function AddPointer(name, pose)
 			if not pose or not pose.pos or not pose.ang then return end
-			local fwd = pose.ang:Forward()
+			local aimAng = Angle(pose.ang.p, pose.ang.y, pose.ang.r)
+			aimAng:RotateAroundAxis(aimAng:Right(), AIM_PITCH)
+			local fwd = aimAng:Forward()
 			pointers[#pointers + 1] = {
 				name = name,
-				pos = pose.pos + fwd * 2.5, -- tip offset
-				ang = pose.ang,
-				root = pose.pos, -- beam start at palm/controller
+				pos = pose.pos + fwd * 3.0,
+				ang = aimAng,
+				root = pose.pos,
 			}
 		end
-		if tr then
-			AddPointer("right", tr.pose_righthand)
-			AddPointer("left", tr.pose_lefthand)
+		-- Prefer stereo-frozen hands (match panel snap) so laser and draw share one pose
+		do
+			local rh = HandPose("right")
+			local lh = HandPose("left")
+			if rh and rh.pos and rh.ang then
+				AddPointer("right", rh)
+			elseif tr and tr.pose_righthand then
+				AddPointer("right", tr.pose_righthand)
+			end
+			if lh and lh.pos and lh.ang then
+				AddPointer("left", lh)
+			elseif tr and tr.pose_lefthand then
+				AddPointer("left", tr.pose_lefthand)
+			end
 		end
 
-		-- Soft aim (beam only) when ray hits near panel but not hard-focused
-		local softAim = nil -- { uid, dist, world, start, hand, x, y }
-
-		--- Ray × menu plane → UV cursor (or nil). Double-sided, room-scale aim.
+		--- Ray × menu plane → UV + world hit. Double-sided, room-scale.
+		--- Returns raw UV (may be outside panel); caller applies angular pad.
 		local function LaserHitPanel(origin, dir, pos, ang, drawScale)
 			if not origin or not dir or not pos or not ang or not drawScale or drawScale <= 0 then
 				return nil
 			end
 			local normal = ang:Up()
 			local A = normal:Dot(dir)
-			if math.abs(A) < 1e-5 then return nil end -- parallel to plane
+			if math.abs(A) < 1e-5 then return nil end
 			local B = normal:Dot(pos - origin)
 			local hitDist = B / A
-			-- Allow both faces (wrist menus often face HMD while free hand aims off-axis).
-			-- Min ~0.5 skips origin-inside ghosts; max = room-scale.
-			if hitDist < 0.5 or hitDist > 2500 then return nil end
+			if hitDist < 0.25 or hitDist > 3000 then return nil end
 			local hitWorld = origin + dir * hitDist
 			local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
+			-- 3D2D: +X = Right, +Y screen = -Forward
 			return tp.x / drawScale, -tp.y / drawScale, hitDist, hitWorld
+		end
+
+		--- Angular UV pad: world-space aim error → UV. NEVER clamp to panel fraction
+		--- (that was the "must be close" bug: pad capped at 0.55*size ≈ 280px).
+		local function AimPadUV(hitDist, drawScale, width, height)
+			-- ~12° aim forgiveness + fixed world slack for controller wobble
+			local worldSlack = 8 + hitDist * 0.22
+			local pad = worldSlack / math.max(drawScale, 0.001)
+			pad = math.max(pad, 96)
+			-- Soft ceiling only so one stray ray can't steal focus across the room
+			local maxPad = math.max(width or 512, height or 512) * 2.5
+			if pad > maxPad then pad = maxPad end
+			return pad
 		end
 
 		--- Hand currently anchoring a menu (wrist attach or grab).
@@ -946,6 +972,7 @@ if CLIENT then
 					hitCursorX, hitCursorY = pick.hx, pick.hy
 					hitDist, hitWorld = pick.hd, pick.hw
 					hitHandName, hitBeamStart = pick.name, pick.start
+					-- Provisional raw UV; focus block overwrites with clamped if accepted
 					v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
 					v._hitHand = hitHandName
 					v._hitBeamStart = hitBeamStart
@@ -953,6 +980,11 @@ if CLIENT then
 					v._hitScale = drawScale
 					v.lastCursorX = hitCursorX
 					v.lastCursorY = hitCursorY
+				elseif solveFocus then
+					-- Clear stale UV so PreRender menus don't keep a ghost hover
+					v._hitX, v._hitY, v._hitDist, v._hitWorld = nil, nil, nil, nil
+					v._hitHand, v._hitBeamStart = nil, nil
+					v._hitFrame = -1
 				end
 			elseif wantCursor and v._hitFrame == sf and v._hitScale and math.abs(v._hitScale - drawScale) <= 1e-7 then
 				hitCursorX, hitCursorY, hitDist, hitWorld = v._hitX, v._hitY, v._hitDist, v._hitWorld
@@ -995,39 +1027,28 @@ if CLIENT then
 			cam.IgnoreZ(false)
 
 			if solveFocus and wantCursor and hitCursorX and hitCursorY and hitDist then
-				local cz = CornerZoneSize(v)
-				-- Distance-scaled UV pad: at arm's length small angular error = large UV miss
-				-- (was cz*0.2 only → laser/focus only when hand almost on the panel).
-				local pad = math.max(cz * 0.5, 48 + hitDist * 2.2)
-				pad = math.min(pad, math.max(v.width, v.height) * 0.55)
+				local pad = AimPadUV(hitDist, drawScale, v.width, v.height)
 				local inside = hitCursorX > -pad and hitCursorY > -pad
 					and hitCursorX < v.width + pad and hitCursorY < v.height + pad
-				-- Soft aim: larger pad for beam + grip-block even when not click-focused
-				local softPad = pad * 1.75 + 40
-				local near = hitCursorX > -softPad and hitCursorY > -softPad
-					and hitCursorX < v.width + softPad and hitCursorY < v.height + softPad
-				if near and (not softAim or hitDist < softAim.dist) then
-					softAim = {
-						uid = k, dist = hitDist, world = hitWorld,
-						start = hitBeamStart, hand = hitHandName,
-						x = hitCursorX, y = hitCursorY,
-					}
-				end
-				local keepResize = resizingThis and hitDist < menuFocusDist + 50
+				local keepResize = resizingThis and hitDist < menuFocusDist + 80
 				if (inside or keepResize) and hitDist < menuFocusDist then
+					-- Cursor for buttons: clamp to panel so slight misses still hit edge slots
+					local curX = math.Clamp(hitCursorX, 0, v.width)
+					local curY = math.Clamp(hitCursorY, 0, v.height)
 					g_VR.menuFocus = k
 					menuFocusDist = hitDist
 					menuFocusPanel = v.panel
-					v.lastCursorX = hitCursorX
-					v.lastCursorY = hitCursorY
+					v.lastCursorX = curX
+					v.lastCursorY = curY
+					v._hitX, v._hitY = curX, curY
 					menuFocusCursorWorldPos = hitWorld
 					menuFocusBeamStart = hitBeamStart
 					menuFocusHand = hitHandName
 					focusSnap.uid = k
 					focusSnap.panel = v.panel
 					focusSnap.cursorWorld = hitWorld
-					focusSnap.cursorX = hitCursorX
-					focusSnap.cursorY = hitCursorY
+					focusSnap.cursorX = curX
+					focusSnap.cursorY = curY
 					focusSnap.scaleKey = drawScale
 					focusSnap.beamStart = hitBeamStart
 					focusSnap.hand = hitHandName
@@ -1039,10 +1060,7 @@ if CLIENT then
 
 		if solveFocus then
 			g_VR.menuPointerHand = menuFocusHand or focusSnap.hand
-			g_VR.menuAiming = (not g_VR.menuFocus and softAim and softAim.uid) or false
-			if softAim and not g_VR.menuFocus then
-				g_VR.menuPointerHand = softAim.hand
-			end
+			g_VR.menuAiming = g_VR.menuFocus or false -- same as focus after angular pad
 			if focusSnap.panel ~= prevFocusPanel then
 				if IsValid(prevFocusPanel) then prevFocusPanel:SetMouseInputEnabled(false) end
 				if IsValid(focusSnap.panel) then focusSnap.panel:SetMouseInputEnabled(true) end
@@ -1052,7 +1070,6 @@ if CLIENT then
 		end
 
 		local focus = g_VR.menuFocus
-		local beamEnd, beamStart, beamHand, beamAlpha
 		if focus and menus[focus] then
 			-- Always prefer live lastCursor (remapped after stretch) over frozen snap UV
 			local lcX = menus[focus].lastCursorX
@@ -1064,33 +1081,23 @@ if CLIENT then
 				g_VR.menuCursorX = focusSnap.cursorX
 				g_VR.menuCursorY = focusSnap.cursorY
 			end
-			beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
-			beamStart = menus[focus]._hitBeamStart or focusSnap.beamStart
-			beamHand = g_VR.menuPointerHand
-			beamAlpha = 255
-		elseif softAim then
-			-- Aim assist beam when near panel but not locked for click
-			beamEnd = softAim.world
-			beamStart = softAim.start
-			beamHand = softAim.hand
-			beamAlpha = 140
-			g_VR.menuCursorX = softAim.x
-			g_VR.menuCursorY = softAim.y
-		end
-		if not beamStart and beamHand == "left" then
-			local lh = tr and tr.pose_lefthand
-			beamStart = lh and lh.pos
-		end
-		if not beamStart then
-			local rh = tr and tr.pose_righthand
-			beamStart = rh and rh.pos
-		end
-		if beamStart and beamEnd then
-			render.SetMaterial(mat_beam)
-			local col = (beamHand == "left")
-				and Color(180, 220, 255, beamAlpha or 255)
-				or Color(255, 255, 255, beamAlpha or 255)
-			render.DrawBeam(beamStart, beamEnd, 0.12, 0, 1, col)
+			local beamEnd = menus[focus]._hitWorld or focusSnap.cursorWorld
+			local beamStart = menus[focus]._hitBeamStart or focusSnap.beamStart
+			if not beamStart and g_VR.menuPointerHand == "left" then
+				local lh = tr and tr.pose_lefthand
+				beamStart = lh and lh.pos
+			end
+			if not beamStart then
+				local rh = tr and tr.pose_righthand
+				beamStart = rh and rh.pos
+			end
+			if beamStart and beamEnd then
+				render.SetMaterial(mat_beam)
+				local col = (g_VR.menuPointerHand == "left")
+					and Color(180, 220, 255, 255)
+					or Color(255, 255, 255, 255)
+				render.DrawBeam(beamStart, beamEnd, 0.14, 0, 1, col)
+			end
 		end
 
 		render.DepthRange(0, 1)

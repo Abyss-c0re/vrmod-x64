@@ -391,8 +391,13 @@ function VRUtilWeaponMenuOpen()
 		local C = vrmod.cube
 		local T = Theme()
 		local fonts = Fonts()
-		local mx = (g_VR.menuFocus == "weaponmenu") and (g_VR.menuCursorX or -1) or -1
-		local my = (g_VR.menuFocus == "weaponmenu") and (g_VR.menuCursorY or -1) or -1
+		local wm = g_VR.menus and g_VR.menus.weaponmenu
+		local mx, my = -1, -1
+		if wm and wm._hitX and wm._hitY then
+			mx, my = wm._hitX, wm._hitY
+		elseif g_VR.menuFocus == "weaponmenu" or g_VR.menuAiming == "weaponmenu" then
+			mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
+		end
 
 		-- ── Chrome plate ──────────────────────────────────────────
 		if C and C.DrawChrome then

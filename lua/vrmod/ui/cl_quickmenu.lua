@@ -302,8 +302,15 @@ function g_VR.MenuOpen()
 		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()
 		local hoveredItem = -1
 		hoverNav = nil
-		local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
-		if g_VR.menuFocus == "miscmenu" then
+		-- Use last laser UV stored on the menu (PreRender runs before stereo hit-test;
+		-- so this is previous-frame UV — still correct for hover/select).
+		local mx, my = -1, -1
+		if mm._hitX and mm._hitY then
+			mx, my = mm._hitX, mm._hitY
+		elseif g_VR.menuFocus == "miscmenu" or g_VR.menuAiming == "miscmenu" then
+			mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
+		end
+		if mx >= 0 and my >= 0 then
 			-- Nav hit
 			if mx >= navPrev.x and mx <= navPrev.x + navPrev.w and my >= navPrev.y and my <= navPrev.y + navPrev.h then
 				hoverNav = "prev"
