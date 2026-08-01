@@ -177,6 +177,16 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_left_pickup" then
+		-- Stock two-hand FIRST (gVRMod): menu grab must not steal when hands are on the gun
+		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
+			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
+			return
+		end
+		if g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
+			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
+			return
+		end
+
 		-- WayVR-style panel grab consumes grip when laser is on a menu
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
 		if g_VR.menuGrabActive then return end
@@ -196,13 +206,7 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 				end
 			end
 		end
-
-		-- Stock two-hand: only when close to gun body (TryForegripGrab enforces zone)
-		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
-			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
-			return
-		end
-		if arcFG or arcNearFG or g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
+		if arcFG or arcNearFG then
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
 		end
