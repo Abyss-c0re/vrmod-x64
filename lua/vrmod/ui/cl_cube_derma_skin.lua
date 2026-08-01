@@ -578,34 +578,52 @@ end
 ------------------------------------------------------------------------
 local TITLE_H = 32
 
+local CLOSE_W, CLOSE_H = 52, 32 -- large enough for VR laser hit
+
+local function placeCloseButton(btn, panel)
+	if not IsValid(btn) or not IsValid(panel) then return end
+	local pw = math.max(panel:GetWide(), 64)
+	btn:SetSize(CLOSE_W, CLOSE_H)
+	btn:SetPos(math.max(4, pw - CLOSE_W - 6), 2)
+	btn:SetZPos(32767)
+	btn:MoveToFront()
+	btn:SetMouseInputEnabled(true)
+	-- Visible whenever VR theming is on (do not require flaky _cubeThemed re-checks)
+	local show = shouldTheme()
+	if panel._cubeThemed == false then show = false end
+	btn:SetVisible(show)
+end
+
 local function installCloseButton(panel, which)
 	if not IsValid(panel) then return end
 	if IsValid(panel._cubeCloseBtn) then
-		panel._cubeCloseBtn:SetVisible(shouldTheme() and panel._cubeThemed)
+		panel._cubeCloseBtn._cubeShell = which or panel._cubeCloseBtn._cubeShell or "spawn"
+		placeCloseButton(panel._cubeCloseBtn, panel)
 		return
 	end
 	local btn = vgui.Create("DButton", panel)
 	panel._cubeCloseBtn = btn
 	btn:SetText("")
-	btn:SetSize(40, 28)
+	btn:SetSize(CLOSE_W, CLOSE_H)
 	btn:SetZPos(32767)
 	btn:SetMouseInputEnabled(true)
+	btn:SetCursor("hand")
 	btn._cubeShell = which or "spawn"
 	function btn:Think()
-		if not IsValid(panel) then return end
-		local pw = panel:GetWide()
-		self:SetPos(math.max(4, pw - 46), 3)
-		self:SetVisible(shouldTheme() and panel._cubeThemed == true)
+		if not IsValid(panel) then
+			if IsValid(self) then self:Remove() end
+			return
+		end
+		placeCloseButton(self, panel)
 	end
 	function btn:Paint(w, h)
-		if not shouldTheme() or not panel._cubeThemed then return end
+		-- Always paint when visible (even if theme flag briefly lags)
 		local th = T()
 		local hot = self:IsHovered()
-		local bg = hot and (th.btnHover or th.crimson) or (th.btn or th.panel)
+		local bg = hot and (th.btnHover or th.crimson) or Color(120, 20, 40, 255)
 		rect(0, 0, w, h, bg)
-		outline(0, 0, w, h, hot and (th.crimsonHot or th.crimson) or (th.crimsonDim or th.crimson), hot and 3 or 2)
-		if hot then rect(0, 0, 4, h, th.crimson) end
-		draw.SimpleText("X", "DermaDefaultBold", w * 0.5, h * 0.5, th.text or color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		outline(0, 0, w, h, hot and (th.crimsonHot or Color(255, 70, 100)) or Color(196, 30, 58), hot and 3 or 2)
+		draw.SimpleText("X", "DermaLarge", w * 0.5, h * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	end
 	function btn:DoClick()
 		local shell = self._cubeShell or "spawn"
@@ -617,6 +635,7 @@ local function installCloseButton(panel, which)
 			g_SpawnMenu:Close()
 		end
 	end
+	placeCloseButton(btn, panel)
 end
 
 local function installRootChrome(panel, title, which)

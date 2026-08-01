@@ -380,16 +380,10 @@ local function preparePanelForVR(panel, kind)
 		local tw, th = 1024, 768
 		if panel.SetSize then panel:SetSize(tw, th) end
 		if panel.SetPos then panel:SetPos(0, 0) end
-		-- Kill desktop border emptiness (spawnmenu_border uses ScrW)
-		if panel.DockPadding then panel:DockPadding(0, 0, 0, 0) end
+		-- Leave room for Cube title bar + X (was 0,0,0,0 → content ate the close button)
+		if panel.DockPadding then panel:DockPadding(0, 34, 0, 0) end
 		fitSandboxLayout(panel, tw, th)
 		if panel.InvalidateLayout then panel:InvalidateLayout(true) end
-		timer.Simple(0, function()
-			if IsValid(panel) then fitSandboxLayout(panel, tw, th) end
-		end)
-		timer.Simple(0.05, function()
-			if IsValid(panel) then fitSandboxLayout(panel, tw, th) end
-		end)
 		if vrmod.cube and W.IsVR() then
 			if kind == "spawnmenu" and vrmod.cube.ThemeSpawnMenu then
 				vrmod.cube.ThemeSpawnMenu(panel)
@@ -399,6 +393,25 @@ local function preparePanelForVR(panel, kind)
 				vrmod.cube.ApplyDermaSkin(panel)
 			end
 		end
+		-- Re-fit then re-assert chrome so layout timers never bury the X
+		local function restyle()
+			if not IsValid(panel) then return end
+			fitSandboxLayout(panel, tw, th)
+			if vrmod.cube and W.IsVR() then
+				if kind == "spawnmenu" and vrmod.cube.ThemeSpawnMenu then
+					vrmod.cube.ThemeSpawnMenu(panel)
+				elseif kind == "contextmenu" and vrmod.cube.ThemeContextMenu then
+					vrmod.cube.ThemeContextMenu(panel)
+				end
+			end
+			if IsValid(panel._cubeCloseBtn) then
+				panel._cubeCloseBtn:SetVisible(true)
+				panel._cubeCloseBtn:MoveToFront()
+			end
+		end
+		timer.Simple(0, restyle)
+		timer.Simple(0.05, restyle)
+		timer.Simple(0.15, restyle)
 	end
 end
 
