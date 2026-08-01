@@ -185,3 +185,30 @@ end
 function vrmod.logger.Flush()
     flushLogQueue()
 end
+
+--- Desktop toast for player-visible failures (CLIENT). Server no-op.
+--- kind: "generic" | "error" | "hint" (maps to GMod notification types)
+function vrmod.Toast(msg, duration, kind)
+	if SERVER then return end
+	msg = tostring(msg or "")
+	if msg == "" then return end
+	duration = tonumber(duration) or 4
+	kind = kind or "generic"
+	local ntype = NOTIFY_GENERIC
+	if kind == "error" then
+		ntype = NOTIFY_ERROR
+	elseif kind == "hint" then
+		ntype = NOTIFY_HINT
+	end
+	if notification and notification.AddLegacy then
+		notification.AddLegacy("[VRMod] " .. msg, ntype, duration)
+	end
+	if kind == "error" and surface and surface.PlaySound then
+		pcall(surface.PlaySound, "buttons/button10.wav")
+	end
+	if kind == "error" then
+		vrmod.logger.Err("%s", msg)
+	else
+		vrmod.logger.Info("%s", msg)
+	end
+end

@@ -1157,29 +1157,70 @@ if CLIENT then
 	end
 
 	-- 4) Action manifest & input initialization (never abort VR start)
-	local function SetupActions()
-		-- Ensure DATA files exist before native path resolve
+	-- Module resolves: getcwd()/garrysmod/data/<arg> — files must live in DATA/vrmod/.
+	local function RewriteActionManifestFiles()
 		if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
-		if g_VR.action_manifest and not file.Exists("vrmod/vrmod_action_manifest.txt", "DATA") then
+		-- Full binding set when available (self-heal corrupt/empty DATA)
+		if g_VR.action_manifest then
 			file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
-		elseif g_VR.action_manifest then
-			-- refresh if empty
-			local existing = file.Read("vrmod/vrmod_action_manifest.txt", "DATA")
-			if not existing or #existing < 32 then
-				file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
-			end
 		end
+		if g_VR.bindings_holographic then
+			file.Write("vrmod/vrmod_bindings_holographic_controller.txt", g_VR.bindings_holographic)
+		end
+		if g_VR.bindings_touch then
+			file.Write("vrmod/vrmod_bindings_oculus_touch.txt", g_VR.bindings_touch)
+		end
+		if g_VR.bindings_vive then
+			file.Write("vrmod/vrmod_bindings_vive_controller.txt", g_VR.bindings_vive)
+		end
+		if g_VR.bindings_knuckles then
+			file.Write("vrmod/vrmod_bindings_knuckles.txt", g_VR.bindings_knuckles)
+		end
+		if g_VR.bindings_cosmos then
+			file.Write("vrmod/vrmod_bindings_vive_cosmos_controller.txt", g_VR.bindings_cosmos)
+		end
+		if g_VR.bindings_vive_tracker_left_foot then
+			file.Write("vrmod/vrmod_bindings_vive_tracker_left_foot.txt", g_VR.bindings_vive_tracker_left_foot)
+		end
+		if g_VR.bindings_vive_tracker_right_foot then
+			file.Write("vrmod/vrmod_bindings_vive_tracker_right_foot.txt", g_VR.bindings_vive_tracker_right_foot)
+		end
+		if g_VR.bindings_vive_tracker_waist then
+			file.Write("vrmod/vrmod_bindings_vive_tracker_waist.txt", g_VR.bindings_vive_tracker_waist)
+		end
+	end
 
-		local okMan, errMan = pcall(VRMOD_SetActionManifest, "vrmod/vrmod_action_manifest.txt")
+	local function SetupActions()
+		RewriteActionManifestFiles()
+		local manPath = "vrmod/vrmod_action_manifest.txt"
+		local hasFile = file.Exists(manPath, "DATA")
+		local okMan, errMan = pcall(VRMOD_SetActionManifest, manPath)
 		if not okMan then
-			-- retry after force rewrite
-			if g_VR.action_manifest then
-				file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
-			end
-			okMan, errMan = pcall(VRMOD_SetActionManifest, "vrmod/vrmod_action_manifest.txt")
+			-- Retry after force rewrite (corrupt DATA / first-run race)
+			RewriteActionManifestFiles()
+			okMan, errMan = pcall(VRMOD_SetActionManifest, manPath)
 		end
-		if not okMan and vrmod.logger then
-			vrmod.logger.Err("SetActionManifest failed (VR continues without bindings): %s", errMan)
+		if not okMan then
+			local detail = tostring(errMan or "unknown")
+			if vrmod.logger then
+				vrmod.logger.Err("SetActionManifest failed (VR continues without bindings): %s hasFile=%s", detail, tostring(hasFile))
+			end
+			-- Cube W6: honest toast — silent death left controllers dead with no clue
+			if vrmod.Toast then
+				vrmod.Toast(
+					"Controller bindings failed — reinstall VRMod module; ensure data/vrmod/vrmod_action_manifest.txt exists. SteamVR may need restart.",
+					8,
+					"error"
+				)
+			end
+			g_VR.errorText = "Bindings failed — check console / reinstall module"
+			timer.Simple(12, function()
+				if g_VR and g_VR.errorText and string.find(g_VR.errorText, "Bindings failed", 1, true) then
+					g_VR.errorText = ""
+				end
+			end)
+		else
+			g_VR._actionManifestOk = true
 		end
 
 		local set = LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main"
