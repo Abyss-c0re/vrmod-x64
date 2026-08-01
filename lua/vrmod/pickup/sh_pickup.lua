@@ -80,9 +80,13 @@ if CLIENT then
 			or (IsValid(heldRight) and heldRight:GetNWBool("is_npc_ragdoll", false))
 		local function ShouldAddHalo(ent)
 			if not IsValid(ent) or ent == heldLeft or ent == heldRight or holdingRagdoll then return false end
-			-- Client validity is enough for glow (server NW flag can lag after drop)
-			if vrmod.utils.IsValidPickupTarget(ent, ply, false) then return true end
-			return ent:GetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), false)
+			-- Check server flag for pickup validity, fallback to IsValidPickupTarget if flag missing
+			local serverFlag = ent:GetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), nil)
+			if serverFlag == nil then
+				-- If no server flag, fallback to your clientside logic
+				return vrmod.utils.IsValidPickupTarget(ent, ply, false)
+			end
+			return serverFlag
 		end
 
 		if ShouldAddHalo(pickupTargetEntLeft) then haloTargetsLeft[#haloTargetsLeft + 1] = pickupTargetEntLeft end
