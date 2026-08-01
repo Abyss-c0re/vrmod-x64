@@ -832,8 +832,11 @@ function W.InstallHooks()
 	end)
 
 	-- RT paint once per stereo frame (shared both eyes).
+	-- MUST be PreStereoCapture — never PreStereo: that runs under PushRenderTarget(g_VR.rt)
+	-- and nested menu RTs + PaintManual of spawn/settings corrupt the engine RT stack/heap
+	-- (crash a few seconds after menu open). Same law as radar world capture.
 	-- Focused / dirty / alwaysPaint → full rate; idle shells use paintInterval inside RenderPanel.
-	hook.Add("VRMod_PreStereo", "panel2vr_repaint", function()
+	hook.Add("VRMod_PreStereoCapture", "panel2vr_repaint", function()
 		if not W.IsVR() then return end
 		if not isfunction(VRUtilMenuRenderPanel) then return end
 		for uid, info in pairs(bound) do

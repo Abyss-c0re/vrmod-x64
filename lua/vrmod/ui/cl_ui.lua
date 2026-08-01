@@ -90,6 +90,7 @@ if CLIENT then
 
 	--- Paint Derma panel into menu RT.
 	--- force=true always paints. Otherwise: focused every frame; unfocused every N frames or dirty.
+	--- Always PopRenderTarget even if PaintManual errors (nested RT stack corruption → hard crash).
 	function VRUtilMenuRenderPanel(uid, force)
 		local menu = menus[uid]
 		if not menu or not menu.rt or not menu.panel or not menu.panel:IsValid() then return end
@@ -108,14 +109,22 @@ if CLIENT then
 		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
 		ClearMenuRT(menu.width, menu.height)
-		local oldclip = DisableClipping(false)
-		render.SetWriteDepthToDestAlpha(false)
-		menu.panel:PaintManual()
-		render.SetWriteDepthToDestAlpha(true)
-		DisableClipping(oldclip)
+		local ok, err = pcall(function()
+			local oldclip = DisableClipping(false)
+			render.SetWriteDepthToDestAlpha(false)
+			menu.panel:PaintManual()
+			render.SetWriteDepthToDestAlpha(true)
+			DisableClipping(oldclip)
+		end)
 		render.OverrideAlphaWriteEnable(false)
 		cam.End2D()
 		render.PopRenderTarget()
+		if not ok then
+			menu._paintErrN = (menu._paintErrN or 0) + 1
+			if menu._paintErrN <= 3 and vrmod and vrmod.logger then
+				vrmod.logger.Warn("Menu RT paint %s: %s", tostring(uid), tostring(err))
+			end
+		end
 	end
 
 	function VRUtilMenuRenderStart(uid)
