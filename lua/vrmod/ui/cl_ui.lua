@@ -539,23 +539,75 @@ if CLIENT then
 		return true
 	end
 
+	-- How close panel center must be to the wrist palm to snap on grip release (Source units)
+	local WRIST_SNAP_DIST = 16
+
+	--- World-space center of a menu panel (from top-left + scale).
+	local function MenuWorldCenter(menu, wPos, wAng, drawScale)
+		if not menu or not wPos or not wAng then return wPos end
+		local sc = drawScale or ((menu.baseScale or menu.scale or 0.03) * vrmod.GetUIScale())
+		local w = menu.width or 512
+		local h = menu.height or 512
+		return wPos + wAng:Right() * (w * sc * 0.5) - wAng:Forward() * (h * sc * 0.5)
+	end
+
 	local function EndGrab(handName)
 		if not grabState or grabState.hand ~= handName then return false end
-		local menu = menus[grabState.uid]
+		local uid = grabState.uid
+		local menu = menus[uid]
 		if menu and menu.grabPos and menu.grabAng then
 			local hand = HandPose(handName)
+			local wPos, wAng
 			if hand and hand.pos and hand.ang then
-				local wPos, wAng = LocalToWorld(menu.grabPos, menu.grabAng, hand.pos, hand.ang)
-				local origin = g_VR.origin or Vector()
-				local originAng = g_VR.originAngle or Angle()
-				menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
+				wPos, wAng = LocalToWorld(menu.grabPos, menu.grabAng, hand.pos, hand.ang)
 			end
 			menu.grabHand = nil
 			menu.grabPos = nil
 			menu.grabAng = nil
-			menu.freeFloat = true
-			menu.attachment = false
-			vrmod.SaveMenuLayout(grabState.uid)
+
+			-- Natural wrist dock: release grip near the wrist hand → re-anchor
+			local wristName = MenuAttachHandName(menu)
+			local wrist = HandPose(wristName)
+			local center = wPos and MenuWorldCenter(menu, wPos, wAng) or nil
+			local nearWrist = wrist and wrist.pos and center
+				and center:Distance(wrist.pos) <= WRIST_SNAP_DIST
+
+			if nearWrist then
+				-- Clean palm pose for that hand (not a skewed free-float offset)
+				local lp, la = VRUtilHandMenuPose(
+					menu.width, menu.height,
+					menu.baseScale or menu.scale or 0.03,
+					nil, nil, wristName
+				)
+				menu.pos, menu.ang = lp, la
+				menu.freeFloat = false
+				menu.attachment = true
+				menu.attachHand = wristName
+				menu._snapFrame = -1
+				InvalidateMenuHit(menu)
+				-- Persist wrist attach (not free-float)
+				local all = ReadLayouts()
+				local e = all[tostring(uid)] or {}
+				e.scale = menu.baseScale or menu.scale
+				e.freeFloat = false
+				e.pos = nil
+				e.ang = nil
+				all[tostring(uid)] = e
+				WriteLayouts(all)
+				if vrmod.logger then
+					vrmod.logger.Debug("[UI] Panel docked to %s wrist uid=%s", wristName, tostring(uid))
+				end
+			elseif wPos and wAng then
+				local origin = g_VR.origin or Vector()
+				local originAng = g_VR.originAngle or Angle()
+				menu.pos, menu.ang = WorldToLocal(wPos, wAng, origin, originAng)
+				menu.freeFloat = true
+				menu.attachment = false
+				vrmod.SaveMenuLayout(uid)
+			else
+				menu.freeFloat = true
+				menu.attachment = false
+			end
 		end
 		grabState = nil
 		g_VR.menuGrabActive = false
@@ -755,21 +807,28 @@ if CLIENT then
 		end
 	end
 
-	--- Snap a free-floating panel back to wrist attach (secondary / attachHand).
+	--- Snap a free-floating panel back to wrist (default palm pose). Natural path is
+	--- grip + release near wrist; this is for scripts / concommand.
 	function vrmod.MenuReattach(uid)
 		local menu = menus[uid or g_VR.menuFocus]
 		if not menu then return false end
-		local wPos, wAng = ResolveMenuWorldPose(menu)
 		local wrist = MenuAttachHandName(menu)
 		local hand = HandPose(wrist)
-		if not wPos or not hand or not hand.pos or not hand.ang then return false end
-		menu.pos, menu.ang = WorldToLocal(wPos, wAng, hand.pos, hand.ang)
+		if not hand or not hand.pos or not hand.ang then return false end
+		local lp, la = VRUtilHandMenuPose(
+			menu.width, menu.height,
+			menu.baseScale or menu.scale or 0.03,
+			nil, nil, wrist
+		)
+		menu.pos, menu.ang = lp, la
 		menu.freeFloat = false
 		menu.attachment = true
 		menu.attachHand = wrist
 		menu.grabHand = nil
 		menu.grabPos = nil
 		menu.grabAng = nil
+		menu._snapFrame = -1
+		InvalidateMenuHit(menu)
 		if grabState and grabState.uid == menu.uid then
 			grabState = nil
 			g_VR.menuGrabActive = false
@@ -778,7 +837,6 @@ if CLIENT then
 			resizeState = nil
 			g_VR.menuResizeActive = false
 		end
-		-- Remember reattached state (no free-float on next open)
 		local all = ReadLayouts()
 		local e = all[tostring(menu.uid)] or {}
 		e.scale = menu.baseScale or menu.scale
@@ -1200,18 +1258,7 @@ if CLIENT then
 			-- Right-click: ContentIcon spawn options, Derma context, etc.
 			mouseButton = MOUSE_RIGHT
 		elseif action == "boolean_sprint" then
-			-- Middle-click for Derma. Reattach only if laser is on the title bar
-			-- (free-float panels used to steal ALL mid-clicks → spawn menu broke).
-			if pressed then
-				local m = menus[g_VR.menuFocus]
-				local cy = (m and m.lastCursorY) or g_VR.menuCursorY or 999
-				local titleH = 36
-				if m and m.freeFloat and not g_VR.menuGrabActive
-					and cy >= 0 and cy < titleH then
-					vrmod.MenuReattach(g_VR.menuFocus)
-					return
-				end
-			end
+			-- Middle-click for Derma only (wrist dock is grip+release near hand — not mid-click)
 			mouseButton = MOUSE_MIDDLE
 		end
 
@@ -1312,7 +1359,8 @@ end, "vrmod_ui_scale_hud")
 concommand.Add("vrmod_menu_reattach", function()
 	if not CLIENT then return end
 	if vrmod.MenuReattach and vrmod.MenuReattach() then
-		if vrmod.logger then vrmod.logger.Info("[UI] Menu reattached to left hand") end
+		local h = vrmod.GetSecondaryHand and vrmod.GetSecondaryHand() or "wrist"
+		if vrmod.logger then vrmod.logger.Info("[UI] Menu reattached to %s hand", h) end
 	end
 end)
 
