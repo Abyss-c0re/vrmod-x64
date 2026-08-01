@@ -202,7 +202,54 @@ local function detectKind(panel)
 	end
 	if panel == g_SpawnMenu or name:find("spawnmenu", 1, true) then return "spawnmenu" end
 	if panel == g_ContextMenu or name:find("context", 1, true) then return "contextmenu" end
+	-- ContentIcon right-click menus
+	if class == "dmenu" or class:find("dmenu", 1, true) or name == "dmenu" then
+		return "dmenu"
+	end
 	return "panel"
+end
+
+--- Parent a DMenu under the focused spawn/context shell so it paints into the same RT.
+--- Separate MakePopup surfaces were unusable for spawn right-click.
+local function attachDMenuToShell(panel)
+	if not IsValid(panel) then return false end
+	local host, mx, my = nil, g_VR.menuCursorX or 8, g_VR.menuCursorY or 8
+	if g_VR.menuFocus == STABLE_UID.spawnmenu and IsValid(g_SpawnMenu) then
+		host = g_SpawnMenu
+	elseif g_VR.menuFocus == STABLE_UID.contextmenu and IsValid(g_ContextMenu) then
+		host = g_ContextMenu
+	elseif IsValid(g_SpawnMenu) and g_SpawnMenu:IsVisible() and bound[STABLE_UID.spawnmenu] then
+		host = g_SpawnMenu
+	elseif IsValid(g_ContextMenu) and g_ContextMenu:IsVisible() and bound[STABLE_UID.contextmenu] then
+		host = g_ContextMenu
+	end
+	if not IsValid(host) then return false end
+
+	local hw = host:GetWide() or 1024
+	local hh = host:GetTall() or 768
+	local pw = panel:GetWide() or 160
+	local ph = panel:GetTall() or 120
+	mx = math.Clamp(math.floor(mx), 0, math.max(0, hw - pw - 4))
+	my = math.Clamp(math.floor(my), 0, math.max(0, hh - ph - 4))
+
+	if panel.SetParent then panel:SetParent(host) end
+	if panel.SetPos then panel:SetPos(mx, my) end
+	if panel.SetPaintedManually then panel:SetPaintedManually(true) end
+	if panel.SetVisible then panel:SetVisible(true) end
+	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
+	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
+	if panel.MakePopup then
+		-- already called by caller; ensure focus stays usable for clicks
+	end
+	if panel.MoveToFront then panel:MoveToFront() end
+	-- Force host RT refresh so menu appears this frame
+	local uid = STABLE_UID.spawnmenu
+	if host == g_ContextMenu then uid = STABLE_UID.contextmenu end
+	if isfunction(VRUtilMenuRenderPanel) then
+		VRUtilMenuRenderPanel(uid)
+	end
+	log("dmenu attached to shell uid=%s at %s,%s", uid, tostring(mx), tostring(my))
+	return true
 end
 
 local function tryNative(kind, panel, opts)
@@ -610,11 +657,29 @@ function W.InstallHooks()
 
 	meta.MakePopup = function(panel, ...)
 		origMakePopup(panel, ...)
-		if not shouldIntercept(panel) then return end
+		if not W.IsVR() then return end
+		if not IsValid(panel) then return end
 		local kind = detectKind(panel)
 		-- Spawn/context: OpenSandboxShell / OnSpawn* own a single manifest — skip here
-		-- (double manifest = first pose then jump)
 		if kind == "spawnmenu" or kind == "contextmenu" then return end
+		-- Right-click menus must live ON the spawn RT (not a second broken surface)
+		if kind == "dmenu" then
+			timer.Simple(0, function()
+				if not IsValid(panel) or not W.IsVR() then return end
+				if not attachDMenuToShell(panel) then
+					-- Fallback: free-float tiny popup if no shell open
+					if W.IsBound(panel) then return end
+					W.ManifestPanel(panel, {
+						kind = "dmenu",
+						place = "popup",
+						hint = "dmenu",
+						alwaysPaint = true,
+					})
+				end
+			end)
+			return
+		end
+		if not shouldIntercept(panel) then return end
 		timer.Simple(0, function()
 			if not IsValid(panel) or not W.IsVR() then return end
 			if W.IsBound(panel) then return end

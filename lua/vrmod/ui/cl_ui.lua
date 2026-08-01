@@ -842,12 +842,18 @@ if CLIENT then
 		if not g_VR.menuFocus then return end
 		local menu = menus[g_VR.menuFocus]
 		if not menu or not menu.lastCursorX or not menu.lastCursorY then return end
-		-- Optional: convert local panel coords to screen coords if needed
+		-- Panel-local laser → screen space (spawn/content icons need absolute pos)
 		local x, y = menu.lastCursorX, menu.lastCursorY
-		input.SetCursorPos(x, y)
-		-- Also update globals if still needed elsewhere
 		g_VR.menuCursorX = x
 		g_VR.menuCursorY = y
+		if IsValid(menu.panel) and menu.panel.LocalToScreen then
+			local sx, sy = menu.panel:LocalToScreen(x, y)
+			if sx and sy then
+				input.SetCursorPos(sx, sy)
+				return
+			end
+		end
+		input.SetCursorPos(x, y)
 	end
 
 	function VRUtilMenuClose(uid)
@@ -912,13 +918,19 @@ if CLIENT then
 		local mouseButton = nil
 		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
 			mouseButton = MOUSE_LEFT
-		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right" then
+		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right"
+			or action == "boolean_left_secondaryfire" then
+			-- Right-click: ContentIcon spawn options, Derma context, etc.
 			mouseButton = MOUSE_RIGHT
 		elseif action == "boolean_sprint" then
-			-- Sprint while laser-focused on a free-floating panel re-snaps it to left hand
+			-- Middle-click for Derma. Reattach only if laser is on the title bar
+			-- (free-float panels used to steal ALL mid-clicks → spawn menu broke).
 			if pressed then
 				local m = menus[g_VR.menuFocus]
-				if m and m.freeFloat and not g_VR.menuGrabActive and not g_VR.menuResizeActive then
+				local cy = (m and m.lastCursorY) or g_VR.menuCursorY or 999
+				local titleH = 36
+				if m and m.freeFloat and not g_VR.menuGrabActive
+					and cy >= 0 and cy < titleH then
 					vrmod.MenuReattach(g_VR.menuFocus)
 					return
 				end
@@ -935,7 +947,10 @@ if CLIENT then
 				gui.InternalMouseReleased(mouseButton)
 			end
 
-			VRUtilMenuRenderPanel(g_VR.menuFocus)
+			-- Keep spawn RT current so right-click DMenus under the shell paint immediately
+			if isfunction(VRUtilMenuRenderPanel) then
+				VRUtilMenuRenderPanel(g_VR.menuFocus)
+			end
 		end
 	end)
 
