@@ -1092,6 +1092,63 @@ if CLIENT then
 		end
 	end
 
+	-- Menu mouse: left trigger (boolean_left_primaryfire) = normal LMB click.
+	-- Hold either trigger (left or right primary) → RMB / context menu.
+	-- Instant RMB still available via boolean_secondaryfire (right controller).
+	local MENU_HOLD_RMB = 0.38 -- seconds
+	local menuTrigger = {
+		-- [action] = { down = bool, t0 = number, lmb = bool, rmbDone = bool }
+	}
+
+	local function DirtyFocusedMenu()
+		if not g_VR.menuFocus then return end
+		vrmod.MarkMenuDirty(g_VR.menuFocus)
+		if isfunction(VRUtilMenuRenderPanel) then
+			VRUtilMenuRenderPanel(g_VR.menuFocus, true)
+		end
+	end
+
+	local function FireMenuRightClick()
+		SyncCursorToVR()
+		g_VR._dmenuOpened = false
+		local p = vgui.GetHoveredPanel and vgui.GetHoveredPanel() or nil
+		if not IsValid(p) and IsValid(menus[g_VR.menuFocus] and menus[g_VR.menuFocus].panel) then
+			local root = menus[g_VR.menuFocus].panel
+			local lx = menus[g_VR.menuFocus].lastCursorX or g_VR.menuCursorX or 0
+			local ly = menus[g_VR.menuFocus].lastCursorY or g_VR.menuCursorY or 0
+			if root.LocalToScreen then
+				local sx, sy = root:LocalToScreen(lx, ly)
+				if sx and vgui.GetHoveredPanel then
+					input.SetCursorPos(sx, sy)
+					p = vgui.GetHoveredPanel()
+				end
+			end
+		end
+		local hops = 0
+		while IsValid(p) and hops < 32 do
+			if isfunction(p.DoRightClick) then
+				pcall(function() p:DoRightClick() end)
+				break
+			end
+			if isfunction(p.OpenMenu) then
+				pcall(function() p:OpenMenu() end)
+				break
+			end
+			p = p:GetParent()
+			hops = hops + 1
+		end
+		gui.InternalMousePressed(MOUSE_RIGHT)
+		gui.InternalMouseReleased(MOUSE_RIGHT)
+		heldButtons[MOUSE_RIGHT] = false
+		DirtyFocusedMenu()
+	end
+
+	local function IsMenuTriggerAction(action)
+		return action == "boolean_primaryfire"
+			or action == "boolean_left_primaryfire"
+			or action == "boolean_car_mouse_left"
+	end
+
 	hook.Add("VRMod_Input", "ui", function(action, pressed)
 		-- Panel grab is handled in cl_input (before entity pickup) via vrmod.TryMenuGrab.
 		-- Also handle here so grab works if default input is disabled / reordered.
@@ -1100,19 +1157,56 @@ if CLIENT then
 			if vrmod.TryMenuGrab(hand, pressed) then return end
 		end
 
-		if not g_VR.menuFocus then return end
+		if not g_VR.menuFocus then
+			-- Clear pending hold-click if we leave the menu mid-hold
+			if not pressed and menuTrigger[action] then
+				local st = menuTrigger[action]
+				if st.lmb then
+					gui.InternalMouseReleased(MOUSE_LEFT)
+					heldButtons[MOUSE_LEFT] = false
+				end
+				menuTrigger[action] = nil
+			end
+			return
+		end
 		-- Don't inject clicks while resizing (corner drag is not a button press)
 		if g_VR.menuResizeActive then return end
+
+		-- ── Triggers: LMB click; hold either → RMB ────────────────────────
+		if IsMenuTriggerAction(action) then
+			if pressed then
+				SyncCursorToVR()
+				menuTrigger[action] = {
+					down = true,
+					t0 = CurTime(),
+					lmb = true,
+					rmbDone = false,
+				}
+				heldButtons[MOUSE_LEFT] = true
+				gui.InternalMousePressed(MOUSE_LEFT)
+				DirtyFocusedMenu()
+			else
+				local st = menuTrigger[action]
+				menuTrigger[action] = nil
+				if st and st.lmb and not st.rmbDone then
+					SyncCursorToVR()
+					gui.InternalMouseReleased(MOUSE_LEFT)
+					heldButtons[MOUSE_LEFT] = false
+					DirtyFocusedMenu()
+				elseif st and st.rmbDone then
+					-- LMB already released when hold converted to RMB
+					heldButtons[MOUSE_LEFT] = false
+				end
+			end
+			return
+		end
+
+		-- Instant right-click (dedicated secondary / car right) — not left trigger
 		local mouseButton = nil
-		if action == "boolean_primaryfire" or action == "boolean_car_mouse_left" then
-			mouseButton = MOUSE_LEFT
-		elseif action == "boolean_secondaryfire" or action == "boolean_car_mouse_right"
-			or action == "boolean_left_secondaryfire" then
-			-- Right-click: ContentIcon spawn options, Derma context, etc.
+		if action == "boolean_secondaryfire" or action == "boolean_car_mouse_right" then
 			mouseButton = MOUSE_RIGHT
 		elseif action == "boolean_sprint" then
 			-- Middle-click for Derma. Reattach only if laser is on the title bar
-			-- (free-float panels used to steal ALL mid-clicks → spawn menu broke).
 			if pressed then
 				local m = menus[g_VR.menuFocus]
 				local cy = (m and m.lastCursorY) or g_VR.menuCursorY or 999
@@ -1125,48 +1219,15 @@ if CLIENT then
 			end
 			mouseButton = MOUSE_MIDDLE
 		end
+		-- Note: boolean_left_secondaryfire is NOT right-click on menus
+		-- (left trigger is boolean_left_primaryfire → normal click above).
 
 		if mouseButton then
 			heldButtons[mouseButton] = pressed
 			SyncCursorToVR()
-
-			-- RIGHT CLICK (spawn ContentIcon menu):
-			-- Derma only calls DoRightClick on mouse *release* when panel.Hovered.
-			-- Laser VR often has Hovered=false on release → menu never opens.
-			-- Fire DoRightClick on press while laser hover is valid; DMenu:Open is
-			-- patched in panel2vr to parent onto the spawn RT.
 			if mouseButton == MOUSE_RIGHT then
 				if pressed then
-					g_VR._dmenuOpened = false
-					local p = vgui.GetHoveredPanel and vgui.GetHoveredPanel() or nil
-					-- Fallback: walk spawn/context children under laser UV
-					if not IsValid(p) and IsValid(menus[g_VR.menuFocus] and menus[g_VR.menuFocus].panel) then
-						local root = menus[g_VR.menuFocus].panel
-						local lx = menus[g_VR.menuFocus].lastCursorX or g_VR.menuCursorX or 0
-						local ly = menus[g_VR.menuFocus].lastCursorY or g_VR.menuCursorY or 0
-						-- Convert root-local laser → screen → find child (VGUI helpers)
-						if root.LocalToScreen then
-							local sx, sy = root:LocalToScreen(lx, ly)
-							if sx and vgui.GetHoveredPanel then
-								input.SetCursorPos(sx, sy)
-								p = vgui.GetHoveredPanel()
-							end
-						end
-					end
-					local hops = 0
-					while IsValid(p) and hops < 32 do
-						if isfunction(p.DoRightClick) then
-							pcall(function() p:DoRightClick() end)
-							break
-						end
-						if isfunction(p.OpenMenu) then
-							pcall(function() p:OpenMenu() end)
-							break
-						end
-						p = p:GetParent()
-						hops = hops + 1
-					end
-					gui.InternalMousePressed(MOUSE_RIGHT)
+					FireMenuRightClick()
 				else
 					SyncCursorToVR()
 					gui.InternalMouseReleased(MOUSE_RIGHT)
@@ -1177,14 +1238,7 @@ if CLIENT then
 				else
 					gui.InternalMouseReleased(mouseButton)
 				end
-			end
-
-			-- Force-paint focused shell so DMenus appear on RT this frame
-			if g_VR.menuFocus then
-				vrmod.MarkMenuDirty(g_VR.menuFocus)
-				if isfunction(VRUtilMenuRenderPanel) then
-					VRUtilMenuRenderPanel(g_VR.menuFocus, true)
-				end
+				DirtyFocusedMenu()
 			end
 		end
 	end)
@@ -1192,6 +1246,18 @@ if CLIENT then
 	hook.Add("Think", "VRUtil_SyncCursorWhileHeld", function()
 		if not g_VR or not g_VR.menuFocus then return end
 		SyncCursorToVR()
+		-- Hold either trigger → right-click context (spawn icons, Derma menus)
+		local now = CurTime()
+		for action, st in pairs(menuTrigger) do
+			if st and st.down and st.lmb and not st.rmbDone and (now - st.t0) >= MENU_HOLD_RMB then
+				st.rmbDone = true
+				st.lmb = false
+				SyncCursorToVR()
+				gui.InternalMouseReleased(MOUSE_LEFT)
+				heldButtons[MOUSE_LEFT] = false
+				FireMenuRightClick()
+			end
+		end
 	end)
 
 	local lastMenuFocus = nil
