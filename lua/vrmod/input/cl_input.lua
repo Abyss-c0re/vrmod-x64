@@ -177,21 +177,20 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_left_pickup" then
-		-- Stock two-hand FIRST — never let menu grab / pickup steal when FG starts
-		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
-			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
-			return
-		end
-		if g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
-			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
-			return
+		-- Stock foregrip owns left grip when it starts or is held (before menus/pickup)
+		if vrmod.TryForegripGrab then
+			local took = vrmod.TryForegripGrab(pressed and true or false)
+			if took or (vrmod.IsForegripActive and vrmod.IsForegripActive()) or g_VR.foregripActive then
+				if g_VR.vehicle.wheel_bone then leftGrip = pressed end
+				return
+			end
 		end
 
-		-- WayVR panel grab only when laser is on a menu
+		-- Panel free-grab only with laser focus
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
 		if g_VR.menuGrabActive and g_VR.menuFocus then return end
 
-		-- ArcVR: block world pickup when gripping FG or LH in FG zone (not magwell)
+		-- ArcVR FG zone (not magwell)
 		local awep = LocalPlayer():GetActiveWeapon()
 		local arcFG = IsValid(awep) and awep.ArcticVR and awep.ForegripGrabbed
 		local arcNearFG = false
@@ -209,7 +208,6 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
 		end
-		-- Free twin: grips spin/distance the avatar (not world pickup)
 		if g_VR.avatarSteerTwin then return end
 		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
 		if twin and twin.active and twin.mode == "free" and not g_VR.menuFocus then return end
