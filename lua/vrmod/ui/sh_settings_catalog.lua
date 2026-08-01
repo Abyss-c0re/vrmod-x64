@@ -41,7 +41,7 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Teleport max distance", cvar = "vrmod_teleport_maxdist", min = 0, max = 1000, decimals = 0 },
 			{ kind = "bool", label = "Alternative head angles", cvar = "vrmod_althead" },
 			{ kind = "help", label = "Less precise — jigglebone compatibility" },
-			{ kind = "action", label = "Edit controller actions", cmd = "vrmod_actioneditor" },
+			{ kind = "help", label = "Controller actions / custom binds → Bindings tab" },
 			{ kind = "header", label = "Controller offsets" },
 			{ kind = "slider", label = "Offset X", cvar = "vrmod_controlleroffset_x", min = -30, max = 30, decimals = 0 },
 			{ kind = "slider", label = "Offset Y", cvar = "vrmod_controlleroffset_y", min = -30, max = 30, decimals = 0 },
@@ -60,6 +60,19 @@ vrmod.SettingsCatalog = {
 			{ kind = "bool", label = "Climbing mechanics", cvar = "vrmod_climbing" },
 			{ kind = "bool", label = "Door use mechanics", cvar = "vrmod_doors" },
 			{ kind = "action", label = "Reset all settings", cmd = "vrmod_reset" },
+		},
+	},
+	{
+		-- Workshop: Батон — "Where did you move the Bindings tab?"
+		-- Cube SoT: one Bindings pane (action editor + SteamVR pointer); not buried only under Controls.
+		id = "bindings",
+		title = "Bindings",
+		icon = "icon16/keyboard.png",
+		rows = {
+			{ kind = "help", label = "Custom input actions (was the old Bindings tab)" },
+			{ kind = "action", label = "Open action editor", cmd = "vrmod_actioneditor" },
+			{ kind = "help", label = "SteamVR rebind: Settings → Controllers → Manage Controller Bindings → Garry's Mod" },
+			{ kind = "help", label = "Default binding files rewrite to data/vrmod/ on VR start" },
 		},
 	},
 	{
