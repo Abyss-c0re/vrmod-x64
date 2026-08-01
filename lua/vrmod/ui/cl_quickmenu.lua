@@ -348,18 +348,27 @@ function g_VR.MenuOpen()
 			return
 		end
 		local mm = g_VR.menus.miscmenu
-		-- Pin every frame: never free-float / grab away from wrist
-		mm.freeFloat = false
-		mm.attachment = true
-		mm.grabbable = false
-		mm.grabHand = nil
-		if not mm.attachHand then
-			mm.attachHand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
-		end
-		if not mm.scaleLocked then
-			mm.scale = 0.025
-			mm.baseScale = 0.025
-			mm._lastAssignedScale = 0.025
+		local mode = (vrmod.GetQuickMenuAttachMode and vrmod.GetQuickMenuAttachMode()) or "left"
+		if mode == "float" then
+			-- Free float: allow grab; keep world pose
+			mm.grabbable = true
+			if not mm.grabHand then
+				mm.freeFloat = true
+				mm.attachment = false
+			end
+		else
+			-- Left / right hand lock
+			local wrist = (vrmod.GetQuickMenuHand and vrmod.GetQuickMenuHand()) or mode
+			mm.freeFloat = false
+			mm.attachment = true
+			mm.grabbable = false
+			mm.grabHand = nil
+			mm.attachHand = wrist
+			if not mm.scaleLocked then
+				mm.scale = 0.025
+				mm.baseScale = 0.025
+				mm._lastAssignedScale = 0.025
+			end
 		end
 		mm.cubeMenu = true
 		mm.paintInterval = 12
