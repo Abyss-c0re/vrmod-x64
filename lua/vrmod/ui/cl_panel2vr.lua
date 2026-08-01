@@ -743,9 +743,12 @@ function W.InstallHooks()
 		end
 	end)
 
-	-- Hold-open / layout bookkeeping (not RT paint — that is every stereo frame below)
+	-- Hold-open / layout bookkeeping (throttled — not every Think field rewrite)
+	local keepAliveN = 0
 	hook.Add("Think", "panel2vr_keepalive", function()
 		if not W.IsVR() then return end
+		keepAliveN = keepAliveN + 1
+		local heavy = (keepAliveN % 15) == 0 -- ~4 Hz pose snapshot
 		for uid, info in pairs(bound) do
 			if info.panel and IsValid(info.panel) then
 				if info.kind == "spawnmenu" or info.kind == "contextmenu" then
@@ -761,7 +764,8 @@ function W.InstallHooks()
 						m.persistOpen = true
 						m.keepAlive = true
 						m.allowHiddenPanel = true
-						if (m.freeFloat or not m.attachment) and m.pos and m.ang then
+						m.paintInterval = 3 -- unfocused spawn RT cheaper than full rate
+						if heavy and (m.freeFloat or not m.attachment) and m.pos and m.ang then
 							shellFloatPose[info.kind] = {
 								pos = Vector(m.pos),
 								ang = Angle(m.ang.p, m.ang.y, m.ang.r),
@@ -782,12 +786,22 @@ function W.InstallHooks()
 		end
 	end)
 
-	-- Realtime RT paint: every stereo frame for all open Derma shells (shared both eyes)
+	-- RT paint once per stereo frame (shared both eyes).
+	-- Focused / dirty / alwaysPaint → full rate; idle shells use paintInterval inside RenderPanel.
 	hook.Add("VRMod_PreStereo", "panel2vr_repaint", function()
 		if not W.IsVR() then return end
 		if not isfunction(VRUtilMenuRenderPanel) then return end
 		for uid, info in pairs(bound) do
 			if info.panel and IsValid(info.panel) then
+				local m = g_VR.menus and g_VR.menus[uid]
+				if m then
+					if info.alwaysPaint or info.html then
+						m.paintInterval = 2
+					end
+					if g_VR.menuFocus == uid then
+						m.dirty = true -- hover/selection needs every-frame while pointed
+					end
+				end
 				VRUtilMenuRenderPanel(uid)
 			end
 		end

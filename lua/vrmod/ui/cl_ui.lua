@@ -71,25 +71,40 @@ if CLIENT then
 		beamInit = cv and cv:GetString() or "255,0,0,255"
 	end
 	UpdateBeamColor(beamInit)
-	-- Wipe menu RT completely (alpha 0). Prevents ghosted pixels / uncleared HUD-style trails
-	-- when panel paint is sparse (workshop bugs #349 weapon wheel + hand menus).
-	local function ClearMenuRT(w, h)
+	-- Wipe menu RT (alpha 0). Cheap path: Clear alone (no full-screen DrawRect/blend).
+	local function ClearMenuRT(_w, _h)
 		render.OverrideAlphaWriteEnable(true, true)
-		if render.ClearDepth then render.ClearDepth() end
 		render.Clear(0, 0, 0, 0, true, true)
-		if render.OverrideBlend then
-			pcall(function()
-				render.OverrideBlend(true, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD)
-			end)
-		end
-		surface.SetDrawColor(0, 0, 0, 0)
-		surface.DrawRect(0, 0, w or 2048, h or 2048)
-		if render.OverrideBlend then pcall(function() render.OverrideBlend(false) end) end
 	end
 
-	function VRUtilMenuRenderPanel(uid)
+	--- Mark a menu RT dirty so the next paint is not skipped (input, open, resize).
+	function vrmod.MarkMenuDirty(uid)
+		if uid and menus[uid] then
+			menus[uid].dirty = true
+		elseif not uid then
+			for _, m in pairs(menus) do
+				m.dirty = true
+			end
+		end
+	end
+
+	--- Paint Derma panel into menu RT.
+	--- force=true always paints. Otherwise: focused every frame; unfocused every N frames or dirty.
+	function VRUtilMenuRenderPanel(uid, force)
 		local menu = menus[uid]
 		if not menu or not menu.rt or not menu.panel or not menu.panel:IsValid() then return end
+		local fn = FrameNumber and FrameNumber() or 0
+		if not force then
+			local focused = (g_VR.menuFocus == uid)
+			local interval = focused and 1 or (menu.paintInterval or 4)
+			if not menu.dirty and menu._lastPaintFrame
+				and (fn - menu._lastPaintFrame) < interval then
+				return
+			end
+		end
+		menu.dirty = false
+		menu._lastPaintFrame = fn
+
 		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
 		ClearMenuRT(menu.width, menu.height)
@@ -106,6 +121,9 @@ if CLIENT then
 	function VRUtilMenuRenderStart(uid)
 		local menu = menus[uid]
 		if not menu or not menu.rt then return false end
+		-- Native paint paths always force (caller owns full redraw)
+		menu.dirty = false
+		menu._lastPaintFrame = FrameNumber and FrameNumber() or 0
 		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
 		ClearMenuRT(menu.width, menu.height)
@@ -572,26 +590,52 @@ if CLIENT then
 		return true
 	end
 
+	-- Focus result frozen after first stereo eye so second eye only draws quads
+	local focusSnap = {
+		frame = -1,
+		uid = false,
+		panel = nil,
+		cursorWorld = nil,
+		cursorX = 0,
+		cursorY = 0,
+	}
+
 	function VRUtilRenderMenuSystem()
 		if not menusExist or #menuOrder == 0 then
 			g_VR.menuFocus = false
 			return
 		end
-		g_VR.menuFocus = false
-		local cursorX, cursorY = 0, 0
+		local sf = g_VR.stereoFrame or 0
+		local eye = g_VR.stereoEye
+		-- First eye of the frame solves laser focus; second eye reuses (no double hit tests)
+		local solveFocus = (focusSnap.frame ~= sf) or (eye == "left") or (eye == nil)
+		if solveFocus then
+			g_VR.menuFocus = false
+			focusSnap.frame = sf
+			focusSnap.uid = false
+			focusSnap.panel = nil
+			focusSnap.cursorWorld = nil
+		else
+			g_VR.menuFocus = focusSnap.uid
+		end
+
 		local menuFocusDist = 99999
 		local menuFocusPanel = nil
 		local menuFocusCursorWorldPos = nil
 		local tms = render.GetToneMappingScaleLinear()
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
-		for k, v in ipairs(menuOrder) do
-			k = v.uid
+
+		local rh = g_VR.tracking and g_VR.tracking.pose_righthand
+		local rhPos = rh and rh.pos
+		local rhAng = rh and rh.ang
+
+		for _, v in ipairs(menuOrder) do
+			local k = v.uid
 			if v.panel then
 				if not IsValid(v.panel) then
 					VRUtilMenuClose(k)
 					continue
 				end
-				-- Spawn/context stay open while bound (QM open must not kill them).
 				if not v.panel:IsVisible() then
 					local keep = v.persistOpen or v.keepAlive or v.allowHiddenPanel
 						or (v.panel.IsPaintedManually and v.panel:IsPaintedManually())
@@ -605,7 +649,6 @@ if CLIENT then
 				end
 			end
 
-			-- Remember open-time scale once; never bake global UI scale into baseScale
 			if not v.baseScale then
 				local uid = v.uid or ""
 				local keepScale = v.cubeMenu or v.cubeui
@@ -626,86 +669,72 @@ if CLIENT then
 				end
 				v.baseScale = base
 			end
-			-- Callers that re-assign .scale update baseScale only if user has not locked size
 			if not v.scaleLocked and v.scale and v.scale > 0
 				and math.abs(v.scale - (v._lastAssignedScale or -1)) > 1e-6 then
 				v.baseScale = v.scale
 				v._lastAssignedScale = v.scale
 			elseif v.scaleLocked and v.baseScale then
-				-- Keep paint hooks from drifting RT scale
 				v.scale = v.baseScale
 				v._lastAssignedScale = v.baseScale
 			end
 
-			-- Stereo-stable: first eye freezes pose/scale for the frame; second reuses it.
-			local sf = g_VR.stereoFrame or 0
-			local pos, ang, drawScale
-			if v._snapFrame == sf and v._snapPos and v._snapAng and v._snapScale and v._snapScale > 0 then
-				pos, ang, drawScale = v._snapPos, v._snapAng, v._snapScale
-			else
+			local pos, ang, drawScale = v._snapPos, v._snapAng, v._snapScale
+			if not pos or not ang or not drawScale or drawScale <= 0 or v._snapFrame ~= sf then
 				pos, ang, drawScale = ResolveDrawPose(v)
 				if not pos or not ang then continue end
 				v._snapPos, v._snapAng, v._snapScale = pos, ang, drawScale
 				v._snapFrame = sf
 			end
-			if not pos or not ang or not drawScale then continue end
 
-			if v.mat and not v.mat:IsError() then
+			-- SetTexture only when RT instance changes
+			if v.mat and not v.mat:IsError() and v._boundRT ~= v.rt then
 				v.mat:SetTexture("$basetexture", v.rt)
+				v._boundRT = v.rt
 			end
 
-			-- Laser plane hit: always for cursor and/or resize (every window resizable)
 			local hitCursorX, hitCursorY, hitDist, hitWorld = nil, nil, nil, nil
 			local resizingThis = resizeState and resizeState.uid == k
 			local wantCursor = v.cursorEnabled or MenuIsResizable(v) or resizingThis
-			if wantCursor then
-				local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-				if rh and rh.pos and rh.ang then
-					local start = rh.pos
-					local dir = rh.ang:Forward()
-					local normal = ang:Up()
-					local A = normal:Dot(dir)
-					if A < 0 then
-						local B = normal:Dot(pos - start)
-						if B < 0 then
-							hitDist = B / A
-							hitWorld = start + dir * hitDist
-							local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
-							hitCursorX = tp.x * 1 / drawScale
-							hitCursorY = -tp.y * 1 / drawScale
-						end
+			if wantCursor and solveFocus and rhPos and rhAng then
+				local dir = rhAng:Forward()
+				local normal = ang:Up()
+				local A = normal:Dot(dir)
+				if A < 0 then
+					local B = normal:Dot(pos - rhPos)
+					if B < 0 then
+						hitDist = B / A
+						hitWorld = rhPos + dir * hitDist
+						local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
+						hitCursorX = tp.x / drawScale
+						hitCursorY = -tp.y / drawScale
+						v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
+						v._hitFrame = sf
 					end
 				end
+			elseif wantCursor and v._hitFrame == sf then
+				hitCursorX, hitCursorY, hitDist, hitWorld = v._hitX, v._hitY, v._hitDist, v._hitWorld
 			end
 
 			cam.IgnoreZ(true)
 			cam.Start3D2D(pos, ang, drawScale)
-			local blendOn = false
-			if render.OverrideBlend then
-				blendOn = pcall(function()
-					render.OverrideBlend(true, BLEND_SRC_ALPHA, BLEND_ONE_MINUS_SRC_ALPHA, BLENDFUNC_ADD)
-				end)
-			end
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(v.mat)
 			surface.DrawTexturedRect(0, 0, v.width, v.height)
-			if blendOn then pcall(function() render.OverrideBlend(false) end) end
 			if uioutline:GetBool() then
 				surface.SetDrawColor(255, 0, 0, 255)
 				surface.DrawOutlinedRect(0, 0, v.width, v.height)
 			end
 
-			-- Soft corner hint when laser is in a resize zone (all windows); brighter while dragging
 			local inCorner = hitCursorX and hitCursorY and MenuIsResizable(v)
 				and CursorInResizeCorner(v, hitCursorX, hitCursorY)
 			if (resizingThis or inCorner) and cv_menu_resize:GetBool() then
 				local a = resizingThis and 90 or 45
 				surface.SetDrawColor(255, 255, 255, a)
+				local w, h = v.width, v.height
 				local function cornerGrip(x0, y0, sx, sy)
 					surface.DrawLine(x0, y0 + sy * 12, x0, y0)
 					surface.DrawLine(x0, y0, x0 + sx * 12, y0)
 				end
-				local w, h = v.width, v.height
 				if hitCursorX and hitCursorY then
 					local left = hitCursorX < w * 0.5
 					local top = hitCursorY < h * 0.5
@@ -718,43 +747,49 @@ if CLIENT then
 					cornerGrip(w - 3, h - 3, -1, -1)
 				end
 			end
-
 			cam.End3D2D()
 			cam.IgnoreZ(false)
-			if wantCursor then
-				if not hitCursorX or not hitCursorY or not hitDist or not menuFocusDist then continue end
-				cursorX, cursorY = hitCursorX, hitCursorY
+
+			if solveFocus and wantCursor and hitCursorX and hitCursorY and hitDist then
 				local cz = CornerZoneSize(v)
-				local inside = cursorX > -cz * 0.2 and cursorY > -cz * 0.2
-					and cursorX < v.width + cz * 0.2 and cursorY < v.height + cz * 0.2
+				local inside = hitCursorX > -cz * 0.2 and hitCursorY > -cz * 0.2
+					and hitCursorX < v.width + cz * 0.2 and hitCursorY < v.height + cz * 0.2
 				local keepResize = resizingThis and hitDist < menuFocusDist + 50
 				if (inside or keepResize) and hitDist < menuFocusDist then
 					g_VR.menuFocus = k
 					menuFocusDist = hitDist
 					menuFocusPanel = v.panel
-					v.lastCursorX = cursorX
-					v.lastCursorY = cursorY
+					v.lastCursorX = hitCursorX
+					v.lastCursorY = hitCursorY
 					menuFocusCursorWorldPos = hitWorld
+					focusSnap.uid = k
+					focusSnap.panel = v.panel
+					focusSnap.cursorWorld = hitWorld
+					focusSnap.cursorX = hitCursorX
+					focusSnap.cursorY = hitCursorY
 				end
 			end
 		end
 
 		render.SetToneMappingScaleLinear(tms)
-		if menuFocusPanel ~= prevFocusPanel then
-			if IsValid(prevFocusPanel) then prevFocusPanel:SetMouseInputEnabled(false) end
-			if IsValid(menuFocusPanel) then menuFocusPanel:SetMouseInputEnabled(true) end
-			gui.EnableScreenClicker(menuFocusPanel ~= nil)
-			prevFocusPanel = menuFocusPanel
+
+		if solveFocus then
+			if focusSnap.panel ~= prevFocusPanel then
+				if IsValid(prevFocusPanel) then prevFocusPanel:SetMouseInputEnabled(false) end
+				if IsValid(focusSnap.panel) then focusSnap.panel:SetMouseInputEnabled(true) end
+				gui.EnableScreenClicker(focusSnap.panel ~= nil)
+				prevFocusPanel = focusSnap.panel
+			end
 		end
 
 		local focus = g_VR.menuFocus
-		if focus and menus[focus] and menuFocusCursorWorldPos then
-			g_VR.menuCursorX = menus[focus].lastCursorX
-			g_VR.menuCursorY = menus[focus].lastCursorY
-			local rh = g_VR.tracking and g_VR.tracking.pose_righthand
-			if rh and rh.pos then
+		if focus and menus[focus] then
+			g_VR.menuCursorX = menus[focus].lastCursorX or focusSnap.cursorX
+			g_VR.menuCursorY = menus[focus].lastCursorY or focusSnap.cursorY
+			local beamEnd = focusSnap.cursorWorld or menus[focus]._hitWorld
+			if rhPos and beamEnd then
 				render.SetMaterial(mat_beam)
-				render.DrawBeam(rh.pos, menuFocusCursorWorldPos, 0.1, 0, 1, Color(255, 255, 255, 255))
+				render.DrawBeam(rhPos, beamEnd, 0.1, 0, 1, Color(255, 255, 255, 255))
 			end
 		end
 
@@ -801,6 +836,8 @@ if CLIENT then
 			grabHand = nil,
 			grabPos = nil,
 			grabAng = nil,
+			dirty = true,
+			paintInterval = 4, -- unfocused RT refresh every N frames
 		}
 
 		menuOrder[#menuOrder + 1] = menus[uid]
@@ -947,9 +984,12 @@ if CLIENT then
 				gui.InternalMouseReleased(mouseButton)
 			end
 
-			-- Keep spawn RT current so right-click DMenus under the shell paint immediately
-			if isfunction(VRUtilMenuRenderPanel) then
-				VRUtilMenuRenderPanel(g_VR.menuFocus)
+			-- Force-paint focused shell so right-click DMenus / hover update immediately
+			if g_VR.menuFocus then
+				vrmod.MarkMenuDirty(g_VR.menuFocus)
+				if isfunction(VRUtilMenuRenderPanel) then
+					VRUtilMenuRenderPanel(g_VR.menuFocus, true)
+				end
 			end
 		end
 	end)
