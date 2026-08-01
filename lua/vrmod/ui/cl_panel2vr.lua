@@ -514,6 +514,7 @@ function W.ManifestNative(uid, width, height, drawFn, opts)
 		end
 		m.cubeMenu = true
 		m.grabbable = true
+		m.resizable = true
 		if not m.freeFloat and not m.grabHand then
 			m.attachment = place.attachment and true or false
 		end
@@ -691,6 +692,7 @@ function W.InstallHooks()
 					if info.kind == "spawnmenu" or info.kind == "contextmenu" then
 						m.cubeMenu = true
 						m.grabbable = true
+						m.resizable = true
 						m.persistOpen = true
 						m.keepAlive = true
 						m.allowHiddenPanel = true
