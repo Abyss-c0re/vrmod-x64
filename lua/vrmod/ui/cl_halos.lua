@@ -1,27 +1,24 @@
--- Stereo-safe halo rendering for VR dual-eye SBS.
+-- Stereo-safe halo.Add for VR dual-eye SBS.
 --
--- Stock halo (includes/modules/halo.lua) is mono-frame:
---   Copy scene → Clear FULL scene RT → silhouette → blur → DrawScreenQuad
--- Under VR that Clear wipes the other eye half of the shared SBS RT, and
--- full-screen quads ignore the eye scissor → flicker / missing outlines / decal
--- side-effects from dirty stencil state.
+-- Stock halo.Clear's the full scene RT and DrawScreenQuad's ScrWxScrH — that
+-- wipes the other eye and breaks scissor. Old VRMod wrapper only drew when
+-- EyePos == g_VR.view.origin (never true per-eye).
 --
--- While g_VR.active:
---   • Own halo.Add list
---   • Replace PostDrawEffects "RenderHalos"
---   • Silhouette + blur in private RTs (never Clear the stereo scene)
---   • Stencil entities on the scene with colour writes off
---   • Composite blur into the current eye viewport only (DrawScreenQuadEx)
---   • Reset stencil / depth / blend after each entry
--- Each eye re-fills the list (PostDrawOpaque / PreDrawHalos), so both eyes outline.
+-- This version:
+--   • Owns halo.Add list while VR is active
+--   • Draws on PostDrawTranslucentRenderables when stereoEye is left|right only
+--     (never nil — radar/HUD captures must not consume or clear the list)
+--   • Silhouette + blur in a private RT; never Clear the stereo scene
+--   • Composites into the current eye viewport only
+--   • Restores stock halo on VR exit via require("halo")
 
 if SERVER then return end
 
 local mat_Add = Material("pp/add")
 local mat_Sub = Material("pp/sub")
+local mat_white = Material("models/debug/debugwhite")
 
-local rt_Color
-local rt_Blur
+local rt_Halo
 local rt_W, rt_H = 0, 0
 
 local modelFlags = bit.bor(STUDIO_RENDER, STUDIO_SKIP_DECALS or 0)
@@ -30,50 +27,62 @@ local installed = false
 local stockAdd
 local list = {}
 
-local function EnsureRTs(needW, needH)
-	needW = math.max(64, math.floor(needW or 512))
-	needH = math.max(64, math.floor(needH or 512))
-	if rt_Color and rt_W == needW and rt_H == needH then return end
-	rt_W, rt_H = needW, needH
-	local tag = tostring(needW) .. "x" .. tostring(needH)
-	rt_Color = GetRenderTarget("vrmod_halo_color_" .. tag, needW, needH, false)
-	rt_Blur = GetRenderTarget("vrmod_halo_blur_" .. tag, needW, needH, false)
+local function EnsureRT(w, h)
+	w = math.max(64, math.floor(w))
+	h = math.max(64, math.floor(h))
+	if rt_Halo and rt_W == w and rt_H == h then return end
+	rt_W, rt_H = w, h
+	rt_Halo = GetRenderTarget("vrmod_halo_eye_" .. w .. "x" .. h, w, h, false)
 end
 
-local function ResetDrawState()
-	render.SetStencilEnable(false)
-	render.SetStencilTestMask(0)
-	render.SetStencilWriteMask(0)
-	render.SetStencilReferenceValue(0)
-	render.SuppressEngineLighting(false)
-	render.SetBlend(1)
-	if render.OverrideDepthEnable then render.OverrideDepthEnable(false, false) end
-	if render.OverrideBlend then render.OverrideBlend(false) end
-	if render.OverrideColorWriteEnable then render.OverrideColorWriteEnable(false) end
-	if render.DepthRange then render.DepthRange(0, 1) end
-	pcall(cam.IgnoreZ, false)
+local function ResetState()
+	pcall(function()
+		render.SetStencilEnable(false)
+		render.SetStencilTestMask(0)
+		render.SetStencilWriteMask(0)
+		render.SetStencilReferenceValue(0)
+		render.SuppressEngineLighting(false)
+		render.SetBlend(1)
+		render.SetColorModulation(1, 1, 1)
+		render.MaterialOverride(nil)
+		if render.OverrideDepthEnable then render.OverrideDepthEnable(false, false) end
+		if render.OverrideBlend then render.OverrideBlend(false) end
+		if render.DepthRange then render.DepthRange(0, 1) end
+		cam.IgnoreZ(false)
+	end)
 end
 
-local function EyeCam(w, h)
+local function ClearList()
+	for i = #list, 1, -1 do
+		list[i] = nil
+	end
+end
+
+local function EyeOriginAngles()
 	local origin = EyePos()
 	local angles = EyeAngles()
-	local fov = 90
-	local znear, zfar = 1, 32768
-	if g_VR and g_VR.view then
-		fov = g_VR.view.fov or fov
-		znear = g_VR.view.znear or znear
-		zfar = g_VR.view.zfar or zfar
-		if zfar < 256 then zfar = 32768 end
-		if g_VR.view.angles then angles = g_VR.view.angles end
-	end
 	if g_VR then
 		if g_VR.stereoEye == "right" and g_VR.eyePosRight then
 			origin = g_VR.eyePosRight
 		elseif g_VR.eyePosLeft then
 			origin = g_VR.eyePosLeft
 		end
+		if g_VR.view and g_VR.view.angles then
+			angles = g_VR.view.angles
+		end
 	end
-	cam.Start3D(origin, angles, fov, 0, 0, w, h, znear, zfar)
+	return origin, angles
+end
+
+local function EyeFovZ()
+	local fov, znear, zfar = 90, 1, 32768
+	if g_VR and g_VR.view then
+		fov = g_VR.view.fov or fov
+		znear = g_VR.view.znear or znear
+		zfar = g_VR.view.zfar or zfar
+		if zfar < 256 then zfar = 32768 end
+	end
+	return fov, znear, zfar
 end
 
 local function DrawEnts(ents)
@@ -85,8 +94,8 @@ local function DrawEnts(ents)
 	RenderEnt = NULL
 end
 
---- One halo entry: private silhouette, stencil on scene, composite into eye rect only.
-local function StereoRenderEntry(entry)
+--- Soft outline: private silhouette (no scene clear) + stencil composite in eye rect.
+local function RenderEntry(entry)
 	if not entry or not entry.Ents then return end
 
 	local vx, vy, vw, vh = 0, 0, ScrW(), ScrH()
@@ -95,53 +104,41 @@ local function StereoRenderEntry(entry)
 	end
 	if vw < 8 or vh < 8 then return end
 
-	EnsureRTs(vw, vh)
+	EnsureRT(vw, vh)
 
 	local additive = entry.Additive
 	if additive == nil then additive = true end
 	local ignoreZ = entry.IgnoreZ and true or false
-	local blurX = entry.BlurX or 2
-	local blurY = entry.BlurY or 2
-	local passes = entry.DrawPasses or 1
+	local blurX = math.max(1, entry.BlurX or 2)
+	local blurY = math.max(1, entry.BlurY or 2)
+	local passes = math.max(0, entry.DrawPasses or 1)
 	local col = entry.Color or color_white
+	local cr = (col.r or 255) / 255
+	local cg = (col.g or 255) / 255
+	local cb = (col.b or 255) / 255
+	local origin, angles = EyeOriginAngles()
+	local fov, znear, zfar = EyeFovZ()
 
-	-- ── 1) Flat colour silhouette → private RT (scene untouched) ──────────
-	render.PushRenderTarget(rt_Color)
+	-- 1) Flat coloured models → private RT
+	render.PushRenderTarget(rt_Halo)
 	render.Clear(0, 0, 0, 255, true, true)
-	render.ClearStencil()
-	render.SetStencilEnable(true)
+	cam.Start3D(origin, angles, fov, 0, 0, vw, vh, znear, zfar)
 	render.SuppressEngineLighting(true)
-	pcall(cam.IgnoreZ, ignoreZ)
-
-	render.SetStencilWriteMask(1)
-	render.SetStencilTestMask(1)
-	render.SetStencilReferenceValue(1)
-	render.SetStencilCompareFunction(STENCIL_ALWAYS)
-	render.SetStencilPassOperation(STENCIL_REPLACE)
-	render.SetStencilFailOperation(STENCIL_KEEP)
-	render.SetStencilZFailOperation(STENCIL_KEEP)
-
-	EyeCam(vw, vh)
+	cam.IgnoreZ(ignoreZ)
+	render.MaterialOverride(mat_white)
+	render.SetColorModulation(cr, cg, cb)
 	DrawEnts(entry.Ents)
-
-	render.SetStencilCompareFunction(STENCIL_EQUAL)
-	render.SetStencilPassOperation(STENCIL_KEEP)
-	cam.Start2D()
-	surface.SetDrawColor(col.r or 255, col.g or 255, col.b or 255, col.a or 255)
-	surface.DrawRect(0, 0, vw, vh)
-	cam.End2D()
-	cam.End3D()
-
-	pcall(cam.IgnoreZ, false)
+	render.SetColorModulation(1, 1, 1)
+	render.MaterialOverride(nil)
+	cam.IgnoreZ(false)
 	render.SuppressEngineLighting(false)
-	render.SetStencilEnable(false)
-
-	-- Copy colour RT → blur RT (must still be on a push that can Copy)
-	render.CopyRenderTargetToTexture(rt_Blur)
+	cam.End3D()
 	render.PopRenderTarget()
-	render.BlurRenderTarget(rt_Blur, blurX, blurY, 1)
 
-	-- ── 2) Stencil entity occupancy on SCENE (no colour write) ────────────
+	-- 2) Soften (custom RTs support BlurRenderTarget in modern GMod)
+	pcall(render.BlurRenderTarget, rt_Halo, blurX, blurY, 1)
+
+	-- 3) Stencil entity masks on the live eye (colour off)
 	render.ClearStencil()
 	render.SetStencilEnable(true)
 	render.SetStencilWriteMask(1)
@@ -152,26 +149,26 @@ local function StereoRenderEntry(entry)
 	render.SetStencilFailOperation(STENCIL_KEEP)
 	render.SetStencilZFailOperation(STENCIL_KEEP)
 	render.SuppressEngineLighting(true)
-	pcall(cam.IgnoreZ, ignoreZ)
-	render.SetBlend(0) -- stencil only — do not paint models onto the world
+	cam.IgnoreZ(ignoreZ)
+	render.SetBlend(0)
 
 	cam.Start3D()
 	DrawEnts(entry.Ents)
 	cam.End3D()
 
 	render.SetBlend(1)
-	pcall(cam.IgnoreZ, false)
+	cam.IgnoreZ(false)
 	render.SuppressEngineLighting(false)
 
-	-- ── 3) Additive/subtractive blur where stencil != body (outline ring) ─
+	-- 4) Blur where stencil != body → outline ring (eye rect only)
 	render.SetStencilCompareFunction(STENCIL_NOTEQUAL)
 	render.SetStencilPassOperation(STENCIL_KEEP)
 
 	if additive then
-		mat_Add:SetTexture("$basetexture", rt_Blur)
+		mat_Add:SetTexture("$basetexture", rt_Halo)
 		render.SetMaterial(mat_Add)
 	else
-		mat_Sub:SetTexture("$basetexture", rt_Blur)
+		mat_Sub:SetTexture("$basetexture", rt_Halo)
 		render.SetMaterial(mat_Sub)
 	end
 
@@ -183,30 +180,51 @@ local function StereoRenderEntry(entry)
 		end
 	end
 
-	ResetDrawState()
+	ResetState()
 end
 
-local function ClearList()
-	for i = #list, 1, -1 do
-		list[i] = nil
-	end
+--- Fallback if stencil/blur path fails: ignoreZ solid tint (always visible).
+local function RenderEntryFallback(entry)
+	if not entry or not entry.Ents then return end
+	local col = entry.Color or color_white
+	local ignoreZ = entry.IgnoreZ and true or false
+
+	render.SuppressEngineLighting(true)
+	cam.IgnoreZ(ignoreZ)
+	render.MaterialOverride(mat_white)
+	render.SetColorModulation((col.r or 255) / 255, (col.g or 255) / 255, (col.b or 255) / 255)
+	render.SetBlend(0.35)
+
+	cam.Start3D()
+	DrawEnts(entry.Ents)
+	cam.End3D()
+
+	render.SetBlend(1)
+	render.SetColorModulation(1, 1, 1)
+	render.MaterialOverride(nil)
+	cam.IgnoreZ(false)
+	render.SuppressEngineLighting(false)
+	ResetState()
 end
 
-local function RenderHalosVR()
+local function DrawHalosThisEye()
 	if not g_VR or not g_VR.active then return end
-	if not g_VR.stereoEye then return end
+	-- Real eyes only — never radar / HUD nested views
+	local eye = g_VR.stereoEye
+	if eye ~= "left" and eye ~= "right" then return end
 
 	hook.Run("PreDrawHalos")
 	if #list < 1 then return end
 
 	for i = 1, #list do
-		local ok, err = pcall(StereoRenderEntry, list[i])
-		if not ok and vrmod.logger then
-			vrmod.logger.Debug("[halo] %s", tostring(err))
+		local entry = list[i]
+		local ok = pcall(RenderEntry, entry)
+		if not ok then
+			pcall(RenderEntryFallback, entry)
 		end
 	end
 	ClearList()
-	ResetDrawState()
+	ResetState()
 end
 
 local function Install()
@@ -244,39 +262,57 @@ local function Install()
 		return NULL
 	end
 
+	-- Disable stock mono renderer (clears full SBS RT)
 	hook.Remove("PostDrawEffects", "RenderHalos")
-	hook.Add("PostDrawEffects", "RenderHalos", RenderHalosVR)
+
+	-- Draw during the eye pass after opaque halo.Add (pickup uses PostDrawOpaque)
+	hook.Add("PostDrawTranslucentRenderables", "vrmod_halos", function(depth, sky)
+		if depth or sky then return end
+		DrawHalosThisEye()
+	end)
+
+	-- Safety: also try PostDrawEffects if translucent was skipped
+	hook.Add("PostDrawEffects", "RenderHalos", function()
+		if not g_VR or not g_VR.active then return end
+		if #list < 1 then return end
+		DrawHalosThisEye()
+	end)
+
 	hook.Add("VRMod_PostRender", "vrmod_halos_clear", ClearList)
 
 	installed = true
 	if vrmod.logger then
-		vrmod.logger.Debug("[halo] Stereo-safe renderer installed")
+		vrmod.logger.Debug("[halo] Stereo renderer installed (translucent + effects)")
 	end
 end
 
 local function Uninstall()
 	if not installed then return end
 
+	hook.Remove("PostDrawTranslucentRenderables", "vrmod_halos")
 	hook.Remove("PostDrawEffects", "RenderHalos")
 	hook.Remove("VRMod_PostRender", "vrmod_halos_clear")
 	ClearList()
-	ResetDrawState()
+	ResetState()
 
-	-- Reload stock halo module (restores private List + mono RenderHalos)
+	if stockAdd then
+		halo.Add = stockAdd
+	end
+	stockAdd = nil
+
+	-- Restore stock PostDrawEffects RenderHalos + private List
 	package.loaded["halo"] = nil
 	local ok = pcall(require, "halo")
 	if not ok then
-		-- Fallback: put back saved Add; mono outlines may be missing until reconnect
-		if stockAdd then halo.Add = stockAdd end
+		-- Minimal stock-compatible flush if require fails
 		hook.Add("PostDrawEffects", "RenderHalos", function()
 			hook.Run("PreDrawHalos")
 		end)
 	end
 
 	installed = false
-	stockAdd = nil
 	if vrmod.logger then
-		vrmod.logger.Debug("[halo] Stock renderer restored (ok=%s)", tostring(ok))
+		vrmod.logger.Debug("[halo] Stock restored (require_ok=%s)", tostring(ok))
 	end
 end
 
@@ -290,6 +326,7 @@ hook.Add("VRMod_Exit", "vrmod_halos", function(ply)
 	Uninstall()
 end)
 
+-- lua_refresh / already in VR
 if g_VR and g_VR.active then
 	timer.Simple(0, Install)
 end
