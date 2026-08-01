@@ -379,7 +379,13 @@ function VRUtilWeaponMenuOpen()
 
 	local function paint()
 		if not isfunction(VRUtilMenuRenderStart) then return end
-		VRUtilMenuRenderStart("weaponmenu")
+		local wm = g_VR.menus and g_VR.menus.weaponmenu
+		if wm then
+			wm.paintInterval = wm.paintInterval or 8
+			wm.paintIntervalFocused = 1
+		end
+		if vrmod.MenuShouldRepaint and not vrmod.MenuShouldRepaint("weaponmenu") then return end
+		if VRUtilMenuRenderStart("weaponmenu") == false then return end
 		local C = vrmod.cube
 		local T = Theme()
 		local fonts = Fonts()

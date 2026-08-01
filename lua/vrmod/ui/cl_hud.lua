@@ -998,8 +998,9 @@ local function Bind()
 		end
 	end)
 
-	-- Capture HUD RT once per stereo frame (shared for both eyes — realtime vitals/blips)
-	hook.Add("VRMod_PreStereo", "vrmod_hud_capture", function()
+	-- Capture HUD RT once per stereo frame BEFORE stereo RT push (Cube: no nested RT under g_VR.rt).
+	-- Pose freeze still on PreStereo so it shares the same hand/HMD snap as menus.
+	hook.Add("VRMod_PreStereoCapture", "vrmod_hud_capture", function()
 		if not g_VR.active or not CVBool("vrmod_hud", true) then return end
 		if not g_VR.tracking or not g_VR.tracking.hmd then return end
 
@@ -1015,12 +1016,16 @@ local function Bind()
 		pcall(CaptureHudRT, rtW, rtH, plateScale)
 		captureN = captureN + 1
 
-		-- Freeze plate pose for both eyes this frame
+		hook.Call("VRMod_PostRenderHUD", nil)
+	end)
+
+	-- Freeze plate pose once for both eyes (after stereoPose hands are frozen)
+	hook.Add("VRMod_PreStereo", "vrmod_hud_pose", function()
+		if not g_VR.active or not CVBool("vrmod_hud", true) then return end
+		if not g_VR.tracking or not g_VR.tracking.hmd then return end
 		mtx:Identity()
 		mtx:Translate(g_VR.tracking.hmd.pos + g_VR.tracking.hmd.ang:Forward() * CVFloat("vrmod_huddistance", 60))
 		mtx:Rotate(g_VR.tracking.hmd.ang)
-
-		hook.Call("VRMod_PostRenderHUD", nil)
 	end)
 
 	-- SINGLE draw path (both eyes) — same RT + same mtx every eye

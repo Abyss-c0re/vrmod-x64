@@ -364,6 +364,8 @@ local function paint()
 	if not (g_VR.menus and g_VR.menus[UID]) then return end
 
 	local m = g_VR.menus[UID]
+	m.paintInterval = m.paintInterval or 10
+	m.paintIntervalFocused = 1
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 	elseif not m.freeFloat and not m.grabHand then
@@ -378,6 +380,8 @@ local function paint()
 	local focused = (g_VR.menuFocus == UID)
 	local mx = g_VR.menuCursorX or -1
 	local my = g_VR.menuCursorY or -1
+	-- Cube: only rebuild RT when dirty / focused cursor / idle heartbeat
+	if vrmod.MenuShouldRepaint and not vrmod.MenuShouldRepaint(UID) then return end
 
 	if VRUtilMenuRenderStart(UID) == false then return end
 	ApplyDensityLayout()
@@ -724,6 +728,8 @@ function vrmod.CubeSettings_Open()
 			vrmod.CubeSettings_Close()
 			return
 		end
+		-- Any interaction dirties RT for next paint
+		if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
 		if not pressed then return end
 		if g_VR.menuFocus ~= UID then return end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end

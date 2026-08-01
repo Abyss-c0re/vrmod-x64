@@ -813,7 +813,7 @@ function W.InstallHooks()
 						m.persistOpen = true
 						m.keepAlive = true
 						m.allowHiddenPanel = true
-						m.paintInterval = 3 -- unfocused spawn RT cheaper than full rate
+						m.paintInterval = 12 -- unfocused spawn: idle heartbeat only
 						if heavy and (m.freeFloat or not m.attachment) and m.pos and m.ang then
 							shellFloatPose[info.kind] = {
 								pos = Vector(m.pos),
@@ -836,11 +836,9 @@ function W.InstallHooks()
 		end
 	end)
 
-	-- RT paint once per stereo frame (shared both eyes).
-	-- MUST be PreStereoCapture — never PreStereo: that runs under PushRenderTarget(g_VR.rt)
-	-- and nested menu RTs + PaintManual of spawn/settings corrupt the engine RT stack/heap
-	-- (crash a few seconds after menu open). Same law as radar world capture.
-	-- Focused / dirty / alwaysPaint → full rate; idle shells use paintInterval inside RenderPanel.
+	-- RT paint once per stereo frame (shared both eyes) — before stereo RT push.
+	-- Cube law: never PreStereo (under g_VR.rt). Never force-dirty every frame.
+	-- Focused: MenuShouldRepaint dirties on cursor move; idle: paintInterval heartbeat.
 	hook.Add("VRMod_PreStereoCapture", "panel2vr_repaint", function()
 		if not W.IsVR() then return end
 		if not isfunction(VRUtilMenuRenderPanel) then return end
@@ -848,13 +846,19 @@ function W.InstallHooks()
 			if info.panel and IsValid(info.panel) then
 				local m = g_VR.menus and g_VR.menus[uid]
 				if m then
-					if info.alwaysPaint or info.html then
-						m.paintInterval = 2
-					end
-					if g_VR.menuFocus == uid then
-						m.dirty = true -- hover/selection needs every-frame while pointed
+					-- Heavy shells: slower idle, focused still cursor-driven
+					if info.kind == "spawnmenu" or info.kind == "contextmenu" then
+						m.paintInterval = 12
+						m.paintIntervalFocused = 1
+					elseif info.html then
+						m.paintInterval = 6
+						m.paintIntervalFocused = 2
+					elseif info.alwaysPaint then
+						m.paintInterval = 8
+						m.paintIntervalFocused = 1
 					end
 				end
+				-- Gate inside VRUtilMenuRenderPanel (dirty / cursor / idle)
 				VRUtilMenuRenderPanel(uid)
 			end
 		end

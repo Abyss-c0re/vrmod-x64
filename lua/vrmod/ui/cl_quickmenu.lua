@@ -174,7 +174,9 @@ function g_VR.MenuOpen()
 
 	local function paint(hoveredItem)
 		if not isfunction(VRUtilMenuRenderStart) then return end
-		VRUtilMenuRenderStart("miscmenu")
+		-- Cube: skip full RT rebuild when nothing changed (unfocused idle)
+		if vrmod.MenuShouldRepaint and not vrmod.MenuShouldRepaint("miscmenu") then return end
+		if VRUtilMenuRenderStart("miscmenu") == false then return end
 		local C, M, buttonWidth, buttonHeight, gap, baseY, headerH = layoutMetrics()
 		local T = (C and C.ThemeLive and C.ThemeLive()) or (C and C.Theme) or {}
 		local q = QM()
@@ -298,7 +300,9 @@ function g_VR.MenuOpen()
 			mm.baseScale = 0.03
 			mm._lastAssignedScale = 0.03
 		end
-		g_VR.menus.miscmenu.cubeMenu = true
+		mm.cubeMenu = true
+		mm.paintInterval = mm.paintInterval or 10
+		mm.paintIntervalFocused = 1
 
 		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()
 		local hoveredItem = -1
@@ -323,10 +327,16 @@ function g_VR.MenuOpen()
 				end
 			end
 		end
+		local hoverChanged = false
 		if hoverNav then
+			if prevHoveredItem ~= -1 then hoverChanged = true end
 			prevHoveredItem = -1
 		else
+			if prevHoveredItem ~= hoveredItem then hoverChanged = true end
 			prevHoveredItem = hoveredItem
+		end
+		if hoverChanged or g_VR.menuFocus == "miscmenu" then
+			mm.dirty = true
 		end
 		paint(hoveredItem)
 	end)

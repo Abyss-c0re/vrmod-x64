@@ -141,38 +141,93 @@ if CLIENT then
 		end
 	end
 
+	------------------------------------------------------------------------
+	-- Cube paint law (one energy):
+	--   • Never nest menu RTs under g_VR.rt (stereoRtActive) — crash + waste
+	--   • Paint when dirty / forced / controlled idle heartbeat
+	--   • Focused: dirty on cursor move (smooth hover) — not blind every frame
+	--   • Unfocused: idle heartbeat only (paintInterval frames), not busy-loop
+	------------------------------------------------------------------------
+
+	--- True if this menu should repaint now. Call before VRUtilMenuRenderStart / full paint.
+	function vrmod.MenuShouldRepaint(uid, force)
+		local menu = menus[uid]
+		if not menu or not menu.rt then return false end
+		if g_VR.stereoRtActive then
+			-- Defer to next PreStereoCapture / PreRender window
+			menu.dirty = true
+			return false
+		end
+		if force or menu.dirty then return true end
+
+		local fn = FrameNumber and FrameNumber() or 0
+		local focused = (g_VR.menuFocus == uid)
+
+		-- Cursor motion on the focused panel → dirty (hover/selection)
+		if focused then
+			local cx, cy = menu.lastCursorX, menu.lastCursorY
+			if cx and cy then
+				if menu._paintCursorX ~= cx or menu._paintCursorY ~= cy then
+					menu._paintCursorX = cx
+					menu._paintCursorY = cy
+					menu.dirty = true
+					return true
+				end
+			end
+			-- Focused idle: light heartbeat so cursor/anim stay live (~every frame if interval 1)
+			local fi = menu.paintIntervalFocused
+			if fi == nil then fi = 1 end
+			if fi > 0 and menu._lastPaintFrame and (fn - menu._lastPaintFrame) >= fi then
+				return true
+			end
+			if fi > 0 and not menu._lastPaintFrame then return true end
+			return false
+		end
+
+		-- Unfocused: optional idle refresh only (0 = never until dirty)
+		local idle = menu.paintInterval
+		if idle == nil then idle = 8 end
+		if idle <= 0 then return false end
+		if not menu._lastPaintFrame then return true end
+		return (fn - menu._lastPaintFrame) >= idle
+	end
+
 	--- Paint Derma panel into menu RT.
-	--- force=true always paints. Otherwise: focused every frame; unfocused every N frames or dirty.
+	--- force=true always paints (if not under stereo RT). Otherwise Cube gate.
 	--- Always PopRenderTarget even if PaintManual errors (nested RT stack corruption → hard crash).
 	function VRUtilMenuRenderPanel(uid, force)
 		local menu = menus[uid]
 		if not menu or not menu.rt or not menu.panel or not menu.panel:IsValid() then return end
+		if not vrmod.MenuShouldRepaint(uid, force) then return end
+
 		local fn = FrameNumber and FrameNumber() or 0
-		if not force then
-			local focused = (g_VR.menuFocus == uid)
-			local interval = focused and 1 or (menu.paintInterval or 4)
-			if not menu.dirty and menu._lastPaintFrame
-				and (fn - menu._lastPaintFrame) < interval then
-				return
-			end
-		end
 		menu.dirty = false
 		menu._lastPaintFrame = fn
+		if menu.lastCursorX then
+			menu._paintCursorX = menu.lastCursorX
+			menu._paintCursorY = menu.lastCursorY
+		end
+
+		if g_VR.stereoRtActive then
+			menu.dirty = true
+			return
+		end
 
 		render.PushRenderTarget(menu.rt)
-		cam.Start2D()
-		ClearMenuRT(menu.width, menu.height)
 		local ok, err = pcall(function()
+			cam.Start2D()
+			ClearMenuRT(menu.width, menu.height)
 			local oldclip = DisableClipping(false)
 			render.SetWriteDepthToDestAlpha(false)
 			menu.panel:PaintManual()
 			render.SetWriteDepthToDestAlpha(true)
 			DisableClipping(oldclip)
+			render.OverrideAlphaWriteEnable(false)
+			cam.End2D()
 		end)
-		render.OverrideAlphaWriteEnable(false)
-		cam.End2D()
 		render.PopRenderTarget()
 		if not ok then
+			menu.dirty = true
 			menu._paintErrN = (menu._paintErrN or 0) + 1
 			if menu._paintErrN <= 3 and vrmod and vrmod.logger then
 				vrmod.logger.Warn("Menu RT paint %s: %s", tostring(uid), tostring(err))
@@ -183,9 +238,17 @@ if CLIENT then
 	function VRUtilMenuRenderStart(uid)
 		local menu = menus[uid]
 		if not menu or not menu.rt then return false end
-		-- Native paint paths always force (caller owns full redraw)
+		if g_VR.stereoRtActive then
+			menu.dirty = true
+			return false
+		end
+		-- Native paint paths own full redraw
 		menu.dirty = false
 		menu._lastPaintFrame = FrameNumber and FrameNumber() or 0
+		if menu.lastCursorX then
+			menu._paintCursorX = menu.lastCursorX
+			menu._paintCursorY = menu.lastCursorY
+		end
 		render.PushRenderTarget(menu.rt)
 		cam.Start2D()
 		ClearMenuRT(menu.width, menu.height)
@@ -916,6 +979,10 @@ if CLIENT then
 					g_VR.menuFocus = k
 					menuFocusDist = hitDist
 					menuFocusPanel = v.panel
+					-- Cursor move dirties RT for hover paint (MenuShouldRepaint)
+					if v.lastCursorX ~= hitCursorX or v.lastCursorY ~= hitCursorY then
+						v.dirty = true
+					end
 					v.lastCursorX = hitCursorX
 					v.lastCursorY = hitCursorY
 					menuFocusCursorWorldPos = hitWorld
@@ -1009,7 +1076,9 @@ if CLIENT then
 			grabPos = nil,
 			grabAng = nil,
 			dirty = true,
-			paintInterval = 4, -- unfocused RT refresh every N frames
+			-- Cube: unfocused idle heartbeat (0=dirty-only). Focused uses paintIntervalFocused.
+			paintInterval = 10,
+			paintIntervalFocused = 1, -- smooth cursor/hover while laser locked
 		}
 
 		menuOrder[#menuOrder + 1] = menus[uid]
@@ -1199,12 +1268,9 @@ if CLIENT then
 				end
 			end
 
-			-- Force-paint focused shell so DMenus appear on RT this frame
+			-- Defer shell repaint to PreStereoCapture (never nest under stereo RT mid-input)
 			if g_VR.menuFocus then
 				vrmod.MarkMenuDirty(g_VR.menuFocus)
-				if isfunction(VRUtilMenuRenderPanel) then
-					VRUtilMenuRenderPanel(g_VR.menuFocus, true)
-				end
 			end
 		end
 	end)

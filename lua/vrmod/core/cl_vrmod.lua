@@ -903,7 +903,10 @@ if CLIENT then
 			hook.Call("VRMod_PreStereoCapture", nil)
 
 			render.PushRenderTarget(g_VR.rt)
+			-- Menu / HUD panel RTs must NEVER nest while this is true (malloc crash ~2s after menu open).
+			g_VR.stereoRtActive = true
 			if DrawErrorOverlay() then
+				g_VR.stereoRtActive = false
 				render.PopRenderTarget()
 				return
 			end
@@ -990,10 +993,12 @@ if CLIENT then
 				g_VR.deathTime = nil
 			end
 
+			g_VR.stereoRtActive = false
 			render.PopRenderTarget()
 		end)
 		renderingEyes = false
 		g_VR.stereoEye = nil
+		g_VR.stereoRtActive = false
 		if view and cyclopeanOrigin then
 			view.origin = cyclopeanOrigin
 			view.angles = baseAngles
@@ -1004,6 +1009,7 @@ if CLIENT then
 				vrmod.logger.Warn("PerformRenderViews error: %s", tostring(errEyes))
 			end
 			pcall(function() render.SetScissorRect(0, 0, 0, 0, false) end)
+			g_VR.stereoRtActive = false
 			pcall(render.PopRenderTarget)
 		end
 
