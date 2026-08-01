@@ -818,11 +818,20 @@ function W.Close(uid)
 end
 
 function W.CloseAll()
+	-- Snapshot keys — Close mutates bound
+	local uids = {}
 	for uid in pairs(bound) do
-		W.Close(uid)
+		uids[#uids + 1] = uid
 	end
-	if isfunction(VRUtilMenuClose) then
-		-- also clear anything opened outside registry
+	for _, uid in ipairs(uids) do
+		-- Prefer shell teardown for sandbox (restores control panels)
+		if uid == STABLE_UID.spawnmenu then
+			W.CloseSandboxShell("spawn")
+		elseif uid == STABLE_UID.contextmenu then
+			W.CloseSandboxShell("context")
+		else
+			W.Close(uid)
+		end
 	end
 end
 

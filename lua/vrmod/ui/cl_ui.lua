@@ -1463,12 +1463,65 @@ if CLIENT then
 	end)
 end
 
-concommand.Add("vrmod_vgui_reset", function()
-	if g_VR and g_VR.menus then
-		for uid, _ in pairs(g_VR.menus) do
-			VRUtilMenuClose(uid)
+--- Close every VR window / sandbox shell / Derma popup.
+-- @param opts.keep table|nil map of menu uid → true to leave open (default keeps quick menu)
+-- @param opts.alsoQuickMenu boolean also close miscmenu (default false)
+function vrmod.CloseAllWindows(opts)
+	opts = opts or {}
+	local keep = {}
+	if opts.keep then
+		for k, v in pairs(opts.keep) do
+			if v then keep[k] = true end
+		end
+	elseif not opts.alsoQuickMenu then
+		keep.miscmenu = true -- stay on QM after "close all windows"
+	end
+
+	-- Sandbox shells (proper teardown + HangOpen)
+	if vrmod.panel2vr then
+		if vrmod.panel2vr.CloseSandboxShell then
+			pcall(function() vrmod.panel2vr.CloseSandboxShell("spawn") end)
+			pcall(function() vrmod.panel2vr.CloseSandboxShell("context") end)
+		end
+		if vrmod.panel2vr.CloseAll then
+			pcall(function() vrmod.panel2vr.CloseAll() end)
 		end
 	end
+
+	-- Glide settings (context DesktopWindows)
+	if Glide and Glide.Config and isfunction(Glide.Config.CloseFrame) then
+		pcall(function() Glide.Config:CloseFrame() end)
+	end
+
+	-- Native Cube / avatar / settings helpers
+	if isfunction(vrmod.CubeSettings_Close) then pcall(vrmod.CubeSettings_Close) end
+	if isfunction(vrmod.AvatarMenu_Close) then pcall(vrmod.AvatarMenu_Close) end
+	if isfunction(vrmod.WeaponSettings_Close) then pcall(vrmod.WeaponSettings_Close) end
+
+	-- Derma option menus floating on desktop
+	if isfunction(CloseDermaMenus) then pcall(CloseDermaMenus) end
+
+	-- Every VR surface still open
+	if g_VR and g_VR.menus then
+		local list = {}
+		for uid in pairs(g_VR.menus) do
+			if not keep[uid] then list[#list + 1] = uid end
+		end
+		for _, uid in ipairs(list) do
+			if isfunction(VRUtilMenuClose) then VRUtilMenuClose(uid) end
+		end
+	end
+
+	return true
+end
+
+concommand.Add("vrmod_close_all_windows", function()
+	vrmod.CloseAllWindows()
+end)
+
+concommand.Add("vrmod_vgui_reset", function()
+	-- Full wipe including quick menu (layout / stuck RT recovery)
+	vrmod.CloseAllWindows({ alsoQuickMenu = true })
 end)
 
 -- Rebuild HUD mesh when UI scale changes; dirty open menus (world scale is live via GetUIScale)
