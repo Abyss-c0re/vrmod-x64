@@ -1286,18 +1286,35 @@ if CLIENT then
 			if bSky or not LocalPlayer():Alive() then return end
 			if IsValid(g_VR.viewModel) then
 				blockViewModelDraw = false
-				-- DrawModel can invoke SWEP:PostDrawViewModel (ArcVR) — never let nils blow the frame
+				-- Stamp frozen gun matrix both eyes (same pose — no live re-pose here)
+				local sf = g_VR.stereoFrame or 0
+				local vm = g_VR.viewModel
+				if g_VR._weaponSnapFrame == sf and g_VR._weaponSnapPos and g_VR._weaponSnapAng then
+					g_VR.viewModelPos = g_VR._weaponSnapPos
+					g_VR.viewModelAng = g_VR._weaponSnapAng
+					vm:SetPos(g_VR._weaponSnapPos)
+					vm:SetAngles(g_VR._weaponSnapAng)
+					if g_VR._weaponBonesFrame ~= sf then
+						vm:SetupBones()
+						g_VR._weaponBonesFrame = sf
+					end
+				elseif g_VR.viewModelPos and g_VR.viewModelAng then
+					vm:SetPos(g_VR.viewModelPos)
+					vm:SetAngles(g_VR.viewModelAng)
+					if g_VR._weaponBonesFrame ~= sf then
+						vm:SetupBones()
+						g_VR._weaponBonesFrame = sf
+					end
+				end
 				local okDraw, errDraw = pcall(function()
-					g_VR.viewModel:DrawModel()
+					vm:DrawModel()
 				end)
 				if not okDraw and vrmod.logger then
 					vrmod.logger.Debug("viewModel DrawModel error: %s", tostring(errDraw))
 				end
-				-- ArcVR (and others) put mag/attachments in SWEP:PostDrawViewModel —
-				-- engine may not run that when we DrawModel() the VR viewmodel ourselves.
 				local wep = LocalPlayer():GetActiveWeapon()
 				if IsValid(wep) and isfunction(wep.PostDrawViewModel) then
-					local ok, err = pcall(wep.PostDrawViewModel, wep, g_VR.viewModel, LocalPlayer(), wep)
+					local ok, err = pcall(wep.PostDrawViewModel, wep, vm, LocalPlayer(), wep)
 					if not ok and vrmod.logger then
 						vrmod.logger.Debug("PostDrawViewModel error: %s", tostring(err))
 					end
