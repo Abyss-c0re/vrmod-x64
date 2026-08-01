@@ -177,7 +177,7 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	end
 
 	if action == "boolean_left_pickup" then
-		-- Stock two-hand FIRST (gVRMod): menu grab must not steal when hands are on the gun
+		-- Stock two-hand FIRST — never let menu grab / pickup steal when FG starts
 		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
@@ -187,12 +187,11 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 			return
 		end
 
-		-- WayVR-style panel grab consumes grip when laser is on a menu
+		-- WayVR panel grab only when laser is on a menu
 		if vrmod.TryMenuGrab and vrmod.TryMenuGrab("left", pressed) then return end
-		if g_VR.menuGrabActive then return end
+		if g_VR.menuGrabActive and g_VR.menuFocus then return end
 
-		-- ArcVR: only block world pickup when already gripping FG, or LH is in FG
-		-- (not magwell). Mag eject is handled in ArcVR VRInput before FG.
+		-- ArcVR: block world pickup when gripping FG or LH in FG zone (not magwell)
 		local awep = LocalPlayer():GetActiveWeapon()
 		local arcFG = IsValid(awep) and awep.ArcticVR and awep.ForegripGrabbed
 		local arcNearFG = false
