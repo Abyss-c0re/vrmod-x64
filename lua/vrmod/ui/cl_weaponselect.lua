@@ -130,19 +130,17 @@ end
 
 local function GetWeaponAmmo(wep, ply)
 	if not IsValid(wep) then return -1, -1, -1 end
-	local clip = wep.Clip1 and (wep:Clip1() or -1) or -1
-	local total = -1
+	local clip, total = -1, -1
+	if vrmod.utils and vrmod.utils.GetWeaponAmmoDisplay then
+		clip, total = vrmod.utils.GetWeaponAmmoDisplay(wep, ply)
+	else
+		clip = wep.Clip1 and (wep:Clip1() or -1) or -1
+		local primaryType = wep.GetPrimaryAmmoType and wep:GetPrimaryAmmoType() or -1
+		if primaryType and primaryType >= 0 then total = ply:GetAmmoCount(primaryType) or 0 end
+	end
 	local alt = -1
-	local primaryType = wep.GetPrimaryAmmoType and wep:GetPrimaryAmmoType() or -1
-	if primaryType and primaryType >= 0 then total = ply:GetAmmoCount(primaryType) or 0 end
 	local secondaryType = wep.GetSecondaryAmmoType and wep:GetSecondaryAmmoType() or -1
 	if secondaryType and secondaryType >= 0 then alt = ply:GetAmmoCount(secondaryType) or 0 end
-	if wep.ArcticVR and (not clip or clip <= 0) then
-		clip = (wep.LoadedRounds or 0) + (wep.Chambered or 0)
-	end
-	if (total == nil or total < 0) and wep.Primary and wep.Primary.Ammo then
-		total = ply:GetAmmoCount(wep.Primary.Ammo) or 0
-	end
 	return clip or -1, total or -1, alt or -1
 end
 

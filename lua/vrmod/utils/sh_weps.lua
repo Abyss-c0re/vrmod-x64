@@ -2,6 +2,42 @@ g_VR = g_VR or {}
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 vrmod.suppressViewModelUpdates = false
+
+--- Clip + reserve for HUD / weapon select.
+-- ArcVR does not keep Clip1() in sync — use LoadedRounds + Chambered.
+function vrmod.utils.GetWeaponAmmoDisplay(wep, ply)
+	ply = ply or LocalPlayer()
+	if not IsValid(wep) then return -1, -1 end
+	local clip = -1
+	local reserve = -1
+
+	if wep.ArcticVR or wep.ArcticVRNade then
+		-- Mag in gun + chamber (client fields updated by avr_magin_forclient / shoot)
+		local loaded = tonumber(wep.LoadedRounds) or 0
+		local chamber = tonumber(wep.Chambered) or 0
+		clip = loaded + chamber
+		-- Mag entity still held separately may report Rounds
+		if IsValid(wep.Magazine) and wep.Magazine.Rounds then
+			-- LoadedRounds already mirrors inserted mag; only use mag if Loaded empty but mag present
+			if loaded <= 0 and not wep.InternalMagazine then
+				clip = (tonumber(wep.Magazine.Rounds) or 0) + chamber
+			end
+		end
+	elseif wep.Clip1 then
+		clip = wep:Clip1() or -1
+	end
+
+	if IsValid(ply) then
+		local at = wep.GetPrimaryAmmoType and wep:GetPrimaryAmmoType() or -1
+		if isnumber(at) and at >= 0 then
+			reserve = ply:GetAmmoCount(at) or 0
+		elseif wep.Primary and wep.Primary.Ammo then
+			reserve = ply:GetAmmoCount(wep.Primary.Ammo) or 0
+		end
+	end
+	return clip, reserve
+end
+
 -- WEP UTILS
 function vrmod.utils.CreateWorldModelVM(class, vmi)
     if not IsValid(g_VR.worldModelVM) then

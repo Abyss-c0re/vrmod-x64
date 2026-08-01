@@ -136,13 +136,13 @@ function g_VR.MenuOpen()
 		end
 	end
 
-	-- First-open coaching (once per install)
-	if not cookie.GetNumber("vrmod_hint_qm_v2", 0) or cookie.GetNumber("vrmod_hint_qm_v2", 0) == 0 then
-		cookie.Set("vrmod_hint_qm_v2", "1")
+	-- One-shot toast: 3× menu button resets panel poses
+	if not cookie.GetNumber("vrmod_hint_qm_v3", 0) or cookie.GetNumber("vrmod_hint_qm_v3", 0) == 0 then
+		cookie.Set("vrmod_hint_qm_v3", "1")
 		if vrmod.Toast then
-			timer.Simple(0.4, function()
+			timer.Simple(0.5, function()
 				if not g_VR or not g_VR.active then return end
-				vrmod.Toast("Quick Menu: left/right hand or free float in Settings · 3× tap menu = reset poses", 6, "hint")
+				vrmod.Toast("3× tap Quick Menu button = reset all panel poses / sizes / dock", 6, "hint")
 			end)
 		end
 	end

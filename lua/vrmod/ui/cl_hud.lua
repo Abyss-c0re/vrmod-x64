@@ -840,10 +840,14 @@ local function PaintVitals(w, h)
 
 	local wep = ply:GetActiveWeapon()
 	if IsValid(wep) then
-		local clip = wep:Clip1()
-		local ammo = -1
-		local at = wep:GetPrimaryAmmoType()
-		if isnumber(at) and at >= 0 then ammo = ply:GetAmmoCount(at) end
+		local clip, ammo = -1, -1
+		if vrmod.utils and vrmod.utils.GetWeaponAmmoDisplay then
+			clip, ammo = vrmod.utils.GetWeaponAmmoDisplay(wep, ply)
+		else
+			clip = wep.Clip1 and (wep:Clip1() or -1) or -1
+			local at = wep.GetPrimaryAmmoType and wep:GetPrimaryAmmoType() or -1
+			if isnumber(at) and at >= 0 then ammo = ply:GetAmmoCount(at) or 0 end
+		end
 		local line
 		if clip >= 0 and ammo >= 0 then
 			line = string.format("%d  |  %d", clip, ammo)
