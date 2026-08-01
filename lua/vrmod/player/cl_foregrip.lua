@@ -33,12 +33,14 @@ timer.Simple(1, BlockOldForegripAddon)
 
 local cv_enable = CreateClientConVar("vrmod_foregrip_enabled", "1", true, FCVAR_ARCHIVE,
 	"Universal two-hand foregrip for stock + ArcVR weapons", 0, 1)
-local cv_dist = CreateClientConVar("vrmod_foregrip_distance", "12", true, FCVAR_ARCHIVE,
-	"Max hand distance to start stock two-hand grip", 4, 40)
+local cv_dist = CreateClientConVar("vrmod_foregrip_distance", "22", true, FCVAR_ARCHIVE,
+	"Max hand↔hand / hand↔foregrip distance to start two-hand grip", 4, 48)
 local cv_blend = CreateClientConVar("vrmod_foregrip_blend", "0.45", true, FCVAR_ARCHIVE,
 	"Stock aim blend toward support hand (0–1)", 0, 1)
-local cv_release = CreateClientConVar("vrmod_foregrip_release", "1.35", true, FCVAR_ARCHIVE,
+local cv_release = CreateClientConVar("vrmod_foregrip_release", "1.5", true, FCVAR_ARCHIVE,
 	"Release multiplier × max(weapon reach, start distance)", 1.05, 3)
+local cv_arc_radius = CreateClientConVar("vrmod_foregrip_arcvr_radius", "14", true, FCVAR_ARCHIVE,
+	"ArcVR world-space foregrip grab radius (units)", 6, 40)
 
 local MODE_STOCK = "stock"
 local MODE_ARCVR = "arcvr"
@@ -113,9 +115,13 @@ local function IsValidForegripWeapon(wep)
 		return wep.TwoHanded and true or false
 	end
 
-	-- Stock / non-VR: must pose a viewmodel
-	if class:StartWith("arcticvr") then return false end -- unknown arctic class without flag
-	if vrmod.utils and vrmod.utils.IsValidWep and not vrmod.utils.IsValidWep(wep) then
+	-- Stock / non-VR (unknown arctic* without .ArcticVR flag stays out)
+	if class:StartWith("arcticvr") then return false end
+	-- Prefer IsValidWep, but don't hard-fail stock guns with odd VM paths
+	if vrmod.utils and vrmod.utils.IsValidWep then
+		if vrmod.utils.IsValidWep(wep) then return true end
+		local vm = wep.ViewModel or (wep.GetWeaponViewModel and wep:GetWeaponViewModel()) or ""
+		if vm ~= "" and vm ~= "models/weapons/c_arms.mdl" then return true end
 		return false
 	end
 	return true
@@ -260,40 +266,64 @@ local function CanStartGripContext()
 	return true
 end
 
---- ArcVR: hand inside SWEP foregrip bone OBB (same test as arcticvr_base).
-local function ArcVRHandInForegrip(wep)
+--- World-space ArcVR foregrip point. Offset is applied in RH/gun axes (matches ArcVR track).
+local function ArcVRForegripWorldPos(wep, rpos, rang)
+	local off = wep.ForegripOffset
+	if not isvector(off) then off = Vector(12, -2, 0) end
+
+	-- Hand-local (most reliable at input time — same basis AVR_GunTracking uses pre-aim)
+	if rpos and rang then
+		local p = Vector(rpos)
+		p = p + rang:Forward() * off.x + rang:Right() * off.y + rang:Up() * off.z
+		return p
+	end
+	local gunPos, gunAng = g_VR.viewModelPos, g_VR.viewModelAng
+	if gunPos and gunAng then
+		return gunPos + gunAng:Forward() * off.x + gunAng:Right() * off.y + gunAng:Up() * off.z
+	end
+	local vm = g_VR.viewModel
+	if IsValid(vm) then
+		local a = vm:GetAngles()
+		return vm:GetPos() + a:Forward() * off.x + a:Right() * off.y + a:Up() * off.z
+	end
+	return nil
+end
+
+--- ArcVR: hand in foregrip — world offset (primary) + bone OBB when available.
+local function ArcVRHandInForegrip(wep, lpos, rpos, rang)
 	if not IsValid(wep) or not wep.TwoHanded then return false end
-	-- Don't steal slide / belt / dust-cover grabs
 	if wep.SlideGrabbed or wep.BeltGrabbed or wep.DustCoverGrabbed then return false end
 	if wep.ForegripOnPivot and wep.ChamberOpen then return false end
+	if not lpos then
+		local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+		lpos = L and L.pos
+	end
+	if not lpos then return false end
 
+	local rad = math.max(cv_arc_radius:GetFloat(), 8)
+	local fgWorld = ArcVRForegripWorldPos(wep, rpos, rang)
+	if fgWorld and lpos:DistToSqr(fgWorld) <= (rad * rad) then
+		return true
+	end
+
+	-- Bone OBB (needs SetupBones; often fails mid-input — only bonus path)
 	local mag = 1
 	local cv = GetConVar("arcticvr_grip_magnification")
 	if cv then mag = math.max(cv:GetFloat(), 0.25) end
-
 	local mins = wep.ForegripMins or Vector(-4, -3, -4)
 	local maxs = wep.ForegripMaxs or Vector(4, 3, 4)
-	if isvector(mins) then mins = mins * mag end
-	if isvector(maxs) then maxs = maxs * mag end
+	if isvector(mins) then mins = Vector(mins.x * mag, mins.y * mag, mins.z * mag) end
+	if isvector(maxs) then maxs = Vector(maxs.x * mag, maxs.y * mag, maxs.z * mag) end
 
-	local bone = 0
-	if wep.BoneIndices and wep.BoneIndices.foregrip then
-		bone = wep.BoneIndices.foregrip
-	end
-
-	if isfunction(wep.LeftHandInMaxs) then
+	local bone = wep.BoneIndices and wep.BoneIndices.foregrip
+	if bone ~= nil and isfunction(wep.LeftHandInMaxs) then
+		local vm = g_VR.viewModel
+		if IsValid(vm) then pcall(vm.SetupBones, vm) end
 		local ok, hit = pcall(wep.LeftHandInMaxs, wep, bone, mins, maxs)
-		if ok then return hit and true or false end
+		if ok and hit then return true end
 	end
 
-	-- Fallback: hand near world foregrip offset from gun
-	local vm = g_VR.viewModel
-	if not IsValid(vm) then return false end
-	local off = wep.ForegripOffset or Vector(0, 0, 0)
-	local fgWorld = LocalToWorld(off, Angle(0, 0, 0), vm:GetPos(), vm:GetAngles())
-	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
-	if not (L and L.pos) then return false end
-	return L.pos:DistToSqr(fgWorld) < (10 * 10)
+	return false
 end
 
 --- ArcVR backend: pose already solved on VRMod_Tracking; freeze snap + LH for both eyes.
@@ -467,25 +497,38 @@ local function TryStartGrip()
 	if not CanStartGripContext() then return false end
 	if state.gripping then return true end
 
-	local lpos, lang, rpos, rang = StereoHands()
+	-- Prefer live tracking at input time (stereoPose is last frame's freeze)
+	local lpos, lang, rpos, rang = LiveHands()
 	if not lpos then
-		lpos, lang, rpos, rang = LiveHands()
+		lpos, lang, rpos, rang = StereoHands()
 	end
-	if not lpos then return false end
+	if not lpos or not rpos then return false end
 
 	local wep = LocalPlayer():GetActiveWeapon()
 	if not IsValidForegripWeapon(wep) then return false end
 
 	local mode = MODE_STOCK
+	local dist = lpos:Distance(rpos)
+	local maxStart = cv_dist:GetFloat()
+
 	if IsArcVRWeapon(wep) then
 		mode = MODE_ARCVR
-		if not ArcVRHandInForegrip(wep) then return false end
+		if not ArcVRHandInForegrip(wep, lpos, rpos, rang) then return false end
 	else
-		local dist = lpos:Distance(rpos)
-		if dist > cv_dist:GetFloat() then return false end
+		-- Stock: hand-to-hand OR left hand near estimated gun fore (long guns)
+		local nearHands = dist <= maxStart
+		local vmi = EnsureVMI(wep)
+		local gunPos = g_VR.viewModelPos
+		local gunAng = g_VR.viewModelAng
+		if not gunPos or not gunAng then
+			gunPos, gunAng = LocalToWorld(vmi.offsetPos or Vector(), vmi.offsetAng or Angle(), rpos, rang)
+		end
+		-- Soft “fore” point ~ halfway along typical rifle
+		local fore = gunPos + gunAng:Forward() * math.min(math.max(dist * 0.5, 6), 16)
+		local nearFore = lpos:DistToSqr(fore) <= (maxStart * maxStart)
+		if not nearHands and not nearFore then return false end
 	end
 
-	local dist = lpos:Distance(rpos)
 	local vmi = EnsureVMI(wep)
 	local wepWorldPos, wepWorldAng = LocalToWorld(
 		vmi.offsetPos or Vector(),
@@ -501,17 +544,16 @@ local function TryStartGrip()
 	state.bonesFrame = -1
 	state.boxTries = 0
 	state.weaponBox = nil
-	state.startDist = math.max(dist, 4)
+	state.startDist = math.max(dist, 6)
 	if mode == MODE_STOCK then
 		RefreshWeaponBox(LocalPlayer(), wep)
 	else
-		-- ArcVR: long guns — soft box from foregrip offset length
 		local off = wep.ForegripOffset
-		local reach = (off and off:Length()) or 16
+		local reach = (isvector(off) and off:Length()) or 18
 		state.weaponBox = {
 			mins = wep.ForegripMins or Vector(-4, -4, -4),
 			maxs = wep.ForegripMaxs or Vector(4, 4, 4),
-			reach = math.max(reach, 16),
+			reach = math.max(reach, 18),
 			radius = 4,
 		}
 		NotifyArcVRGrip(wep)
@@ -525,9 +567,8 @@ function vrmod.HasUniversalForegrip()
 	return cv_enable:GetBool()
 end
 
---- opts.fromArcVR: ArcVR already ran slide/mag/belt priority; allow start.
---- Without it, ArcVR weapons only release / keep-active here so prop pickup
---- is not claimed before arcticvr_base VRInput can grab the slide.
+--- opts.fromArcVR: called after ArcVR slide/mag priority (preferred for ArcVR).
+--- Also allows start from default input so grip works if ArcVR hook order differs.
 function vrmod.TryForegripGrab(pressed, opts)
 	if not g_VR or not g_VR.active then return false end
 	if not cv_enable:GetBool() then return false end
@@ -541,10 +582,6 @@ function vrmod.TryForegripGrab(pressed, opts)
 	end
 	if state.gripping then
 		return true
-	end
-	local wep = LocalPlayer():GetActiveWeapon()
-	if IsArcVRWeapon(wep) and not opts.fromArcVR then
-		return false
 	end
 	return TryStartGrip()
 end
