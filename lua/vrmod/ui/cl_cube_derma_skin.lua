@@ -531,11 +531,12 @@ end
 -- Apply skin to panel tree (spawn creates children lazily) — VR only
 ------------------------------------------------------------------------
 local function applySkinRecursive(panel, skinName, depth)
-	if not IsValid(panel) or (depth or 0) > 64 then return end
+	if not IsValid(panel) or (depth or 0) > 40 then return end
 	if panel.SetSkin then
 		pcall(function() panel:SetSkin(skinName) end)
 	end
-	if panel.ApplySchemeSettings then
+	-- ApplySchemeSettings on every node is expensive — root + one level is enough
+	if (depth or 0) <= 1 and panel.ApplySchemeSettings then
 		pcall(function() panel:ApplySchemeSettings() end)
 	end
 	for _, child in ipairs(panel:GetChildren() or {}) do
@@ -543,24 +544,26 @@ local function applySkinRecursive(panel, skinName, depth)
 	end
 end
 
-function vrmod.cube.ApplyDermaSkin(panel)
+function vrmod.cube.ApplyDermaSkin(panel, force)
 	-- Desktop must stay stock Default — no skin swap outside VR
 	if not shouldTheme() then return end
 	if not cubeSkin then vrmod.cube.RefreshDermaSkin() end
 	if not IsValid(panel) then return end
+	-- Full tree walk only once per open cycle (Cube: no UI thrash)
+	if panel._cubeThemed and panel._cubeSkinApplied and not force then
+		return
+	end
 	panel._cubeThemed = true
+	panel._cubeSkinApplied = true
 	applySkinRecursive(panel, SKIN_NAME, 0)
-	-- Future children (lazy creation tabs) — only while VR theming is active
+	-- Future children (lazy tabs) — skin the child only, not re-walk the whole shell
 	if not panel._cubeSkinHooked then
 		panel._cubeSkinHooked = true
 		local old = panel.OnChildAdded
 		panel.OnChildAdded = function(self, child)
 			if old then old(self, child) end
-			timer.Simple(0, function()
-				if IsValid(child) and shouldTheme() and self._cubeThemed then
-					applySkinRecursive(child, SKIN_NAME, 0)
-				end
-			end)
+			if not IsValid(child) or not shouldTheme() or not self._cubeThemed then return end
+			if child.SetSkin then pcall(function() child:SetSkin(SKIN_NAME) end) end
 		end
 	end
 end
@@ -569,8 +572,10 @@ end
 function vrmod.cube.RestoreDermaSkin(panel)
 	if not IsValid(panel) then return end
 	panel._cubeThemed = false
+	panel._cubeSkinApplied = false
+	panel._cubeWorkbenchReady = false
 	applySkinRecursive(panel, DEFAULT_SKIN, 0)
-	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+	if panel.InvalidateLayout then panel:InvalidateLayout(false) end
 end
 
 ------------------------------------------------------------------------
@@ -780,11 +785,20 @@ end
 local function themeWorkbench(panel, title, which)
 	if not IsValid(panel) or not shouldTheme() then return end
 	if not cubeSkin then vrmod.cube.RefreshDermaSkin() end
-	vrmod.cube.ApplyDermaSkin(panel)
-	installRootChrome(panel, title, which or "spawn")
 	local isContext = (which == "context" or which == "contextmenu")
+	local first = not panel._cubeWorkbenchReady
 
-	local function applyMargins()
+	-- Heavy path once: skin walk + chrome install
+	if first then
+		vrmod.cube.ApplyDermaSkin(panel, true)
+		installRootChrome(panel, title, which or "spawn")
+		panel._cubeWorkbenchReady = true
+	else
+		-- Light reopen: chrome + close X only
+		installRootChrome(panel, title, which or "spawn")
+	end
+
+	local function applyMargins(full)
 		if not IsValid(panel) or not shouldTheme() then return end
 		if panel.DockPadding then
 			panel:DockPadding(4, TITLE_H + 2, 4, 4)
@@ -810,41 +824,54 @@ local function themeWorkbench(panel, title, which)
 				if div.SetLeftWidth then div:SetLeftWidth(math.floor(tw * 0.62)) end
 				if div.SetDividerWidth then div:SetDividerWidth(4) end
 			end
-			polishSpawnTreePanels(panel)
+			-- Tree polish only on first open or explicit full pass
+			if full and not panel._cubePolishDone then
+				polishSpawnTreePanels(panel)
+				panel._cubePolishDone = true
+			end
 		end
 		if IsValid(panel._cubeCloseBtn) then
 			placeCloseButton(panel._cubeCloseBtn, panel)
 		end
 	end
-	applyMargins()
+
+	applyMargins(first)
+
 	if not panel._cubeLayoutHooked then
 		panel._cubeLayoutHooked = true
 		panel._cubeLayoutOrig = panel.PerformLayout
 		panel.PerformLayout = function(self, ...)
 			if isContext and shouldTheme() and self._cubeThemed then
-				-- NEVER run stock ScrW/ScrH layout — it parks Canvas off the VR RT
-				applyMargins()
+				-- NEVER run stock ScrW/ScrH layout — parks Canvas off the VR RT
+				applyMargins(false)
 				return
 			end
 			if self._cubeLayoutOrig then self._cubeLayoutOrig(self, ...) end
 			if shouldTheme() then
-				applyMargins()
+				applyMargins(false)
 			end
 		end
 	end
-	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
-	timer.Simple(0, function()
-		if IsValid(panel) and shouldTheme() then applyMargins() end
-	end)
-	timer.Simple(0.08, function()
-		if IsValid(panel) and shouldTheme() then
+
+	-- One forced layout on first theme only (InvalidateLayout true freezes VR)
+	if first and panel.InvalidateLayout then
+		panel:InvalidateLayout(true)
+	end
+	-- Single deferred pass for close X after lazy children — not 3 full restyles
+	if not panel._cubeOneShotMargin then
+		panel._cubeOneShotMargin = true
+		timer.Simple(0.06, function()
+			panel._cubeOneShotMargin = nil
+			if not IsValid(panel) or not shouldTheme() then return end
 			installCloseButton(panel, which or "spawn")
-			applyMargins()
-		end
-	end)
-	timer.Simple(0.2, function()
-		if IsValid(panel) and shouldTheme() then applyMargins() end
-	end)
+			applyMargins(false)
+			if g_VR and g_VR.menus then
+				for uid, m in pairs(g_VR.menus) do
+					if m and m.panel == panel then m.dirty = true end
+				end
+			end
+		end)
+	end
 end
 
 function vrmod.cube.ThemeSpawnMenu(panel)
@@ -860,11 +887,14 @@ end
 --- Undo VR workbench theming (Default skin, stock layout path)
 function vrmod.cube.RestoreWorkbench(panel)
 	if not IsValid(panel) then return end
+	panel._cubeWorkbenchReady = false
+	panel._cubePolishDone = false
+	panel._cubeOneShotMargin = nil
 	vrmod.cube.RestoreDermaSkin(panel)
 	if IsValid(panel._cubeCloseBtn) then
 		panel._cubeCloseBtn:SetVisible(false)
 	end
-	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+	if panel.InvalidateLayout then panel:InvalidateLayout(false) end
 end
 
 function vrmod.cube.RestoreAllWorkbench()
@@ -902,37 +932,11 @@ local function patchContentIcon()
 end
 
 ------------------------------------------------------------------------
--- Hooks — theme only while VR is active; restore on exit
+-- Hooks — restore on exit only.
+-- Theme apply is owned by panel2vr preparePanelForVR (one-energy; no open thrash).
 ------------------------------------------------------------------------
-local function onSpawnOpen()
-	if not shouldTheme() then return end
-	timer.Simple(0, function()
-		if not shouldTheme() then return end
-		vrmod.cube.ThemeSpawnMenu(g_SpawnMenu)
-		-- Lazy tab content may appear next frames
-		timer.Simple(0.05, function()
-			if shouldTheme() then vrmod.cube.ThemeSpawnMenu(g_SpawnMenu) end
-		end)
-		timer.Simple(0.25, function()
-			if shouldTheme() then vrmod.cube.ThemeSpawnMenu(g_SpawnMenu) end
-		end)
-	end)
-end
-
-local function onCtxOpen()
-	if not shouldTheme() then return end
-	timer.Simple(0, function()
-		if not shouldTheme() then return end
-		vrmod.cube.ThemeContextMenu(g_ContextMenu)
-		timer.Simple(0.05, function()
-			if shouldTheme() then vrmod.cube.ThemeContextMenu(g_ContextMenu) end
-		end)
-	end)
-end
-
--- Do NOT theme on SpawnMenuCreated / map load — that hits non-VR players.
-hook.Add("OnSpawnMenuOpen", "vrmod_cube_spawn_skin", onSpawnOpen)
-hook.Add("OnContextMenuOpen", "vrmod_cube_spawn_skin", onCtxOpen)
+hook.Remove("OnSpawnMenuOpen", "vrmod_cube_spawn_skin")
+hook.Remove("OnContextMenuOpen", "vrmod_cube_spawn_skin")
 
 hook.Add("VRMod_Start", "vrmod_cube_spawn_skin", function()
 	-- Skin table ready; actual apply waits for spawn open

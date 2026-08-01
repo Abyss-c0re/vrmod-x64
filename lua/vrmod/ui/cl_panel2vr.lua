@@ -454,22 +454,36 @@ local function fitSandboxLayout(panel, tw, th)
 end
 
 --- Prepare oversized sandbox shells for VR (RT from eye res × ui_scale, not ScrW×ScrH)
+-- Cube: one size + one fit + one theme — no restyle storms (freeze on open).
 local function preparePanelForVR(panel, kind)
 	if not IsValid(panel) then return end
 	if kind == "spawnmenu" or kind == "contextmenu" then
 		local tw, th = shellMetrics(kind)
-		-- Stock ContextMenu docks FILL + DesktopWidgets Dock LEFT — undock for VR RT
+		local sizeKey = tw .. "x" .. th
+		local sameSize = panel._cubeVRSizeKey == sizeKey
+
 		if panel.Dock then panel:Dock(NODOCK) end
-		if panel.SetSize then panel:SetSize(tw, th) end
+		if not sameSize then
+			if panel.SetSize then panel:SetSize(tw, th) end
+			panel._cubeVRSizeKey = sizeKey
+		end
 		if panel.SetPos then panel:SetPos(0, 0) end
 		if panel.SetWorldClicker then panel:SetWorldClicker(false) end
 		if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
-		-- Leave room for Cube title bar + X
 		if panel.DockPadding then panel:DockPadding(4, 34, 4, 4) end
-		if kind == "spawnmenu" then
+
+		if kind == "spawnmenu" and not panel._cubeFitDone then
+			fitSandboxLayout(panel, tw, th)
+			panel._cubeFitDone = true
+		elseif kind == "spawnmenu" and not sameSize then
 			fitSandboxLayout(panel, tw, th)
 		end
-		if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+
+		-- Layout only when size changed (true = full tree; freezes VR if every open)
+		if not sameSize and panel.InvalidateLayout then
+			panel:InvalidateLayout(true)
+		end
+
 		if vrmod.cube and W.IsVR() then
 			if kind == "spawnmenu" and vrmod.cube.ThemeSpawnMenu then
 				vrmod.cube.ThemeSpawnMenu(panel)
@@ -479,33 +493,18 @@ local function preparePanelForVR(panel, kind)
 				vrmod.cube.ApplyDermaSkin(panel)
 			end
 		end
-		local function restyle()
-			if not IsValid(panel) then return end
-			-- Re-query metrics (ui_scale may have changed while open timers fire)
-			local rw, rh = shellMetrics(kind)
-			if panel.Dock then panel:Dock(NODOCK) end
-			panel:SetSize(rw, rh)
-			panel:SetPos(0, 0)
-			if panel.SetWorldClicker then panel:SetWorldClicker(false) end
-			if kind == "spawnmenu" then
-				fitSandboxLayout(panel, rw, rh)
-			end
-			if vrmod.cube and W.IsVR() then
-				if kind == "spawnmenu" and vrmod.cube.ThemeSpawnMenu then
-					vrmod.cube.ThemeSpawnMenu(panel)
-				elseif kind == "contextmenu" and vrmod.cube.ThemeContextMenu then
-					vrmod.cube.ThemeContextMenu(panel)
+		-- One deferred close-X reassert only (no re-theme / re-fit)
+		if not panel._cubeCloseShot then
+			panel._cubeCloseShot = true
+			timer.Simple(0.08, function()
+				panel._cubeCloseShot = nil
+				if not IsValid(panel) then return end
+				if IsValid(panel._cubeCloseBtn) then
+					panel._cubeCloseBtn:SetVisible(true)
+					panel._cubeCloseBtn:MoveToFront()
 				end
-			end
-			if IsValid(panel._cubeCloseBtn) then
-				panel._cubeCloseBtn:SetVisible(true)
-				panel._cubeCloseBtn:MoveToFront()
-			end
+			end)
 		end
-		timer.Simple(0, restyle)
-		timer.Simple(0.05, restyle)
-		timer.Simple(0.15, restyle)
-		timer.Simple(0.35, restyle)
 	elseif kind == "settings" or kind == "popup" or kind == "panel" then
 		-- Glide Styled_TabbedFrame etc.: always fit VR eye × ui_scale (not ScrH 850×600)
 		W.ApplyStyledThemeVRScale()
@@ -726,17 +725,10 @@ function W.ManifestPanel(panel, opts)
 
 	if g_VR.menus and g_VR.menus[uid] then
 		g_VR.menus[uid].dirty = true
-		-- Force first paint (dirty-only gate would skip a blank RT)
+		-- One first paint only — second forced paint caused open hitch
 		if isfunction(VRUtilMenuRenderPanel) then
 			VRUtilMenuRenderPanel(uid, true)
 		end
-		-- Second paint next tick after layout settle (spawn tabs)
-		timer.Simple(0.05, function()
-			if g_VR and g_VR.menus and g_VR.menus[uid] and isfunction(VRUtilMenuRenderPanel) then
-				g_VR.menus[uid].dirty = true
-				VRUtilMenuRenderPanel(uid, true)
-			end
-		end)
 	end
 
 	log("manifest %s uid=%s %dx%d place=%s attach=%s", kind, uid, w, h, placeName, tostring(place.attachment))
@@ -943,9 +935,7 @@ function W.InstallHooks()
 		timer.Simple(0, function()
 			if not IsValid(g_SpawnMenu) or not W.IsVR() then return end
 			if W.IsBound(g_SpawnMenu) or bound[STABLE_UID.spawnmenu] then return end
-			if vrmod.cube and vrmod.cube.ThemeSpawnMenu then
-				vrmod.cube.ThemeSpawnMenu(g_SpawnMenu)
-			end
+			-- Theme once inside preparePanelForVR (no double ThemeSpawnMenu)
 			W.ManifestPanel(g_SpawnMenu, {
 				kind = "spawnmenu",
 				place = "hand",
@@ -969,9 +959,6 @@ function W.InstallHooks()
 		timer.Simple(0, function()
 			if not IsValid(g_ContextMenu) or not W.IsVR() then return end
 			if W.IsBound(g_ContextMenu) or bound[STABLE_UID.contextmenu] then return end
-			if vrmod.cube and vrmod.cube.ThemeContextMenu then
-				vrmod.cube.ThemeContextMenu(g_ContextMenu)
-			end
 			W.ManifestPanel(g_ContextMenu, {
 				kind = "contextmenu",
 				place = "hand",
@@ -1201,15 +1188,7 @@ function W.OpenSandboxShell(which)
 		panel:SetVisible(true)
 	end
 
-	if vrmod.cube then
-		if isCtx and vrmod.cube.ThemeContextMenu then
-			vrmod.cube.ThemeContextMenu(panel)
-		elseif (not isCtx) and vrmod.cube.ThemeSpawnMenu then
-			vrmod.cube.ThemeSpawnMenu(panel)
-		end
-	end
-
-	-- Single manifest after Open (hooks will no-op if already bound)
+	-- Theme/size happens once inside Manifest → preparePanelForVR (no double Theme*)
 	local uid = W.ManifestPanel(panel, {
 		kind = kind,
 		place = "hand",
@@ -1217,9 +1196,9 @@ function W.OpenSandboxShell(which)
 		uid = uidStable,
 	})
 
-	if uid and isfunction(VRUtilMenuRenderPanel) then
-		if g_VR.menus and g_VR.menus[uid] then g_VR.menus[uid].dirty = true end
-		VRUtilMenuRenderPanel(uid, true)
+	-- Manifest already force-painted once; only mark dirty if needed
+	if uid and g_VR.menus and g_VR.menus[uid] then
+		g_VR.menus[uid].dirty = true
 	end
 
 	log("OpenSandboxShell %s uid=%s vis=%s", kind, tostring(uid), tostring(panel:IsVisible()))
