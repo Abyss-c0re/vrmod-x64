@@ -1147,6 +1147,10 @@ function W.ClearShellFloatPose(which)
 	shellFloatPose[isCtx and "contextmenu" or "spawnmenu"] = nil
 end
 
+function W.ClearAllShellFloatPoses()
+	shellFloatPose = {}
+end
+
 --- Toggle spawn/context — never stack a second copy
 function W.OpenSandboxShell(which)
 	which = which or "spawn"

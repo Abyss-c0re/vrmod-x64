@@ -27,10 +27,18 @@ end
 
 function g_VR.MenuOpen()
 	if hook.Call("VRMod_OpenQuickMenu") == false then return end
-	-- Recover if flag stuck after UI reset / failed open
+	-- Recover if flag stuck after UI reset / crash / failed open
 	if open and not (g_VR.menus and g_VR.menus.miscmenu) then open = false end
 	if open then return end
 	if not g_VR.active or not isfunction(VRUtilMenuOpen) then return end
+
+	-- Empty item list after crash — rebuild defaults
+	if not g_VR.menuItems or #g_VR.menuItems == 0 then
+		if isfunction(vrmod.RebuildInGameMenuItems) then
+			pcall(vrmod.RebuildInGameMenuItems)
+		end
+	end
+
 	open = true
 	ensureLayout()
 	prevHoveredItem = -2
@@ -42,44 +50,37 @@ function g_VR.MenuOpen()
 	if isfunction(VRUtilHandMenuPose) then
 		qmPos, qmAng, qmScale = VRUtilHandMenuPose(qmW, qmH, 0.025, Vector(2.5, 3.5, 4), Angle(0, -90, 55), wrist)
 	end
-	VRUtilMenuOpen("miscmenu", qmW, qmH, nil, true, qmPos, qmAng, qmScale, true, function()
-		hook.Remove("PreRender", "vrutil_hook_renderigm")
-		hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
-		open = false
-		local sel = prevHoveredItem
-		local nav = hoverNav
-		hoverNav = nil
-		-- Page nav on close shouldn't fire items
-		if nav then return end
-		-- Run after miscmenu is fully closed so nested VRUtilMenuOpen works
-		if sel > 0 and pageEntries[sel] then
-			local fn = pageEntries[sel].func
-			if isfunction(fn) then
-				timer.Simple(0, function()
-					if g_VR and g_VR.active then
-						local ok, err = pcall(fn)
-						if not ok and vrmod.logger then
-							vrmod.logger.Warn("quickmenu item: %s", tostring(err))
-						end
-					end
-				end)
-			end
-		end
-	end)
 
-	if g_VR.menus and g_VR.menus.miscmenu then
-		local mm = g_VR.menus.miscmenu
-		if not mm.scaleLocked then
-			mm.scale = qmScale
-			mm.baseScale = qmScale
-			mm._lastAssignedScale = qmScale
-		end
-		mm.cubeMenu = true
-		mm.grabbable = true
-		mm.attachHand = wrist
-		if not mm.freeFloat and not mm.grabHand then
-			mm.attachment = true
-		end
+	local okOpen, errOpen = pcall(function()
+		VRUtilMenuOpen("miscmenu", qmW, qmH, nil, true, qmPos, qmAng, qmScale, true, function()
+			hook.Remove("PreRender", "vrutil_hook_renderigm")
+			hook.Remove("VRMod_Input", "vrmod_qm_page_nav")
+			open = false
+			local sel = prevHoveredItem
+			local nav = hoverNav
+			hoverNav = nil
+			-- Page nav on close shouldn't fire items
+			if nav then return end
+			-- Run after miscmenu is fully closed so nested VRUtilMenuOpen works
+			if sel > 0 and pageEntries[sel] then
+				local fn = pageEntries[sel].func
+				if isfunction(fn) then
+					timer.Simple(0, function()
+						if g_VR and g_VR.active then
+							local ok, err = pcall(fn)
+							if not ok and vrmod.logger then
+								vrmod.logger.Warn("quickmenu item: %s", tostring(err))
+							end
+						end
+					end)
+				end
+			end
+		end)
+	end)
+	if not okOpen then
+		open = false
+		if vrmod.logger then vrmod.logger.Warn("MenuOpen failed: %s", tostring(errOpen)) end
+		return
 	end
 
 	if not (g_VR.menus and g_VR.menus.miscmenu) then
@@ -89,10 +90,24 @@ function g_VR.MenuOpen()
 
 	do
 		local mm = g_VR.menus.miscmenu
-		if not mm.scaleLocked then
-			mm.scale = 0.03
-			mm.baseScale = 0.03
-			mm._lastAssignedScale = 0.03
+		-- Always start hand-docked at default scale unless user had scaleLocked *and*
+		-- a valid free-float layout — crash recovery ignores corrupt float poses.
+		local lay = vrmod.GetMenuLayout and vrmod.GetMenuLayout("miscmenu")
+		local keepFloat = lay and lay.freeFloat and lay.pos and lay.ang
+			and tonumber(lay.scale) and tonumber(lay.scale) >= 0.01 and tonumber(lay.scale) <= 0.12
+		if not keepFloat then
+			mm.scaleLocked = false
+			mm.freeFloat = false
+			mm.attachment = true
+			mm.scale = qmScale
+			mm.baseScale = qmScale
+			mm._lastAssignedScale = qmScale
+			mm.pos = qmPos
+			mm.ang = qmAng
+		elseif not mm.scaleLocked then
+			mm.scale = qmScale
+			mm.baseScale = qmScale
+			mm._lastAssignedScale = qmScale
 		end
 		mm.cubeMenu = true
 		mm.grabbable = true

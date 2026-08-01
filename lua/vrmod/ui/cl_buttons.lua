@@ -108,10 +108,24 @@ local function InitializeMenuItems()
 			LocalPlayer():ConCommand("vrmod_close_all_windows")
 		end
 	end, true, "close spawn · context · glide · popups", "close_windows")
-	add("UI Reset", 3, 2, function() LocalPlayer():ConCommand("vrmod_vgui_reset") end, true, "hard reset all UI incl. QM", "ui_reset")
-	add("Border Cal", 4, 2, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
-	add("Toggle blacklist weapon", 5, 2, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
-	add("Map Browser", 0, 3, function()
+	add("Reset Layouts", 3, 2, function()
+		-- Poses, sizes, free-float anchors → wrist defaults; reopens QM if gone
+		if vrmod.ResetAllWindowLayouts then
+			vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
+		else
+			LocalPlayer():ConCommand("vrmod_reset_window_layouts")
+		end
+	end, true, "poses · sizes · dock to wrist", "reset_layouts")
+	add("UI Reset", 4, 2, function()
+		if vrmod.ResetAllWindowLayouts then
+			vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
+		else
+			LocalPlayer():ConCommand("vrmod_vgui_reset")
+		end
+	end, true, "same as reset layouts (recovery)", "ui_reset")
+	add("Border Cal", 5, 2, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
+	add("Toggle blacklist weapon", 0, 3, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
+	add("Map Browser", 1, 3, function()
 		local window = VRUtilCreateMapBrowserWindow()
 		hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
 			hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
@@ -119,9 +133,9 @@ local function InitializeMenuItems()
 			return false
 		end)
 	end, true, nil, "map")
-	add("RESPAWN", 1, 3, function() LocalPlayer():ConCommand("kill") end, true, nil, "respawn")
-	add("VR EXIT", 2, 3, function() LocalPlayer():ConCommand("vrmod_exit") end, true, nil, "vr_exit")
-	add("DISCONNECT", 3, 3, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
+	add("RESPAWN", 2, 3, function() LocalPlayer():ConCommand("kill") end, true, nil, "respawn")
+	add("VR EXIT", 3, 3, function() LocalPlayer():ConCommand("vrmod_exit") end, true, nil, "vr_exit")
+	add("DISCONNECT", 4, 3, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
 end
 
 hook.Add("VRMod_Start", "ReloadMenuItems", function() InitializeMenuItems() end)

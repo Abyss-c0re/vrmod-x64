@@ -432,17 +432,22 @@ if CLIENT then
 		local e = ReadLayouts()[tostring(uid)]
 		if not e then return false end
 		local applied = false
-		if e.scale and tonumber(e.scale) and tonumber(e.scale) > 0 then
-			LockMenuScale(menu, tonumber(e.scale))
+		local sc = e.scale and tonumber(e.scale) or nil
+		-- Reject corrupt/micro scales that make menus effectively invisible
+		if sc and sc >= SCALE_MIN and sc <= SCALE_MAX then
+			LockMenuScale(menu, sc)
 			applied = true
-		elseif e.scaleLocked then
-			menu.scaleLocked = true
+		elseif e.scaleLocked and sc and sc > 0 then
+			-- Was locked but out of range — unlock and ignore
+			menu.scaleLocked = false
 		end
 		-- freeFloat==false means user reattached: keep open-time attachment, only scale above
 		if e.freeFloat and e.pos and e.ang then
 			local px, py, pz = e.pos.x or e.pos[1], e.pos.y or e.pos[2], e.pos.z or e.pos[3]
 			local ap, ay, ar = e.ang.p or e.ang[1], e.ang.y or e.ang[2], e.ang.r or e.ang[3]
-			if px and py and pz and ap and ay and ar then
+			-- NaN / absurd world offsets → ignore (menu "gone")
+			local okPos = px and py and pz and math.abs(px) < 1e5 and math.abs(py) < 1e5 and math.abs(pz) < 1e5
+			if okPos and ap and ay and ar and (not sc or (sc >= SCALE_MIN and sc <= SCALE_MAX)) then
 				menu.pos = Vector(px, py, pz)
 				menu.ang = Angle(ap, ay, ar)
 				menu.freeFloat = true
@@ -583,6 +588,115 @@ if CLIENT then
 		menu._hitX, menu._hitY, menu._hitDist, menu._hitWorld = nil, nil, nil, nil
 		-- Force laser remap next eye so close/buttons match new scale immediately
 		menu.lastCursorX, menu.lastCursorY = nil, nil
+	end
+
+	--- Default wrist pose + unlocked scale for one open menu.
+	function vrmod.ResetMenuPose(uid, opts)
+		opts = opts or {}
+		local menu = menus[uid]
+		if not menu then return false end
+		menu.scaleLocked = false
+		menu.freeFloat = false
+		menu.attachment = true
+		menu.grabHand = nil
+		menu.grabPos = nil
+		menu.grabAng = nil
+		menu._snapFrame = -1
+		local wrist = MenuAttachHandName(menu)
+		menu.attachHand = wrist
+		local defSc = menu.baseScale or menu.scale or 0.03
+		if defSc < 0.01 or defSc > 0.12 then defSc = 0.03 end
+		if uid == "miscmenu" then defSc = 0.025 end
+		if uid == "p2v_spawnmenu" or uid == "p2v_contextmenu" then
+			if vrmod.GetVRUIPanelMetrics then
+				local _, _, msc = vrmod.GetVRUIPanelMetrics(
+					uid == "p2v_contextmenu" and "contextmenu" or "spawnmenu")
+				if msc then defSc = msc end
+			else
+				defSc = 0.016
+			end
+		end
+		menu.scale = defSc
+		menu.baseScale = defSc
+		menu._lastAssignedScale = defSc
+		if isfunction(VRUtilHandMenuPose) then
+			local lp, la = VRUtilHandMenuPose(
+				menu.width or 512, menu.height or 512, defSc, nil, nil, wrist)
+			if lp then menu.pos = lp end
+			if la then menu.ang = la end
+		end
+		InvalidateMenuHit(menu)
+		menu.dirty = true
+		if opts.save then
+			local all = ReadLayouts()
+			all[tostring(uid)] = {
+				scale = defSc,
+				scaleLocked = false,
+				freeFloat = false,
+			}
+			WriteLayouts(all)
+		end
+		return true
+	end
+
+	--- Wipe saved poses/sizes/anchors and re-dock every open window to the wrist.
+	-- Use after a menu crash, lost panel, or unusable free-float placement.
+	function vrmod.ResetAllWindowLayouts(opts)
+		opts = opts or {}
+		local reopenQM = opts.reopenQM ~= false
+		local closeAll = opts.closeAll
+		if closeAll == nil then closeAll = reopenQM end
+
+		vrmod.ClearMenuLayout()
+		if vrmod.panel2vr and vrmod.panel2vr.ClearAllShellFloatPoses then
+			vrmod.panel2vr.ClearAllShellFloatPoses()
+		end
+
+		grabState = nil
+		resizeState = nil
+		g_VR.menuGrabActive = false
+		g_VR.menuResizeActive = false
+		g_VR.menuFocus = false
+
+		if g_VR.menus then
+			for uid in pairs(g_VR.menus) do
+				vrmod.ResetMenuPose(uid)
+			end
+		end
+
+		if closeAll then
+			if isfunction(vrmod.CloseAllWindows) then
+				vrmod.CloseAllWindows({ alsoQuickMenu = true })
+			elseif g_VR.menus then
+				local list = {}
+				for uid in pairs(g_VR.menus) do list[#list + 1] = uid end
+				for _, uid in ipairs(list) do
+					if isfunction(VRUtilMenuClose) then VRUtilMenuClose(uid) end
+				end
+			end
+			if g_VR.MenuClose then pcall(g_VR.MenuClose) end
+		end
+
+		if reopenQM and g_VR.active then
+			timer.Simple(0.05, function()
+				if not g_VR or not g_VR.active then return end
+				if (not g_VR.menuItems or #g_VR.menuItems == 0)
+					and isfunction(vrmod.RebuildInGameMenuItems) then
+					pcall(vrmod.RebuildInGameMenuItems)
+				end
+				if g_VR.MenuOpen then pcall(g_VR.MenuOpen) end
+				if vrmod.Toast then
+					vrmod.Toast("Windows reset — wrist dock, default size", 3, "ok")
+				end
+			end)
+		elseif vrmod.Toast then
+			vrmod.Toast("Window poses cleared", 2, "ok")
+		end
+
+		if vrmod.logger then
+			vrmod.logger.Info("[UI] ResetAllWindowLayouts reopenQM=%s", tostring(reopenQM))
+		end
+		return true
 	end
 
 	local function EndResize(handName)
@@ -1519,9 +1633,14 @@ concommand.Add("vrmod_close_all_windows", function()
 	vrmod.CloseAllWindows()
 end)
 
+concommand.Add("vrmod_reset_window_layouts", function()
+	-- Poses, sizes, free-float, shell float cache → wrist defaults + reopen QM
+	vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
+end)
+
 concommand.Add("vrmod_vgui_reset", function()
-	-- Full wipe including quick menu (layout / stuck RT recovery)
-	vrmod.CloseAllWindows({ alsoQuickMenu = true })
+	-- Hard recovery: clear layouts, close everything, reopen QM
+	vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
 end)
 
 -- Rebuild HUD mesh when UI scale changes; dirty open menus (world scale is live via GetUIScale)
@@ -1563,10 +1682,13 @@ concommand.Add("vrmod_menu_layout_clear", function(ply, cmd, args)
 	local uid = args and args[1]
 	if uid and uid ~= "" then
 		vrmod.ClearMenuLayout(uid)
+		if g_VR and g_VR.menus and g_VR.menus[uid] then
+			vrmod.ResetMenuPose(uid)
+		end
 		print("[vrmod] Cleared layout for " .. tostring(uid))
 	else
-		vrmod.ClearMenuLayout()
-		print("[vrmod] Cleared all panel layouts (data/vrmod/panel_layouts.json)")
+		vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
+		print("[vrmod] Reset all window poses/sizes/anchors + reopened QM")
 	end
 end)
 
