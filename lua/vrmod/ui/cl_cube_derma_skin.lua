@@ -512,7 +512,7 @@ local function buildSkin()
 		rect(0, h - 2, w, 2, th.crimson)
 	end
 
-	derma.DefineSkin(SKIN_NAME, "Crimson Cube Experience — spawn & VGUI", SKIN)
+	derma.DefineSkin(SKIN_NAME, "Cube — spawn & VGUI", SKIN)
 	return SKIN
 end
 

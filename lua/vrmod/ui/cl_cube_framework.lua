@@ -40,11 +40,11 @@ F.LAW = {
 }
 
 ------------------------------------------------------------------------
--- Presets (Crimson Cube Experience skins)
+-- Presets (Cube theme skins)
 ------------------------------------------------------------------------
 local PRESETS = {
 	classic = {
-		label = "Glorious Crimson",
+		label = "Classic",
 		bg = { 12, 6, 10, 245 },
 		bgGlass = { 22, 10, 16, 230 },
 		panel = { 36, 12, 18, 240 },

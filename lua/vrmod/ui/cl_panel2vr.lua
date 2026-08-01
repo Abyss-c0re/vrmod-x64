@@ -21,7 +21,7 @@ vrmod.panel2vr = vrmod.panel2vr or {}
 
 local W = vrmod.panel2vr
 
--- Glorious Crimson Cube palette (shared with native surfaces)
+-- Cube palette (shared with native surfaces)
 W.Theme = {
 	bg = Color(18, 8, 12, 230),
 	panel = Color(36, 12, 18, 240),

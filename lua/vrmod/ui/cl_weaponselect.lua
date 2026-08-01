@@ -1,5 +1,5 @@
 -- =============================================================================
--- Cube Weapon Menu — Crimson Cube chrome + inventory fan
+-- Cube Weapon Menu — inventory fan
 --
 -- Large dynamic 3D icons, category rails, glass weapon cards, laser select.
 -- Open on changeweapon press; release selects hovered weapon / holster.
@@ -395,7 +395,7 @@ function VRUtilWeaponMenuOpen()
 		-- ── Chrome plate ──────────────────────────────────────────
 		if C and C.DrawChrome then
 			C.DrawChrome(0, 0, MENU_W, MENU_H, "WEAPONS", {
-				subtitle = (T.presetLabel or "CUBE") .. " · ALYX",
+				subtitle = T.presetLabel or "CUBE",
 				pad = 16,
 				headerH = HEADER_H,
 			})

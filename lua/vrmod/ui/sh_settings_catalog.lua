@@ -567,7 +567,7 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		end
 		return true
 	end
-	-- Crimson Cube Experience presets / density / HUD style
+	-- Cube theme presets / density / HUD style
 	if action_id and string.StartWith(action_id, "cube_preset_") then
 		local id = string.sub(action_id, #"cube_preset_" + 1)
 		RunConsoleCommand("vrmod_cube_preset", id)
