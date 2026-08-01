@@ -209,47 +209,91 @@ local function detectKind(panel)
 	return "panel"
 end
 
---- Parent a DMenu under the focused spawn/context shell so it paints into the same RT.
---- Separate MakePopup surfaces were unusable for spawn right-click.
-local function attachDMenuToShell(panel)
-	if not IsValid(panel) then return false end
-	local host, mx, my = nil, g_VR.menuCursorX or 8, g_VR.menuCursorY or 8
-	if g_VR.menuFocus == STABLE_UID.spawnmenu and IsValid(g_SpawnMenu) then
-		host = g_SpawnMenu
-	elseif g_VR.menuFocus == STABLE_UID.contextmenu and IsValid(g_ContextMenu) then
-		host = g_ContextMenu
-	elseif IsValid(g_SpawnMenu) and g_SpawnMenu:IsVisible() and bound[STABLE_UID.spawnmenu] then
-		host = g_SpawnMenu
-	elseif IsValid(g_ContextMenu) and g_ContextMenu:IsVisible() and bound[STABLE_UID.contextmenu] then
-		host = g_ContextMenu
+local function GetVRShellHost()
+	if bound[STABLE_UID.spawnmenu] and IsValid(g_SpawnMenu) then
+		return g_SpawnMenu, STABLE_UID.spawnmenu
 	end
+	if bound[STABLE_UID.contextmenu] and IsValid(g_ContextMenu) then
+		return g_ContextMenu, STABLE_UID.contextmenu
+	end
+	-- Bound may lag one frame; accept visible sandbox shell
+	if IsValid(g_SpawnMenu) and g_SpawnMenu:IsVisible() and g_VR.menus and g_VR.menus[STABLE_UID.spawnmenu] then
+		return g_SpawnMenu, STABLE_UID.spawnmenu
+	end
+	if IsValid(g_ContextMenu) and g_ContextMenu:IsVisible() and g_VR.menus and g_VR.menus[STABLE_UID.contextmenu] then
+		return g_ContextMenu, STABLE_UID.contextmenu
+	end
+	return nil, nil
+end
+
+--- Parent DMenu under spawn/context shell (same RT). Never MakePopup to world.
+local function attachDMenuToShell(panel, mx, my)
+	if not IsValid(panel) then return false end
+	local host, uid = GetVRShellHost()
 	if not IsValid(host) then return false end
 
+	panel:InvalidateLayout(true)
+	local pw = math.max(panel:GetWide() or 160, 80)
+	local ph = math.max(panel:GetTall() or 24, 20)
 	local hw = host:GetWide() or 1024
 	local hh = host:GetTall() or 768
-	local pw = panel:GetWide() or 160
-	local ph = panel:GetTall() or 120
-	mx = math.Clamp(math.floor(mx), 0, math.max(0, hw - pw - 4))
-	my = math.Clamp(math.floor(my), 0, math.max(0, hh - ph - 4))
+	mx = math.Clamp(math.floor(tonumber(mx) or g_VR.menuCursorX or 8), 0, math.max(0, hw - pw - 2))
+	my = math.Clamp(math.floor(tonumber(my) or g_VR.menuCursorY or 8), 0, math.max(0, hh - ph - 2))
 
-	if panel.SetParent then panel:SetParent(host) end
-	if panel.SetPos then panel:SetPos(mx, my) end
-	if panel.SetPaintedManually then panel:SetPaintedManually(true) end
-	if panel.SetVisible then panel:SetVisible(true) end
-	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
-	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
-	if panel.MakePopup then
-		-- already called by caller; ensure focus stays usable for clicks
-	end
+	-- Stay in shell tree so PaintManual of host draws us
+	panel:SetParent(host)
+	panel:SetPaintedManually(false)
+	panel:SetPos(mx, my)
+	panel:SetVisible(true)
+	panel:SetMouseInputEnabled(true)
+	panel:SetKeyboardInputEnabled(false)
+	if panel.SetDrawOnTop then panel:SetDrawOnTop(true) end
 	if panel.MoveToFront then panel:MoveToFront() end
-	-- Force host RT refresh so menu appears this frame
-	local uid = STABLE_UID.spawnmenu
-	if host == g_ContextMenu then uid = STABLE_UID.contextmenu end
+	panel._vrmod_shell_host = host
+	panel._vrmod_shell_uid = uid
+
 	if isfunction(VRUtilMenuRenderPanel) then
-		VRUtilMenuRenderPanel(uid)
+		VRUtilMenuRenderPanel(uid, true)
 	end
-	log("dmenu attached to shell uid=%s at %s,%s", uid, tostring(mx), tostring(my))
+	g_VR._dmenuOpened = true
+	log("dmenu attached to shell uid=%s at %s,%s size=%sx%s", uid, tostring(mx), tostring(my), tostring(pw), tostring(ph))
 	return true
+end
+
+--- Patch DMenu:Open so ContentIcon right-click menus appear on the spawn RT.
+local dmenuOpenPatched = false
+local function PatchDMenuOpen()
+	if dmenuOpenPatched then return end
+	local ct = vgui.GetControlTable and vgui.GetControlTable("DMenu")
+	if not ct or not isfunction(ct.Open) then return end
+	dmenuOpenPatched = true
+	local oldOpen = ct.Open
+	ct.Open = function(self, x, y, skipAnim, ownerpanel)
+		if not W.IsVR() then
+			return oldOpen(self, x, y, skipAnim, ownerpanel)
+		end
+		local host, uid = GetVRShellHost()
+		if not IsValid(host) then
+			return oldOpen(self, x, y, skipAnim, ownerpanel)
+		end
+
+		-- Layout options first (AddOption already ran)
+		if self.InvalidateLayout then self:InvalidateLayout(true) end
+		local mx = g_VR.menuCursorX or 8
+		local my = g_VR.menuCursorY or 8
+		if IsValid(ownerpanel) and ownerpanel.LocalToScreen and host.ScreenToLocal then
+			local sx, sy = ownerpanel:LocalToScreen(0, ownerpanel:GetTall() or 0)
+			if sx and sy then
+				local lx, ly = host:ScreenToLocal(sx, sy)
+				if lx then mx, my = lx, ly end
+			end
+		end
+		if not attachDMenuToShell(self, mx, my) then
+			return oldOpen(self, x, y, skipAnim, ownerpanel)
+		end
+		-- Do NOT call MakePopup — that tears us out of the spawn RT
+	end
+	log("DMenu:Open patched for VR shell menus")
 end
 
 local function tryNative(kind, panel, opts)
@@ -646,6 +690,8 @@ function W.InstallHooks()
 	if hooksInstalled then return end
 	hooksInstalled = true
 
+	PatchDMenuOpen()
+
 	local meta = getmetatable(vgui.GetWorldPanel())
 	if not meta or not meta.MakePopup then
 		log("WorldPanel MakePopup meta missing")
@@ -656,29 +702,28 @@ function W.InstallHooks()
 	end
 
 	meta.MakePopup = function(panel, ...)
-		origMakePopup(panel, ...)
-		if not W.IsVR() then return end
+		if not W.IsVR() then
+			return origMakePopup(panel, ...)
+		end
 		if not IsValid(panel) then return end
 		local kind = detectKind(panel)
-		-- Spawn/context: OpenSandboxShell / OnSpawn* own a single manifest — skip here
-		if kind == "spawnmenu" or kind == "contextmenu" then return end
-		-- Right-click menus must live ON the spawn RT (not a second broken surface)
-		if kind == "dmenu" then
+		-- Spawn/context: OpenSandboxShell owns manifest
+		if kind == "spawnmenu" or kind == "contextmenu" then
+			return origMakePopup(panel, ...)
+		end
+		-- DMenu: Open patch parents to shell — skip MakePopup entirely if already attached
+		if kind == "dmenu" or panel._vrmod_shell_host then
+			if panel._vrmod_shell_host then
+				return -- already on shell from DMenu:Open patch
+			end
+			-- Legacy path: someone called MakePopup without Open
+			origMakePopup(panel, ...)
 			timer.Simple(0, function()
-				if not IsValid(panel) or not W.IsVR() then return end
-				if not attachDMenuToShell(panel) then
-					-- Fallback: free-float tiny popup if no shell open
-					if W.IsBound(panel) then return end
-					W.ManifestPanel(panel, {
-						kind = "dmenu",
-						place = "popup",
-						hint = "dmenu",
-						alwaysPaint = true,
-					})
-				end
+				if IsValid(panel) then attachDMenuToShell(panel) end
 			end)
 			return
 		end
+		origMakePopup(panel, ...)
 		if not shouldIntercept(panel) then return end
 		timer.Simple(0, function()
 			if not IsValid(panel) or not W.IsVR() then return end
@@ -809,6 +854,10 @@ function W.InstallHooks()
 
 	hook.Add("VRMod_Exit", "panel2vr_cleanup", function()
 		W.CloseAll()
+	end)
+
+	hook.Add("VRMod_Start", "panel2vr_dmenu_patch", function()
+		PatchDMenuOpen()
 	end)
 
 	log("hooks installed (MakePopup + spawn/context + repaint)")

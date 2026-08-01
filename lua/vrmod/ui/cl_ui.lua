@@ -623,16 +623,7 @@ if CLIENT then
 		return true
 	end
 
-	-- Focus result frozen after first stereo eye so second eye only draws quads
-	local focusSnap = {
-		frame = -1,
-		uid = false,
-		panel = nil,
-		cursorWorld = nil,
-		cursorX = 0,
-		cursorY = 0,
-		scaleKey = 0, -- invalidate when any focused menu scale changes
-	}
+	-- focusSnap declared above (EndResize invalidates it after stretch)
 
 	function VRUtilRenderMenuSystem()
 		if not menusExist or #menuOrder == 0 then
@@ -1034,13 +1025,57 @@ if CLIENT then
 		if mouseButton then
 			heldButtons[mouseButton] = pressed
 			SyncCursorToVR()
-			if pressed then
-				gui.InternalMousePressed(mouseButton)
+
+			-- RIGHT CLICK (spawn ContentIcon menu):
+			-- Derma only calls DoRightClick on mouse *release* when panel.Hovered.
+			-- Laser VR often has Hovered=false on release → menu never opens.
+			-- Fire DoRightClick on press while laser hover is valid; DMenu:Open is
+			-- patched in panel2vr to parent onto the spawn RT.
+			if mouseButton == MOUSE_RIGHT then
+				if pressed then
+					g_VR._dmenuOpened = false
+					local p = vgui.GetHoveredPanel and vgui.GetHoveredPanel() or nil
+					-- Fallback: walk spawn/context children under laser UV
+					if not IsValid(p) and IsValid(menus[g_VR.menuFocus] and menus[g_VR.menuFocus].panel) then
+						local root = menus[g_VR.menuFocus].panel
+						local lx = menus[g_VR.menuFocus].lastCursorX or g_VR.menuCursorX or 0
+						local ly = menus[g_VR.menuFocus].lastCursorY or g_VR.menuCursorY or 0
+						-- Convert root-local laser → screen → find child (VGUI helpers)
+						if root.LocalToScreen then
+							local sx, sy = root:LocalToScreen(lx, ly)
+							if sx and vgui.GetHoveredPanel then
+								input.SetCursorPos(sx, sy)
+								p = vgui.GetHoveredPanel()
+							end
+						end
+					end
+					local hops = 0
+					while IsValid(p) and hops < 32 do
+						if isfunction(p.DoRightClick) then
+							pcall(function() p:DoRightClick() end)
+							break
+						end
+						if isfunction(p.OpenMenu) then
+							pcall(function() p:OpenMenu() end)
+							break
+						end
+						p = p:GetParent()
+						hops = hops + 1
+					end
+					gui.InternalMousePressed(MOUSE_RIGHT)
+				else
+					SyncCursorToVR()
+					gui.InternalMouseReleased(MOUSE_RIGHT)
+				end
 			else
-				gui.InternalMouseReleased(mouseButton)
+				if pressed then
+					gui.InternalMousePressed(mouseButton)
+				else
+					gui.InternalMouseReleased(mouseButton)
+				end
 			end
 
-			-- Force-paint focused shell so right-click DMenus / hover update immediately
+			-- Force-paint focused shell so DMenus appear on RT this frame
 			if g_VR.menuFocus then
 				vrmod.MarkMenuDirty(g_VR.menuFocus)
 				if isfunction(VRUtilMenuRenderPanel) then
