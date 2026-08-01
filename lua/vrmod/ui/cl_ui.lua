@@ -447,29 +447,18 @@ if CLIENT then
 		end
 	end
 
+	--- World pose for a menu. Uses stereo-frozen hands only (never mutates mid-eye).
 	local function ResolveDrawPose(v)
 		local pos, ang
 		if v.grabHand and v.grabPos and v.grabAng then
-			-- Use frozen grab hand pose when available (stereo-stable during grip)
-			local hand = v._grabHandSnap
-			if not hand or hand.frame ~= (g_VR.stereoFrame or 0) then
-				local live = HandPose(v.grabHand)
-				if live and live.pos and live.ang then
-					hand = {
-						frame = g_VR.stereoFrame or 0,
-						pos = Vector(live.pos),
-						ang = Angle(live.ang.p, live.ang.y, live.ang.r),
-					}
-					v._grabHandSnap = hand
-				end
-			end
+			local hand = HandPose(v.grabHand)
 			if hand and hand.pos and hand.ang then
 				pos, ang = LocalToWorld(v.grabPos, v.grabAng, hand.pos, hand.ang)
 			end
 		elseif v.freeFloat or not v.attachment then
 			pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
 		else
-			local hand = g_VR.tracking and g_VR.tracking.pose_lefthand
+			local hand = HandPose("left")
 			if hand and hand.pos and hand.ang then
 				pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
 			end
@@ -478,29 +467,23 @@ if CLIENT then
 		return pos, ang, drawScale
 	end
 
-	--- Once per stereo frame: solve resize, freeze grab hand + pose for BOTH eyes.
+	--- Once per stereo frame: freeze world matrix copies for BOTH eyes.
 	local function SnapshotMenuDrawState()
 		UpdateResizeFromHand()
 		local sf = g_VR.stereoFrame or 0
 		for _, v in ipairs(menuOrder) do
-			-- Freeze grip hand sample for this frame (no L/R drift while dragging panels)
-			if v.grabHand then
-				local live = HandPose(v.grabHand)
-				if live and live.pos and live.ang then
-					v._grabHandSnap = {
-						frame = sf,
-						pos = Vector(live.pos),
-						ang = Angle(live.ang.p, live.ang.y, live.ang.r),
-					}
-				end
-			else
-				v._grabHandSnap = nil
-			end
 			local pos, ang, drawScale = ResolveDrawPose(v)
-			v._snapPos = pos
-			v._snapAng = ang
-			v._snapScale = drawScale
-			v._snapFrame = sf
+			if pos and ang then
+				-- Own copies — never alias LocalToWorld temps or tracking tables
+				if not v._snapPos then v._snapPos = Vector() end
+				if not v._snapAng then v._snapAng = Angle() end
+				v._snapPos:Set(pos)
+				v._snapAng:Set(ang)
+				v._snapScale = drawScale
+				v._snapFrame = sf
+			else
+				v._snapFrame = -1
+			end
 		end
 	end
 
@@ -750,13 +733,25 @@ if CLIENT then
 				v._lastAssignedScale = v.baseScale
 			end
 
+			-- Draw ONLY from PreStereo snap. Never re-resolve during eye passes
+			-- (live hand between L/R was "new pose on one eye only" while gripping).
 			local pos, ang, drawScale = v._snapPos, v._snapAng, v._snapScale
 			if not pos or not ang or not drawScale or drawScale <= 0 or v._snapFrame ~= sf then
-				pos, ang, drawScale = ResolveDrawPose(v)
-				if not pos or not ang then continue end
-				v._snapPos, v._snapAng, v._snapScale = pos, ang, drawScale
-				v._snapFrame = sf
+				if g_VR.stereoEye == "right" and v._snapPos and v._snapAng and v._snapScale then
+					-- Prefer previous snap over live recompute on second eye
+					pos, ang, drawScale = v._snapPos, v._snapAng, v._snapScale
+				else
+					pos, ang, drawScale = ResolveDrawPose(v)
+					if not pos or not ang then continue end
+					if not v._snapPos then v._snapPos = Vector() end
+					if not v._snapAng then v._snapAng = Angle() end
+					v._snapPos:Set(pos)
+					v._snapAng:Set(ang)
+					v._snapScale = drawScale
+					v._snapFrame = sf
+				end
 			end
+			if not pos or not ang then continue end
 
 			-- SetTexture only when RT instance changes
 			if v.mat and not v.mat:IsError() and v._boundRT ~= v.rt then
