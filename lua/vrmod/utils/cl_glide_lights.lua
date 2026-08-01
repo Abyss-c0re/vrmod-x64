@@ -1,11 +1,15 @@
 -- Stereo-correct Glide vehicle lights for VR (no Glide source edits).
 --
--- Driven entirely by VR rendering hooks (VRMod_PreRender / VRMod_PostRender),
--- same pattern as the player flashlight ProjectedTexture.
+-- Keep the simple path that actually draws lights:
+--   DrawLightSprite while VR → buffer
+--   PreRender each eye → re-queue into Glide for PreDrawEffects
 --
--- Glide is mono-frame: ProjectedTexture:Update once, and light sprites are
--- queued then wiped in PreDrawEffects after the first eye. Dual RenderView
--- needs both refreshed before every eye.
+-- Left-eye flicker fixes (minimal):
+--   1) ProjectedTexture:Update only once per stereo pair (before left eye)
+--   2) Inject sprites with dir=nil so PreDrawEffects does not re-scale size
+--      differently for L/R view rays
+--   3) Snapshot buffer count for the stereo pair so mid-frame appends do not
+--      desync the two eyes
 
 if SERVER then return end
 
@@ -16,10 +20,12 @@ vrmod.utils = vrmod.utils or {}
 local patched = false
 local spriteBuffer = {}
 local spriteBufferCount = 0
+local injectCount = 0 -- frozen for this stereo pair
+local injectFrame = -1
+local projFrame = -1
 local origDrawLightSprite
 local spriteColorScratch = Color(255, 255, 255, 255)
 
---- Only local player's Glide vehicle — never ents.GetAll (latency spikes on big maps).
 local function LocalGlideVehicle()
 	local ply = LocalPlayer()
 	if not IsValid(ply) or not ply.GlideGetVehicle then return nil end
@@ -28,8 +34,12 @@ local function LocalGlideVehicle()
 	return nil
 end
 
---- Pose + Update projected headlights before this eye's RenderView.
-local function UpdateProjectedHeadlights()
+--- Once per stereo frame — dual Update is a common L-eye ProjectedTexture flicker.
+local function UpdateProjectedHeadlightsOnce()
+	local sf = g_VR.stereoFrame or 0
+	if projFrame == sf then return end
+	projFrame = sf
+
 	local ent = LocalGlideVehicle()
 	if not IsValid(ent) then return end
 
@@ -39,7 +49,6 @@ local function UpdateProjectedHeadlights()
 	local headlights = ent.Headlights
 	for index, light in pairs(lights) do
 		if not IsValid(light) then continue end
-
 		if istable(headlights) and headlights[index] then
 			local data = headlights[index]
 			if data.offset then
@@ -49,7 +58,6 @@ local function UpdateProjectedHeadlights()
 				light:SetAngles(ent:LocalToWorldAngles(data.angles))
 			end
 		end
-
 		light:Update()
 	end
 end
@@ -59,45 +67,54 @@ local function ClearSpriteBuffer()
 		spriteBuffer[i] = nil
 	end
 	spriteBufferCount = 0
+	injectCount = 0
+	injectFrame = -1
 end
 
 local function BufferSprite(pos, dir, size, color, material)
+	if not pos then return end
 	spriteBufferCount = spriteBufferCount + 1
 	local slot = spriteBuffer[spriteBufferCount]
 	if not slot then
-		slot = {}
+		slot = { pos = Vector() }
 		spriteBuffer[spriteBufferCount] = slot
 	end
-
-	slot.pos = slot.pos or Vector()
+	if not slot.pos then slot.pos = Vector() end
 	slot.pos:Set(pos)
-	if dir then
-		slot.dir = slot.dir or Vector()
-		slot.dir:Set(dir)
-	else
-		slot.dir = nil
-	end
-
-	slot.size = size
+	-- Store dir only for optional future use; inject never passes it (stereo-stable size)
+	slot.size = size or 30
 	if color then
-		slot.r, slot.g, slot.b, slot.a = color.r, color.g, color.b, color.a
+		slot.r, slot.g, slot.b, slot.a = color.r, color.g, color.b, color.a or 255
 	else
 		slot.r, slot.g, slot.b, slot.a = 255, 255, 255, 255
 	end
 	slot.material = material
 end
 
---- Feed Glide's sprite queue for the upcoming eye (PreDrawEffects consumes it).
-local function InjectSpritesForEye()
-	if spriteBufferCount < 1 or not origDrawLightSprite then return end
+--- Snapshot how many sprites both eyes will draw this pair.
+local function EnsureInjectCount()
+	local sf = g_VR.stereoFrame or 0
+	if injectFrame ~= sf then
+		injectFrame = sf
+		injectCount = spriteBufferCount
+	end
+end
 
-	for i = 1, spriteBufferCount do
+--- Feed Glide's mono queue for this eye. dir=nil → no per-eye size falloff.
+local function InjectSpritesForEye()
+	if not origDrawLightSprite then return end
+	EnsureInjectCount()
+	local n = injectCount
+	if n < 1 then return end
+
+	for i = 1, n do
 		local s = spriteBuffer[i]
+		if not s or not s.pos then continue end
 		spriteColorScratch.r = s.r
 		spriteColorScratch.g = s.g
 		spriteColorScratch.b = s.b
 		spriteColorScratch.a = s.a
-		origDrawLightSprite(s.pos, s.dir, s.size, spriteColorScratch, s.material)
+		origDrawLightSprite(s.pos, nil, s.size or 30, spriteColorScratch, s.material)
 	end
 end
 
@@ -107,40 +124,38 @@ function vrmod.utils.PatchGlideLights()
 
 	origDrawLightSprite = Glide.DrawLightSprite
 
-	-- While VR is active: capture sprites only. Injection happens on VRMod_PreRender
-	-- for each eye so we never depend on a single mono-frame queue.
 	function Glide.DrawLightSprite(pos, dir, size, color, material)
-		if g_VR.active and pos then
+		if g_VR and g_VR.active and pos then
 			BufferSprite(pos, dir, size, color, material)
 			return
 		end
 		return origDrawLightSprite(pos, dir, size, color, material)
 	end
 
-	-- View location override lives in cl_glide_audio.lua only (one SoT wrap).
-
-	-- Per-eye, immediately before render.RenderView (see cl_vrmod PerformRenderViews)
-	hook.Add("VRMod_PreRender", "vrmod_glide_lights", function(_eye)
-		if not g_VR.active then return end
-
+	hook.Add("VRMod_PreRender", "vrmod_glide_lights", function(eye)
+		if not g_VR or not g_VR.active then return end
+		-- Projected lights: only before left eye (first of the pair)
+		if eye ~= "right" then
+			UpdateProjectedHeadlightsOnce()
+		end
 		InjectSpritesForEye()
-		UpdateProjectedHeadlights()
 	end)
 
-	-- End of stereo pair: drop this frame's sprite copies
 	hook.Add("VRMod_PostRender", "vrmod_glide_lights", function()
-		if not g_VR.active then return end
+		if not g_VR or not g_VR.active then return end
 		ClearSpriteBuffer()
+		projFrame = -1
 	end)
 
 	hook.Add("VRMod_Exit", "vrmod_glide_lights_cleanup", function(ply)
 		if ply and ply ~= LocalPlayer() then return end
 		ClearSpriteBuffer()
+		projFrame = -1
 	end)
 
 	patched = true
 	if vrmod.logger then
-		vrmod.logger.Debug("[Glide] Stereo light rendering hooked to VRMod_PreRender")
+		vrmod.logger.Debug("[Glide] Stereo lights: inject both eyes, PT update once")
 	end
 	return true
 end
@@ -152,7 +167,6 @@ end
 
 hook.Add("InitPostEntity", "vrmod_glide_lights_init", TryPatch)
 hook.Add("VRMod_Start", "vrmod_glide_lights_start", TryPatch)
--- Late Glide load: attempt once per stereo frame until the wrap sticks
 hook.Add("VRMod_PreRender", "vrmod_glide_lights_ensure", function()
 	if patched then
 		hook.Remove("VRMod_PreRender", "vrmod_glide_lights_ensure")
