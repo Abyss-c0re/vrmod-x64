@@ -31,6 +31,16 @@ local FONT_FALLBACK = {
 	CubeLabel = "DermaDefaultBold",
 	CubeSmall = "DermaDefault",
 	CubeHuge = "DermaLarge",
+	title = "DermaLarge",
+	label = "DermaDefaultBold",
+	small = "DermaDefault",
+	huge = "DermaLarge",
+}
+local FONT_ALIAS = {
+	title = "CubeTitle",
+	label = "CubeLabel",
+	small = "CubeSmall",
+	huge = "CubeHuge",
 }
 
 --- Always available: prefer framework density fonts, else static CreateFont

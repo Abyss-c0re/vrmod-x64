@@ -44,7 +44,11 @@ end
 
 local function Font(name)
 	if vrmod.cube and vrmod.cube.Font then return vrmod.cube.Font(name) end
-	return name == "title" and "DermaLarge" or "DermaDefault"
+	-- Offline fallback when cube fonts not loaded
+	if name == "title" or name == "CubeTitle" then return "DermaLarge" end
+	if name == "label" or name == "CubeLabel" then return "DermaDefaultBold" end
+	if name == "small" or name == "CubeSmall" then return "DermaDefault" end
+	return "DermaDefault"
 end
 
 local function WristPose()

@@ -277,16 +277,36 @@ function F.RefreshFonts()
 	return d
 end
 
+-- Short aliases used by menus (never pass these to surface.SetFont raw)
+local FONT_ALIAS = {
+	title = "CubeTitle",
+	label = "CubeLabel",
+	small = "CubeSmall",
+	huge = "CubeHuge",
+	CubeTitle = "CubeTitle",
+	CubeLabel = "CubeLabel",
+	CubeSmall = "CubeSmall",
+	CubeHuge = "CubeHuge",
+}
+local FONT_ENGINE = {
+	CubeTitle = "DermaLarge",
+	CubeLabel = "DermaDefaultBold",
+	CubeSmall = "DermaDefault",
+	CubeHuge = "DermaLarge",
+}
+
 function F.Font(name)
 	local id = F.DensityId()
 	if fontsDensityId ~= id then F.RefreshFonts() end
-	if not name then return "DermaDefault" end
+	if not name or name == "" then return "DermaDefault" end
+	-- Resolve alias first so we never SetFont("label") / SetFont("title")
+	local resolved = FONT_ALIAS[name] or FONT_ALIAS[string.lower(tostring(name))] or name
 	local ok, w = pcall(function()
-		surface.SetFont(name)
+		surface.SetFont(resolved)
 		return surface.GetTextSize("W")
 	end)
-	if ok and w and w > 0 then return name end
-	return ({ CubeTitle = "DermaLarge", CubeLabel = "DermaDefaultBold", CubeSmall = "DermaDefault", CubeHuge = "DermaLarge" })[name] or "DermaDefault"
+	if ok and w and w > 0 then return resolved end
+	return FONT_ENGINE[resolved] or "DermaDefault"
 end
 
 function F.ApplyDensity(id)
