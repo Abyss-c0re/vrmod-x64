@@ -79,6 +79,18 @@ local function VRMod_CleanupVehicleExit()
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
 	timer.Simple(1, function() g_VR.antiDrop = false end)
 	timer.Remove("vrmod_vehicle_watchdog")
+	timer.Remove("vrmod_glide_seat_recheck")
+end
+
+local function ResolveGlideDriving(ply)
+	if not IsValid(ply) then return false end
+	local seat = 0
+	if ply.GlideGetSeatIndex then
+		seat = ply:GlideGetSeatIndex() or 0
+	end
+	-- Driver seat is 1. Seat 0 = API not ready yet → treat as driver until recheck.
+	if seat == 1 or seat < 1 then return true end
+	return false
 end
 
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
@@ -95,7 +107,32 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 		g_VR.vehicle.glide = glide
 		g_VR.vehicle.bone_name = name
 		vrmod.logger.Info("Steer grip type selected: " .. tostring(vType))
-		if glide and ply:GlideGetSeatIndex() == 1 or not glide then g_VR.vehicle.driving = true end
+		if glide then
+			g_VR.vehicle.driving = ResolveGlideDriving(ply)
+			-- Seat index often 0 on first tick after enter — recheck once
+			timer.Create("vrmod_glide_seat_recheck", 0.6, 1, function()
+				if not IsValid(ply) or not g_VR.vehicle.inside or not g_VR.vehicle.glide then return end
+				g_VR.vehicle.driving = ResolveGlideDriving(ply)
+			end)
+			-- Cube W3: honest toast — stick drives; wheel is optional assist
+			if g_VR.vehicle.driving and vrmod.Toast then
+				vrmod.Toast("Glide: thumbstick throttle/steer · wheel grip is optional assist", 5, "hint")
+				-- If driving actions never bound, warn once (was silent dead car)
+				timer.Create("vrmod_glide_bind_check", 1.5, 1, function()
+					if not g_VR.vehicle.inside or not g_VR.vehicle.glide or not g_VR.vehicle.driving then return end
+					local inp = g_VR.input
+					if not inp or inp.vector2_steer == nil then
+						vrmod.Toast(
+							"Glide inputs unbound — SteamVR bindings missing for VRMod /actions/driving. Reinstall module or rebind.",
+							7,
+							"error"
+						)
+					end
+				end)
+			end
+		else
+			g_VR.vehicle.driving = true
+		end
 		-- Safety watchdog: check every second if the vehicle is still valid and player still inside
 		timer.Create("vrmod_vehicle_watchdog", 1, 0, function() if not IsValid(ply) or not ply:InVehicle() or not IsValid(g_VR.vehicle.current) then VRMod_CleanupVehicleExit() end end)
 	end)
@@ -334,12 +371,20 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 
 	if Glide and g_VR.vehicle.glide then
 		-- === Steering / throttle / brake ===
-		local throttle = g_VR.input.vector1_forward or 0
-		local brake = g_VR.input.vector1_reverse or 0
-		local steer = g_VR.wheelGripped and g_VR.analog_input.steer or g_VR.input.vector2_steer.x or 0
+		-- Cube W3: joystick/action-set is SoT; wheel grip is assist only when stick idle.
+		local inp = g_VR.input or {}
+		local throttle = inp.vector1_forward or 0
+		local brake = inp.vector1_reverse or 0
+		local stickX = (inp.vector2_steer and inp.vector2_steer.x) or 0
+		local stickY = (inp.vector2_steer and inp.vector2_steer.y) or 0
+		local wheelSteer = (g_VR.wheelGripped and g_VR.analog_input.steer) or 0
+		local steer = stickX
+		if math.abs(stickX) < 0.05 and math.abs(wheelSteer) > 0.02 then
+			steer = wheelSteer
+		end
 		if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
-		local pitch = g_VR.analog_input.pitch + g_VR.input.vector2_steer.y or 0
-		local yaw = g_VR.analog_input.yaw + g_VR.input.vector2_steer.x or 0
+		local pitch = (g_VR.analog_input.pitch or 0) + stickY
+		local yaw = (g_VR.analog_input.yaw or 0) + stickX
 		local roll = g_VR.analog_input.roll or 0
 		-- === Send to server if significant change ===
 		local changed = math.abs(throttle - lastInputState.throttle) > ANALOG_EPSILON or math.abs(brake - lastInputState.brake) > ANALOG_EPSILON or math.abs(steer - lastInputState.steer) > ANALOG_EPSILON or math.abs(pitch - lastInputState.pitch) > ANALOG_EPSILON or math.abs(yaw - lastInputState.yaw) > ANALOG_EPSILON or math.abs(roll - lastInputState.roll) > ANALOG_EPSILON
