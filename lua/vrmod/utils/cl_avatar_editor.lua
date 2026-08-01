@@ -979,8 +979,14 @@ end
 g_VR.avatarPoseSnap = g_VR.avatarPoseSnap or nil
 
 --- Call from cl_character / VR draw AFTER player IK — NEVER invent pose here.
+--- Once per stereoFrame only: re-publishing after the right eye (or mid-draw)
+--- made FBT left-hand foregrip flicker between eyes on the avatar twin.
 function vrmod.avatar.PublishPlayerPose(ply, frame)
 	if not IsValid(ply) then return end
+	local sf = (g_VR and g_VR.stereoFrame) or 0
+	if g_VR.avatarPoseSnap and g_VR.avatarPoseSnap.stereoFrame == sf and sf > 0 then
+		return
+	end
 	local n = ply:GetBoneCount() or 0
 	if n < 4 then return end
 
@@ -1013,6 +1019,7 @@ function vrmod.avatar.PublishPlayerPose(ply, frame)
 	if #bones < 4 then return end
 	g_VR.avatarPoseSnap = {
 		frame = FrameNumber(),
+		stereoFrame = sf,
 		characterYaw = yaw,
 		feet = Vector(fx, fy, originZ),
 		bones = bones,

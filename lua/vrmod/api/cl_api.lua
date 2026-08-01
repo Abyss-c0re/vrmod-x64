@@ -375,17 +375,38 @@ if CLIENT then
 
     function vrmod.SetLeftHandPose(pos, ang, smoothing)
         local ply = LocalPlayer()
-        -- Late override: write final tracking (what every local system reads)
-        if g_VR.tracking and g_VR.tracking.pose_lefthand and pos and ang then
-            g_VR.tracking.pose_lefthand.pos = SmoothValue(g_VR.tracking.pose_lefthand.pos, pos, smoothing or 0)
-            g_VR.tracking.pose_lefthand.ang = SmoothValue(g_VR.tracking.pose_lefthand.ang, ang, smoothing or 0)
-            pos = g_VR.tracking.pose_lefthand.pos
-            ang = g_VR.tracking.pose_lefthand.ang
+        if not pos or not ang then return end
+        -- Always write COPIES — never alias caller vectors into tracking/net
+        -- (foregrip + FBT flicker when state.leftPos became tracking.pos).
+        local factor = smoothing or 0
+        local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+        if L and L.pos and L.ang then
+            local np = SmoothValue(L.pos, pos, factor)
+            local na = SmoothValue(L.ang, ang, factor)
+            if L.pos.Set and isvector(np) then
+                L.pos:Set(np)
+            else
+                L.pos = Vector(np.x, np.y, np.z)
+            end
+            if L.ang.Set and isangle and isangle(na) then
+                L.ang:Set(na)
+            elseif L.ang.Set and na.p then
+                L.ang:Set(na)
+            else
+                L.ang = Angle(na.p or 0, na.y or 0, na.r or 0)
+            end
+            pos, ang = L.pos, L.ang
         end
         local netFrame = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
         if not netFrame then return end
-        netFrame.lefthandPos = SmoothValue(netFrame.lefthandPos, pos, smoothing or 0)
-        netFrame.lefthandAng = SmoothValue(netFrame.lefthandAng, ang, smoothing or 0)
+        local npos = SmoothValue(netFrame.lefthandPos, pos, factor)
+        local nang = SmoothValue(netFrame.lefthandAng, ang, factor)
+        netFrame.lefthandPos = Vector(npos.x or npos[1] or 0, npos.y or npos[2] or 0, npos.z or npos[3] or 0)
+        if nang and nang.p then
+            netFrame.lefthandAng = Angle(nang.p, nang.y, nang.r)
+        else
+            netFrame.lefthandAng = Angle(ang.p, ang.y, ang.r)
+        end
     end
 
     function vrmod.SetRightHandPose(pos, ang, smoothing)

@@ -301,8 +301,11 @@ function vrmod_fbt.CalculateBonePositions(ply)
 	local steamid = ply:SteamID()
 	local info = vrmod_fbt.characterInfo[steamid]
 	local frame = g_VR.net[steamid].lerpedFrame
-	if info.frameNumber == FrameNumber() or not frame then return end
-	info.frameNumber = FrameNumber()
+	-- Freeze once per stereo pair (not FrameNumber) so left/right eyes share one solve.
+	-- Foregrip stamps attach LH before the first eye; use that snap as SoT.
+	local sf = (g_VR and g_VR.stereoFrame) or FrameNumber() or 0
+	if info.frameNumber == sf or not frame then return end
+	info.frameNumber = sf
 	local boneids = info.boneids
 	local boneinfo = info.boneinfo
 	local boneCount = info.boneCount
@@ -320,7 +323,12 @@ function vrmod_fbt.CalculateBonePositions(ply)
 	-- Target poses
 	local pelvisTargetPos, pelvisTargetAng = LocalToWorld(info.waistCalibrationPos, info.waistCalibrationAng, frame.waistPos, frame.waistAng)
 	local headTargetPos, headTargetAng = LocalToWorld(info.headCalibrationPos, info.headCalibrationAng, frame.hmdPos, frame.hmdAng)
+	-- Stock foregrip: frozen attach hand (same both eyes) — not live device LH
 	local leftHandTargetPos, leftHandTargetAng = frame.lefthandPos, frame.lefthandAng
+	if g_VR.foregripActive and g_VR._leftHandSnapFrame == sf and g_VR._leftHandSnapPos and g_VR._leftHandSnapAng then
+		leftHandTargetPos = g_VR._leftHandSnapPos
+		leftHandTargetAng = g_VR._leftHandSnapAng
+	end
 	local rightHandTargetPos, rightHandTargetAng = frame.righthandPos, frame.righthandAng
 	local leftFootTargetPos, leftFootTargetAng = LocalToWorld(info.leftFootCalibrationPos, info.leftFootCalibrationAng, frame.leftfootPos, frame.leftfootAng)
 	local rightFootTargetPos, rightFootTargetAng = LocalToWorld(info.rightFootCalibrationPos, info.rightFootCalibrationAng, frame.rightfootPos, frame.rightfootAng)

@@ -144,6 +144,69 @@ local function PublishSnap(sf, gunPos, gunAng)
 	g_VR.viewModelAng = Angle(gunAng.p, gunAng.y, gunAng.r)
 end
 
+--- Stereo-stable left hand for FBT / avatar IK / body draw.
+--- Writes COPIES into tracking + lerpedFrame (never alias state vectors into them).
+--- Forces FBT bone solve to re-run if it already used device hands this FrameNumber.
+local function StampLeftStable(sf)
+	local p = state.leftPos
+	local a = state.leftAng
+	if not p or not a then return end
+
+	g_VR._leftHandSnapFrame = sf
+	if not g_VR._leftHandSnapPos then g_VR._leftHandSnapPos = Vector() end
+	if not g_VR._leftHandSnapAng then g_VR._leftHandSnapAng = Angle() end
+	g_VR._leftHandSnapPos:Set(p)
+	g_VR._leftHandSnapAng:Set(a)
+
+	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+	if L and L.pos and L.ang then
+		if L.pos.Set then L.pos:Set(p) else L.pos = Vector(p) end
+		if L.ang.Set then L.ang:Set(a) else L.ang = Angle(a.p, a.y, a.r) end
+	end
+
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return end
+	local tab = g_VR.net and g_VR.net[ply:SteamID()]
+	local nf = tab and tab.lerpedFrame
+	if nf then
+		-- Fresh vectors — SetLeftHandPose used to alias state.leftPos into net frame
+		nf.lefthandPos = Vector(p.x, p.y, p.z)
+		nf.lefthandAng = Angle(a.p, a.y, a.r)
+	end
+
+	-- FBT freezes once per FrameNumber; if it already ran with device LH, re-solve
+	if vrmod_fbt and vrmod_fbt.characterInfo then
+		local info = vrmod_fbt.characterInfo[ply:SteamID()]
+		if info then info.frameNumber = -1 end
+	end
+
+	-- Non-FBT character IK: allow one more UpdateIK this frame with attach hands
+	if g_VR._charIkUpdated then
+		g_VR._charIkUpdated = nil
+	end
+end
+
+--- Per-eye: only re-assert frozen LH (same matrix both eyes; no recompute).
+local function ReassertLeftSnap(sf)
+	if g_VR._leftHandSnapFrame ~= sf or not g_VR._leftHandSnapPos then return end
+	local p, a = g_VR._leftHandSnapPos, g_VR._leftHandSnapAng
+	local L = g_VR.tracking and g_VR.tracking.pose_lefthand
+	if L and L.pos and L.ang then
+		if L.pos.Set then L.pos:Set(p) else L.pos = Vector(p) end
+		if L.ang.Set then L.ang:Set(a) else L.ang = Angle(a.p, a.y, a.r) end
+	end
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return end
+	local nf = g_VR.net and g_VR.net[ply:SteamID()] and g_VR.net[ply:SteamID()].lerpedFrame
+	if nf and nf.lefthandPos and nf.lefthandPos.Set then
+		nf.lefthandPos:Set(p)
+		if nf.lefthandAng and nf.lefthandAng.Set then nf.lefthandAng:Set(a) end
+	elseif nf then
+		nf.lefthandPos = Vector(p.x, p.y, p.z)
+		nf.lefthandAng = Angle(a.p, a.y, a.r)
+	end
+end
+
 local function SolveForegripFrame()
 	if not state.gripping then return false end
 
@@ -167,9 +230,7 @@ local function SolveForegripFrame()
 	local sf = g_VR.stereoFrame or 0
 	if state.frame == sf then
 		PublishSnap(sf, state.gunPos, state.gunAng)
-		if vrmod.SetLeftHandPose then
-			vrmod.SetLeftHandPose(state.leftPos, state.leftAng, 0)
-		end
+		ReassertLeftSnap(sf)
 		return true
 	end
 
@@ -214,6 +275,11 @@ local function SolveForegripFrame()
 	end
 
 	local attachPos, attachAng = LocalToWorld(state.offsetPos, state.offsetAng, gunPos, gunAng)
+	-- Dampen micro-jitter from tracking/guide noise (FBT body amplifies LH shake)
+	if state.frame >= 0 and state.leftPos and state.leftAng then
+		attachPos = LerpVector(0.45, state.leftPos, attachPos)
+		attachAng = LerpAngle(0.45, state.leftAng, attachAng)
+	end
 	state.gunPos:Set(gunPos)
 	state.gunAng:Set(gunAng)
 	state.leftPos:Set(attachPos)
@@ -223,18 +289,7 @@ local function SolveForegripFrame()
 
 	PublishSnap(sf, state.gunPos, state.gunAng)
 	g_VR.foregripActive = true
-
-	if vrmod.SetLeftHandPose then
-		vrmod.SetLeftHandPose(state.leftPos, state.leftAng, 0)
-	end
-	local sp = g_VR.stereoPose
-	if sp and sp.frame == sf then
-		if not sp.leftPos then sp.leftPos = Vector() end
-		if not sp.leftAng then sp.leftAng = Angle() end
-		sp.leftPos:Set(state.leftPos)
-		sp.leftAng:Set(state.leftAng)
-		sp.hasLeft = true
-	end
+	StampLeftStable(sf)
 	return true
 end
 
@@ -266,9 +321,8 @@ local function ApplyFrozenGunDraw()
 			}
 		end
 	end
-	if vrmod.SetLeftHandPose then
-		vrmod.SetLeftHandPose(state.leftPos, state.leftAng, 0)
-	end
+	-- Same frozen LH both eyes (FBT/avatar read tracking + lerpedFrame)
+	ReassertLeftSnap(sf)
 end
 
 local function TryStartGrip()

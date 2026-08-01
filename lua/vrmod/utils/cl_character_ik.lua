@@ -262,6 +262,13 @@ function C.Update(ent, state, frame, opts)
 	if not IsValid(ent) or not state or not frame then return false end
 	if not frame.lefthandPos and not frame.righthandPos then return false end
 	opts = opts or {}
+	-- Stock foregrip: force left hand target to stereo-frozen attach (FBT/avatar body)
+	local sf = (g_VR and g_VR.stereoFrame) or 0
+	if g_VR and g_VR.foregripActive and g_VR._leftHandSnapFrame == sf
+		and g_VR._leftHandSnapPos and g_VR._leftHandSnapAng then
+		frame.lefthandPos = g_VR._leftHandSnapPos
+		frame.lefthandAng = g_VR._leftHandSnapAng
+	end
 
 	local bones = state.bones
 	local boneinfo = state.boneinfo

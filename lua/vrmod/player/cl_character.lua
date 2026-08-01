@@ -465,8 +465,11 @@ if CLIENT then
 			return -- snap still taken in PostPlayerDraw after FBT bone apply
 		end
 
-		if prevFrameNumber ~= FrameNumber() then
-			prevFrameNumber = FrameNumber()
+		-- Once per stereoFrame (not FrameNumber): left/right eyes share one IK.
+		-- Foregrip updates lefthand after NetUpdate; first eye must use attach pose.
+		local sf = g_VR.stereoFrame or FrameNumber() or 0
+		if prevFrameNumber ~= sf then
+			prevFrameNumber = sf
 			updatedPlayers = {}
 		end
 
