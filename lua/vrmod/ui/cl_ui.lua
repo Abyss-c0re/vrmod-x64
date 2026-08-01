@@ -88,6 +88,69 @@ if CLIENT then
 		local base = (menu and (menu.baseScale or menu.scale)) or 0.03
 		return base * vrmod.GetUIScale()
 	end
+
+	------------------------------------------------------------------------
+	-- VR-resolution panel metrics (Derma shells + native RTs)
+	-- Pixel size tracks headset eye RT × design fraction × vrmod_ui_scale.
+	-- baseScale is derived so world size = designPhys * ui_scale (once).
+	------------------------------------------------------------------------
+	local UI_KIND = {
+		-- fracW/H of one eye; designPhys = full panel width in Source units @ ui_scale=1
+		spawnmenu = { fracW = 0.58, fracH = 0.72, designPhys = 16, minW = 640, minH = 480 },
+		contextmenu = { fracW = 0.36, fracH = 0.62, designPhys = 11, minW = 320, minH = 400 },
+		settings = { fracW = 0.38, fracH = 0.58, designPhys = 12, minW = 380, minH = 460 },
+		popup = { fracW = 0.40, fracH = 0.50, designPhys = 12, minW = 280, minH = 280 },
+		panel = { fracW = 0.40, fracH = 0.50, designPhys = 12, minW = 256, minH = 256 },
+	}
+
+	--- One-eye pixel size from the active VR stereo RT (SBS → half width).
+	function vrmod.GetVREyeSize()
+		local rtW = g_VR and tonumber(g_VR.rtWidth) or 0
+		local rtH = g_VR and tonumber(g_VR.rtHeight) or 0
+		local eyeW = g_VR and g_VR.view and tonumber(g_VR.view.w) or 0
+		local eyeH = g_VR and g_VR.view and tonumber(g_VR.view.h) or 0
+		if eyeW < 64 and rtW >= 64 then eyeW = math.floor(rtW * 0.5) end
+		if eyeH < 64 and rtH >= 64 then eyeH = rtH end
+		if eyeW < 64 then eyeW = math.max(ScrW() or 1280, 1024) end
+		if eyeH < 64 then eyeH = math.max(ScrH() or 720, 720) end
+		return eyeW, eyeH
+	end
+
+	--- Max UI RT edge (GPU-safe). Prefer eye dim; hard cap 2048.
+	function vrmod.GetVRUIMaxRT()
+		local eyeW, eyeH = vrmod.GetVREyeSize()
+		return math.Clamp(math.max(eyeW, eyeH), 512, 2048)
+	end
+
+	--- Pixel W/H + recommended base 3D2D scale for a UI kind (spawn/context/popup/…).
+	-- @param kind string
+	-- @param opts optional { fracW, fracH, designPhys, minW, minH, width, height }
+	-- @return w, h, baseScale
+	function vrmod.GetVRUIPanelMetrics(kind, opts)
+		opts = opts or {}
+		local spec = UI_KIND[kind] or UI_KIND.panel
+		local eyeW, eyeH = vrmod.GetVREyeSize()
+		local uiS = vrmod.GetUIScale()
+		local fracW = opts.fracW or spec.fracW or 0.4
+		local fracH = opts.fracH or spec.fracH or 0.5
+		local designPhys = opts.designPhys or spec.designPhys or 12
+		local minW = opts.minW or spec.minW or 256
+		local minH = opts.minH or spec.minH or 256
+		local maxRT = vrmod.GetVRUIMaxRT()
+
+		local w = opts.width or math.floor(eyeW * fracW * uiS + 0.5)
+		local h = opts.height or math.floor(eyeH * fracH * uiS + 0.5)
+		w = math.Clamp(w, minW, maxRT)
+		h = math.Clamp(h, minH, maxRT)
+		-- Even dims for RT
+		w = math.floor(w / 2) * 2
+		h = math.floor(h / 2) * 2
+
+		-- World width ≈ designPhys * ui_scale (draw multiplies baseScale × ui_scale)
+		local baseScale = designPhys / math.max(w, 1)
+		baseScale = math.Clamp(baseScale, 0.008, 0.08)
+		return w, h, baseScale
+	end
 	local rt_beam = GetRenderTarget("vrmod_rt_beam", 64, 64, false)
 	local mat_beam = CreateMaterial("vrmod_mat_beam", "UnlitGeneric", {
 		["$basetexture"] = rt_beam:GetName(),
@@ -917,7 +980,9 @@ if CLIENT then
 
 			if not v.baseScale then
 				local uid = v.uid or ""
-				local keepScale = v.cubeMenu or v.cubeui
+				local isShell = uid == "p2v_spawnmenu" or uid == "p2v_contextmenu"
+					or string.StartWith(uid, "p2v_")
+				local keepScale = v.cubeMenu or v.cubeui or isShell
 					or uid == "heightmenu"
 					or uid == "avatar_menu"
 					or uid == "cube_settings"
@@ -925,13 +990,14 @@ if CLIENT then
 					or string.StartWith(uid, "cubeui_")
 				local base = v.scale
 				if not base or base <= 0 then
-					base = keepScale and 0.04 or (v.attachment and 0.04 or 0.02)
+					base = keepScale and (isShell and 0.018 or 0.04) or (v.attachment and 0.04 or 0.02)
 				elseif not keepScale and v.attachment and base < 0.03 then
+					-- Never inflate intentional shell scales (0.016) to 0.04 — breaks UV hit
 					base = 0.04
 				elseif not keepScale and not v.attachment then
 					base = 0.02
-				elseif keepScale and base < 0.02 then
-					base = 0.04
+				elseif keepScale and base < 0.01 then
+					base = isShell and 0.016 or 0.04
 				end
 				v.baseScale = base
 			end
@@ -1037,8 +1103,10 @@ if CLIENT then
 
 			if solveFocus and wantCursor and hitCursorX and hitCursorY and hitDist then
 				local cz = CornerZoneSize(v)
-				local inside = hitCursorX > -cz * 0.2 and hitCursorY > -cz * 0.2
-					and hitCursorX < v.width + cz * 0.2 and hitCursorY < v.height + cz * 0.2
+				-- Generous pad so large shells stay focusable at arm's length
+				local pad = math.max(cz * 0.35, 24)
+				local inside = hitCursorX > -pad and hitCursorY > -pad
+					and hitCursorX < v.width + pad and hitCursorY < v.height + pad
 				local keepResize = resizingThis and hitDist < menuFocusDist + 50
 				if (inside or keepResize) and hitDist < menuFocusDist then
 					g_VR.menuFocus = k
@@ -1186,18 +1254,32 @@ if CLIENT then
 		if not g_VR.menuFocus then return end
 		local menu = menus[g_VR.menuFocus]
 		if not menu or not menu.lastCursorX or not menu.lastCursorY then return end
-		-- Panel-local laser → screen space (spawn/content icons need absolute pos)
+		-- Panel-local laser UV (RT space). Shells are forced to SetPos(0,0) — LocalToScreen
+		-- is only safe when the panel actually sits at origin; otherwise clicks miss.
 		local x, y = menu.lastCursorX, menu.lastCursorY
+		x = math.Clamp(x, 0, (menu.width or 1024) - 1)
+		y = math.Clamp(y, 0, (menu.height or 768) - 1)
 		g_VR.menuCursorX = x
 		g_VR.menuCursorY = y
-		if IsValid(menu.panel) and menu.panel.LocalToScreen then
-			local sx, sy = menu.panel:LocalToScreen(x, y)
-			if sx and sy then
-				input.SetCursorPos(sx, sy)
+		local panel = menu.panel
+		if IsValid(panel) then
+			if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
+			local px, py = 0, 0
+			if panel.GetPos then px, py = panel:GetPos() end
+			-- Painted-manual shells at 0,0: UV is already "screen" for InternalMouse*
+			if (px == 0 and py == 0) or menu.uid and string.StartWith(tostring(menu.uid), "p2v_") then
+				input.SetCursorPos(math.floor(x + 0.5), math.floor(y + 0.5))
 				return
 			end
+			if panel.LocalToScreen then
+				local sx, sy = panel:LocalToScreen(x, y)
+				if sx and sy then
+					input.SetCursorPos(math.floor(sx + 0.5), math.floor(sy + 0.5))
+					return
+				end
+			end
 		end
-		input.SetCursorPos(x, y)
+		input.SetCursorPos(math.floor(x + 0.5), math.floor(y + 0.5))
 	end
 
 	function VRUtilMenuClose(uid)
@@ -1259,6 +1341,31 @@ if CLIENT then
 		if not g_VR.menuFocus then return end
 		-- Don't inject clicks while resizing (corner drag is not a button press)
 		if g_VR.menuResizeActive then return end
+
+		-- Close shells: chat/B always; secondary only on title strip (keep RMB for spawn icons)
+		if pressed then
+			local uid = g_VR.menuFocus
+			local isShell = uid == "p2v_spawnmenu" or uid == "p2v_contextmenu"
+			if isShell and vrmod.panel2vr and vrmod.panel2vr.CloseSandboxShell then
+				local closeShell = false
+				if action == "boolean_chat" then
+					closeShell = true
+				elseif vrmod.IsMenuSecondaryClick and vrmod.IsMenuSecondaryClick(action) then
+					local menu = menus[uid]
+					local cy = menu and (menu.lastCursorY or g_VR.menuCursorY) or 999
+					-- Title bar (~32px) or context shell: secondary = close
+					if uid == "p2v_contextmenu" or cy < 40 then
+						closeShell = true
+					end
+				end
+				if closeShell then
+					local which = (uid == "p2v_contextmenu") and "context" or "spawn"
+					vrmod.panel2vr.CloseSandboxShell(which)
+					return
+				end
+			end
+		end
+
 		local mouseButton = nil
 		if vrmod.IsMenuPrimaryClick(action) then
 			mouseButton = MOUSE_LEFT
@@ -1273,6 +1380,10 @@ if CLIENT then
 		if mouseButton then
 			heldButtons[mouseButton] = pressed
 			SyncCursorToVR()
+			-- Nudge hover state for Derma under PaintManual
+			if gui.InternalCursorMoved then
+				pcall(gui.InternalCursorMoved, g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+			end
 
 			-- RIGHT CLICK (spawn ContentIcon menu):
 			-- Derma only calls DoRightClick on mouse *release* when panel.Hovered.
@@ -1359,9 +1470,26 @@ concommand.Add("vrmod_vgui_reset", function()
 	end
 end)
 
--- Rebuild HUD mesh when UI scale changes
+-- Rebuild HUD mesh when UI scale changes; dirty open menus (world scale is live via GetUIScale)
 cvars.AddChangeCallback("vrmod_ui_scale", function()
 	if vrmod.RefreshHUD then vrmod.RefreshHUD() end
+	if g_VR and g_VR.menus then
+		for uid, m in pairs(g_VR.menus) do
+			if m then
+				m.dirty = true
+				-- Re-pin hand shells so HandMenuPose half-size tracks new draw scale
+				if m.attachment and not m.freeFloat and m.width and m.height then
+					local sc = m.baseScale or m.scale or 0.03
+					if isfunction(VRUtilHandMenuPose) and m._centerLocal then
+						local wrist = vrmod.GetMenuWristHand and vrmod.GetMenuWristHand(m) or "left"
+						local hp, ha = VRUtilHandMenuPose(m.width, m.height, sc, m._centerLocal, m.ang, wrist)
+						if hp then m.pos = hp end
+						if ha then m.ang = ha end
+					end
+				end
+			end
+		end
+	end
 end, "vrmod_ui_scale_hud")
 
 concommand.Add("vrmod_menu_reattach", function()

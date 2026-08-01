@@ -60,7 +60,7 @@ W.Place = {
 		scale = 0.022,
 	},
 	-- Spawn / context: wrist shell (center is palm-forward, NOT top-left).
-	-- Larger RT (1024×768) needs smaller base scale so physical size matches QM.
+	-- scale here is fallback only — ManifestPanel overwrites from GetVRUIPanelMetrics.
 	workbench = {
 		attachment = true,
 		pos = Vector(4, 5, 6), -- center local (HandMenuPose converts → top-left)
@@ -88,8 +88,12 @@ local origMakePopup = nil
 -- Last free-float pose per shell kind (origin-relative) so reopen keeps placement
 local shellFloatPose = {} -- kind → { pos, ang, scale }
 
-local MAX_RT = 1024 -- Linux/ToGL-friendly RT dim for UI surfaces
 local MIN_RT = 128
+
+local function maxRT()
+	if vrmod.GetVRUIMaxRT then return vrmod.GetVRUIMaxRT() end
+	return 1024
+end
 
 local function log(fmt, ...)
 	if vrmod.logger then
@@ -97,6 +101,16 @@ local function log(fmt, ...)
 	else
 		print("[panel2vr] " .. string.format(fmt, ...))
 	end
+end
+
+--- Pixel size + base 3D2D scale from VR eye res × vrmod_ui_scale (Derma shells).
+local function shellMetrics(kind)
+	if vrmod.GetVRUIPanelMetrics then
+		return vrmod.GetVRUIPanelMetrics(kind)
+	end
+	if kind == "contextmenu" then return 420, 640, 0.018 end
+	if kind == "spawnmenu" then return 1024, 768, 0.016 end
+	return 512, 512, 0.022
 end
 
 function W.IsVR()
@@ -195,8 +209,9 @@ function W.ResolvePlace(placeName, override, pixelW, pixelH)
 end
 
 local function clampSize(w, h)
-	w = math.Clamp(math.floor(tonumber(w) or 512), MIN_RT, MAX_RT)
-	h = math.Clamp(math.floor(tonumber(h) or 512), MIN_RT, MAX_RT)
+	local mx = maxRT()
+	w = math.Clamp(math.floor(tonumber(w) or 512), MIN_RT, mx)
+	h = math.Clamp(math.floor(tonumber(h) or 512), MIN_RT, mx)
 	-- Even dims
 	w = math.floor(w / 2) * 2
 	h = math.floor(h / 2) * 2
@@ -373,16 +388,22 @@ local function fitSandboxLayout(panel, tw, th)
 	walk(panel, 0)
 end
 
---- Prepare oversized sandbox shells for VR (readable RT, not ScrW×ScrH)
+--- Prepare oversized sandbox shells for VR (RT from eye res × ui_scale, not ScrW×ScrH)
 local function preparePanelForVR(panel, kind)
 	if not IsValid(panel) then return end
 	if kind == "spawnmenu" or kind == "contextmenu" then
-		local tw, th = 1024, 768
+		local tw, th = shellMetrics(kind)
+		-- Stock ContextMenu docks FILL + DesktopWidgets Dock LEFT — undock for VR RT
+		if panel.Dock then panel:Dock(NODOCK) end
 		if panel.SetSize then panel:SetSize(tw, th) end
 		if panel.SetPos then panel:SetPos(0, 0) end
-		-- Leave room for Cube title bar + X (was 0,0,0,0 → content ate the close button)
-		if panel.DockPadding then panel:DockPadding(0, 34, 0, 0) end
-		fitSandboxLayout(panel, tw, th)
+		if panel.SetWorldClicker then panel:SetWorldClicker(false) end
+		if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
+		-- Leave room for Cube title bar + X
+		if panel.DockPadding then panel:DockPadding(4, 34, 4, 4) end
+		if kind == "spawnmenu" then
+			fitSandboxLayout(panel, tw, th)
+		end
 		if panel.InvalidateLayout then panel:InvalidateLayout(true) end
 		if vrmod.cube and W.IsVR() then
 			if kind == "spawnmenu" and vrmod.cube.ThemeSpawnMenu then
@@ -393,10 +414,17 @@ local function preparePanelForVR(panel, kind)
 				vrmod.cube.ApplyDermaSkin(panel)
 			end
 		end
-		-- Re-fit then re-assert chrome so layout timers never bury the X
 		local function restyle()
 			if not IsValid(panel) then return end
-			fitSandboxLayout(panel, tw, th)
+			-- Re-query metrics (ui_scale may have changed while open timers fire)
+			local rw, rh = shellMetrics(kind)
+			if panel.Dock then panel:Dock(NODOCK) end
+			panel:SetSize(rw, rh)
+			panel:SetPos(0, 0)
+			if panel.SetWorldClicker then panel:SetWorldClicker(false) end
+			if kind == "spawnmenu" then
+				fitSandboxLayout(panel, rw, rh)
+			end
 			if vrmod.cube and W.IsVR() then
 				if kind == "spawnmenu" and vrmod.cube.ThemeSpawnMenu then
 					vrmod.cube.ThemeSpawnMenu(panel)
@@ -412,6 +440,15 @@ local function preparePanelForVR(panel, kind)
 		timer.Simple(0, restyle)
 		timer.Simple(0.05, restyle)
 		timer.Simple(0.15, restyle)
+		timer.Simple(0.35, restyle)
+	elseif kind == "settings" or kind == "popup" or kind == "panel" then
+		-- Generic Derma: size from VR eye × ui_scale when still desktop-sized
+		local mw, mh = shellMetrics(kind == "settings" and "settings" or "popup")
+		local pw, ph = panel:GetSize()
+		if not pw or pw < 64 or pw > mw * 1.5 or not ph or ph < 64 or ph > mh * 1.5 then
+			if panel.SetSize then panel:SetSize(mw, mh) end
+		end
+		if panel.SetPos then panel:SetPos(0, 0) end
 	end
 end
 
@@ -457,15 +494,32 @@ function W.ManifestPanel(panel, opts)
 	local pw, ph = panel:GetSize()
 	if not pw or pw < 32 then pw = 512 end
 	if not ph or ph < 32 then ph = 512 end
-	if kind == "settings" then
-		pw, ph = math.max(pw, 420), math.max(ph, 505)
-	end
-	if kind == "spawnmenu" or kind == "contextmenu" then
-		pw, ph = 1024, 768
+	local shellBaseScale = nil
+	if kind == "spawnmenu" or kind == "contextmenu" or kind == "settings" then
+		local mw, mh, msc = shellMetrics(kind)
+		pw, ph = mw, mh
+		shellBaseScale = msc
+		if panel.SetSize then panel:SetSize(pw, ph) end
+		if panel.SetPos then panel:SetPos(0, 0) end
+	elseif kind == "popup" or kind == "panel" then
+		local mw, mh, msc = shellMetrics(kind == "popup" and "popup" or "panel")
+		-- Prefer metrics when panel is still desktop ScrW-ish or tiny
+		if pw > mw * 1.25 or ph > mh * 1.25 or pw < 128 or ph < 128 then
+			pw, ph = mw, mh
+			shellBaseScale = msc
+			if panel.SetSize then panel:SetSize(pw, ph) end
+		else
+			shellBaseScale = msc
+		end
 	end
 	local w, h = clampSize(opts.width or pw, opts.height or ph)
-	-- Resolve AFTER pixel size is known so wrist top-left matches RT extents
-	local place = W.ResolvePlace(placeName, opts.placeOverride, w, h)
+	-- Resolve AFTER pixel size + metrics scale so wrist center matches RT × baseScale
+	local placeOverride = opts.placeOverride
+	if shellBaseScale then
+		placeOverride = placeOverride and table.Copy(placeOverride) or {}
+		placeOverride.scale = shellBaseScale
+	end
+	local place = W.ResolvePlace(placeName, placeOverride, w, h)
 
 	if panel.SetVisible then panel:SetVisible(true) end
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
@@ -550,8 +604,8 @@ function W.ManifestPanel(panel, opts)
 		local disk = isfunction(vrmod.GetMenuLayout) and vrmod.GetMenuLayout(uid) or nil
 		-- Prefer layout already applied by VRUtilMenuOpen; only fill defaults if missing
 		if not (disk and disk.scale) then
+			-- place.scale already from GetVRUIPanelMetrics (VR res × ui_scale)
 			local sc = place.scale or m.scale or 0.022
-			if isShell then sc = math.max(sc, 0.02) end
 			m.scale = sc
 			m.baseScale = sc
 			m._lastAssignedScale = sc
@@ -563,6 +617,8 @@ function W.ManifestPanel(panel, opts)
 		m.persistOpen = isShell
 		m.keepAlive = isShell
 		m.allowHiddenPanel = isShell
+		if place._centerLocal then m._centerLocal = place._centerLocal end
+		if place.attachHand then m.attachHand = place.attachHand end
 		if useFloat or m.freeFloat then
 			m.attachment = false
 			m.freeFloat = true

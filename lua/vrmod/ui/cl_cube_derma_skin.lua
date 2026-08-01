@@ -714,58 +714,135 @@ local function polishSpawnTreePanels(root)
 	walk(root, 0)
 end
 
+--- Context menu stock layout uses ScrW/ScrH — content sits OFF the VR RT.
+local function layoutContextForVR(panel)
+	if not IsValid(panel) then return end
+	-- World clicker steals focus for "shoot world through UI" — kills VR laser clicks
+	if panel.SetWorldClicker then panel:SetWorldClicker(false) end
+	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
+	-- Stock ContextMenu: Dock FILL + DesktopWidgets Dock LEFT — undock into RT box
+	if panel.Dock then panel:Dock(NODOCK) end
+	-- Prefer VR eye metrics when available (keeps layout in sync with RT)
+	local mw, mh
+	if vrmod.GetVRUIPanelMetrics then
+		mw, mh = vrmod.GetVRUIPanelMetrics("contextmenu")
+	end
+	local pw = math.max(panel:GetWide(), mw or 320, 320)
+	local ph = math.max(panel:GetTall(), mh or 240, 240)
+	if mw and mh and (panel:GetWide() ~= mw or panel:GetTall() ~= mh) then
+		panel:SetSize(mw, mh)
+		pw, ph = mw, mh
+	end
+	panel:SetPos(0, 0)
+	if panel.DockPadding then
+		panel:DockPadding(4, TITLE_H + 2, 4, 4)
+	end
+	-- Tool control panel lives on Canvas (DCategoryList)
+	if IsValid(panel.Canvas) then
+		if panel.Canvas.Dock then panel.Canvas:Dock(NODOCK) end
+		if panel.Canvas.SetWorldClicker then panel.Canvas:SetWorldClicker(false) end
+		local acp = spawnmenu and spawnmenu.ActiveControlPanel and spawnmenu.ActiveControlPanel()
+		if IsValid(acp) then
+			pcall(function() acp:InvalidateLayout(true) end)
+			local tall = math.min((acp.GetTall and acp:GetTall() or 400) + 10, ph - TITLE_H - 24)
+			local wide = math.min(math.floor(pw * 0.88), math.max(220, pw - 24))
+			panel.Canvas:SetVisible(true)
+			panel.Canvas:SetSize(wide, math.max(120, tall))
+			panel.Canvas:SetPos(12, TITLE_H + 8)
+			if panel.Canvas.InvalidateLayout then panel.Canvas:InvalidateLayout(true) end
+		else
+			panel.Canvas:SetVisible(panel.Canvas:IsVisible())
+			if panel.Canvas:IsVisible() then
+				panel.Canvas:SetSize(math.max(200, pw - 24), math.max(120, ph - TITLE_H - 24))
+				panel.Canvas:SetPos(12, TITLE_H + 8)
+			end
+		end
+	end
+	-- DesktopWidgets (DIconLayout) — undock and keep inside frame
+	if IsValid(panel.DesktopWidgets) then
+		if panel.DesktopWidgets.Dock then panel.DesktopWidgets:Dock(NODOCK) end
+		if panel.DesktopWidgets.SetWorldClicker then panel.DesktopWidgets:SetWorldClicker(false) end
+		local y0 = TITLE_H + 8
+		if IsValid(panel.Canvas) and panel.Canvas:IsVisible() then
+			y0 = panel.Canvas:GetY() + panel.Canvas:GetTall() + 8
+		end
+		-- Icons row under tool panel (or fill if no tool)
+		local ih = math.max(40, math.min(100, ph - y0 - 12))
+		if not (IsValid(panel.Canvas) and panel.Canvas:IsVisible()) then
+			ih = math.max(80, ph - y0 - 12)
+		end
+		panel.DesktopWidgets:SetPos(12, y0)
+		panel.DesktopWidgets:SetSize(math.max(100, pw - 24), ih)
+		if panel.DesktopWidgets.InvalidateLayout then panel.DesktopWidgets:InvalidateLayout(true) end
+	end
+end
+
 local function themeWorkbench(panel, title, which)
 	if not IsValid(panel) or not shouldTheme() then return end
 	if not cubeSkin then vrmod.cube.RefreshDermaSkin() end
 	vrmod.cube.ApplyDermaSkin(panel)
 	installRootChrome(panel, title, which or "spawn")
-	-- Compact margins + nested dividers so content sits under title bar + X
+	local isContext = (which == "context" or which == "contextmenu")
+
 	local function applyMargins()
-		if not IsValid(panel) or not shouldTheme() or not panel._cubeThemed then return end
+		if not IsValid(panel) or not shouldTheme() then return end
+		if panel.DockPadding then
+			panel:DockPadding(4, TITLE_H + 2, 4, 4)
+		end
 		if IsValid(panel._cubeCloseBtn) then
-			panel._cubeCloseBtn:SetVisible(true)
-			panel._cubeCloseBtn:MoveToFront()
-		end
-		local div = panel.HorizontalDivider
-		if IsValid(div) then
-			if div.DockMargin then
-				div:DockMargin(8, TITLE_H + 4, 8, 8)
-			end
-			local tw = panel:GetWide()
-			if tw < 100 then tw = 1024 end
-			if div.SetRightMin then div:SetRightMin(math.floor(tw * 0.28)) end
-			if div.SetLeftMin then div:SetLeftMin(math.floor(tw * 0.42)) end
-			if div.SetLeftWidth then div:SetLeftWidth(math.floor(tw * 0.62)) end
-			if div.SetDividerWidth then div:SetDividerWidth(4) end
+			placeCloseButton(panel._cubeCloseBtn, panel)
 		else
-			-- Context menu: sandbox positions Canvas with ScrW/ScrH — fix into VR RT frame
-			if panel.Canvas and IsValid(panel.Canvas) then
-				local cw = math.min(340, math.max(200, panel:GetWide() - 24))
-				local ch = math.max(120, panel:GetTall() - TITLE_H - 20)
-				panel.Canvas:SetPos(12, TITLE_H + 8)
-				panel.Canvas:SetSize(cw, ch)
-				panel.Canvas:SetVisible(true)
-				if panel.Canvas.InvalidateLayout then panel.Canvas:InvalidateLayout(true) end
-			end
-			if panel.DockPadding then
-				panel:DockPadding(4, TITLE_H + 2, 4, 4)
-			end
+			installCloseButton(panel, which or panel._cubeShellWhich or "spawn")
 		end
-		polishSpawnTreePanels(panel)
+
+		if isContext then
+			layoutContextForVR(panel)
+		else
+			local div = panel.HorizontalDivider
+			if IsValid(div) then
+				if div.DockMargin then
+					div:DockMargin(8, TITLE_H + 4, 8, 8)
+				end
+				local tw = panel:GetWide()
+				if tw < 100 then tw = 1024 end
+				if div.SetRightMin then div:SetRightMin(math.floor(tw * 0.28)) end
+				if div.SetLeftMin then div:SetLeftMin(math.floor(tw * 0.42)) end
+				if div.SetLeftWidth then div:SetLeftWidth(math.floor(tw * 0.62)) end
+				if div.SetDividerWidth then div:SetDividerWidth(4) end
+			end
+			polishSpawnTreePanels(panel)
+		end
+		if IsValid(panel._cubeCloseBtn) then
+			placeCloseButton(panel._cubeCloseBtn, panel)
+		end
 	end
 	applyMargins()
 	if not panel._cubeLayoutHooked then
 		panel._cubeLayoutHooked = true
 		panel._cubeLayoutOrig = panel.PerformLayout
 		panel.PerformLayout = function(self, ...)
+			if isContext and shouldTheme() and self._cubeThemed then
+				-- NEVER run stock ScrW/ScrH layout — it parks Canvas off the VR RT
+				applyMargins()
+				return
+			end
 			if self._cubeLayoutOrig then self._cubeLayoutOrig(self, ...) end
-			if shouldTheme() and self._cubeThemed then
+			if shouldTheme() then
 				applyMargins()
 			end
 		end
 	end
 	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
 	timer.Simple(0, function()
+		if IsValid(panel) and shouldTheme() then applyMargins() end
+	end)
+	timer.Simple(0.08, function()
+		if IsValid(panel) and shouldTheme() then
+			installCloseButton(panel, which or "spawn")
+			applyMargins()
+		end
+	end)
+	timer.Simple(0.2, function()
 		if IsValid(panel) and shouldTheme() then applyMargins() end
 	end)
 end

@@ -198,11 +198,16 @@ function VRUtilOpenMenu()
 	end
 
 	frame = vgui.Create("DFrame")
-	-- Global UI scale (same convar as VR menus)
+	-- Global UI scale (same convar as VR menus / Derma shells)
 	local uiS = (vrmod.GetUIScale and vrmod.GetUIScale()) or 1
-	local fw, fh = math.floor(440 * uiS + 0.5), math.floor(560 * uiS + 0.5)
-	fw = math.Clamp(fw, 360, math.min(ScrW() - 20, 900))
-	fh = math.Clamp(fh, 420, math.min(ScrH() - 20, 1000))
+	local fw, fh
+	if vrmod.GetVRUIPanelMetrics and g_VR and g_VR.active then
+		fw, fh = vrmod.GetVRUIPanelMetrics("settings")
+	else
+		fw, fh = math.floor(440 * uiS + 0.5), math.floor(560 * uiS + 0.5)
+		fw = math.Clamp(fw, 360, math.min(ScrW() - 20, 900))
+		fh = math.Clamp(fh, 420, math.min(ScrH() - 20, 1000))
+	end
 	frame:SetSize(fw, fh)
 	frame:SetTitle("VRMod Menu")
 	frame:MakePopup()

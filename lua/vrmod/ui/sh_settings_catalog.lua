@@ -155,7 +155,7 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Radar build min elev", cvar = "vrmod_hud_radar_build_min", min = 8, max = 128, decimals = 0 },
 			{ kind = "slider", label = "Radar build max elev", cvar = "vrmod_hud_radar_build_max", min = 64, max = 512, decimals = 0 },
 			{ kind = "slider", label = "Radar player depth band", cvar = "vrmod_hud_radar_player_depth", min = 64, max = 1024, decimals = 0 },
-			{ kind = "slider", label = "UI scale (menus + Derma)", cvar = "vrmod_ui_scale", min = 0.75, max = 2.0, decimals = 2 },
+			{ kind = "slider", label = "UI scale (VR res × menus + Derma)", cvar = "vrmod_ui_scale", min = 0.75, max = 2.0, decimals = 2 },
 			{ kind = "combo", label = "Primary hand (laser + click)", cvar = "vrmod_primary_hand", choices = {
 				{ text = "Right", value = 0 },
 				{ text = "Left", value = 1 },
