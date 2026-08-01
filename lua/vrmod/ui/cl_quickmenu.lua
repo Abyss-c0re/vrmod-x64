@@ -75,6 +75,7 @@ function g_VR.MenuOpen()
 		end
 		mm.cubeMenu = true
 		mm.grabbable = true
+		mm.attachHand = "left"
 		if not mm.freeFloat and not mm.grabHand then
 			mm.attachment = true
 		end
@@ -94,6 +95,7 @@ function g_VR.MenuOpen()
 		end
 		mm.cubeMenu = true
 		mm.grabbable = true
+		mm.attachHand = "left"
 		if not mm.freeFloat then
 			mm.attachment = true
 		end

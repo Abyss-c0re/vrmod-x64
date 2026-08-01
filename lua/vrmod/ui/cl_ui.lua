@@ -359,6 +359,15 @@ if CLIENT then
 		return HandPoseLive(handName)
 	end
 
+	--- Which hand a wrist-attached menu is parented to (default left).
+	local function MenuAttachHandName(menu)
+		if not menu then return "left" end
+		if menu.attachHand == "right" or menu.attachHand == "left" then
+			return menu.attachHand
+		end
+		return "left"
+	end
+
 	local function MarkConsumed(handName, pressed)
 		consumeStamp.frame = FrameNumber and FrameNumber() or 0
 		consumeStamp.hand = handName
@@ -386,7 +395,7 @@ if CLIENT then
 			local originAng = g_VR.originAngle or Angle()
 			return LocalToWorld(pos, ang, origin, originAng)
 		end
-		local hand = HandPose("left")
+		local hand = HandPose(MenuAttachHandName(menu))
 		if hand and hand.pos and hand.ang then
 			return LocalToWorld(pos, ang, hand.pos, hand.ang)
 		end
@@ -489,7 +498,7 @@ if CLIENT then
 		elseif v.freeFloat or not v.attachment then
 			pos, ang = LocalToWorld(v.pos, v.ang, g_VR.origin or Vector(), g_VR.originAngle or Angle())
 		else
-			local hand = HandPose("left")
+			local hand = HandPose(MenuAttachHandName(v))
 			if hand and hand.pos and hand.ang then
 				pos, ang = LocalToWorld(v.pos, v.ang, hand.pos, hand.ang)
 			end
@@ -735,7 +744,7 @@ if CLIENT then
 			}
 		end
 
-		--- Ray × menu plane → UV cursor (or nil)
+		--- Ray × menu plane → UV cursor (or nil). Generous range for wrist/HMD menus.
 		local function LaserHitPanel(origin, dir, pos, ang, drawScale)
 			if not origin or not dir or not pos or not ang or not drawScale or drawScale <= 0 then
 				return nil
@@ -746,20 +755,19 @@ if CLIENT then
 			local B = normal:Dot(pos - origin)
 			if B >= 0 then return nil end -- behind ray
 			local hitDist = B / A
-			-- Reject near-zero distance (hand that is *holding* the panel always "hits")
-			if hitDist < 2.5 or hitDist > 400 then return nil end
+			-- Min: skip "hand inside panel" ghosts. Max: full room-scale aim (was 400 → felt "must be close")
+			if hitDist < 1.0 or hitDist > 2500 then return nil end
 			local hitWorld = origin + dir * hitDist
 			local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
 			return tp.x / drawScale, -tp.y / drawScale, hitDist, hitWorld
 		end
 
-		--- Hand currently anchoring a menu (wrist attach or grab) must not be the laser.
+		--- Hand currently anchoring a menu (wrist attach or grab).
 		local function MenuAnchorHand(menu)
 			if not menu then return nil end
 			if menu.grabHand then return menu.grabHand end
 			if menu.freeFloat or menu.attachment == false then return nil end
-			-- Default VR menus attach to left wrist
-			if menu.attachment then return "left" end
+			if menu.attachment then return MenuAttachHandName(menu) end
 			return nil
 		end
 
@@ -847,52 +855,46 @@ if CLIENT then
 				or not v._hitScale
 				or math.abs((v._hitScale or 0) - drawScale) > 1e-7
 			if wantCursor and (solveFocus or hitStale or resizingThis) and #pointers > 0 then
-				-- Dual laser: skip the hand that *owns* the panel (wrist attach / grab).
-				-- That hand always had the shortest hitDist and stole focus from the free hand
-				-- (e.g. right couldn't aim left-wrist Settings).
+				-- Prefer free hand (not the wrist/grab anchor). If free hand misses,
+				-- fall back to any hand so menus stay usable at arm's length.
 				local anchor = MenuAnchorHand(v)
-				local sticky = focusSnap.hand
-				local stickyUid = focusSnap.uid
-				local bestD = 99999
-				local stickyHit = nil
+				local bestFreeD, bestAnyD = 99999, 99999
+				local freeHit, anyHit = nil, nil
 				for pi = 1, #pointers do
 					local p = pointers[pi]
 					if not p.pos or not p.ang then continue end
-					if anchor and p.name == anchor then continue end
 					local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
-					if hx and hy and hd then
-						local cand = { hx = hx, hy = hy, hd = hd, hw = hw, name = p.name, start = p.pos }
-						-- Mild sticky: keep previous free hand if still on this panel and not much worse
-						if sticky and stickyUid == k and p.name == sticky and sticky ~= anchor
-							and hd <= bestD * 1.15 + 4 then
-							stickyHit = cand
-						end
-						if hd < bestD then
-							bestD = hd
-							hitCursorX, hitCursorY, hitDist, hitWorld = hx, hy, hd, hw
-							hitHandName, hitBeamStart = p.name, p.pos
-						end
+					if not (hx and hy and hd) then continue end
+					local cand = { hx = hx, hy = hy, hd = hd, hw = hw, name = p.name, start = p.pos }
+					if hd < bestAnyD then
+						bestAnyD = hd
+						anyHit = cand
+					end
+					-- Free hand: not the anchor, or anchor but far enough to be deliberate aim
+					local isAnchor = anchor and p.name == anchor
+					if (not isAnchor or hd >= 6) and hd < bestFreeD then
+						bestFreeD = hd
+						freeHit = cand
 					end
 				end
-				-- Free-float with no valid free-hand hit: allow any hand (including former anchor)
-				if not hitCursorX and (v.freeFloat or not v.attachment) then
+				local pick = freeHit or anyHit
+				-- Mild sticky only if previous hand still has a free hit
+				if pick and focusSnap.hand and focusSnap.uid == k and freeHit then
 					for pi = 1, #pointers do
 						local p = pointers[pi]
-						if not p.pos or not p.ang then continue end
-						local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
-						if hx and hy and hd and hd < bestD then
-							bestD = hd
-							hitCursorX, hitCursorY, hitDist, hitWorld = hx, hy, hd, hw
-							hitHandName, hitBeamStart = p.name, p.pos
+						if p.name == focusSnap.hand and p.pos and p.ang then
+							local hx, hy, hd, hw = LaserHitPanel(p.pos, p.ang:Forward(), pos, ang, drawScale)
+							if hx and hy and hd and hd <= freeHit.hd * 1.25 + 8 then
+								pick = { hx = hx, hy = hy, hd = hd, hw = hw, name = p.name, start = p.pos }
+							end
+							break
 						end
 					end
 				end
-				if stickyHit and stickyHit.hd <= (hitDist or 99999) * 1.2 + 6 then
-					hitCursorX, hitCursorY = stickyHit.hx, stickyHit.hy
-					hitDist, hitWorld = stickyHit.hd, stickyHit.hw
-					hitHandName, hitBeamStart = stickyHit.name, stickyHit.start
-				end
-				if hitCursorX then
+				if pick then
+					hitCursorX, hitCursorY = pick.hx, pick.hy
+					hitDist, hitWorld = pick.hd, pick.hw
+					hitHandName, hitBeamStart = pick.name, pick.start
 					v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
 					v._hitHand = hitHandName
 					v._hitBeamStart = hitBeamStart
