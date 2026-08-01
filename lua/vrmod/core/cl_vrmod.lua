@@ -32,23 +32,27 @@ if CLIENT then
 	-- Desired values applied while VR is active.
 	-- Do NOT include cvars on GMod's Blocked_ConCommands list (mat_reduceparticles,
 	-- r_shadowrendertotexture, etc.) — Lua cannot change them without console spam.
-	-- mat_queue_mode from vrmod_mat_queue_mode (0/1/2). Mode 2 is first-class:
-	-- set once at VR start, never thrash workers mid-session; submit uses Lua RT size.
+	-- OpenVR (vrmod-x64): mat_queue_mode 2 is NOT supported — dual-eye Submit races
+	-- material workers (flicker #348 / zero-dim / worker abort). Always pin 0 or 1.
+	-- gVRMod OpenXR may use mode 2; do NOT blind-sync that path into this tree.
 	local function WantedMatQueueMode()
 		local cv = convars and convars.vrmod_mat_queue_mode
 		if not cv and GetConVar then cv = GetConVar("vrmod_mat_queue_mode") end
-		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 2
-		n = math.floor(tonumber(n) or 2)
+		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 1
+		n = math.floor(tonumber(n) or 1)
 		if n < 0 then n = 0 end
-		if n > 2 then n = 2 end
+		if n >= 2 then
+			-- Clamp 2+ → 1 (OpenVR)
+			n = 1
+		end
 		return n
 	end
 
 	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
-		-- Filled at VR start from WantedMatQueueMode()
-		mat_queue_mode = "2",
+		-- Always "1" for OpenVR unless user forces 0 via convar (clamped above).
+		mat_queue_mode = "1",
 		mat_disable_bloom = "1",
 		mat_disable_fancy_blending = "1",
 		mat_disable_lightwarp = "1",
@@ -65,12 +69,10 @@ if CLIENT then
 		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
 		snd_mute_losefocus = "0",
 	}
-	-- mat_queue is set ONCE at start (re-SetInt every frame restarts workers → crash).
-	-- Other pins can be re-asserted if needed.
+	-- Re-assert mat_queue every frame while VR active (OpenVR law: stay on 0/1).
 	local SESSION_PIN_CONVARS = {
-		-- mat_queue_mode deliberately NOT here
+		mat_queue_mode = true,
 	}
-	local matQueueAppliedForSession = false
 	-- Stores original convar values so we can restore them on VR exit
 	local convarOverrides = {}
 
@@ -106,7 +108,7 @@ if CLIENT then
 	-- 0) Helper functions
 	-- Only ConVar setters — never RunConsoleCommand (GMod blacklists many engine cvars
 	-- and prints "Command is blocked!" even when pcall'd).
-	-- mat_queue_mode: 0 sync · 1 queued single-thread (safe) · 2 multithreaded (opt-in).
+	-- mat_queue_mode OpenVR: 0 sync · 1 queued (required for stereo). Mode 2 clamped away.
 	local function setConvarValue(name, value)
 		local cv = GetConVar(name)
 		if not cv then return false end
@@ -157,31 +159,17 @@ if CLIENT then
 	end
 
 	local function restoreConvarOverrides()
-		-- Drain Source material workers before restoring mat_queue (avoids
-		-- "Illegal termination of worker thread" on VR exit under mode 2).
-		if convarOverrides["mat_queue_mode"] ~= nil then
-			setConvarValue("mat_queue_mode", "0")
-		end
+		-- Restore pre-VR values (including user's desktop mat_queue_mode).
 		for k, v in pairs(convarOverrides) do
 			setConvarValue(k, v)
 		end
 		convarOverrides = {}
 	end
 
-	-- Push authoritative SBS RT size to the module (mat_queue 2 cannot query GL size).
-	local function PushKnownSubmitSize()
-		if not isfunction(VRMOD_SetKnownSubmitSize) then return end
-		local w = tonumber(g_VR.rtWidth)
-		local h = tonumber(g_VR.rtHeight)
-		if w and h and w >= 32 and h >= 32 then
-			pcall(VRMOD_SetKnownSubmitSize, w, h)
-		end
-	end
-
-	-- While VR is active: do NOT re-set mat_queue_mode every frame (worker thrash).
+	-- While VR is active, force pinned cvars every frame (mat_queue 0/1 only).
 	local function EnsurePinnedConvars()
 		if not g_VR.active then return end
-		PushKnownSubmitSize()
+		RefreshMatQueuePin()
 		for name, _ in pairs(SESSION_PIN_CONVARS) do
 			local want = PERFORMANCE_CONVARS[name]
 			if want ~= nil then
@@ -824,17 +812,6 @@ if CLIENT then
 		end)
 	end
 
-	--- Mode 2: light GPU-state barrier between eyes (NO glFinish — that races mat workers
-	--- and caused "Illegal termination of worker thread" + zero-dimension submit spam).
-	local function SyncMatQueueBetweenEyes()
-		if WantedMatQueueMode() < 2 then return end
-		ResetStereoEyeState()
-		pcall(function()
-			if render.SetColorMaterial then render.SetColorMaterial() end
-			render.SetBlend(1)
-		end)
-	end
-
 	local function EnsureDecalsEnabled()
 		local d = GetConVar("r_drawdecals")
 		local m = GetConVar("r_drawmodeldecals")
@@ -1013,8 +990,6 @@ if CLIENT then
 			-- Reset stencil/depth-range so right eye does not inherit halo/HUD state.
 			ResetStereoEyeState()
 			render.ClearDepth(true)
-			-- mat_queue_mode 2: serialize material workers before second eye
-			SyncMatQueueBetweenEyes()
 
 			-- RIGHT eye — draw only (same world pose as left)
 			view.origin = g_VR.eyePosRight
@@ -1102,19 +1077,16 @@ if CLIENT then
 		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
 		RefreshMatQueuePin()
 		for cvar, val in pairs(PERFORMANCE_CONVARS) do
-			-- mat_queue only once per session
-			if cvar == "mat_queue_mode" then
-				if not matQueueAppliedForSession then
-					overrideConvar(cvar, val)
-					matQueueAppliedForSession = true
-				end
-			else
-				overrideConvar(cvar, val)
-			end
+			overrideConvar(cvar, val)
 		end
 		local mq = WantedMatQueueMode()
 		if vrmod.logger then
-			vrmod.logger.Info("mat_queue_mode=%s (vrmod_mat_queue_mode; 2=multithreaded, set once)", tostring(mq))
+			vrmod.logger.Info("mat_queue_mode=%s (OpenVR pin 0/1 only; mode 2 unsupported)", tostring(mq))
+		end
+		local req = convars.vrmod_mat_queue_mode
+		local raw = req and (req.GetInt and req:GetInt() or tonumber(req:GetString())) or 1
+		if raw and tonumber(raw) and tonumber(raw) >= 2 and vrmod.Toast then
+			vrmod.Toast("mat_queue 2 not supported on OpenVR (vrmod-x64) — using 1", 5, "warn")
 		end
 	end
 
@@ -1252,8 +1224,6 @@ if CLIENT then
 			end
 		end
 		g_VR._shareTextureOk = okBegin and okFin and true or false
-		-- Authoritative SBS size for OpenXR submit (mat_queue 2 cannot glGetTexLevel)
-		PushKnownSubmitSize()
 		ApplySubmitBounds()
 		BindBorderConvarCallbacks()
 		BindRenderProfileCallbacks()
@@ -1432,7 +1402,7 @@ if CLIENT then
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			if DrawErrorOverlay() then return true end
 
-			-- Keep session mat_queue_mode (0/1/2) if another addon fights it
+			-- Keep mat_queue_mode 0/1 for OpenVR if another addon fights it
 			EnsurePinnedConvars()
 
 			-- Keep World Portals suppressed for the entire VR frame (do not restore mid-frame)
@@ -1536,7 +1506,6 @@ if CLIENT then
 			if not g_VR.active then return end
 			timer.Remove("vrmod_stereo_selftest")
 			g_VR._stereoSelfTestDone = true
-			matQueueAppliedForSession = false
 			restoreConvarOverrides()
 			VRUtilMenuClose()
 			VRUtilNetworkCleanup()
