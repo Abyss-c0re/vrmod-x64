@@ -122,8 +122,9 @@ function vrmod.utils.UpdateViewModel()
         if istable(atts) then
             for _, a in ipairs(atts) do
                 local n = string.lower(tostring(a.name or ""))
-                if n:find("muzzle", 1, true) or n:find("laser", 1, true) then
-                    muz = vm:GetAttachment(a.id or a.id)
+                local id = a.id or a.ID
+                if id and (n:find("muzzle", 1, true) or n:find("laser", 1, true)) then
+                    muz = vm:GetAttachment(id)
                     if muz and muz.Pos then break end
                 end
             end
