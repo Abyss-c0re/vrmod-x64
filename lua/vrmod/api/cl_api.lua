@@ -71,7 +71,7 @@ if CLIENT then
         if vrmod.DetectBackend then pcall(vrmod.DetectBackend) end
         local pol = vrmod.GetBackendPolicy and vrmod.GetBackendPolicy() or {}
         local requiredVersion = pol.requiredModule or 20
-        local latestVersion = pol.latestModule or 27
+        local latestVersion = pol.latestModule or 28
         local moduleDownload = pol.moduleDownload
             or "https://github.com/Abyss-c0re/gVRMod/releases"
 
