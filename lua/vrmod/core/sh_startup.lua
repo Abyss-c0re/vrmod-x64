@@ -72,9 +72,20 @@ if CLIENT then
     -- auto = prefer OpenXR if installed, else OpenVR. Force with openxr|openvr.
     vrmod.AddCallbackedConvar("vrmod_prefer_backend", nil, "auto", FCVAR_ARCHIVE,
         "Native module prefer: auto | openxr | openvr (both DLLs may coexist)", nil, nil, tostring)
-    -- mat_queue while VR is active (clamped by active backend: OpenVR max 1, OpenXR max 2).
-    vrmod.AddCallbackedConvar("vrmod_mat_queue_mode", nil, "2", FCVAR_ARCHIVE,
-        "mat_queue: 0 sync, 1 queued, 2 MT (OpenXR only when that module is loaded)", 0, 2, tonumber)
+    -- mat_queue_mode: engine cvar only (no vrmod_mat_*). VR never SetInt's it —
+    -- changing workers mid-session = Illegal termination of CThread.
+    -- Desktop window focus: default OFF so HMD play works alt-tabbed / Wayland compositor focus loss.
+    vrmod.AddCallbackedConvar("vrmod_require_window_focus", nil, "0", FCVAR_ARCHIVE,
+        "1 = pause VR when GMod window unfocused; 0 = keep playing in headset without desktop focus", nil, nil, tobool)
+    -- Prefer engine mat_queue_mode (0/1/2). Never SetInt from VR settings mid-map (CThread crash).
+    -- User must apply engine mat_queue_mode themselves at a safe time (console before map / after changelevel).
+    vrmod.AddCallbackedConvar("vrmod_prefer_mat_queue", nil, "1", FCVAR_ARCHIVE,
+        "Preferred mat_queue_mode (display only; apply engine mat_queue_mode at safe idle)", 0, 2, tonumber)
+    vrmod.AddCallbackedConvar("vrmod_prefer_mcore", nil, "0", FCVAR_ARCHIVE,
+        "Preferred gmod_mcore_test (display only; do not thrash mid-session)", 0, 1, tonumber)
+    -- Mode 2: one engine RenderView (left) only — dual nested RenderView races MatQueue workers.
+    vrmod.AddCallbackedConvar("vrmod_mq2_single_pass", nil, "1", FCVAR_ARCHIVE,
+        "Under mat_queue_mode 2: 1 = single-pass stereo (safer), 0 = dual RenderView (may crash)", nil, nil, tobool)
     vrmod.AddCallbackedConvar("vrmod_skybox", nil, "0", nil, nil, nil, nil, tobool, function(val) RunConsoleCommand("r_3dsky", val and "1" or "0") end)
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")

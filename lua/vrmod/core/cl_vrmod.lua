@@ -32,24 +32,25 @@ if CLIENT then
 	-- Desired values applied while VR is active.
 	-- Do NOT include cvars on GMod's Blocked_ConCommands list (mat_reduceparticles,
 	-- r_shadowrendertotexture, etc.) — Lua cannot change them without console spam.
-	-- mat_queue_mode from vrmod_mat_queue_mode (0/1/2). Mode 2 is first-class:
-	-- set once at VR start, never thrash workers mid-session; submit uses Lua RT size.
+	-- Engine mat_queue_mode is process-global. We never write it (no force 0/1/2).
+	-- Mode 2 is supported when the user already set it; thrash = ~CThread crash.
 	local function WantedMatQueueMode()
-		local cv = convars and convars.vrmod_mat_queue_mode
-		if not cv and GetConVar then cv = GetConVar("vrmod_mat_queue_mode") end
-		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 2
-		n = math.floor(tonumber(n) or 2)
+		local cv = GetConVar and GetConVar("mat_queue_mode")
+		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 1
+		n = math.floor(tonumber(n) or 1)
 		if n < 0 then n = 0 end
 		if n > 2 then n = 2 end
 		return n
 	end
 
-	-- Performance pins. Under mat_queue_mode 2 NEVER touch gmod_mcore_test /
-	-- cl_threaded_bone_setup — stacking MT systems with material workers is a
-	-- primary "Illegal termination of worker thread" / SIGBUS crash source.
+	-- Cvars we must never SetInt during VR (worker / thread lifecycle).
+	local NEVER_WRITE_CONVARS = {
+		mat_queue_mode = true,
+		gmod_mcore_test = true, -- toggling mcore mid-session = same CThread assert
+	}
+
 	local PERFORMANCE_CONVARS = {
-		-- Filled at VR start from WantedMatQueueMode()
-		mat_queue_mode = "2",
+		-- NEVER list mat_queue_mode / gmod_mcore_test — thrash kills CThread workers.
 		mat_disable_bloom = "1",
 		mat_disable_fancy_blending = "1",
 		mat_disable_lightwarp = "1",
@@ -58,25 +59,19 @@ if CLIENT then
 		mat_fastspecular = "0",
 		r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
 		r_queued_ropes = "1",
-		-- Keep world + model decals on for both eye passes (stereo flicker if off/intermittent)
 		r_drawdecals = "1",
 		r_drawmodeldecals = "1",
 		r_drawbatchdecals = "1",
-		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
 		snd_mute_losefocus = "0",
+		-- Keep engine frame loop alive when desktop window is not focused (VR HMD play).
+		engine_no_focus_sleep = "0",
 	}
-	-- mat_queue is set ONCE at start (re-SetInt every frame restarts workers → crash).
-	-- Other pins can be re-asserted if needed — NEVER mat_queue_mode.
-	local SESSION_PIN_CONVARS = {
-		-- mat_queue_mode deliberately NOT here (even if policy says pin — OpenXR forbids)
-	}
+	-- Empty: never re-pin engine queue/mcore every frame.
+	local SESSION_PIN_CONVARS = {}
 	local matQueueAppliedForSession = false
-	-- Stores original convar values so we can restore them on VR exit
 	local convarOverrides = {}
 
 	local wasPaused = false
-	-- Dual binary: OpenXR = gmcl_vrmod_xr_* (require vrmod_xr), OpenVR = gmcl_vrmod_* (require vrmod).
-	-- Both may coexist under garrysmod/lua/bin; LoadNativeModule picks one.
 	if vrmod.LoadNativeModule then
 		if vrmod.LoadNativeModule() then
 			moduleFile = g_VR.moduleFile
@@ -84,17 +79,11 @@ if CLIENT then
 			if vrmod.logger then
 				vrmod.logger.Info("Runtime: %s", vrmod.DescribeBackend and vrmod.DescribeBackend() or tostring(pol and pol.backend))
 			end
-			-- Never pin mat_queue every frame under OpenXR (worker thrash → crash).
-			-- OpenVR policy may request pin; we still refuse for safety on mode 2.
-			if pol and pol.matQueuePinEveryFrame and WantedMatQueueMode() < 2 then
-				SESSION_PIN_CONVARS = SESSION_PIN_CONVARS or {}
-				SESSION_PIN_CONVARS.mat_queue_mode = true
-			end
+			-- Refuse every-frame mat_queue pin always (OpenXR + mode 2 fatal).
 		else
 			vrmod.logger.Err("Failed to load module: %s", tostring(vrmod.GetModuleLoadError and vrmod.GetModuleLoadError()))
 		end
 	else
-		-- Fallback if cl_runtime missing (should not happen)
 		local success, err = pcall(function() require("vrmod_xr") end)
 		if not success then
 			success, err = pcall(function() require("vrmod") end)
@@ -112,31 +101,8 @@ if CLIENT then
 	-- 0) Helper functions
 	-- Only ConVar setters — never RunConsoleCommand (GMod blacklists many engine cvars
 	-- and prints "Command is blocked!" even when pcall'd).
-	-- mat_queue_mode: 0 sync · 1 queued single-thread (safe) · 2 multithreaded (opt-in).
-	local function setConvarValue(name, value)
-		local cv = GetConVar(name)
-		if not cv then return false end
-		value = tostring(value)
-		local ok = pcall(function()
-			-- Prefer SetInt for numeric engine cvars (mat_queue_mode is an int)
-			local n = tonumber(value)
-			if n ~= nil and cv.SetInt then
-				cv:SetInt(n)
-			else
-				cv:SetString(value)
-			end
-		end)
-		if not ok then
-			-- Fallback SetString only
-			ok = pcall(function() cv:SetString(value) end)
-		end
-		if not ok then
-			vrmod.logger.Debug("Could not set convar: " .. name)
-			return false
-		end
-		return true
-	end
-
+	-- mat_queue_mode: 0 sync · 1 queued single-thread · 2 multithreaded.
+	-- HARD BAN: any write restarts CThread workers → Illegal termination / ExitProcess.
 	local function convarMatches(cv, want)
 		if not cv then return false end
 		want = tostring(want)
@@ -147,27 +113,53 @@ if CLIENT then
 		return false
 	end
 
-	local function RefreshMatQueuePin()
-		PERFORMANCE_CONVARS.mat_queue_mode = tostring(WantedMatQueueMode())
+	local function setConvarValue(name, value)
+		if NEVER_WRITE_CONVARS[name] then
+			if vrmod.logger then
+				vrmod.logger.Debug("refused write %s (thread-lifecycle cvar)", tostring(name))
+			end
+			return false
+		end
+		local cv = GetConVar(name)
+		if not cv then return false end
+		value = tostring(value)
+		-- Skip no-ops so we do not fire engine change callbacks needlessly.
+		if convarMatches(cv, value) then return true end
+		local ok = pcall(function()
+			local n = tonumber(value)
+			if n ~= nil and cv.SetInt and math.floor(n) == n then
+				cv:SetInt(n)
+			elseif n ~= nil and cv.SetFloat then
+				cv:SetFloat(n)
+			else
+				cv:SetString(value)
+			end
+		end)
+		if not ok then
+			ok = pcall(function() cv:SetString(value) end)
+		end
+		if not ok then
+			vrmod.logger.Debug("Could not set convar: " .. name)
+			return false
+		end
+		return true
 	end
 
 	local function overrideConvar(name, value)
+		if NEVER_WRITE_CONVARS[name] then return end
 		local cv = GetConVar(name)
 		if not cv then return end
 		local previous = cv:GetString()
 		if not setConvarValue(name, value) then return end
-		-- Remember original so VR exit can restore (including mat_queue_mode).
 		if convarOverrides[name] == nil then
 			convarOverrides[name] = previous
 		end
 	end
 
 	local function restoreConvarOverrides()
-		-- Restore non-mat_queue pins only. NEVER flip mat_queue_mode on exit —
-		-- 2→0/1 destroys CThread workers ("Illegal termination of worker thread")
-		-- and was a primary crash source under mode 2.
+		-- Never restore mat_queue_mode / gmod_mcore_test (lifecycle thrash).
 		for k, v in pairs(convarOverrides) do
-			if k ~= "mat_queue_mode" then
+			if not NEVER_WRITE_CONVARS[k] then
 				setConvarValue(k, v)
 			end
 		end
@@ -662,22 +654,31 @@ if CLIENT then
 		end
 	end
 
+	local function RequireWindowFocus()
+		local cv = convars and convars.vrmod_require_window_focus
+		if not cv and GetConVar then cv = GetConVar("vrmod_require_window_focus") end
+		return cv and cv.GetBool and cv:GetBool() or false
+	end
+
 	local function DrawErrorOverlay()
-		local isPaused = not system.HasFocus() or #g_VR.errorText > 0
+		-- Default: do NOT require desktop focus — play in HMD while alt-tabbed / unfocused.
+		-- Opt-in via vrmod_require_window_focus 1 (old "Please focus the game window" behavior).
+		local lostFocus = RequireWindowFocus() and not system.HasFocus()
+		local hasErr = g_VR.errorText and #g_VR.errorText > 0
+		local isPaused = lostFocus or hasErr
 		if isPaused then
 			render.Clear(0, 0, 0, 255, true, true)
 			cam.Start2D()
-			local text = not system.HasFocus() and "Please focus the game window" or g_VR.errorText
+			local text = lostFocus and "Please focus the game window\n(or set vrmod_require_window_focus 0)" or g_VR.errorText
 			draw.DrawText(text, "DermaLarge", ScrW() / 2, ScrH() / 2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER)
 			cam.End2D()
-			g_VR.active = false
-			-- Only log on state change
-			if not wasPaused then vrmod.logger.Info("VR session paused") end
+			-- Soft-pause only: do not clear g_VR.active (that desynced session state).
+			g_VR._focusPaused = true
+			if not wasPaused then vrmod.logger.Info("VR session paused (%s)", lostFocus and "no window focus" or "error") end
 			wasPaused = true
 			return true
 		else
-			g_VR.active = true
-			-- Only log unpause on state change
+			g_VR._focusPaused = false
 			if wasPaused then vrmod.logger.Info("VR session resumed") end
 			wasPaused = false
 		end
@@ -688,8 +689,16 @@ if CLIENT then
 		if not IsValid(ply) then return end
 		local viewEnt = ply:GetViewEntity()
 		if not IsValid(viewEnt) then return end
-		local hmd = g_VR.tracking.hmd
-		if not hmd then return end
+		local hmd = g_VR.tracking and g_VR.tracking.hmd
+		if not hmd or not hmd.pos then return end
+
+		-- Keep tracking floor under the player's feet (standing height / stairs / ladders).
+		-- Locomotion also sets origin.z; do it here so even without loco the view follows.
+		if g_VR.origin and not ply:InVehicle() then
+			local feet = ply:GetPos()
+			g_VR.origin.z = feet.z
+		end
+
 		-- Transform HMD to VR origin local space
 		local rawPos, rawAng = WorldToLocal(hmd.pos, hmd.ang, g_VR.origin, g_VR.originAngle)
 		-- Base position and angle
@@ -702,7 +711,7 @@ if CLIENT then
 		end
 
 		-- Detect Glide vehicle and apply small lift/forward
-		if g_VR.vehicle.glide then
+		if g_VR.vehicle and g_VR.vehicle.glide then
 			local forward = g_VR.view.angles:Forward() -- view/vehicle facing direction
 			local up = g_VR.view.angles:Up()
 			if g_VR.vehicle.type == "motorcycle" then
@@ -713,8 +722,12 @@ if CLIENT then
 				g_VR.view.origin = finalPos + forward * 6 + up * 6
 			end
 
-			g_VR.tracking.pose_lefthand.pos = g_VR.tracking.pose_lefthand.pos + forward * 5
-			g_VR.tracking.pose_righthand.pos = g_VR.tracking.pose_righthand.pos + forward * 5
+			if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_lefthand.pos then
+				g_VR.tracking.pose_lefthand.pos = g_VR.tracking.pose_lefthand.pos + forward * 5
+			end
+			if g_VR.tracking.pose_righthand and g_VR.tracking.pose_righthand.pos then
+				g_VR.tracking.pose_righthand.pos = g_VR.tracking.pose_righthand.pos + forward * 5
+			end
 		else
 			g_VR.view.origin = finalPos
 		end
@@ -964,18 +977,55 @@ if CLIENT then
 		local eyezUse = eyez or 0
 		eyeOffset = ipdUse * scale
 		forwardOffset = fwd * -(eyezUse * scale)
-		verticalOffset = up * -2.1
 
 		-- Cyclopean SoT (public) — never leave g_VR.view stuck on last eye
 		local cyclopeanOrigin = view.origin
+		-- SHARED orientation for both eyes (HMD). Per-eye rotation from OpenXR causes
+		-- vertical disparity / warp when tilting head; tests + OpenVR legacy use one roll.
 		local baseAngles = ang
 		local znear = view.znear or 1
 		local zfar = view.zfar or VIEW_ZFAR
 		if zfar < 256 then zfar = VIEW_ZFAR end
 		local dopost = view.dopostprocess and true or false
+		-- Mode 2: engine post on nested dual RenderView races material workers.
+		if (g_VR._matQueueMode or WantedMatQueueMode()) >= 2 then
+			dopost = false
+		end
 
-		g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale) + verticalOffset
-		g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale) + verticalOffset
+		-- Prefer OpenXR locateViews eye positions (correct IPD under pitch/yaw/roll).
+		-- Fallback: synthetic separation along head Right() (must use full basis, not yaw-only).
+		local eL = (g_VR.tracking and g_VR.tracking.eye_left) or (g_VR.rawTracking and g_VR.rawTracking.eye_left)
+		local eR = (g_VR.tracking and g_VR.tracking.eye_right) or (g_VR.rawTracking and g_VR.rawTracking.eye_right)
+		local usedXrEyes = false
+		if eL and eR and eL.pos and eR.pos then
+			local d = eL.pos:DistToSqr(eR.pos)
+			-- Sanity: IPD in Source units roughly (scale * meters)^2 — reject collapsed poses
+			if d > 0.01 and d < (scale * 0.2) * (scale * 0.2) then
+				g_VR.eyePosLeft = eL.pos
+				g_VR.eyePosRight = eR.pos
+				usedXrEyes = true
+			end
+		end
+		if not usedXrEyes then
+			-- Synthetic: pure translation along head right (tilts with roll) + small Z along forward.
+			-- No fixed world-up bias (old up*-2.1 warped under roll).
+			g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale)
+			g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale)
+		end
+
+		-- Per-eye FOV/aspect from OpenXR overrender (symmetric FOV enclosing asymmetric frustum)
+		local fovL = hfovLeft
+		local fovR = hfovRight
+		local aspL = aspectLeft
+		local aspR = aspectRight
+		if eL and tonumber(eL.fov) and tonumber(eL.aspectratio) then
+			fovL = tonumber(eL.fov)
+			aspL = tonumber(eL.aspectratio)
+		end
+		if eR and tonumber(eR.fov) and tonumber(eR.aspectratio) then
+			fovR = tonumber(eR.fov)
+			aspR = tonumber(eR.aspectratio)
+		end
 
 		-- Optional eye swap (PSVR2 / inverted-stereo reports): content for logical L/R
 		-- still uses correct IPD/FOV, but is written into the opposite SBS half.
@@ -985,8 +1035,8 @@ if CLIENT then
 			leftX, rightX = rtHalfW, 0
 		end
 
-		SyncEyeView(viewLeft, g_VR.eyePosLeft, hfovLeft, aspectLeft, leftX, 0, rtHalfW, rtH, baseAngles, znear, dopost, zfar)
-		SyncEyeView(viewRight, g_VR.eyePosRight, hfovRight, aspectRight, rightX, 0, rtHalfW, rtH, baseAngles, znear, dopost, zfar)
+		SyncEyeView(viewLeft, g_VR.eyePosLeft, fovL, aspL, leftX, 0, rtHalfW, rtH, baseAngles, znear, dopost, zfar)
+		SyncEyeView(viewRight, g_VR.eyePosRight, fovR, aspR, rightX, 0, rtHalfW, rtH, baseAngles, znear, dopost, zfar)
 
 		renderingEyes = true
 		local okEyes, errEyes = pcall(function()
@@ -1057,34 +1107,47 @@ if CLIENT then
 			hook.Call("VRMod_PreStereo", nil)
 			EnsureDecalsEnabled()
 
-			-- LEFT eye — draw only
+			local mqNow = g_VR._matQueueMode or WantedMatQueueMode()
+			-- Mode 2: always single-pass (second RenderView = CThread crash on Linux).
+			-- Convar only documents intent; dual-eye under 2 is not supported yet.
+			local singlePass = mqNow >= 2
+			g_VR._mq2SinglePass = singlePass
+
+			-- LEFT eye — draw only (angles = shared HMD roll for both eyes)
 			view.origin = g_VR.eyePosLeft
 			view.angles = baseAngles
-			view.fov = hfovLeft
-			view.aspectratio = aspectLeft
+			view.fov = fovL
+			view.aspectratio = aspL
 			view.x, view.y, view.w, view.h = leftX, 0, rtHalfW, rtH
 			g_VR.stereoEye = "left"
 			render.SetScissorRect(leftX, 0, leftX + rtHalfW, rtH, true)
 			hook.Call("VRMod_PreRender", nil, "left")
 			SafeRenderView(viewLeft)
 
-			-- Depth only — never Clear colour (would wipe left-eye world + decals).
-			-- Reset stencil/depth-range so right eye does not inherit halo/HUD state.
-			ResetStereoEyeState()
-			render.ClearDepth(true)
-			-- mat_queue_mode 2: serialize material workers before second eye
-			SyncMatQueueBetweenEyes()
+			if singlePass then
+				-- mat_queue_mode 2: NO second RenderView and NO RT self-copy (both race workers).
+				-- Right half stays clear/black; left eye still drives HMD (better than crash).
+				render.SetScissorRect(0, 0, 0, 0, false)
+				ResetStereoEyeState()
+				g_VR.stereoEye = "right"
+				hook.Call("VRMod_PreRender", nil, "right")
+			else
+				-- Depth only — never Clear colour (would wipe left-eye world + decals).
+				ResetStereoEyeState()
+				render.ClearDepth(true)
+				SyncMatQueueBetweenEyes()
 
-			-- RIGHT eye — draw only (same world pose as left)
-			view.origin = g_VR.eyePosRight
-			view.angles = baseAngles
-			view.fov = hfovRight
-			view.aspectratio = aspectRight
-			view.x, view.y, view.w, view.h = rightX, 0, rtHalfW, rtH
-			g_VR.stereoEye = "right"
-			render.SetScissorRect(rightX, 0, rightX + rtHalfW, rtH, true)
-			hook.Call("VRMod_PreRender", nil, "right")
-			SafeRenderView(viewRight)
+				-- RIGHT eye — full second RenderView (mode 0/1); same roll as left
+				view.origin = g_VR.eyePosRight
+				view.angles = baseAngles
+				view.fov = fovR
+				view.aspectratio = aspR
+				view.x, view.y, view.w, view.h = rightX, 0, rtHalfW, rtH
+				g_VR.stereoEye = "right"
+				render.SetScissorRect(rightX, 0, rightX + rtHalfW, rtH, true)
+				hook.Call("VRMod_PreRender", nil, "right")
+				SafeRenderView(viewRight)
+			end
 
 			render.SetScissorRect(0, 0, 0, 0, false)
 			g_VR.stereoEye = nil
@@ -1093,8 +1156,8 @@ if CLIENT then
 			-- Restore cyclopean public SoT
 			view.origin = cyclopeanOrigin
 			view.angles = baseAngles
-			view.fov = hfovLeft
-			view.aspectratio = aspectLeft
+			view.fov = fovL
+			view.aspectratio = aspL
 			view.x, view.y, view.w, view.h = 0, 0, rtHalfW, rtH
 
 			local ply = LocalPlayer()
@@ -1174,49 +1237,47 @@ if CLIENT then
 		timer.Remove("vrmod_mat_queue_restore")
 		timer.Remove("vrmod_async_shutdown")
 		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
-		RefreshMatQueuePin()
 
 		local mq = WantedMatQueueMode()
-		-- Soft pins first (never mat_queue). Under mode 2 skip extra MT cvars.
-		for cvar, val in pairs(PERFORMANCE_CONVARS) do
-			if cvar ~= "mat_queue_mode" then
+		g_VR._matQueueMode = mq
+
+		-- Soft pins only — never mat_queue_mode (setConvarValue/overrideConvar ban it).
+		-- Under mat_queue 2: skip almost all material/render convar thrash (workers already
+		-- fragile; flipping mat_* at VR start can Illegal-termination crash).
+		if mq < 2 then
+			for cvar, val in pairs(PERFORMANCE_CONVARS) do
 				overrideConvar(cvar, val)
 			end
-		end
-		-- Mode 0/1 can use light threading; mode 2 = material workers only.
-		if mq < 2 then
 			overrideConvar("cl_threaded_bone_setup", "1")
 			overrideConvar("r_threaded_particles", "1")
-			-- gmod_mcore_test stays off always — crashes with VR stereo + mat queue
+		else
+			-- Minimal pins only (audio/focus) — no mat_* / r_* material churn.
+			overrideConvar("snd_mute_losefocus", "0")
+			overrideConvar("engine_no_focus_sleep", "0")
 		end
 
-		-- mat_queue: set ONCE, only if different, BEFORE RT share / RenderScene.
-		-- Never re-SetInt later (worker thrash → crash under mode 2).
-		-- Never restore on exit (2→0 kills CThread workers).
 		if not matQueueAppliedForSession then
-			local cv = GetConVar("mat_queue_mode")
-			local cur = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or nil
-			if cur == nil or cur ~= mq then
-				if cv and convarOverrides["mat_queue_mode"] == nil then
-					convarOverrides["mat_queue_mode"] = cv:GetString()
-				end
-				-- Brief settle: applying mode 2 mid-frame races workers. We only
-				-- call this before RT share / first RenderScene, so main-thread is OK.
-				setConvarValue("mat_queue_mode", tostring(mq))
-				if vrmod.logger then
-					vrmod.logger.Info(
-						"mat_queue_mode %s→%s (once at start; no exit restore; no mcore)",
-						tostring(cur), tostring(mq)
-					)
-				end
-			else
-				if vrmod.logger then
-					vrmod.logger.Info("mat_queue_mode already %s — leave workers alone", tostring(mq))
-				end
-			end
 			matQueueAppliedForSession = true
-			PERFORMANCE_CONVARS.mat_queue_mode = tostring(mq)
-			g_VR._matQueueMode = mq
+			local mcore = GetConVar("gmod_mcore_test")
+			local mcoreOn = mcore and (mcore.GetInt and mcore:GetInt() or tonumber(mcore:GetString()) or 0) ~= 0
+			if vrmod.logger then
+				vrmod.logger.Info(
+					"mat_queue_mode=%s mcore=%s single_pass=%s (VR never writes mat_queue/mcore)",
+					tostring(mq),
+					mcoreOn and "1" or "0",
+					tostring(mq >= 2)
+				)
+			end
+			if mq >= 2 and vrmod.Toast and not g_VR._mq2Hint then
+				g_VR._mq2Hint = true
+				vrmod.Toast(
+					mcoreOn
+						and "mat_queue 2: single-pass stereo; set gmod_mcore_test 0 if it still dies"
+						or "mat_queue 2: single-pass stereo (no second RenderView)",
+					6,
+					"hint"
+				)
+			end
 		end
 	end
 
@@ -1538,7 +1599,10 @@ if CLIENT then
 	-- 5) Networking & origin
 	local function SetupNetworkAndOrigin()
 		VRUtilNetworkInit()
-		g_VR.origin = LocalPlayer():GetPos()
+		local ply = LocalPlayer()
+		-- Feet of the gmod player = tracking floor. Keep Z in sync so standing height matches.
+		g_VR.origin = IsValid(ply) and ply:GetPos() or Vector(0, 0, 0)
+		g_VR.originAngle = g_VR.originAngle or Angle(0, 0, 0)
 	end
 
 	-- 6) Controller offsets & scale
@@ -1621,13 +1685,13 @@ if CLIENT then
 
 	local function BindRenderSceneHook()
 		BeginVRNestedRenderLock()
-		-- Cube frame energy (one direction):
-		--   raw → tracking SoT → modifiers → input/net → cyclopean view
-		--   → stereo eyes (engine RealRenderView only) → submit → PostRender
+		-- Frame energy (stable order — reverse collect/submit raced MatQueue → ~CThread):
+		--   UpdatePoses (WaitFrame+Begin) → dual RenderView → optional Collect → Submit EndFrame
+		-- Backend still owns XR timing; collect is best-effort isolate, not submit-before-render.
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
 			if DrawErrorOverlay() then return true end
 
-			-- Keep session mat_queue_mode (0/1/2) if another addon fights it
+			-- Soft session pins only (never mat_queue_mode — workers are process-global).
 			EnsurePinnedConvars()
 
 			-- Keep World Portals suppressed for the entire VR frame (do not restore mid-frame)
@@ -1641,7 +1705,24 @@ if CLIENT then
 			HandleInput()
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
-			PerformRenderViews()
+
+			local shouldRender = true
+			if isfunction(VRMOD_ShouldRender) then
+				local okSR, sr = pcall(VRMOD_ShouldRender)
+				if okSR then shouldRender = sr and true or false end
+			end
+
+			if shouldRender then
+				PerformRenderViews()
+				-- Optional isolate into module staging (never required for submit).
+				-- Skip under mat_queue 2 — blit from live engine RT races workers.
+				local mq = g_VR._matQueueMode or WantedMatQueueMode()
+				if mq < 2 and isfunction(VRMOD_CollectEyes) then
+					PushKnownSubmitSize()
+					pcall(VRMOD_CollectEyes)
+				end
+			end
+
 			if isfunction(VRMOD_SubmitSharedTexture) then
 				VRMOD_SubmitSharedTexture()
 			end
@@ -1812,7 +1893,7 @@ if CLIENT then
 			return
 		end
 		if not PerformStartup() then return end
-		-- mat_queue once (if needed) BEFORE RT share — never during live stereo.
+		-- Soft performance pins only (never mat_queue / mcore).
 		OverridePerformanceConvars()
 		local okRT, errRT = pcall(SetupRenderTargets)
 		if not okRT or not g_VR.rt or not g_VR.rtWidth then

@@ -87,12 +87,18 @@ vrmod.SettingsCatalog = {
 				{ text = "right eye", value = 3 },
 			}},
 			{ kind = "bool", label = "Engine post-processing", cvar = "vrmod_postprocess" },
-			{ kind = "combo", label = "Material queue (mat_queue_mode)", cvar = "vrmod_mat_queue_mode", choices = {
-				{ text = "0 — sync (single-thread)", value = 0 },
-				{ text = "1 — queued single-thread", value = 1 },
-				{ text = "2 — multithreaded (default)", value = 2 },
+			{ kind = "bool", label = "Require desktop window focus", cvar = "vrmod_require_window_focus" },
+			{ kind = "help", label = "Off (default) = keep playing in HMD when GMod is alt-tabbed / unfocused." },
+			{ kind = "bool", label = "Show DESKTOP chip on unfocused players", cvar = "vrmod_presence_chip" },
+			{ kind = "help", label = "Multiplayer: crimson plate above their HMD when their game window is unfocused." },
+			{ kind = "combo", label = "Material queue prefer (safe)", cvar = "vrmod_prefer_mat_queue", choices = {
+				{ text = "0 — sync", value = 0 },
+				{ text = "1 — queued (recommended)", value = 1 },
+				{ text = "2 — multithreaded", value = 2 },
 			}},
-			{ kind = "help", label = "2 = MT mat workers. Restart VR after change. If crash: use 1. 3D radar auto-off under 2." },
+			{ kind = "help", label = "Does NOT SetInt engine mat_queue_mode (that crashes). Apply yourself when idle: mat_queue_mode N then changelevel." },
+			{ kind = "bool", label = "Mode 2 single-pass stereo", cvar = "vrmod_mq2_single_pass" },
+			{ kind = "help", label = "On mat_queue_mode 2: one RenderView only (avoids worker crash). Slight stereo quality tradeoff." },
 			{ kind = "bool", label = "Auto render offset", cvar = "vrmod_renderoffset" },
 			{ kind = "help", label = "Disable if rendering glitches" },
 			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },
@@ -496,6 +502,35 @@ end
 function vrmod.SettingsSetInt(cvar, v)
 	if not cvar then return end
 	local n = math.floor(tonumber(v) or 0)
+	-- mat_queue_mode / gmod_mcore_test: SetInt restarts CThread workers and causes
+	-- "Illegal termination of worker thread" if done mid-map / mid-frame.
+	-- Never write engine cvar from settings. Prefer + next-map / next-launch only.
+	if cvar == "mat_queue_mode" or cvar == "gmod_mcore_test" then
+		if CLIENT and g_VR and g_VR.active then
+			if vrmod.Toast then
+				vrmod.Toast("Stop VR first — cannot change " .. cvar, 5, "warn")
+			end
+			return
+		end
+		local preferName = (cvar == "mat_queue_mode") and "vrmod_prefer_mat_queue" or "vrmod_prefer_mcore"
+		local pcv = GetConVar(preferName)
+		if pcv and pcv.SetInt then
+			pcall(function() pcv:SetInt(n) end)
+		end
+		if CLIENT and file then
+			if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
+			file.Write("vrmod/pending_" .. cvar .. ".txt", tostring(n))
+		end
+		if vrmod.Toast then
+			vrmod.Toast(
+				cvar .. " → " .. tostring(n) .. " saved. Apply: disconnect or changelevel, then run  " .. cvar .. " " .. tostring(n),
+				7,
+				"hint"
+			)
+		end
+		-- Do NOT SetInt / RunConsoleCommand the engine cvar here (crash).
+		return
+	end
 	local cv = GetConVar(cvar)
 	if not SafeClientSet(cv, function(c) c:SetInt(n) end) then
 		RunConsoleCommand(cvar, tostring(n))

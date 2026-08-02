@@ -154,7 +154,30 @@ if CLIENT then
 		lastSentFrame = vrmod.utils.CopyFrame(frame)
 	end
 
+	-- Desktop window focus → multiplayer presence (Cube: no black local wall; others see a chip).
+	local lastDesktopFocused = nil
+	local function SendDesktopFocus(focused)
+		focused = focused and true or false
+		if lastDesktopFocused == focused then return end
+		lastDesktopFocused = focused
+		net.Start("vrmod_net_desktop_focus", true)
+		net.WriteBool(focused)
+		net.SendToServer()
+		if g_VR then g_VR.desktopFocused = focused end
+	end
+
+	local function PollDesktopFocus()
+		if not g_VR or not g_VR.active then return end
+		-- system.HasFocus: false when alt-tabbed / compositor focus elsewhere
+		local focused = true
+		if system and system.HasFocus then
+			focused = system.HasFocus() and true or false
+		end
+		SendDesktopFocus(focused)
+	end
+
 	function VRUtilNetworkInit() --called by localplayer when they enter vr
+		lastDesktopFocused = nil
 		-- transmit loop
 		timer.Create("vrmod_transmit", 1 / convarValues.vrmod_net_tickrate, 0, function()
 			if g_VR.threePoints and g_VR.active then
@@ -165,14 +188,19 @@ if CLIENT then
 					vrmod.logger.Debug("Skipping identical frame")
 					if not lastSentFrame then SendFrame(frame) end
 				end
+				PollDesktopFocus()
 			end
 		end)
+		-- Also poll focus on a slow timer (tick may skip identical pose frames)
+		timer.Create("vrmod_desktop_focus", 0.35, 0, PollDesktopFocus)
 
 		net.Start("vrutil_net_join", true)
 		--send some stuff here that doesnt need to be in every frame
 		net.WriteBool(GetConVar("vrmod_althead"):GetBool())
 		net.WriteBool(GetConVar("vrmod_floatinghands"):GetBool())
 		net.SendToServer()
+		-- Initial presence (usually focused at start)
+		timer.Simple(0.2, PollDesktopFocus)
 	end
 
 	local function LerpOtherVRPlayers()
@@ -227,9 +255,23 @@ if CLIENT then
 	-- Cleanup on exit
 	function VRUtilNetworkCleanup()
 		timer.Remove("vrmod_transmit")
+		timer.Remove("vrmod_desktop_focus")
+		lastDesktopFocused = nil
+		if g_VR then g_VR.desktopFocused = nil end
 		net.Start("vrutil_net_exit")
 		net.SendToServer()
 	end
+
+	-- Remote players: desktop unfocused chip state
+	net.Receive("vrmod_net_desktop_focus", function()
+		local ply = net.ReadEntity()
+		local focused = net.ReadBool()
+		if not IsValid(ply) or ply == LocalPlayer() then return end
+		local tab = g_VR.net and g_VR.net[ply:SteamID()]
+		if not tab then return end
+		tab.desktopFocused = focused
+		tab.desktopUnfocused = not focused
+	end)
 
 	-- Receive remote tick frames
 	net.Receive("vrutil_net_tick", function(len)
@@ -410,6 +452,19 @@ if SERVER then
 	util.AddNetworkString("vrutil_net_requestvrplayers")
 	util.AddNetworkString("vrutil_net_entervehicle")
 	util.AddNetworkString("vrutil_net_exitvehicle")
+	util.AddNetworkString("vrmod_net_desktop_focus")
+	-- Presence: desktop window focus (rare; on-change only)
+	vrmod.NetReceiveLimited("vrmod_net_desktop_focus", 8, 1, function(len, ply)
+		if not IsValid(ply) then return end
+		local sid = ply:SteamID()
+		if g_VR[sid] == nil then return end
+		local focused = net.ReadBool()
+		g_VR[sid].desktopFocused = focused
+		net.Start("vrmod_net_desktop_focus", true)
+		net.WriteEntity(ply)
+		net.WriteBool(focused)
+		net.SendOmit(ply)
+	end)
 	vrmod.NetReceiveLimited("vrutil_net_tick", convarValues.vrmod_net_tickrate + 5, 1200, function(len, ply)
 		vrmod.logger.Debug("received net_tick, len: " .. len)
 		if g_VR[ply:SteamID()] == nil then return end
@@ -514,6 +569,13 @@ if SERVER then
 					net.WriteBool(v.characterAltHead)
 					net.WriteBool(v.dontHideBullets)
 					net.Send(ply)
+					-- Late joiners also get current desktop-focus presence
+					if v.desktopFocused ~= nil then
+						net.Start("vrmod_net_desktop_focus", true)
+						net.WriteEntity(vrPly)
+						net.WriteBool(v.desktopFocused and true or false)
+						net.Send(ply)
+					end
 				else
 					vrmod.logger.Err("Invalid SteamID \"" .. k .. "\" found in player table")
 				end
