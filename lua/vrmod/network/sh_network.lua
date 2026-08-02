@@ -438,19 +438,24 @@ if SERVER then
 	end)
 
 	vrmod.NetReceiveLimited("vrutil_net_join", 5, 2, function(len, ply)
-		if g_VR[ply:SteamID()] ~= nil then return end
-		ply:DrawShadow(false)
-		ply.originalViewOffset = ply:GetViewOffset()
-		ply.viewOffset = Vector(0, 0, 0)
-		--add gt entry
-		g_VR[ply:SteamID()] = {
-			--store join values so we can re-send joins to players that connect later
-			characterAltHead = net.ReadBool(),
-			dontHideBullets = net.ReadBool(),
+		local sid = ply:SteamID()
+		local altHead = net.ReadBool()
+		local dontHide = net.ReadBool()
+		-- Restart path: exit→start can race; allow re-join to refresh flags + re-fire Start
+		-- (old code early-returned and skipped VRMod_Start → settings/hooks not re-applied).
+		local rejoin = g_VR[sid] ~= nil
+		if not rejoin then
+			ply:DrawShadow(false)
+			ply.originalViewOffset = ply:GetViewOffset()
+			ply.viewOffset = Vector(0, 0, 0)
+			ply:Give("weapon_vrmod_empty")
+			ply:SelectWeapon("weapon_vrmod_empty")
+		end
+		g_VR[sid] = {
+			characterAltHead = altHead,
+			dontHideBullets = dontHide,
 		}
 
-		ply:Give("weapon_vrmod_empty")
-		ply:SelectWeapon("weapon_vrmod_empty")
 		--relay join message to everyone except players that aren't fully loaded in yet
 		local omittedPlayers = {}
 		for k, v in ipairs(player.GetAll()) do
@@ -459,10 +464,13 @@ if SERVER then
 
 		net.Start("vrutil_net_join")
 		net.WriteEntity(ply)
-		net.WriteBool(g_VR[ply:SteamID()].characterAltHead)
-		net.WriteBool(g_VR[ply:SteamID()].dontHideBullets)
+		net.WriteBool(altHead)
+		net.WriteBool(dontHide)
 		net.SendOmit(omittedPlayers)
 		hook.Run("VRMod_Start", ply)
+		if rejoin and vrmod.logger then
+			vrmod.logger.Info("VR re-join (restart) for " .. tostring(sid))
+		end
 	end)
 
 	local function net_exit(steamid, ply)

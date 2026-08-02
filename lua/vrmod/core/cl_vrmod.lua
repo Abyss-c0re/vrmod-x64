@@ -278,18 +278,33 @@ if CLIENT then
 		local sbsW = eyeW * 2
 		local rawW, rawH = sbsW, eyeH
 
-		local leftProj = vrmod.utils.AdjustFOV(di.ProjectionLeft, fovX, fovY)
-		local rightProj = vrmod.utils.AdjustFOV(di.ProjectionRight, fovX, fovY)
+		-- Raw module projection (before FOV scale). Identity = session not RUNNING yet
+		-- (deferred GL session after cold Init/teardown). Callers must re-query.
+		local rawLeft = di.ProjectionLeft
+		local rawRight = di.ProjectionRight
+		local projLive = false
+		if type(rawLeft) == "table" and type(rawLeft[1]) == "table" then
+			local a11 = tonumber(rawLeft[1][1]) or 1
+			local a22 = tonumber(rawLeft[2] and rawLeft[2][2]) or 1
+			projLive = math.abs(a11 - 1.0) > 0.02 or math.abs(a22 - 1.0) > 0.02
+		end
+		-- IPD from eye transform: identity has translation 0; real HMD has non-zero X offset.
+		local ipd = di.TransformRight and di.TransformRight[1] and di.TransformRight[1][4] and (di.TransformRight[1][4] * 2) or 0.064
+		local eyez = di.TransformRight and di.TransformRight[3] and di.TransformRight[3][4] or 0
+		if not projLive and math.abs(ipd) > 0.001 and math.abs(ipd - 0.064) > 0.0001 then
+			projLive = true
+		end
+
+		local leftProj = vrmod.utils.AdjustFOV(rawLeft, fovX, fovY)
+		local rightProj = vrmod.utils.AdjustFOV(rawRight, fovX, fovY)
 		local leftCalc = vrmod.utils.CalculateProjectionParams(leftProj, viewscale)
 		local rightCalc = vrmod.utils.CalculateProjectionParams(rightProj, viewscale)
 
-		local ipd = di.TransformRight and di.TransformRight[1] and di.TransformRight[1][4] and (di.TransformRight[1][4] * 2) or 0.064
-		local eyez = di.TransformRight and di.TransformRight[3] and di.TransformRight[3][4] or 0
 		if vrmod.logger then
 			vrmod.logger.Info(
-				"Display RT SBS %dx%d (eye %dx%d, SS=%.2f, module v%d%s)",
+				"Display RT SBS %dx%d (eye %dx%d, SS=%.2f, module v%d%s, projLive=%s)",
 				rawW, rawH, eyeW, eyeH, ss, g_VR.moduleVersion or 0,
-				canSS and ", eyeArgs" or ", legacy"
+				canSS and ", eyeArgs" or ", legacy", tostring(projLive)
 			)
 		end
 		return {
@@ -305,7 +320,8 @@ if CLIENT then
 			aspL = leftCalc.AspectRatio,
 			aspR = rightCalc.AspectRatio,
 			ipd = ipd,
-			eyez = eyez
+			eyez = eyez,
+			projLive = projLive,
 		}
 	end
 
@@ -1203,11 +1219,17 @@ if CLIENT then
 		end
 	end
 
-	-- Soft-reload projection/FOV/viewscale without full VR restart (rendering profile)
+	-- True once GetDisplayInfo returned a real (non-identity) projection.
+	-- After full OpenXR teardown, session is deferred until Share/Render — first
+	-- GetDisplayInfo returns identity FOV, so viewscale/fov/borders look "stuck".
+	local displayParamsLive = false
+
+	-- Soft-reload projection/FOV/viewscale (also after cold restart when session goes RUNNING).
 	local function SoftRefreshDisplayParams()
-		if not g_VR.active then return end
+		if not g_VR.active and not g_VR.rt then return false end
 		local dp = ComputeDisplayParams()
-		if not dp then return end
+		if not dp then return false end
+		local live = dp.projLive and true or false
 		leftCalc = dp.leftCalc or leftCalc
 		rightCalc = dp.rightCalc or rightCalc
 		hfovLeft = dp.hfovL or hfovLeft
@@ -1221,9 +1243,69 @@ if CLIENT then
 			cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
 		end
 		ApplySubmitBounds()
-		if vrmod.logger then
-			vrmod.logger.Info("Soft-refreshed display params (FOV/viewscale/desktop)")
+		if live then
+			displayParamsLive = true
+			if vrmod.logger then
+				vrmod.logger.Info(
+					"Display params live FOV L=%.1f R=%.1f — viewscale/borders applied",
+					tonumber(hfovLeft) or 0, tonumber(hfovRight) or 0
+				)
+			end
 		end
+		return live
+	end
+
+	-- Re-read session convars into g_VR (offsets, scale, view, pins).
+	-- Inlined — do not call later local Setup* (Lua scoping).
+	local function ApplySessionSettingsFromConvars()
+		g_VR.scale = convars.vrmod_scale:GetFloat()
+		g_VR.rightControllerOffsetPos = Vector(
+			convars.vrmod_controlleroffset_x:GetFloat(),
+			convars.vrmod_controlleroffset_y:GetFloat(),
+			convars.vrmod_controlleroffset_z:GetFloat()
+		)
+		g_VR.leftControllerOffsetPos = g_VR.rightControllerOffsetPos * Vector(1, -1, 1)
+		g_VR.rightControllerOffsetAng = Angle(
+			convars.vrmod_controlleroffset_pitch:GetFloat(),
+			convars.vrmod_controlleroffset_yaw:GetFloat(),
+			convars.vrmod_controlleroffset_roll:GetFloat()
+		)
+		g_VR.leftControllerOffsetAng = g_VR.rightControllerOffsetAng
+		if g_VR.view then
+			g_VR.view.znear = convars.vrmod_znear:GetFloat()
+			g_VR.view.dopostprocess = convars.vrmod_postprocess:GetBool()
+			g_VR.view.w = g_VR.view.w or (g_VR.rtWidth and g_VR.rtWidth / 2)
+			g_VR.view.h = g_VR.view.h or g_VR.rtHeight
+		end
+		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
+		setConvarValue("r_3dsky", PERFORMANCE_CONVARS.r_3dsky)
+		SoftRefreshDisplayParams()
+		ApplySubmitBounds()
+		PushKnownSubmitSize()
+	end
+
+	-- After cold Init, session becomes RUNNING a few frames after Share — keep
+	-- re-pulling FOV/IPD/submit bounds until live or timeout.
+	local function ScheduleDisplayParamsCatchup()
+		timer.Remove("vrmod_display_params_catchup")
+		displayParamsLive = false
+		local tries = 0
+		timer.Create("vrmod_display_params_catchup", 0, 90, function()
+			tries = tries + 1
+			if not g_VR or not g_VR.active then
+				timer.Remove("vrmod_display_params_catchup")
+				return
+			end
+			if SoftRefreshDisplayParams() or tries >= 90 then
+				timer.Remove("vrmod_display_params_catchup")
+				if displayParamsLive then
+					-- One more full convar pass once FOV is real
+					ApplySessionSettingsFromConvars()
+				elseif vrmod.logger then
+					vrmod.logger.Warn("Display params still deferred after catchup — FOV may use defaults")
+				end
+			end
+		end)
 	end
 
 	local function BindRenderProfileCallbacks()
@@ -1232,13 +1314,38 @@ if CLIENT then
 			"vrmod_fovscale_y",
 			"vrmod_viewscale",
 			"vrmod_desktopview",
+			"vrmod_eyescale",
+			"vrmod_swap_eyes",
+			"vrmod_znear",
+			"vrmod_postprocess",
 		}
 		for _, name in ipairs(names) do
 			cvars.RemoveChangeCallback(name, "vrmod_render_profile")
 			cvars.AddChangeCallback(name, function()
 				if not g_VR.active then return end
-				SoftRefreshDisplayParams()
+				if name == "vrmod_znear" or name == "vrmod_postprocess" then
+					ApplySessionSettingsFromConvars()
+				else
+					SoftRefreshDisplayParams()
+				end
 			end, "vrmod_render_profile")
+		end
+		-- Controller offsets / world scale: live re-apply without full restart
+		local offsetNames = {
+			"vrmod_scale",
+			"vrmod_controlleroffset_x",
+			"vrmod_controlleroffset_y",
+			"vrmod_controlleroffset_z",
+			"vrmod_controlleroffset_pitch",
+			"vrmod_controlleroffset_yaw",
+			"vrmod_controlleroffset_roll",
+		}
+		for _, name in ipairs(offsetNames) do
+			cvars.RemoveChangeCallback(name, "vrmod_session_settings")
+			cvars.AddChangeCallback(name, function()
+				if not g_VR.active then return end
+				ApplySessionSettingsFromConvars()
+			end, "vrmod_session_settings")
 		end
 	end
 
@@ -1305,6 +1412,8 @@ if CLIENT then
 		g_VR._shareTextureOk = okBegin and okFin and true or false
 		-- Authoritative SBS size for OpenXR submit (mat_queue 2 cannot glGetTexLevel)
 		PushKnownSubmitSize()
+		-- Share may have created the session — re-pull FOV if now live (else catchup).
+		SoftRefreshDisplayParams()
 		ApplySubmitBounds()
 		BindBorderConvarCallbacks()
 		BindRenderProfileCallbacks()
@@ -1588,6 +1697,8 @@ if CLIENT then
 			timer.Remove("vrmod_stereo_selftest")
 			timer.Remove("vrmod_async_shutdown")
 			timer.Remove("vrmod_mat_queue_apply")
+			timer.Remove("vrmod_display_params_catchup")
+			displayParamsLive = false
 			g_VR._stereoSelfTestDone = true
 			matQueueAppliedForSession = false
 
@@ -1691,6 +1802,9 @@ if CLIENT then
 		InitializeTracking()
 		pcall(SetupHandSimulation)
 		g_VR.active = true
+		-- Re-apply all convars now that active + RT exist (cold restart path).
+		ApplySessionSettingsFromConvars()
+		ScheduleDisplayParamsCatchup()
 		BeginVRNestedRenderLock()
 		BindRenderSceneHook()
 		SetupModelAndPlayerHooks()

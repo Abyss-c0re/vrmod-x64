@@ -302,7 +302,10 @@ function VRUtilOpenMenu()
 		frame:Remove()
 		if g_VR and g_VR.active then
 			VRUtilClientExit()
-			timer.Simple(1, function() VRUtilClientStart() end)
+			timer.Simple(0.75, function()
+				if g_VR and g_VR.active then return end
+				VRUtilClientStart()
+			end)
 		else
 			VRUtilClientStart()
 		end

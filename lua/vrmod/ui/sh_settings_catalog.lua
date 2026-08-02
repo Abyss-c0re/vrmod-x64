@@ -684,9 +684,14 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		return true
 	end
 	if action_id == "restart_vr" then
+		-- Full teardown needs a beat for OpenXR session to die; then cold start
+		-- re-reads all convars (SS/FOV/borders/offsets) once display is live.
 		if g_VR and g_VR.active then
 			VRUtilClientExit()
-			timer.Simple(1, function() VRUtilClientStart() end)
+			timer.Simple(0.75, function()
+				if g_VR and g_VR.active then return end
+				VRUtilClientStart()
+			end)
 		else
 			VRUtilClientStart()
 		end
