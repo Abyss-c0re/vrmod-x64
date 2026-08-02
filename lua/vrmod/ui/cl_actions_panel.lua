@@ -102,18 +102,24 @@ local function HardSave()
 	end
 end
 
+local editing = nil -- { index, field } while keyboard open
+
 local function StartEdit(index, field)
 	local list = List()
 	local row = list[index]
-	if not row then return end
+	if not row then
+		SetStatus("No row to edit", 2)
+		return
+	end
 	local text = ""
 	if field == "name" then text = row[1] or ""
 	elseif field == "press" then text = row[2] or ""
 	elseif field == "release" then text = row[3] or ""
 	end
 
-	if not vrmod.VRKeyboard_Open then
-		SetStatus("VR keyboard missing", 3)
+	if not isfunction(vrmod.VRKeyboard_Open) then
+		SetStatus("Keyboard missing — lua_refresh / restart", 4)
+		if vrmod.Toast then vrmod.Toast("VR keyboard not loaded", 4, "error") end
 		return
 	end
 
@@ -121,34 +127,51 @@ local function StartEdit(index, field)
 		or (field == "press" and "PRESS CMD")
 		or "RELEASE CMD"
 
-	vrmod.VRKeyboard_Open({
-		title = title,
-		text = text,
-		filter = field == "name" and function(ch)
-			ch = string.lower(ch or "")
-			if string.find("abcdefghijklmnopqrstuvwxyz0123456789_", ch, 1, true) then
-				return ch
-			end
-			return false
-		end or nil,
-		onDone = function(result)
-			local r = List()[index]
-			if not r then return end
-			if field == "name" then
-				r[1] = string.lower(string.gsub(result or "", "[^a-z0-9_]", ""))
-			elseif field == "press" then
-				r[2] = result or ""
-			else
-				r[3] = result or ""
-			end
-			SoftSave()
-			SetStatus("Updated " .. field, 2)
-			if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
-		end,
-		onCancel = function()
-			SetStatus("Edit cancelled", 1.5)
-		end,
-	})
+	editing = { index = index, field = field }
+
+	-- Defer so the Add/Name click does not steal focus from the new keyboard menu
+	timer.Simple(0.12, function()
+		if not open then return end
+		local ok = vrmod.VRKeyboard_Open({
+			title = title,
+			text = text,
+			filter = field == "name" and function(ch)
+				ch = string.lower(ch or "")
+				if string.find("abcdefghijklmnopqrstuvwxyz0123456789_", ch, 1, true) then
+					return ch
+				end
+				return false
+			end or nil,
+			onDone = function(result)
+				editing = nil
+				local r = List()[index]
+				if not r then return end
+				if field == "name" then
+					local n = string.lower(string.gsub(result or "", "[^a-z0-9_]", ""))
+					if n == "" then n = "action_" .. tostring(index) end
+					r[1] = n
+				elseif field == "press" then
+					r[2] = result or ""
+				else
+					r[3] = result or ""
+				end
+				SoftSave()
+				SetStatus("Saved " .. field .. ": " .. tostring(result or ""), 3)
+				if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
+			end,
+			onCancel = function()
+				editing = nil
+				SetStatus("Edit cancelled", 1.5)
+			end,
+		})
+		if not ok then
+			editing = nil
+			SetStatus("Keyboard failed to open", 4)
+			if vrmod.Toast then vrmod.Toast("Keyboard failed to open", 4, "error") end
+		else
+			SetStatus("Keyboard open — type, then Done", 4)
+		end
+	end)
 end
 
 local function rebuildButtons()
@@ -190,7 +213,10 @@ local function paint()
 	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
 	rebuildButtons()
 
-	local sub = "Add → name/press via keyboard · Save writes file"
+	local sub = "Add → keyboard in front of you · laser + trigger · Done"
+	if editing and vrmod.VRKeyboard_IsOpen and vrmod.VRKeyboard_IsOpen() then
+		sub = "Typing: " .. tostring(vrmod.VRKeyboard_GetText and vrmod.VRKeyboard_GetText() or "…")
+	end
 	if vrmod.cube and vrmod.cube.DrawChrome then
 		vrmod.cube.DrawChrome(0, 0, W, H, "CUSTOM ACTIONS", { subtitle = sub, headerH = HEADER })
 	else
@@ -319,14 +345,14 @@ local function activateAt(mx, my)
 			elseif btn.kind == "add" then
 				-- Do NOT push manifest / SetActionManifest here — freezes OpenXR.
 				g_VR.CustomActions = g_VR.CustomActions or {}
-				g_VR.CustomActions[#g_VR.CustomActions + 1] = { "new_action", "", "", "" }
+				local n = #g_VR.CustomActions + 1
+				local name = "action_" .. tostring(n)
+				g_VR.CustomActions[n] = { name, "echo " .. name, "", "" }
 				SoftSave()
 				rowScroll = maxScroll()
-				selected = #g_VR.CustomActions
-				SetStatus("Added — edit Name / Press", 3)
-				timer.Simple(0.05, function()
-					if open then StartEdit(selected, "name") end
-				end)
+				selected = n
+				SetStatus("Added " .. name .. " — keyboard for rename…", 3)
+				StartEdit(n, "name")
 				return
 			elseif btn.kind == "save" then
 				HardSave()

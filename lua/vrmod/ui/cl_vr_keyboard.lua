@@ -1,6 +1,6 @@
 if SERVER then return end
 -- =============================================================================
--- Shared VR keyboard (extracted for chat + custom actions + any future input).
+-- Shared VR keyboard (chat layout). Visible free-float in front of HMD.
 -- vrmod.VRKeyboard_Open({ title, text, onDone, onCancel, filter })
 -- =============================================================================
 
@@ -10,7 +10,7 @@ local UID = "vrmod_shared_keyboard"
 local open = false
 local session = nil
 
-local KW, KH = 555, 275
+local KW, KH = 555, 300
 local KEY_W, KEY_H = 45, 42
 local SPACE_W, ENTER_W, SPEC_W = 545, 65, 48
 local SPACING = 1.5
@@ -23,6 +23,7 @@ local function Theme()
 	return {
 		text = Color(255, 240, 244, 255),
 		muted = Color(200, 150, 165, 230),
+		hot = Color(255, 70, 100, 255),
 	}
 end
 
@@ -32,7 +33,11 @@ local function Font(key)
 end
 
 function vrmod.VRKeyboard_IsOpen()
-	return open
+	return open == true
+end
+
+function vrmod.VRKeyboard_GetText()
+	return session and session.text or ""
 end
 
 function vrmod.VRKeyboard_Close(commit)
@@ -43,59 +48,83 @@ function vrmod.VRKeyboard_Close(commit)
 	hook.Remove("PreRender", "vrmod_shared_kb_paint")
 	hook.Remove("VRMod_Input", "vrmod_shared_kb_input")
 	hook.Remove("VRMod_Exit", "vrmod_shared_kb_exit")
+	if g_VR and g_VR.menus and g_VR.menus[UID] then
+		g_VR.menus[UID].closeFunc = nil
+	end
 	if isfunction(VRUtilMenuClose) then
-		if g_VR and g_VR.menus and g_VR.menus[UID] then
-			g_VR.menus[UID].closeFunc = nil
-		end
-		VRUtilMenuClose(UID)
+		pcall(VRUtilMenuClose, UID)
 	end
 	if s then
 		if commit and s.onDone then
 			pcall(s.onDone, s.text or "")
-		elseif (not commit) and s.onCancel then
+		elseif not commit and s.onCancel then
 			pcall(s.onCancel)
 		end
 	end
 end
 
+local function PoseKeyboard()
+	-- Prefer free-float in front of HMD so it is never hidden under the actions panel
+	if vrmod.panel2vr and isfunction(vrmod.panel2vr.ComputeFloatPose) then
+		local p, a = vrmod.panel2vr.ComputeFloatPose(20, -8)
+		if p and a then return p, a, false end
+	end
+	if g_VR and g_VR.tracking and g_VR.tracking.hmd then
+		local hmd = g_VR.tracking.hmd
+		local yaw = Angle(0, hmd.ang.yaw, 0)
+		local pos = hmd.pos + yaw:Forward() * 18 + Vector(0, 0, -8)
+		local ang = Angle(0, yaw.yaw + 180, 90)
+		if g_VR.origin and g_VR.originAngle then
+			pos, ang = WorldToLocal(pos, ang, g_VR.origin, g_VR.originAngle)
+		end
+		return pos, ang, false
+	end
+	return Vector(5, 4, 3.5), Angle(0, -90, 10), true
+end
+
 local function paint()
 	if not open or not session then return end
 	if not (g_VR and g_VR.menus and g_VR.menus[UID]) then return end
+
+	-- Always repaint
+	g_VR.menus[UID].dirty = true
+
 	if isfunction(VRUtilMenuRenderStart) then VRUtilMenuRenderStart(UID) end
 
 	local T = Theme()
 	local C = vrmod.cube
-	local headerH = 22
+	local headerH = 48
 	local title = session.title or "KEYBOARD"
 
-	if C and C.DrawChrome then
-		C.DrawChrome(0, 0, KW, KH, title, {
-			subtitle = session.text or "",
-			pad = 6,
-			headerH = headerH,
-			barH = 3,
-		})
-	else
-		surface.SetDrawColor(12, 6, 10, 245)
-		surface.DrawRect(0, 0, KW, KH)
-		surface.SetDrawColor(196, 30, 58, 255)
-		surface.DrawRect(0, 0, KW, 3)
-		draw.SimpleText(title, Font("CubeLabel"), 8, 6, T.text)
-		draw.SimpleText(session.text or "", Font("CubeSmall"), 8, headerH - 2, T.muted)
-	end
+	-- Full clear background + field so text is always visible
+	surface.SetDrawColor(12, 6, 10, 250)
+	surface.DrawRect(0, 0, KW, KH)
+	surface.SetDrawColor(196, 30, 58, 255)
+	surface.DrawRect(0, 0, KW, 4)
 
-	local case = session.upper and upperCase or lowerCase
+	draw.SimpleText(title, Font("CubeLabel"), 10, 8, T.hot or Color(255, 70, 100), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+
+	-- Input field
+	surface.SetDrawColor(40, 14, 20, 255)
+	surface.DrawRect(8, 26, KW - 16, 28)
+	surface.SetDrawColor(255, 70, 100, 200)
+	surface.DrawOutlinedRect(8, 26, KW - 16, 28, 2)
+	local show = session.text or ""
+	if show == "" then show = "…" end
+	draw.SimpleText(show, Font("CubeLabel"), 14, 40, T.text or color_white, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+
+	local caseStr = session.upper and upperCase or lowerCase
 	local x = SPACING
 	local y = headerH + SPACING
 	local rowIndex = 0
 	local closeKeyCount = 0
-	local focused = g_VR.menuFocus == UID
+	local focused = (g_VR.menuFocus == UID)
 	local cx, cy = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
-	local clicked = session.justClicked and focused
-	session.justClicked = false
+	local clicked = session.pendingClick == true
+	if clicked then session.pendingClick = false end
 
-	for i = 1, #case do
-		local char = case:sub(i, i)
+	for i = 1, #caseStr do
+		local char = string.sub(caseStr, i, i)
 		if char == "\n" then
 			y = y + KEY_H + SPACING
 			rowIndex = rowIndex + 1
@@ -104,34 +133,33 @@ local function paint()
 			if char == "\3" then closeKeyCount = closeKeyCount + 1 end
 			local txt
 			if char == "\1" then txt = "Del"
-			elseif char == "\2" then txt = "Enter"
+			elseif char == "\2" then txt = "Done"
 			elseif char == "\4" then txt = "Shift"
-			elseif char == "\3" then txt = closeKeyCount == 1 and "Cancel" or "Close"
-			else txt = char == " " and " " or char
+			elseif char == "\3" then txt = (closeKeyCount == 1) and "Cancel" or "Close"
+			elseif char == " " then txt = "space"
+			else txt = char
 			end
 
-			local special = char == "\1" or char == "\2" or char == "\3" or char == "\4"
+			local special = char == "\1" or char == "\2" or char == "\3" or char == "\4" or char == " "
 			local w = char == " " and SPACE_W
 				or char == "\2" and ENTER_W
 				or (char == "\4" or char == "\3") and SPEC_W
 				or KEY_W
 			local h = KEY_H
-			if y + h > KH - 2 then h = math.max(20, KH - 2 - y) end
+			if y + h > KH - 2 then h = math.max(18, KH - 2 - y) end
 			local hovered = focused and cx > x and cx < x + w and cy > y and cy < y + h
 
-			if C and C.DrawSlot then
-				C.DrawSlot(x, y, w, h, txt == " " and "spc" or txt, hovered, special and hovered, true)
-			else
-				surface.SetDrawColor(hovered and Color(100, 22, 38, 255) or Color(55, 14, 24, 220))
-				surface.DrawRect(x, y, w, h)
-				draw.SimpleText(txt == " " and "spc" or txt, Font("CubeSmall"), x + w * 0.5, y + h * 0.5, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-			end
+			surface.SetDrawColor(hovered and Color(120, 30, 48, 255) or Color(55, 14, 24, 240))
+			surface.DrawRect(x, y, w, h)
+			surface.SetDrawColor(196, 30, 58, hovered and 255 or 120)
+			surface.DrawOutlinedRect(x, y, w, h, 1)
+			draw.SimpleText(txt, Font("CubeSmall"), x + w * 0.5, y + h * 0.5, T.text or color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 			if hovered and clicked then
 				if txt == "Del" then
 					local t = session.text or ""
 					session.text = string.sub(t, 1, math.max(0, #t - 1))
-				elseif txt == "Enter" then
+				elseif txt == "Done" then
 					vrmod.VRKeyboard_Close(true)
 					if isfunction(VRUtilMenuRenderEnd) then VRUtilMenuRenderEnd() end
 					return
@@ -142,11 +170,12 @@ local function paint()
 					if isfunction(VRUtilMenuRenderEnd) then VRUtilMenuRenderEnd() end
 					return
 				else
-					local ch = char
+					local ch = (txt == "space") and " " or char
 					if session.filter and isfunction(session.filter) then
-						local ok, filtered = pcall(session.filter, ch, session.text or "")
-						if ok and filtered ~= nil then ch = filtered end
-						if ch == false or ch == nil then ch = "" end
+						local ok, out = pcall(session.filter, ch, session.text or "")
+						if ok then
+							if out == false or out == nil then ch = "" else ch = tostring(out) end
+						end
 					end
 					if ch ~= "" then
 						session.text = (session.text or "") .. ch
@@ -160,21 +189,23 @@ local function paint()
 
 	if focused and cx >= 0 and cy >= 0 then
 		surface.SetDrawColor(255, 70, 100, 255)
-		surface.DrawRect(cx - 2, cy - 10, 4, 20)
-		surface.DrawRect(cx - 10, cy - 2, 20, 4)
+		surface.DrawRect(cx - 2, cy - 12, 4, 24)
+		surface.DrawRect(cx - 12, cy - 2, 24, 4)
 	end
 
 	if isfunction(VRUtilMenuRenderEnd) then VRUtilMenuRenderEnd() end
 end
 
---- opts: title, text, onDone(text), onCancel(), filter(char, text) -> char|false
 function vrmod.VRKeyboard_Open(opts)
 	opts = opts or {}
 	if open then
 		vrmod.VRKeyboard_Close(false)
 	end
-	if not (g_VR and g_VR.active) or not isfunction(VRUtilMenuOpen) then
-		if opts.onDone then pcall(opts.onDone, opts.text or "") end
+	if not (g_VR and g_VR.active) then
+		return false
+	end
+	if not isfunction(VRUtilMenuOpen) then
+		if vrmod.Toast then vrmod.Toast("VR menus unavailable", 3, "error") end
 		return false
 	end
 
@@ -185,16 +216,15 @@ function vrmod.VRKeyboard_Open(opts)
 		onCancel = opts.onCancel,
 		filter = opts.filter,
 		upper = false,
-		justClicked = false,
+		pendingClick = false,
 	}
 	open = true
 
-	local pos = Vector(5, 4, 3.5)
-	local ang = Angle(0, -90, 10)
-	VRUtilMenuOpen(UID, KW, KH, nil, true, pos, ang, 0.03, true, function()
+	local pos, ang, attach = PoseKeyboard()
+	VRUtilMenuOpen(UID, KW, KH, nil, attach, pos, ang, 0.028, true, function()
 		if open then
-			open = false
 			local s = session
+			open = false
 			session = nil
 			hook.Remove("PreRender", "vrmod_shared_kb_paint")
 			hook.Remove("VRMod_Input", "vrmod_shared_kb_input")
@@ -202,38 +232,49 @@ function vrmod.VRKeyboard_Open(opts)
 		end
 	end)
 
-	if not (g_VR.menus and g_VR.menus[UID]) then
+	if not (g_VR.menus and g_VR.menus[UID] and g_VR.menus[UID].rt) then
 		open = false
 		session = nil
+		if vrmod.Toast then vrmod.Toast("Keyboard failed to open", 3, "error") end
 		return false
 	end
 
 	local sm = g_VR.menus[UID]
 	sm.cubeMenu = true
-	if vrmod.MenuApplyHandAnchor then
-		local hand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
-		vrmod.MenuApplyHandAnchor(sm, 0.03, pos, ang, hand)
-	end
+	sm.grabbable = true
+	sm.freeFloat = not attach
+	sm.attachment = attach and true or false
+	sm.dirty = true
+	sm.pos = pos
+	sm.ang = ang
+	if not sm.scaleLocked then sm.scale = 0.028 end
 
 	hook.Add("PreRender", "vrmod_shared_kb_paint", function()
 		if not open then
 			hook.Remove("PreRender", "vrmod_shared_kb_paint")
 			return
 		end
+		if not (g_VR.menus and g_VR.menus[UID]) then
+			open = false
+			return
+		end
 		paint()
 	end)
 
 	hook.Add("VRMod_Input", "vrmod_shared_kb_input", function(action, pressed)
-		if not open then return end
-		if not pressed then return end
+		if not open or not pressed then return end
 		if g_VR.menuFocus ~= UID then return end
-		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
-		if session then session.justClicked = true end
+		if vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action) then
+			if session then session.pendingClick = true end
+		end
 	end)
 
 	hook.Add("VRMod_Exit", "vrmod_shared_kb_exit", function()
 		vrmod.VRKeyboard_Close(false)
 	end)
 
+	if vrmod.Toast then
+		vrmod.Toast((opts.title or "Keyboard") .. " — laser + trigger, Done to confirm", 3, "hint")
+	end
 	return true
 end
