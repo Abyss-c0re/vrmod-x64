@@ -47,10 +47,12 @@ function vrmod.OpenLauncherUnpaused()
 	end)
 end
 
---- Open New Game (map/mode/settings) without GameUI pause.
+--- Open New Game (Cube hand RT) without GameUI pause.
 function vrmod.OpenNewGameUnpaused()
 	vrmod.VRUnpauseWorld()
-	if vrmod.OpenNewGame then
+	if vrmod.VRNewGame_Open then
+		vrmod.VRNewGame_Open()
+	elseif vrmod.OpenNewGame then
 		vrmod.OpenNewGame()
 	elseif isfunction(VRUtilCreateMapBrowserWindow) then
 		VRUtilCreateMapBrowserWindow()

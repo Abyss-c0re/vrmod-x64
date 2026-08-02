@@ -686,14 +686,10 @@ function vrmod.OpenNewGame()
 	vrmod.VRNewGame_Open()
 end
 
-function vrmod.OpenNewGameUnpaused()
-	if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
-	vrmod.VRNewGame_Open()
-	timer.Simple(0.1, function()
-		if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
-	end)
-end
-
 concommand.Add("vrmod_newgame", function()
-	vrmod.OpenNewGameUnpaused()
+	if vrmod.OpenNewGameUnpaused then
+		vrmod.OpenNewGameUnpaused()
+	else
+		vrmod.VRNewGame_Open()
+	end
 end)
