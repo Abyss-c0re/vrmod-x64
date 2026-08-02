@@ -358,6 +358,25 @@ if CLIENT then
 		render.PopRenderTarget()
 	end
 
+	--- Native Cube menus (hub / newgame / settings): paint only when dirty.
+	-- Call from PreRender with force=false. Open/input use force=true or MarkMenuDirty.
+	function vrmod.NativeMenuPaint(uid, paintFn, force)
+		if not uid or not isfunction(paintFn) then return false end
+		if not menus[uid] then return false end
+		if not vrmod.MenuShouldRepaint(uid, force) then return false end
+		if not VRUtilMenuRenderStart(uid) then return false end
+		local ok, err = pcall(paintFn)
+		pcall(VRUtilMenuRenderEnd)
+		if not ok then
+			menus[uid].dirty = true
+			if vrmod.logger then
+				vrmod.logger.Warn("[UI] NativeMenuPaint %s: %s", tostring(uid), tostring(err))
+			end
+			return false
+		end
+		return true
+	end
+
 	function VRUtilIsMenuOpen(uid)
 		return menus[uid] ~= nil
 	end

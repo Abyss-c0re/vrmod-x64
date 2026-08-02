@@ -80,6 +80,15 @@ end
 local function SetStatus(msg, sec)
 	statusMsg = tostring(msg or "")
 	statusUntil = CurTime() + (sec or 2.5)
+	if g_VR and g_VR.menus and g_VR.menus[UID] then
+		g_VR.menus[UID].dirty = true
+	end
+end
+
+local function dirty()
+	if g_VR and g_VR.menus and g_VR.menus[UID] then
+		g_VR.menus[UID].dirty = true
+	end
 end
 
 local function MaxPlayers()
@@ -495,28 +504,20 @@ local function paintInner()
 	end
 end
 
-local function paint()
+local function paint(force)
 	if not open or not (g_VR and g_VR.menus and g_VR.menus[UID]) then return end
 	local m = g_VR.menus[UID]
-	-- Steady paint: no alwaysRedraw thrash (was fighting RT + hand anchor → flicker)
 	m.alwaysRedraw = false
 	m.paintInterval = 0
 	m.paintIntervalFocused = 0
-	m.dirty = true
-
-	local started = false
-	if isfunction(VRUtilMenuRenderStart) then
-		started = VRUtilMenuRenderStart(UID) and true or false
+	if isfunction(vrmod.NativeMenuPaint) then
+		vrmod.NativeMenuPaint(UID, paintInner, force)
+		return
 	end
-	if not started then return end
-
-	local ok, err = pcall(paintInner)
-	if isfunction(VRUtilMenuRenderEnd) then
-		pcall(VRUtilMenuRenderEnd)
-	end
-	if not ok and vrmod.logger then
-		vrmod.logger.Warn("[newgame] paint: %s", tostring(err))
-	end
+	if not force and not m.dirty then return end
+	if not isfunction(VRUtilMenuRenderStart) or not VRUtilMenuRenderStart(UID) then return end
+	pcall(paintInner)
+	if isfunction(VRUtilMenuRenderEnd) then pcall(VRUtilMenuRenderEnd) end
 end
 
 ------------------------------------------------------------------------
@@ -532,31 +533,38 @@ local function activateAt(mx, my)
 			return
 		elseif b.kind == "tab" then
 			tab = b.id
+			dirty()
 			return
 		elseif b.kind == "cat" then
 			catIndex = b.index
 			mapScroll = 0
 			local maps = currentMaps()
 			if maps[1] then selectedMap = maps[1] end
+			dirty()
 			return
 		elseif b.kind == "cat_scroll" then
 			catScroll = math.Clamp(catScroll + b.dir, 0, math.max(0, #categories - VIS_CATS))
+			dirty()
 			return
 		elseif b.kind == "map_scroll" then
 			mapScroll = math.Clamp(mapScroll + b.dir, 0, maxMapScroll())
+			dirty()
 			return
 		elseif b.kind == "map" then
 			selectedMap = b.map
+			dirty()
 			return
 		elseif b.kind == "gm_nav" then
 			gmIndex = gmIndex + b.dir
 			if gmIndex < 1 then gmIndex = #gamemodes end
 			if gmIndex > #gamemodes then gmIndex = 1 end
+			dirty()
 			return
 		elseif b.kind == "mp_nav" then
 			maxPlayersIdx = maxPlayersIdx + b.dir
 			if maxPlayersIdx < 1 then maxPlayersIdx = #maxPlayersOpts end
 			if maxPlayersIdx > #maxPlayersOpts then maxPlayersIdx = 1 end
+			dirty()
 			return
 		elseif b.kind == "toggle" then
 			if b.id == "lan" then
@@ -568,6 +576,7 @@ local function activateAt(mx, my)
 			elseif b.id == "p2pf" then
 				p2pFriends = not p2pFriends
 			end
+			dirty()
 			return
 		elseif b.kind == "host_cycle" then
 			local found = 1
@@ -575,6 +584,7 @@ local function activateAt(mx, my)
 				if h == hostname then found = i break end
 			end
 			hostname = HOST_PRESETS[(found % #HOST_PRESETS) + 1]
+			dirty()
 			return
 		elseif b.kind == "start" then
 			startGame()
@@ -679,7 +689,7 @@ function vrmod.VRNewGame_Open()
 	end
 
 	local lastAnchor = 0
-	paint()
+	paint(true)
 	hook.Add("PreRender", "vr_newgame_paint", function()
 		if not open then
 			hook.Remove("PreRender", "vr_newgame_paint")
@@ -690,14 +700,16 @@ function vrmod.VRNewGame_Open()
 			return
 		end
 		local m = g_VR.menus[UID]
-		-- Re-anchor at most ~10Hz (every-frame anchor jitters → flicker)
 		local now = CurTime()
-		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor and (now - lastAnchor) > 0.1 then
+		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor and (now - lastAnchor) > 0.35 then
 			lastAnchor = now
-			livePos, liveAng, liveScale = WristPose()
-			vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
+			local np, na, ns = WristPose()
+			if not livePos or np:DistToSqr(livePos) > 0.25 then
+				livePos, liveAng, liveScale = np, na, ns
+				vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
+			end
 		end
-		paint()
+		paint(false)
 	end)
 
 	hook.Add("VRMod_Input", "vr_newgame_input", function(action, pressed)
@@ -706,11 +718,11 @@ function vrmod.VRNewGame_Open()
 			vrmod.VRNewGame_Close()
 			return
 		end
-		if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
 		if not pressed then return end
 		if g_VR.menuFocus ~= UID then return end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+		dirty()
 	end)
 
 	hook.Add("VRMod_Exit", "vr_newgame_exit", function()

@@ -67,6 +67,9 @@ end
 local function SetStatus(msg, sec)
 	statusMsg = tostring(msg or "")
 	statusUntil = CurTime() + (sec or 2.5)
+	if g_VR and g_VR.menus and g_VR.menus[UID] then
+		g_VR.menus[UID].dirty = true
+	end
 end
 
 local function MenuItems()
@@ -119,81 +122,84 @@ local function openSettings()
 	end)
 end
 
-local function paint()
+local function paintInner()
+	local T = Theme()
+	local focused = g_VR.menuFocus == UID
+	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
+	rebuildButtons()
+
+	if vrmod.cube and vrmod.cube.DrawChrome then
+		vrmod.cube.DrawChrome(0, 0, W, H, "gVRMod", {
+			subtitle = "PAUSE · CUBE FALLBACK",
+			headerH = HEADER,
+		})
+	else
+		local bg = T.bg or Color(12, 6, 10, 250)
+		surface.SetDrawColor(bg.r, bg.g, bg.b, bg.a or 250)
+		surface.DrawRect(0, 0, W, H)
+	end
+
+	local closeHot = focused and mx >= W - 52 and mx <= W - 14 and my >= 14 and my <= 52
+	local hc = closeHot and (T.hot or Color(255, 70, 100)) or (T.header or Color(196, 30, 58))
+	surface.SetDrawColor(hc.r, hc.g, hc.b, hc.a or 255)
+	surface.DrawRect(W - 52, 14, 38, 38)
+	draw.SimpleText("X", "DermaLarge", W - 33, 33, T.text or color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+	for _, btn in ipairs(buttons) do
+		if btn.kind == "item" then
+			local isHot = focused and mx >= btn.x and mx <= btn.x + btn.w and my >= btn.y and my <= btn.y + btn.h
+			local primary = (btn.id == "newgame" or btn.id == "settings")
+			if vrmod.cube and vrmod.cube.DrawSlot then
+				vrmod.cube.DrawSlot(btn.x, btn.y, btn.w, btn.h, nil, isHot, primary, true)
+			else
+				local rc = isHot and (T.rowHot or Color(90, 22, 36)) or (T.row or Color(40, 14, 20))
+				surface.SetDrawColor(rc.r, rc.g, rc.b, rc.a or 255)
+				surface.DrawRect(btn.x, btn.y, btn.w, btn.h)
+			end
+			draw.SimpleText(btn.item.label, Font("CubeLabel") or "DermaDefaultBold",
+				btn.x + 18, btn.y + 14, T.text or color_white, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+			draw.SimpleText(btn.item.hint or "", "DermaDefault",
+				btn.x + 18, btn.y + 36, T.muted or Color(200, 150, 165), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+		end
+	end
+
+	local gm = engine.ActiveGamemode and engine.ActiveGamemode() or "?"
+	local map = game.GetMap and game.GetMap() or "?"
+	draw.SimpleText(string.format("%s  ·  %s", map, gm), "DermaDefault",
+		PAD, H - 36, T.muted or Color(200, 150, 165), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+	if statusMsg ~= "" and CurTime() < statusUntil then
+		draw.SimpleText(statusMsg, Font("CubeLabel") or "DermaDefaultBold",
+			W - PAD, H - 36, T.ok or Color(90, 220, 150), TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+	end
+
+	if focused and mx >= 0 and my >= 0 then
+		local hotc = T.hot or Color(255, 70, 100)
+		surface.SetDrawColor(hotc.r, hotc.g, hotc.b, 255)
+		surface.DrawRect(mx - 2, my - 14, 4, 28)
+		surface.DrawRect(mx - 14, my - 2, 28, 4)
+	end
+end
+
+local function paint(force)
 	if not open or not (g_VR and g_VR.menus and g_VR.menus[UID]) then return end
 	local m = g_VR.menus[UID]
-	m.dirty = true
 	m.alwaysRedraw = false
 	m.paintInterval = 0
-	m.paintIntervalFocused = 0
-
-	local started = false
-	if isfunction(VRUtilMenuRenderStart) then
-		started = VRUtilMenuRenderStart(UID) and true or false
+	m.paintIntervalFocused = 0 -- cursor quantize dirties via MenuShouldRepaint
+	if isfunction(vrmod.NativeMenuPaint) then
+		vrmod.NativeMenuPaint(UID, paintInner, force)
+		return
 	end
-	if not started then return end
-
-	local ok, err = pcall(function()
-		local T = Theme()
-		local focused = g_VR.menuFocus == UID
-		local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
-		rebuildButtons()
-
-		if vrmod.cube and vrmod.cube.DrawChrome then
-			vrmod.cube.DrawChrome(0, 0, W, H, "gVRMod", {
-				subtitle = "PAUSE · CUBE FALLBACK",
-				headerH = HEADER,
-			})
-		else
-			local bg = T.bg or Color(12, 6, 10, 250)
-			surface.SetDrawColor(bg.r, bg.g, bg.b, bg.a or 250)
-			surface.DrawRect(0, 0, W, H)
-		end
-
-		local closeHot = focused and mx >= W - 52 and mx <= W - 14 and my >= 14 and my <= 52
-		local hc = closeHot and (T.hot or Color(255, 70, 100)) or (T.header or Color(196, 30, 58))
-		surface.SetDrawColor(hc.r, hc.g, hc.b, hc.a or 255)
-		surface.DrawRect(W - 52, 14, 38, 38)
-		draw.SimpleText("X", "DermaLarge", W - 33, 33, T.text or color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-
-		for _, btn in ipairs(buttons) do
-			if btn.kind == "item" then
-				local isHot = focused and mx >= btn.x and mx <= btn.x + btn.w and my >= btn.y and my <= btn.y + btn.h
-				local primary = (btn.id == "newgame" or btn.id == "settings")
-				if vrmod.cube and vrmod.cube.DrawSlot then
-					vrmod.cube.DrawSlot(btn.x, btn.y, btn.w, btn.h, nil, isHot, primary, true)
-				else
-					local rc = isHot and (T.rowHot or Color(90, 22, 36)) or (T.row or Color(40, 14, 20))
-					surface.SetDrawColor(rc.r, rc.g, rc.b, rc.a or 255)
-					surface.DrawRect(btn.x, btn.y, btn.w, btn.h)
-				end
-				draw.SimpleText(btn.item.label, Font("CubeLabel") or "DermaDefaultBold",
-					btn.x + 18, btn.y + 14, T.text or color_white, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-				draw.SimpleText(btn.item.hint or "", "DermaDefault",
-					btn.x + 18, btn.y + 36, T.muted or Color(200, 150, 165), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-			end
-		end
-
-		local gm = engine.ActiveGamemode and engine.ActiveGamemode() or "?"
-		local map = game.GetMap and game.GetMap() or "?"
-		draw.SimpleText(string.format("%s  ·  %s", map, gm), "DermaDefault",
-			PAD, H - 36, T.muted or Color(200, 150, 165), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-		if statusMsg ~= "" and CurTime() < statusUntil then
-			draw.SimpleText(statusMsg, Font("CubeLabel") or "DermaDefaultBold",
-				W - PAD, H - 36, T.ok or Color(90, 220, 150), TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
-		end
-
-		if focused and mx >= 0 and my >= 0 then
-			local hotc = T.hot or Color(255, 70, 100)
-			surface.SetDrawColor(hotc.r, hotc.g, hotc.b, 255)
-			surface.DrawRect(mx - 2, my - 14, 4, 28)
-			surface.DrawRect(mx - 14, my - 2, 28, 4)
-		end
-	end)
-
+	-- Fallback without helper
+	if not force and m.dirty ~= true then return end
+	if not isfunction(VRUtilMenuRenderStart) or not VRUtilMenuRenderStart(UID) then return end
+	pcall(paintInner)
 	if isfunction(VRUtilMenuRenderEnd) then pcall(VRUtilMenuRenderEnd) end
-	if not ok and vrmod.logger then
-		vrmod.logger.Warn("[hub] paint: %s", tostring(err))
+end
+
+local function dirty()
+	if g_VR and g_VR.menus and g_VR.menus[UID] then
+		g_VR.menus[UID].dirty = true
 	end
 end
 
@@ -273,7 +279,8 @@ function vrmod.VRHub_Open()
 	end)
 
 	if open and g_VR.menus and g_VR.menus[UID] then
-		g_VR.menus[UID].dirty = true
+		dirty()
+		paint(true)
 		return
 	end
 	if not isfunction(VRUtilMenuOpen) then
@@ -335,7 +342,7 @@ function vrmod.VRHub_Open()
 	print("[gVRMod] Cube launcher on " .. tostring(wrist) .. " hand")
 
 	local lastAnchor = 0
-	paint()
+	paint(true)
 	hook.Add("PreRender", "vr_hub_paint", function()
 		if not open then
 			hook.Remove("PreRender", "vr_hub_paint")
@@ -347,12 +354,17 @@ function vrmod.VRHub_Open()
 		end
 		local m = g_VR.menus[UID]
 		local now = CurTime()
-		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor and (now - lastAnchor) > 0.1 then
+		-- Rare re-anchor only (MenuApplyHandAnchor every frame = flicker)
+		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor and (now - lastAnchor) > 0.35 then
 			lastAnchor = now
-			livePos, liveAng, liveScale = WristPose()
-			vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
+			local np, na, ns = WristPose()
+			if not livePos or np:DistToSqr(livePos) > 0.25 or math.abs((na and na.y or 0) - (liveAng and liveAng.y or 0)) > 2 then
+				livePos, liveAng, liveScale = np, na, ns
+				vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
+				-- pose change only — no full RT repaint required for 3D placement
+			end
 		end
-		paint()
+		paint(false)
 	end)
 
 	hook.Add("VRMod_Input", "vr_hub_input", function(action, pressed)
@@ -360,6 +372,7 @@ function vrmod.VRHub_Open()
 		if g_VR.menuFocus ~= UID then return end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+		dirty()
 	end)
 
 	hook.Add("VRMod_Exit", "vr_hub_exit", function()
