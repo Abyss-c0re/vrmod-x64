@@ -123,7 +123,7 @@ if CLIENT then
 			if not g_VR.menuCursorX then return end
 			if g_VR.menus and g_VR.menus.numpadmenu then
 				g_VR.menus.numpadmenu.cubeMenu = true
-				-- Keep free-float if user grabbed the panel (WayVR-style)
+				-- Keep free-float if user grabbed the panel
 				if not g_VR.menus.numpadmenu.freeFloat then
 					g_VR.menus.numpadmenu.attachment = true
 				end

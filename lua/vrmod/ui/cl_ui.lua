@@ -14,9 +14,9 @@ if CLIENT then
 	-- Global UI scale: VR menus (3D2D) + Derma frames. 1.0 = default.
 	local cv_ui_scale = CreateClientConVar("vrmod_ui_scale", "1", true, FCVAR_ARCHIVE,
 		"Global VR/Derma UI scale (0.5–2.0)", 0.5, 2.0)
-	-- WayVR-style free grab: grip while laser-focused on a panel to drag it into world space.
+	-- Free grab: grip while laser-focused on a panel to drag it into world space.
 	local cv_menu_grab = CreateClientConVar("vrmod_menu_grab", "1", true, FCVAR_ARCHIVE,
-		"Grip + laser on VR menu panels to free-move them (WayVR overlay style)", 0, 1)
+		"Grip + laser on VR menu panels to free-move them (world-space overlay)", 0, 1)
 	-- Corner resize: grip + pull bottom-right corner to scale a panel.
 	local cv_menu_resize = CreateClientConVar("vrmod_menu_resize", "1", true, FCVAR_ARCHIVE,
 		"Grip + pull panel corner to resize (scale) VR menus", 0, 1)
