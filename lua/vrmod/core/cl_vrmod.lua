@@ -1093,6 +1093,16 @@ if CLIENT then
 
 	-- 1) Startup checks & init
 	local function PerformStartup()
+		-- Flush any deferred exit first so restart is never racing soft-pause.
+		timer.Remove("vrmod_async_shutdown")
+		timer.Remove("vrmod_mat_queue_restore")
+		timer.Remove("vrmod_mat_queue_apply")
+		matQueueAppliedForSession = false
+		pcall(function()
+			if isfunction(VRMOD_SetSubmitEnabled) then VRMOD_SetSubmitEnabled(false) end
+			if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end -- full teardown (cb59aeb)
+		end)
+
 		local err = vrmod.GetStartupError()
 		if err then
 			vrmod.logger.Err("Failed to start: " .. err)
@@ -1102,19 +1112,6 @@ if CLIENT then
 			return false
 		end
 
-		-- Cancel any deferred exit pause so restart is deterministic.
-		timer.Remove("vrmod_async_shutdown")
-		timer.Remove("vrmod_mat_queue_restore")
-		timer.Remove("vrmod_mat_queue_apply")
-		matQueueAppliedForSession = false
-
-		-- Soft pause only (keeps OpenXR instance). Do not force a hard kill here —
-		-- that required map/module reload to start VR again.
-		pcall(function()
-			if isfunction(VRMOD_SetSubmitEnabled) then VRMOD_SetSubmitEnabled(false) end
-			if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end
-		end)
-
 		local okInit, initErr = pcall(function()
 			if VRMOD_Init == false or VRMOD_Init() == false then
 				error("VRMOD_Init returned false")
@@ -1123,8 +1120,7 @@ if CLIENT then
 		if not okInit then
 			vrmod.logger.Err("Init failed: %s", tostring(initErr))
 			if vrmod.Toast then
-				local hint = (vrmod.IsOpenXR and vrmod.IsOpenXR()) and "OpenXR runtime" or "SteamVR/OpenVR"
-				vrmod.Toast("VR_Init failed — is " .. hint .. " running?", 8, "error")
+				vrmod.Toast("VR_Init failed — OpenXR/OpenVR runtime running?", 8, "error")
 			end
 			return false
 		end
@@ -1636,23 +1632,19 @@ if CLIENT then
 			g_VR.stereoEye = nil
 			EndVRNestedRenderLock()
 
-			-- 3) Soft-pause OpenXR next tick (hooks already off). Keeps instance warm
-			--    so vrmod_start works without map/module reload.
-			timer.Create("vrmod_async_shutdown", 0.05, 1, function()
-				if g_VR and g_VR.active then return end
-				pcall(function()
-					if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end
-				end)
+			-- 3) Full OpenXR teardown NOW (hooks already off). Next vrmod_start = cold Init.
+			--    Async defer raced Init "already running" with submit still disabled.
+			pcall(function()
+				if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end
 			end)
 
-			-- 4) Restore soft pins only — never mat_queue_mode under OpenXR.
+			-- 4) Restore soft pins only — never thrash mat_queue under OpenXR.
 			ScheduleConvarRestore(0.2)
 
-			vrmod.logger.Info("Ended VR session (soft-pause; restart without reload)")
+			vrmod.logger.Info("Ended VR session (full teardown; cold restart OK)")
 		end
 
 		hook.Add("ShutDown", "vrutil_hook_shutdown", function()
-			-- Game/process exit: soft pause is enough; module unload does full XR kill.
 			if IsValid(LocalPlayer()) and g_VR.net and g_VR.net[LocalPlayer():SteamID()] then
 				if g_VR.active then
 					g_VR.active = false
