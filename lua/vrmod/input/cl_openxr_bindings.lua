@@ -623,7 +623,7 @@ function vrmod.bindings.SnapshotHeldSources()
 	return held
 end
 
---- Rising-edge poll for rebind listen.
+--- Rising-edge poll for single-bind listen.
 --- held: table mutated across frames (id → true while down).
 --- Returns: newPressIds{}, liveCount, hasAPI
 function vrmod.bindings.PollListenPresses(held)
@@ -654,6 +654,90 @@ function vrmod.bindings.PollListenPresses(held)
 		end
 	end
 	return news, live, true
+end
+
+--- Currently held source ids (sorted), ignoring an optional set (UI click leftovers).
+--- Returns: ids{}, idSet{}, hasAPI
+function vrmod.bindings.GetHeldSourceList(ignoreSet)
+	ignoreSet = ignoreSet or {}
+	if not vrmod.bindings.HasSourcesAPI() then
+		return {}, {}, false
+	end
+	local src = vrmod.bindings.GetSources()
+	if not src then
+		return {}, {}, true
+	end
+	local ids, set = {}, {}
+	for id, s in pairs(src) do
+		if type(id) == "string" and type(s) == "table" and vrmod.bindings.SourceIsPressed(s) then
+			if not ignoreSet[id] then
+				ids[#ids + 1] = id
+				set[id] = true
+			end
+		end
+	end
+	table.sort(ids)
+	return ids, set, true
+end
+
+local function SameIdSet(a, b)
+	if not a or not b then return false end
+	local na, nb = 0, 0
+	for _ in pairs(a) do na = na + 1 end
+	for _ in pairs(b) do nb = nb + 1 end
+	if na ~= nb then return false end
+	for id in pairs(a) do
+		if not b[id] then return false end
+	end
+	return true
+end
+
+--- Chord hold-to-save state machine.
+--- state: { ignore, chordSet, holdStart }
+--- holdSec: seconds to hold a stable simultaneous set (default 3)
+--- Returns: statusMsg, savedSources or nil, hasAPI
+function vrmod.bindings.TickChordHold(state, holdSec)
+	holdSec = holdSec or 3
+	state = state or {}
+	state.ignore = state.ignore or {}
+
+	-- Clear ignore for buttons that have been released
+	local rawHeld = vrmod.bindings.SnapshotHeldSources()
+	for id in pairs(state.ignore) do
+		if not rawHeld[id] then
+			state.ignore[id] = nil
+		end
+	end
+
+	local ids, set, hasAPI = vrmod.bindings.GetHeldSourceList(state.ignore)
+	if not hasAPI then
+		return "No controller source API", nil, false
+	end
+
+	if #ids < 2 then
+		state.chordSet = nil
+		state.holdStart = nil
+		if #ids == 1 then
+			return "Need 2+ held… (only " .. ids[1] .. ")", nil, true
+		end
+		return "Hold 2+ buttons together for " .. tostring(holdSec) .. "s", nil, true
+	end
+
+	if not state.chordSet or not SameIdSet(state.chordSet, set) then
+		-- Set changed — restart timer (does not accumulate past presses)
+		state.chordSet = set
+		state.holdStart = CurTime()
+		return "Hold steady: " .. table.concat(ids, " + ") .. "  0.0/" .. holdSec .. "s", nil, true
+	end
+
+	local elapsed = CurTime() - (state.holdStart or CurTime())
+	if elapsed >= holdSec then
+		local out = {}
+		for _, id in ipairs(ids) do out[#out + 1] = id end
+		return "Chord saved", out, true
+	end
+
+	return string.format("Hold steady: %s  %.1f/%ds", table.concat(ids, " + "), elapsed, holdSec), nil, true
 end
 
 -- Load on file include

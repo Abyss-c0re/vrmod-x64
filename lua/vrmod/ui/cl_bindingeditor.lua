@@ -17,13 +17,16 @@ local function SourceLabel(id)
 	return id
 end
 
+local CHORD_HOLD_SEC = 3
+
 local function BeginListen(action, chord)
-	local held = (vrmod.bindings.SnapshotHeldSources and vrmod.bindings.SnapshotHeldSources()) or {}
+	local ignore = (vrmod.bindings.SnapshotHeldSources and vrmod.bindings.SnapshotHeldSources()) or {}
 	listen = {
 		action = action,
 		chord = not not chord,
-		collected = {},
-		held = held,
+		held = {},
+		ignore = ignore,
+		chordState = { ignore = ignore },
 		armUntil = CurTime() + 0.2,
 	}
 	if vrmod.bindings.SetListenSuppress then
@@ -36,28 +39,6 @@ local function StopListen()
 	if vrmod.bindings.SetListenSuppress then
 		vrmod.bindings.SetListenSuppress(false)
 	end
-end
-
-local function FinishListen(confirm)
-	if not listen then return end
-	if confirm and listen.chord then
-		local collected = listen.collected or {}
-		if #collected < 2 then
-			if vrmod.Toast then
-				vrmod.Toast("Chord needs 2+ buttons held together", 3, "hint")
-			else
-				print("[VRMod] Chord needs 2+ buttons")
-			end
-			return -- keep listening
-		end
-		local prev = vrmod.bindings.GetMap().actions[listen.action]
-		local set = prev and prev.set or nil
-		local warnings = vrmod.bindings.SetActionBinding(listen.action, collected, "all", set)
-		if warnings and warnings[1] and vrmod.Toast then
-			vrmod.Toast(warnings[1], 3, "hint")
-		end
-	end
-	StopListen()
 end
 
 local function RefreshConflicts()
@@ -150,11 +131,7 @@ local function RefreshList(scroll, scrollTo)
 		local txt = vrmod.bindings.FormatRule(rule, true)
 		if listen and listen.action == info.id then
 			if listen.chord then
-				local parts = {}
-				for _, id in ipairs(listen.collected or {}) do
-					parts[#parts + 1] = SourceLabel(id)
-				end
-				txt = "CHORD (hold 2+): " .. (#parts > 0 and table.concat(parts, " + ") or "…")
+				txt = listen.lastStatus or ("Hold 2+ buttons " .. CHORD_HOLD_SEC .. "s…")
 			else
 				txt = "Press one controller button…"
 			end
@@ -247,7 +224,7 @@ concommand.Add("vrmod_bindingeditor", function()
 	help:SetPos(10, 28)
 	help:SetSize(640, 36)
 	help:SetWrap(true)
-	help:SetText("Bind = one button. Chord = hold 2+ buttons then Confirm (AND). Def = Quest default. On foot vs Vehicle are separate sets (shared buttons OK across sets). Red = hard conflict.")
+	help:SetText("Bind = press one button. Chord = hold 2+ buttons steady for 3 seconds (saves auto). Cancel aborts. Def = Quest default. On foot / Vehicle sets. Red = hard conflict.")
 
 	-- Action-set tabs (SteamVR main / driving)
 	local tabBar = vgui.Create("DPanel", frame)
@@ -294,21 +271,9 @@ concommand.Add("vrmod_bindingeditor", function()
 	bar:SetSize(644, 40)
 	bar.Paint = nil
 
-	local btnConfirm = vgui.Create("DButton", bar)
-	btnConfirm:SetText("Confirm Chord")
-	btnConfirm:SetSize(120, 28)
-	btnConfirm:Dock(LEFT)
-	btnConfirm:DockMargin(0, 4, 6, 4)
-	btnConfirm.DoClick = function()
-		if listen and listen.chord then
-			FinishListen(true)
-			FullRefresh()
-		end
-	end
-
 	local btnCancel = vgui.Create("DButton", bar)
 	btnCancel:SetText("Cancel Listen")
-	btnCancel:SetSize(110, 28)
+	btnCancel:SetSize(120, 28)
 	btnCancel:Dock(LEFT)
 	btnCancel:DockMargin(0, 4, 6, 4)
 	btnCancel.DoClick = function()
@@ -389,26 +354,29 @@ concommand.Add("vrmod_bindingeditor", function()
 			srcLabel:SetText("Live: " .. (#pressed > 0 and table.concat(pressed, ", ") or "(none) — press a controller button"))
 
 			if listen and CurTime() >= (listen.armUntil or 0) then
-				local news = {}
-				if vrmod.bindings.PollListenPresses then
-					news = vrmod.bindings.PollListenPresses(listen.held)
-				end
-				for _, id in ipairs(news) do
-					if listen.chord then
-						local found = false
-						for _, c in ipairs(listen.collected) do
-							if c == id then found = true break end
+				if listen.chord and vrmod.bindings.TickChordHold then
+					listen.chordState = listen.chordState or { ignore = listen.ignore or {} }
+					listen.chordState.ignore = listen.ignore or listen.chordState.ignore
+					local status, saved = vrmod.bindings.TickChordHold(listen.chordState, CHORD_HOLD_SEC)
+					if status then listen.lastStatus = status end
+					if saved then
+						local prev = vrmod.bindings.GetMap().actions[listen.action]
+						local set = prev and prev.set or nil
+						vrmod.bindings.SetActionBinding(listen.action, saved, "all", set)
+						StopListen()
+						FullRefresh()
+					elseif CurTime() - lastListenRefresh > 0.15 then
+						lastListenRefresh = CurTime()
+						if IsValid(editorScroll) then
+							RefreshList(editorScroll, editorScroll:GetVBar():GetScroll())
 						end
-						if not found then
-							listen.collected[#listen.collected + 1] = id
-							if CurTime() - lastListenRefresh > 0.1 then
-								lastListenRefresh = CurTime()
-								if IsValid(editorScroll) then
-									RefreshList(editorScroll, editorScroll:GetVBar():GetScroll())
-								end
-							end
-						end
-					else
+					end
+				elseif not listen.chord then
+					local news = {}
+					if vrmod.bindings.PollListenPresses then
+						news = vrmod.bindings.PollListenPresses(listen.held)
+					end
+					for _, id in ipairs(news) do
 						local prev = vrmod.bindings.GetMap().actions[listen.action]
 						local set = prev and prev.set or nil
 						vrmod.bindings.SetActionBinding(listen.action, { id }, "any", set)
