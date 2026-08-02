@@ -117,8 +117,22 @@ local function writeStatus(line)
 	end)
 end
 
+--- Signal native cube_webui_launcher to release OpenXR (seamless handoff, no black gap).
+local function writeHandoff(phase)
+	pcall(function()
+		file.Write("vrmod/cube_handoff.txt",
+			string.format("phase=%s\nts=%d\n", tostring(phase), os.time()))
+	end)
+end
+
+local handoffSignaled = false
+local handoffDelayUntil = 0
+
 local function forceStartVR()
-	if g_VR and g_VR.active then return true end
+	if g_VR and g_VR.active then
+		writeHandoff("vr_active")
+		return true
+	end
 	-- Ensure module is loaded (openxr_launch can run before core finishes require)
 	if not isfunction(VRUtilClientStart) then
 		if vrmod.LoadNativeModule then pcall(vrmod.LoadNativeModule) end
@@ -126,11 +140,28 @@ local function forceStartVR()
 	if not isfunction(VRUtilClientStart) then
 		log("VRUtilClientStart missing (module not loaded yet)")
 		writeStatus("wait_module")
+		writeHandoff("wait_module")
 		return false
 	end
+
+	-- Ask native launcher to drop OpenXR first (only one session). Wait ~1.2s once.
+	if not handoffSignaled then
+		handoffSignaled = true
+		handoffDelayUntil = CurTime() + 1.25
+		writeHandoff("take_xr")
+		writeStatus("take_xr_signaled")
+		log("signaled cube_webui take_xr — waiting for native to release session")
+		return false
+	end
+	if CurTime() < handoffDelayUntil then
+		writeStatus("wait_native_release")
+		return false
+	end
+
 	startAttempts = startAttempts + 1
 	log("force VRUtilClientStart attempt %d", startAttempts)
 	writeStatus("start_attempt_" .. tostring(startAttempts))
+	writeHandoff("starting_xr")
 	-- Always force — loading screen has cursor; normal vrmod_start waits forever
 	if isfunction(RunConsoleCommand) then
 		pcall(RunConsoleCommand, "vrmod_start", "force")
@@ -143,6 +174,8 @@ local function forceStartVR()
 	end
 	if g_VR and g_VR.active then
 		writeStatus("vr_active")
+		writeHandoff("vr_active")
+		pcall(function() file.Write("vrmod/cube_ready.txt", "ready=1\n") end)
 		return true
 	end
 	writeStatus("start_returned_inactive")
@@ -234,6 +267,8 @@ local function bootFromLaunch()
 
 	-- Force openxr backend preference every boot for launcher sessions
 	setStrCvar("vrmod_prefer_backend", "openxr")
+	writeHandoff("boot")
+	writeStatus("boot")
 
 	timer.Create("vrmod_openxr_launch_start", 0.5, 0, function()
 		if g_VR and g_VR.active then
