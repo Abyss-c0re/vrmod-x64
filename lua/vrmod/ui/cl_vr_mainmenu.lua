@@ -116,14 +116,21 @@ function vrmod.BindMainMenuToVR()
 	if not (g_VR and g_VR.active) then return false end
 	if not (vrmod.panel2vr and vrmod.panel2vr.ManifestPanel) then return false end
 
-	local panel, meta = vrmod.FindMainMenuPanel()
-	if not IsValid(panel) then
-		-- In-map: try activate game UI (ESC / pause)
-		if InGame() and gui and gui.ActivateGameUI then
-			pcall(gui.ActivateGameUI)
-			panel, meta = vrmod.FindMainMenuPanel()
+	-- Never ActivateGameUI in VR — it pauses singleplayer and freezes VR input.
+	-- Prefer the unpaused VR hub launcher instead.
+	if g_VR and g_VR.active then
+		if vrmod.OpenLauncherUnpaused then
+			vrmod.OpenLauncherUnpaused()
+			return true
+		end
+		if vrmod.VRHub_Open then
+			if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
+			vrmod.VRHub_Open()
+			return true
 		end
 	end
+
+	local panel, meta = vrmod.FindMainMenuPanel()
 	if not IsValid(panel) then return false end
 
 	if boundPanel == panel and boundUid and g_VR.menus and g_VR.menus[boundUid] then
@@ -318,13 +325,7 @@ hook.Add("VRMod_Exit", "vrmod_menu_vr_exit", function()
 	bootDone = false
 end)
 
--- ESC / pause menu → re-bind GameUI into cinema
-hook.Add("OnPauseMenuShow", "vrmod_menu_vr_pause", function()
-	if not MenuVR() or not (g_VR and g_VR.active) then return end
-	timer.Simple(0.12, function()
-		vrmod.BindMainMenuToVR()
-	end)
-end)
+-- ESC handled by cl_vr_unpause (no GameUI / no SP pause)
 
 -- After map change while menu VR on, re-bind when GameUI reappears
 hook.Add("OnEntityCreated", "vrmod_menu_vr_map", function()

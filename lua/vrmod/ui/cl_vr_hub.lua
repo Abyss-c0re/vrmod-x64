@@ -108,9 +108,13 @@ end
 
 local function openNewGame()
 	timer.Simple(0.05, function()
-		if isfunction(vrmod.OpenNewGame) then
+		if vrmod.OpenNewGameUnpaused then
+			vrmod.OpenNewGameUnpaused()
+		elseif isfunction(vrmod.OpenNewGame) then
+			if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 			vrmod.OpenNewGame()
 		elseif isfunction(VRUtilCreateMapBrowserWindow) then
+			if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 			VRUtilCreateMapBrowserWindow()
 		else
 			RunConsoleCommand("vrmod_newgame")
@@ -120,11 +124,15 @@ end
 
 local function openSettings()
 	timer.Simple(0.05, function()
+		if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 		if vrmod.CubeSettings_Open then
 			vrmod.CubeSettings_Open()
 		elseif vrmod.Settings_Open then
 			vrmod.Settings_Open()
 		end
+		timer.Simple(0.1, function()
+			if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
+		end)
 	end)
 end
 
@@ -261,6 +269,8 @@ function vrmod.VRHub_Open()
 		print("[gVRMod] Start VR first")
 		return
 	end
+	-- Never pause world for hub (SP GameUI freezes tracking/input)
+	if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 	if open and g_VR.menus and g_VR.menus[UID] then
 		g_VR.menus[UID].dirty = true
 		return

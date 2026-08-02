@@ -334,18 +334,25 @@ function VRUtilCreateMapBrowserWindow()
 	window = vgui.Create("DFrame")
 	window:SetSize(WIN_W, WIN_H)
 	window:Center()
-	window:SetDraggable(true)
+	window:SetDraggable(not inVR())
 	window:ShowCloseButton(true)
-	window:MakePopup()
 	window._mapBrowser = true
 	window._newGame = true
 
 	if inVR() then
+		-- Do NOT MakePopup in VR — steals focus / can pause SP and kill VR input.
+		-- panel2vr PaintManual + laser owns interaction.
 		window:SetTitle("")
 		window:DockPadding(8, 40, 8, 8)
+		window:SetVisible(true)
+		if window.SetMouseInputEnabled then window:SetMouseInputEnabled(true) end
+		if window.SetKeyboardInputEnabled then window:SetKeyboardInputEnabled(false) end
+		if window.SetPaintedManually then window:SetPaintedManually(true) end
+		if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 	else
 		window:SetTitle("New Game")
 		window:DockPadding(5, 28, 5, 5)
+		window:MakePopup()
 	end
 
 	function window:Paint(w, h)

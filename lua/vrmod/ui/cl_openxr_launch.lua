@@ -142,13 +142,14 @@ local function bootFromLaunch()
 
 	local function afterVRLive()
 		log("VR active map=%s", tostring(game.GetMap and game.GetMap() or "?"))
-		-- Close stock desktop GameUI so desktop isn't stuck on CEF main menu.
-		-- Primary UI = VR hub (New Game + Settings); also on quick menu as "Launcher".
-		timer.Simple(0.4, function()
+		-- Never GameUI (pauses SP / breaks VR input). Unpaused world + VR hub only.
+		timer.Simple(0.35, function()
 			if not (g_VR and g_VR.active) then return end
-			if gui and gui.HideGameUI then pcall(gui.HideGameUI) end
-			if vrmod.VRHub_Open then
-				pcall(vrmod.VRHub_Open)
+			if vrmod.OpenLauncherUnpaused then
+				pcall(vrmod.OpenLauncherUnpaused)
+			else
+				if vrmod.VRUnpauseWorld then pcall(vrmod.VRUnpauseWorld) end
+				if vrmod.VRHub_Open then pcall(vrmod.VRHub_Open) end
 			end
 		end)
 	end

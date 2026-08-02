@@ -80,21 +80,27 @@ local function InitializeMenuItems()
 		end)
 	end, true, nil, "settings")
 
-	-- Launcher hub (New Game / Settings / Bindings) — same as gvrmod_launcher
+	-- Launcher hub — unpaused VR menu (never GameUI / SP pause)
 	add("Launcher", 0, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
-			if vrmod.VRHub_Open then
+			if vrmod.OpenLauncherUnpaused then
+				vrmod.OpenLauncherUnpaused()
+			elseif vrmod.VRHub_Open then
+				if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 				vrmod.VRHub_Open()
 			else
 				RunConsoleCommand("vrmod_hub_open")
 			end
 		end)
-	end, true, "New Game · VR Settings · Bindings", "launcher")
+	end, true, "unpaused · New Game · Settings", "launcher")
 	add("New Game", 1, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
-			if vrmod.OpenNewGame then
+			if vrmod.OpenNewGameUnpaused then
+				vrmod.OpenNewGameUnpaused()
+			elseif vrmod.OpenNewGame then
+				if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 				vrmod.OpenNewGame()
 			elseif isfunction(VRUtilCreateMapBrowserWindow) then
 				VRUtilCreateMapBrowserWindow()
