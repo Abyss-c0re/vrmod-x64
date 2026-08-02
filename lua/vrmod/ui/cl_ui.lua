@@ -390,6 +390,11 @@ if CLIENT then
 	local LAYOUT_FILE = "vrmod/panel_layouts.json"
 	local layoutCache = nil
 	local SCALE_MIN, SCALE_MAX = 0.008, 0.22
+	-- Free-float farther than this from HMD is treated as "lost" (walk/teleport away,
+	-- bad save). Spawn/context shells were restoring those poses every open → constant
+	-- "reset layouts" workarounds.
+	local MAX_FLOAT_REACH = 140
+	local MAX_ORIGIN_LOCAL = 320 -- origin-relative pos length sanity
 	-- Corner grip zone (any of 4 corners) — large enough to hit reliably in VR
 	local CORNER_PX = 80
 	local CORNER_FRAC = 0.16
@@ -412,6 +417,49 @@ if CLIENT then
 		EnsureLayoutDir()
 		layoutCache = all or layoutCache or {}
 		file.Write(LAYOUT_FILE, util.TableToJSON(layoutCache, true) or "{}")
+	end
+
+	local function RefHeadPos()
+		if g_VR and g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.pos then
+			return g_VR.tracking.hmd.pos
+		end
+		local ply = LocalPlayer()
+		if IsValid(ply) then return ply:EyePos() end
+		return (g_VR and g_VR.origin) or Vector()
+	end
+
+	--- localPos is origin-relative free-float (see ResolveDrawPose).
+	function vrmod.IsFloatPoseReachable(localPos, maxDist)
+		if not localPos then return false end
+		maxDist = tonumber(maxDist) or MAX_FLOAT_REACH
+		local lx = localPos.x or localPos[1]
+		local ly = localPos.y or localPos[2]
+		local lz = localPos.z or localPos[3]
+		if not lx or not ly or not lz then return false end
+		if math.abs(lx) > 1e4 or math.abs(ly) > 1e4 or math.abs(lz) > 1e4 then return false end
+		local lenSqr = lx * lx + ly * ly + lz * lz
+		if lenSqr > (MAX_ORIGIN_LOCAL * MAX_ORIGIN_LOCAL) then return false end
+		local origin = (g_VR and g_VR.origin) or Vector()
+		local originAng = (g_VR and g_VR.originAngle) or Angle()
+		local wpos = LocalToWorld(Vector(lx, ly, lz), Angle(), origin, originAng)
+		return wpos:Distance(RefHeadPos()) <= maxDist
+	end
+
+	local function StripFloatFromDisk(uid)
+		if not uid then return end
+		local all = ReadLayouts()
+		local e = all[tostring(uid)]
+		if not e then return end
+		e.freeFloat = false
+		e.pos = nil
+		e.ang = nil
+		all[tostring(uid)] = e
+		WriteLayouts(all)
+	end
+
+	--- Public: drop free-float pose for one menu (keep scale). Used by panel2vr on far restore.
+	function vrmod.ClearMenuFloatPose(uid)
+		StripFloatFromDisk(uid)
 	end
 
 	local function LockMenuScale(menu, sc)
@@ -442,10 +490,20 @@ if CLIENT then
 			height = menu.height,
 		}
 		if allowFloat and menu.pos and entry.freeFloat then
-			entry.pos = { x = menu.pos.x, y = menu.pos.y, z = menu.pos.z }
-		end
-		if allowFloat and menu.ang and entry.freeFloat then
-			entry.ang = { p = menu.ang.p, y = menu.ang.y, r = menu.ang.r }
+			if vrmod.IsFloatPoseReachable(menu.pos) then
+				entry.pos = { x = menu.pos.x, y = menu.pos.y, z = menu.pos.z }
+				if menu.ang then
+					entry.ang = { p = menu.ang.p, y = menu.ang.y, r = menu.ang.r }
+				end
+			else
+				-- Don't persist lost parking spots (far from head after walk/teleport)
+				entry.freeFloat = false
+				entry.pos = nil
+				entry.ang = nil
+				if vrmod.logger then
+					vrmod.logger.Info("[UI] Skip saving far free-float uid=%s (would get lost)", tostring(uid))
+				end
+			end
 		end
 		all[tostring(uid)] = entry
 		WriteLayouts(all)
@@ -489,8 +547,15 @@ if CLIENT then
 			local px, py, pz = e.pos.x or e.pos[1], e.pos.y or e.pos[2], e.pos.z or e.pos[3]
 			local ap, ay, ar = e.ang.p or e.ang[1], e.ang.y or e.ang[2], e.ang.r or e.ang[3]
 			local okPos = px and py and pz and math.abs(px) < 1e5 and math.abs(py) < 1e5 and math.abs(pz) < 1e5
-			if okPos and ap and ay and ar and (not sc or (sc >= SCALE_MIN and sc <= SCALE_MAX)) then
-				menu.pos = Vector(px, py, pz)
+			local localPos = okPos and Vector(px, py, pz) or nil
+			-- Reject lost free-float (far from HMD / absurd origin-local) → wrist on next open
+			if localPos and not vrmod.IsFloatPoseReachable(localPos) then
+				StripFloatFromDisk(uid)
+				if vrmod.logger then
+					vrmod.logger.Info("[UI] Dropped lost free-float layout uid=%s (re-dock wrist)", tostring(uid))
+				end
+			elseif okPos and ap and ay and ar and (not sc or (sc >= SCALE_MIN and sc <= SCALE_MAX)) then
+				menu.pos = localPos
 				menu.ang = Angle(ap, ay, ar)
 				menu.freeFloat = true
 				menu.attachment = false
@@ -503,6 +568,29 @@ if CLIENT then
 	function vrmod.GetMenuLayout(uid)
 		if not uid then return nil end
 		return ReadLayouts()[tostring(uid)]
+	end
+
+	--- Re-dock free-float menus that are too far from the player (spawn/context "lost").
+	--- opts.toast: notify once if any recovered
+	function vrmod.RecoverLostMenus(opts)
+		opts = opts or {}
+		if not g_VR or not g_VR.active or not g_VR.menus then return 0 end
+		local n = 0
+		for uid, menu in pairs(g_VR.menus) do
+			if not menu then continue end
+			if menu.grabHand then continue end -- mid-drag
+			if not (menu.freeFloat or not menu.attachment) then continue end
+			if not menu.pos then continue end
+			if vrmod.IsFloatPoseReachable(menu.pos) then continue end
+			if vrmod.MenuReattach and vrmod.MenuReattach(uid) then
+				n = n + 1
+				StripFloatFromDisk(uid)
+			end
+		end
+		if n > 0 and opts.toast and vrmod.Toast then
+			vrmod.Toast(string.format("Recovered %d window(s) to wrist", n), 2.5, "hint")
+		end
+		return n
 	end
 
 	function vrmod.ClearMenuLayout(uid)
@@ -1779,6 +1867,34 @@ end)
 concommand.Add("vrmod_vgui_reset", function()
 	-- Hard recovery: clear layouts, close everything, reopen QM
 	vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
+end)
+
+concommand.Add("vrmod_recover_menus", function()
+	if not CLIENT then return end
+	local n = vrmod.RecoverLostMenus and vrmod.RecoverLostMenus({ toast = true }) or 0
+	if n == 0 and vrmod.Toast then
+		vrmod.Toast("No lost windows (or all within reach)", 2, "hint")
+	end
+end)
+
+-- Soft recover: free-float parked too far (walk/teleport) → wrist, no full reset
+hook.Add("VRMod_PreStereo", "vrmod_recover_lost_menus", function()
+	if not g_VR or not g_VR.active then return end
+	local fn = FrameNumber and FrameNumber() or 0
+	if (fn % 45) ~= 0 then return end -- ~0.75s at 60fps — cheap
+	if vrmod.RecoverLostMenus then
+		vrmod.RecoverLostMenus({ toast = false })
+	end
+end)
+
+hook.Add("VRMod_Start", "vrmod_sanitize_menu_layouts", function(ply)
+	if CLIENT and ply == LocalPlayer() and vrmod.RecoverLostMenus then
+		timer.Simple(0.5, function()
+			if g_VR and g_VR.active then
+				vrmod.RecoverLostMenus({ toast = true })
+			end
+		end)
+	end
 end)
 
 -- Rebuild HUD mesh when UI scale changes; dirty open menus (world scale is live via GetUIScale)

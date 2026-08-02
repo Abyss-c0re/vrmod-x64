@@ -108,7 +108,18 @@ local function InitializeMenuItems()
 			LocalPlayer():ConCommand("vrmod_close_all_windows")
 		end
 	end, true, "close spawn · context · glide · popups", "close_windows")
-	add("Reset Layouts", 3, 2, function()
+	add("Recover Menus", 3, 2, function()
+		-- Soft: pull free-float panels that are too far back to wrist
+		if vrmod.RecoverLostMenus then
+			local n = vrmod.RecoverLostMenus({ toast = true })
+			if n == 0 and vrmod.Toast then
+				vrmod.Toast("No lost windows", 2, "hint")
+			end
+		else
+			LocalPlayer():ConCommand("vrmod_recover_menus")
+		end
+	end, true, "far free-float → wrist (no full reset)", "recover_menus")
+	add("Reset Layouts", 4, 2, function()
 		-- Poses, sizes, free-float anchors → wrist defaults; reopens QM if gone
 		if vrmod.ResetAllWindowLayouts then
 			vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
@@ -116,13 +127,13 @@ local function InitializeMenuItems()
 			LocalPlayer():ConCommand("vrmod_reset_window_layouts")
 		end
 	end, true, "poses · sizes · dock to wrist", "reset_layouts")
-	add("UI Reset", 4, 2, function()
+	add("UI Reset", 5, 2, function()
 		if vrmod.ResetAllWindowLayouts then
 			vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
 		else
 			LocalPlayer():ConCommand("vrmod_vgui_reset")
 		end
-	end, true, "same as reset layouts (recovery)", "ui_reset")
+	end, true, "full clear layouts + reopen QM", "ui_reset")
 	add("Border Cal", 5, 2, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
 	add("Toggle blacklist weapon", 0, 3, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
 	add("Map Browser", 1, 3, function()

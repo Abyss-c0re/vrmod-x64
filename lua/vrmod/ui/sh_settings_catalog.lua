@@ -198,6 +198,7 @@ vrmod.SettingsCatalog = {
 			{ kind = "bool", label = "Menu & UI red outline", cvar = "vrmod_ui_outline" },
 			{ kind = "action", label = "Force HUD on + rebind", action_id = "force_hud_on" },
 			{ kind = "action", label = "Close all windows", cmd = "vrmod_close_all_windows" },
+			{ kind = "action", label = "Recover lost windows (wrist)", cmd = "vrmod_recover_menus" },
 			{ kind = "action", label = "Reset layouts (pose · size · wrist)", cmd = "vrmod_reset_window_layouts" },
 			{ kind = "action", label = "UI reset / recover menus", cmd = "vrmod_vgui_reset" },
 			{ kind = "action", label = "HUD/UI defaults", action_id = "reset_hud" },

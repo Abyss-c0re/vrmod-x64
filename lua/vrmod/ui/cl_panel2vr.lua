@@ -600,6 +600,7 @@ function W.ManifestPanel(panel, opts)
 
 	local isShell = (kind == "spawnmenu" or kind == "contextmenu")
 	-- Restore free-float placement: session cache, then disk layout (panel_layouts.json)
+	-- Skip poses that are too far from the player (classic "spawn menu got lost").
 	local saved = isShell and shellFloatPose[kind] or nil
 	if not saved and isfunction(vrmod.GetMenuLayout) then
 		local lay = vrmod.GetMenuLayout(uid)
@@ -615,6 +616,20 @@ function W.ManifestPanel(panel, opts)
 		end
 	end
 	local useFloat = saved and saved.pos and saved.ang
+	if useFloat and isfunction(vrmod.IsFloatPoseReachable) and not vrmod.IsFloatPoseReachable(saved.pos) then
+		useFloat = false
+		if isShell then shellFloatPose[kind] = nil end
+		if isfunction(vrmod.ClearMenuFloatPose) then
+			vrmod.ClearMenuFloatPose(uid)
+		end
+		-- Recompute wrist place for this shell
+		place = W.ResolvePlace(placeName, placeOverride, w, h)
+		place.attachment = true
+		log("manifest %s free-float too far — wrist dock", kind)
+		if vrmod.Toast then
+			vrmod.Toast("Menu was too far — docked to wrist", 2, "hint")
+		end
+	end
 	if useFloat then
 		place.attachment = false
 		place.pos = saved.pos
@@ -1092,14 +1107,19 @@ function W.CloseSandboxShell(which)
 	local uid = isCtx and STABLE_UID.contextmenu or STABLE_UID.spawnmenu
 	local kind = isCtx and "contextmenu" or "spawnmenu"
 
-	-- Save free-float before teardown (reopen restores)
+	-- Save free-float before teardown (reopen restores) — only if still reachable
 	local m = g_VR and g_VR.menus and g_VR.menus[uid]
 	if m and (m.freeFloat or not m.attachment) and m.pos and m.ang then
-		shellFloatPose[kind] = {
-			pos = Vector(m.pos),
-			ang = Angle(m.ang.p, m.ang.y, m.ang.r),
-			scale = m.baseScale or m.scale,
-		}
+		local okReach = (not isfunction(vrmod.IsFloatPoseReachable)) or vrmod.IsFloatPoseReachable(m.pos)
+		if okReach then
+			shellFloatPose[kind] = {
+				pos = Vector(m.pos),
+				ang = Angle(m.ang.p, m.ang.y, m.ang.r),
+				scale = m.baseScale or m.scale,
+			}
+		else
+			shellFloatPose[kind] = nil
+		end
 	end
 	if m and isfunction(vrmod.SaveMenuLayout) then
 		vrmod.SaveMenuLayout(uid)
