@@ -80,10 +80,34 @@ local function InitializeMenuItems()
 		end)
 	end, true, nil, "settings")
 
-	-- Row 2
-	add("Flashlight", 0, 1, function() LocalPlayer():ConCommand("impulse 100") end, true, nil, "flashlight")
-	add("Laser pointer", 1, 1, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end, true, nil, "laser")
-	add("Weapon VR", 2, 1, function()
+	-- Launcher hub (New Game / Settings / Bindings) — same as gvrmod_launcher
+	add("Launcher", 0, 1, function()
+		timer.Simple(0, function()
+			if not g_VR or not g_VR.active then return end
+			if vrmod.VRHub_Open then
+				vrmod.VRHub_Open()
+			else
+				RunConsoleCommand("vrmod_hub_open")
+			end
+		end)
+	end, true, "New Game · VR Settings · Bindings", "launcher")
+	add("New Game", 1, 1, function()
+		timer.Simple(0, function()
+			if not g_VR or not g_VR.active then return end
+			if vrmod.OpenNewGame then
+				vrmod.OpenNewGame()
+			elseif isfunction(VRUtilCreateMapBrowserWindow) then
+				VRUtilCreateMapBrowserWindow()
+			else
+				RunConsoleCommand("vrmod_newgame")
+			end
+		end)
+	end, true, "maps · mode · maxplayers · settings", "newgame")
+
+	-- Row 2 (shifted — launcher takes col 0–1)
+	add("Flashlight", 2, 1, function() LocalPlayer():ConCommand("impulse 100") end, true, nil, "flashlight")
+	add("Laser pointer", 3, 1, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end, true, nil, "laser")
+	add("Weapon VR", 4, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
 			if vrmod.WeaponSettings_Open then
@@ -93,13 +117,13 @@ local function InitializeMenuItems()
 			end
 		end)
 	end, true, "hold pose / laser / muzzle", "weapon_vr")
-	add("Toggle Noclip", 3, 1, function() LocalPlayer():ConCommand("noclip") end, true, nil, "noclip")
-	add("Undo", 4, 1, function() LocalPlayer():ConCommand("gmod_undo") end, true, nil, "undo")
-	add("Cleanup", 5, 1, function() LocalPlayer():ConCommand("gmod_cleanup") end, true, nil, "cleanup")
-	add("Admin Cleanup", 0, 2, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
+	add("Toggle Noclip", 5, 1, function() LocalPlayer():ConCommand("noclip") end, true, nil, "noclip")
+	add("Undo", 0, 2, function() LocalPlayer():ConCommand("gmod_undo") end, true, nil, "undo")
+	add("Cleanup", 1, 2, function() LocalPlayer():ConCommand("gmod_cleanup") end, true, nil, "cleanup")
+	add("Admin Cleanup", 2, 2, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
 
-	-- Row 3 / system (page 2 via layout) — col0 is Admin Cleanup above
-	add("Bindings", 4, 2, function()
+	-- Row 3 / system
+	add("Bindings", 3, 2, function()
 		timer.Simple(0, function()
 			if vrmod.BindingsPanel_Open then
 				vrmod.BindingsPanel_Open()
@@ -108,17 +132,15 @@ local function InitializeMenuItems()
 			end
 		end)
 	end, true, "On foot / Vehicle rebind", "bindings")
-	add("Reset Vehicle View", 1, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
-	add("Close Windows", 2, 2, function()
-		-- Spawn / context / Glide / settings — leave quick menu open
+	add("Reset Vehicle View", 4, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
+	add("Close Windows", 5, 2, function()
 		if vrmod.CloseAllWindows then
 			vrmod.CloseAllWindows()
 		else
 			LocalPlayer():ConCommand("vrmod_close_all_windows")
 		end
 	end, true, "close spawn · context · glide · popups", "close_windows")
-	add("Recover Menus", 3, 2, function()
-		-- Soft: pull free-float panels that are too far back to wrist
+	add("Recover Menus", 0, 3, function()
 		if vrmod.RecoverLostMenus then
 			local n = vrmod.RecoverLostMenus({ toast = true })
 			if n == 0 and vrmod.Toast then
@@ -128,34 +150,35 @@ local function InitializeMenuItems()
 			LocalPlayer():ConCommand("vrmod_recover_menus")
 		end
 	end, true, "far free-float → wrist (no full reset)", "recover_menus")
-	add("Reset Layouts", 4, 2, function()
-		-- Poses, sizes, free-float anchors → wrist defaults; reopens QM if gone
+	add("Reset Layouts", 1, 3, function()
 		if vrmod.ResetAllWindowLayouts then
 			vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
 		else
 			LocalPlayer():ConCommand("vrmod_reset_window_layouts")
 		end
 	end, true, "poses · sizes · dock to wrist", "reset_layouts")
-	add("UI Reset", 5, 2, function()
+	add("UI Reset", 2, 3, function()
 		if vrmod.ResetAllWindowLayouts then
 			vrmod.ResetAllWindowLayouts({ reopenQM = true, closeAll = true })
 		else
 			LocalPlayer():ConCommand("vrmod_vgui_reset")
 		end
 	end, true, "full clear layouts + reopen QM", "ui_reset")
-	add("Border Cal", 5, 2, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
-	add("Toggle blacklist weapon", 0, 3, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
-	add("Map Browser", 1, 3, function()
-		local window = VRUtilCreateMapBrowserWindow()
-		hook.Add("VRMod_OpenQuickMenu", "closemapbrowser", function()
-			hook.Remove("VRMod_OpenQuickMenu", "closemapbrowser")
-			if IsValid(window) then window:Remove() end
-			return false
+	add("Border Cal", 3, 3, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
+	add("Toggle blacklist weapon", 4, 3, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
+	-- Map Browser aliases New Game (stock-style modes/settings)
+	add("Map Browser", 5, 3, function()
+		timer.Simple(0, function()
+			if vrmod.OpenNewGame then
+				vrmod.OpenNewGame()
+			elseif isfunction(VRUtilCreateMapBrowserWindow) then
+				VRUtilCreateMapBrowserWindow()
+			end
 		end)
-	end, true, nil, "map")
-	add("RESPAWN", 2, 3, function() LocalPlayer():ConCommand("kill") end, true, nil, "respawn")
-	add("VR EXIT", 3, 3, function() LocalPlayer():ConCommand("vrmod_exit") end, true, nil, "vr_exit")
-	add("DISCONNECT", 4, 3, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
+	end, true, "New Game · maps · modes", "map")
+	add("RESPAWN", 0, 4, function() LocalPlayer():ConCommand("kill") end, true, nil, "respawn")
+	add("VR EXIT", 1, 4, function() LocalPlayer():ConCommand("vrmod_exit") end, true, nil, "vr_exit")
+	add("DISCONNECT", 2, 4, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
 end
 
 hook.Add("VRMod_Start", "ReloadMenuItems", function() InitializeMenuItems() end)

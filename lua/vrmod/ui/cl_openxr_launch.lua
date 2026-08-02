@@ -142,20 +142,13 @@ local function bootFromLaunch()
 
 	local function afterVRLive()
 		log("VR active map=%s", tostring(game.GetMap and game.GetMap() or "?"))
-		-- Launcher: always open hub (New Game + Settings). Also try freefloat GameUI.
-		timer.Simple(0.5, function()
+		-- Close stock desktop GameUI so desktop isn't stuck on CEF main menu.
+		-- Primary UI = VR hub (New Game + Settings); also on quick menu as "Launcher".
+		timer.Simple(0.4, function()
 			if not (g_VR and g_VR.active) then return end
-			if gui and gui.ActivateGameUI then pcall(gui.ActivateGameUI) end
-			if isfunction(vrmod.BindMainMenuToVR) then
-				pcall(vrmod.BindMainMenuToVR)
-			end
-			-- Hub has New Game (extended map/mode/settings) + VR Settings — primary launcher UI
+			if gui and gui.HideGameUI then pcall(gui.HideGameUI) end
 			if vrmod.VRHub_Open then
-				timer.Simple(0.4, function()
-					if g_VR and g_VR.active and vrmod.VRHub_Open then
-						pcall(vrmod.VRHub_Open)
-					end
-				end)
+				pcall(vrmod.VRHub_Open)
 			end
 		end)
 	end
