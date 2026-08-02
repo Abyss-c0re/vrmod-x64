@@ -142,18 +142,20 @@ local function bootFromLaunch()
 
 	local function afterVRLive()
 		log("VR active map=%s", tostring(game.GetMap and game.GetMap() or "?"))
-		-- HL2VR: GameUI lives over background world — activate + freefloat cinema
+		-- Launcher: always open hub (New Game + Settings). Also try freefloat GameUI.
 		timer.Simple(0.5, function()
 			if not (g_VR and g_VR.active) then return end
 			if gui and gui.ActivateGameUI then pcall(gui.ActivateGameUI) end
 			if isfunction(vrmod.BindMainMenuToVR) then
-				if not vrmod.BindMainMenuToVR() then
-					timer.Simple(1.0, function()
-						if isfunction(vrmod.BindMainMenuToVR) then pcall(vrmod.BindMainMenuToVR) end
-					end)
-				end
-			elseif g_VR._openxrLaunch and g_VR._openxrLaunch.hub and vrmod.VRHub_Open then
-				pcall(vrmod.VRHub_Open)
+				pcall(vrmod.BindMainMenuToVR)
+			end
+			-- Hub has New Game (extended map/mode/settings) + VR Settings — primary launcher UI
+			if vrmod.VRHub_Open then
+				timer.Simple(0.4, function()
+					if g_VR and g_VR.active and vrmod.VRHub_Open then
+						pcall(vrmod.VRHub_Open)
+					end
+				end)
 			end
 		end)
 	end

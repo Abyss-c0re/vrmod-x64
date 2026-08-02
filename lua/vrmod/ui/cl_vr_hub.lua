@@ -1,11 +1,14 @@
 if SERVER then return end
 -- =============================================================================
--- VR Hub — Cube-chrome launcher surface (maps / settings / bindings / quit).
+-- VR Launcher Hub — Cube chrome main menu (HL2VR / stock New Game style)
 --
--- Primary path is menu-first freefloat of the REAL MainMenu (cl_vr_mainmenu.lua).
--- Hub is the fallback when stock VGUI cannot be found, or when vrmod_hub 1.
+-- Always exposes:
+--   · New Game  → extended map browser (modes + maxplayers + server/settings)
+--   · Settings  → VR Cube settings
+--   · Bindings  → OpenXR rebind
+--   · Resume / Disconnect / Quit
 --
--- Opens when: vrmod_hub 1 and VR active, OR menu-vr bind exhausted retries.
+-- Opens when: vrmod_hub 1, openxr launch session, or menu-vr bind exhausted.
 -- Manual: vrmod_hub / vrmod_hub_open
 -- =============================================================================
 
@@ -17,9 +20,10 @@ local open = false
 local buttons = {}
 local statusMsg, statusUntil = "", 0
 
-local W, H = 560, 640
-local livePos, liveAng, liveScale = Vector(4, 3, 6), Angle(0, -90, 55), 0.028
-local HEADER, PAD, ROW_H, FOOTER = 72, 16, 52, 56
+-- Freefloat cinema size (launcher worth showing)
+local W, H = 520, 620
+local livePos, liveAng, liveScale = Vector(0, 0, 48), Angle(0, 0, 90), 0.032
+local HEADER, PAD, ROW_H = 72, 16, 50
 
 local function Theme()
 	if vrmod.cube and vrmod.cube.ThemeLive then return vrmod.cube.ThemeLive() end
@@ -47,16 +51,28 @@ local function HubEnabled()
 	return c and c:GetBool()
 end
 
-local function WristHand()
-	return (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+local function LauncherSession()
+	if vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession() then return true end
+	local menu = GetConVar("vrmod_menu_vr")
+	if menu and menu:GetBool() then return true end
+	return HubEnabled()
 end
 
-local function WristPose()
-	local wrist = WristHand()
-	if isfunction(VRUtilHandMenuPose) then
-		return VRUtilHandMenuPose(W, H, 0.028, Vector(4, 3.5, 6), Angle(0, -90, 55), wrist)
+local function FloatPose()
+	if vrmod.panel2vr and vrmod.panel2vr.ComputeFloatPose then
+		return vrmod.panel2vr.ComputeFloatPose(32, -2)
 	end
-	return Vector(4, 3, 6), Angle(0, -90, 55), 0.028
+	if g_VR and g_VR.tracking and g_VR.tracking.hmd then
+		local hmd = g_VR.tracking.hmd
+		local yaw = Angle(0, hmd.ang.yaw, 0)
+		local pos = hmd.pos + yaw:Forward() * 32 + Vector(0, 0, -2)
+		local ang = Angle(0, yaw.yaw + 180, 90)
+		if g_VR.origin and g_VR.originAngle then
+			pos, ang = WorldToLocal(pos, ang, g_VR.origin, g_VR.originAngle)
+		end
+		return pos, ang
+	end
+	return Vector(0, 0, 48), Angle(0, 0, 90)
 end
 
 local function SetStatus(msg, sec)
@@ -65,14 +81,16 @@ local function SetStatus(msg, sec)
 end
 
 local function MenuItems()
+	local gm = engine.ActiveGamemode and engine.ActiveGamemode() or "?"
+	local map = game.GetMap and game.GetMap() or "?"
 	return {
-		{ id = "resume", label = "Resume world", hint = "Close hub, keep VR" },
-		{ id = "maps", label = "Play map…", hint = "Map browser" },
-		{ id = "settings", label = "Settings", hint = "VR settings" },
-		{ id = "bindings", label = "Controller bindings", hint = "OpenXR rebind" },
-		{ id = "disconnect", label = "Disconnect", hint = "Leave server / map" },
+		{ id = "newgame", label = "New Game", hint = "Maps · gamemode · maxplayers · settings" },
+		{ id = "settings", label = "VR Settings", hint = "Comfort, render, locomotion, UI" },
+		{ id = "bindings", label = "Controller bindings", hint = "OpenXR rebind / chords" },
+		{ id = "resume", label = "Resume", hint = "Close launcher, keep VR · " .. map },
+		{ id = "disconnect", label = "Disconnect", hint = "Leave map / server" },
 		{ id = "quit", label = "Quit Garry's Mod", hint = "Exit game" },
-	}
+	}, gm, map
 end
 
 local function rebuildButtons()
@@ -88,6 +106,28 @@ local function rebuildButtons()
 	end
 end
 
+local function openNewGame()
+	timer.Simple(0.05, function()
+		if isfunction(vrmod.OpenNewGame) then
+			vrmod.OpenNewGame()
+		elseif isfunction(VRUtilCreateMapBrowserWindow) then
+			VRUtilCreateMapBrowserWindow()
+		else
+			RunConsoleCommand("vrmod_newgame")
+		end
+	end)
+end
+
+local function openSettings()
+	timer.Simple(0.05, function()
+		if vrmod.CubeSettings_Open then
+			vrmod.CubeSettings_Open()
+		elseif vrmod.Settings_Open then
+			vrmod.Settings_Open()
+		end
+	end)
+end
+
 local function paint()
 	if not open or not (g_VR and g_VR.menus and g_VR.menus[UID]) then return end
 	if isfunction(VRUtilMenuRenderStart) then VRUtilMenuRenderStart(UID) end
@@ -98,9 +138,10 @@ local function paint()
 	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
 	rebuildButtons()
 
+	local _, map = select(2, MenuItems())
 	if vrmod.cube and vrmod.cube.DrawChrome then
 		vrmod.cube.DrawChrome(0, 0, W, H, "gVRMod", {
-			subtitle = "VR hub · main menu replacement",
+			subtitle = "Launcher · " .. (game.GetMap and game.GetMap() or "?"),
 			headerH = HEADER,
 		})
 	else
@@ -111,7 +152,7 @@ local function paint()
 		surface.SetDrawColor(T.header)
 		surface.DrawRect(0, HEADER - 4, W, 4)
 		draw.SimpleText("gVRMod", Font("CubeTitle"), PAD, 14, T.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-		draw.SimpleText("VR hub · main menu replacement", Font("CubeSmall") or "DermaDefault", PAD, 42, T.muted)
+		draw.SimpleText("Launcher", Font("CubeSmall") or "DermaDefault", PAD, 42, T.muted)
 	end
 
 	local closeHot = focused and mx >= W - 52 and mx <= W - 12 and my >= 12 and my <= 48
@@ -128,17 +169,24 @@ local function paint()
 				surface.SetDrawColor(T.hot)
 				surface.DrawRect(btn.x, btn.y, 6, btn.h)
 			end
+			-- Highlight primary launcher actions
+			if btn.id == "newgame" or btn.id == "settings" then
+				surface.SetDrawColor(T.header.r, T.header.g, T.header.b, hot and 255 or 180)
+				surface.DrawRect(btn.x + btn.w - 6, btn.y, 6, btn.h)
+			end
 			draw.SimpleText(btn.item.label, Font("CubeLabel") or "DermaDefaultBold",
-				btn.x + 18, btn.y + 16, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				btn.x + 18, btn.y + 14, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 			draw.SimpleText(btn.item.hint or "", "DermaDefault",
-				btn.x + 18, btn.y + 36, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				btn.x + 18, btn.y + 34, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 		end
 	end
 
-	local map = game.GetMap() or "?"
-	draw.SimpleText("map: " .. map, "DermaDefault", PAD, H - 36, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+	local gm = engine.ActiveGamemode and engine.ActiveGamemode() or "?"
+	draw.SimpleText(string.format("%s · %s", game.GetMap() or "?", gm), "DermaDefault",
+		PAD, H - 36, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 	if statusMsg ~= "" and CurTime() < statusUntil then
-		draw.SimpleText(statusMsg, Font("CubeLabel") or "DermaDefaultBold", W - PAD, H - 36, T.ok, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+		draw.SimpleText(statusMsg, Font("CubeLabel") or "DermaDefaultBold",
+			W - PAD, H - 36, T.ok, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
 	end
 
 	if focused and mx >= 0 and my >= 0 then
@@ -160,25 +208,15 @@ local function activateAt(mx, my)
 				local id = btn.id
 				if id == "resume" then
 					vrmod.VRHub_Close()
-				elseif id == "maps" then
-					vrmod.VRHub_Close()
-					timer.Simple(0.1, function()
-						if isfunction(VRUtilCreateMapBrowserWindow) then
-							VRUtilCreateMapBrowserWindow()
-						else
-							RunConsoleCommand("vrmod", "mapbrowser")
-						end
-					end)
+				elseif id == "newgame" then
+					-- Keep hub open behind; freefloat New Game in front
+					openNewGame()
+					SetStatus("New Game…", 2)
 				elseif id == "settings" then
-					vrmod.VRHub_Close()
-					timer.Simple(0.1, function()
-						if vrmod.Settings_Open then vrmod.Settings_Open()
-						elseif vrmod.CubeSettings_Open then vrmod.CubeSettings_Open()
-						end
-					end)
+					openSettings()
+					SetStatus("Settings…", 2)
 				elseif id == "bindings" then
-					vrmod.VRHub_Close()
-					timer.Simple(0.1, function()
+					timer.Simple(0.05, function()
 						if vrmod.BindingsPanel_Open then vrmod.BindingsPanel_Open()
 						else RunConsoleCommand("vrmod_controller_bindings") end
 					end)
@@ -220,6 +258,7 @@ end
 function vrmod.VRHub_Open()
 	if not (g_VR and g_VR.active) then
 		SetStatus("Start VR first", 2)
+		print("[gVRMod] Start VR first")
 		return
 	end
 	if open and g_VR.menus and g_VR.menus[UID] then
@@ -228,9 +267,8 @@ function vrmod.VRHub_Open()
 	end
 	if not isfunction(VRUtilMenuOpen) then return end
 
-	-- Close competing shells
 	if g_VR.menus then
-		for _, uid in ipairs({ "miscmenu", "cube_settings", "heightmenu", "bindings_panel", "actions_panel" }) do
+		for _, uid in ipairs({ "miscmenu", "heightmenu" }) do
 			if g_VR.menus[uid] and isfunction(VRUtilMenuClose) then
 				g_VR.menus[uid].closeFunc = nil
 				VRUtilMenuClose(uid)
@@ -239,8 +277,10 @@ function vrmod.VRHub_Open()
 	end
 
 	open = true
-	livePos, liveAng, liveScale = WristPose()
-	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()
+	livePos, liveAng = FloatPose()
+	liveScale = 0.032
+	-- Free-float cinema (not wrist) for launcher presence
+	VRUtilMenuOpen(UID, W, H, nil, false, livePos, liveAng, liveScale, true, function()
 		open = false
 		hook.Remove("PreRender", "vr_hub_paint")
 		hook.Remove("VRMod_Input", "vr_hub_input")
@@ -255,9 +295,9 @@ function vrmod.VRHub_Open()
 	sm.cubeMenu = true
 	sm.grabbable = true
 	sm.resizable = true
-	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(sm, liveScale, livePos, liveAng, WristHand())
-	end
+	sm.freeFloat = true
+	sm.attachment = false
+	sm.persistOpen = true
 
 	paint()
 	hook.Add("PreRender", "vr_hub_paint", function()
@@ -268,9 +308,6 @@ function vrmod.VRHub_Open()
 		if not (g_VR.menus and g_VR.menus[UID]) then
 			open = false
 			return
-		end
-		if vrmod.MenuApplyHandAnchor and not g_VR.menus[UID].freeFloat then
-			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
 		end
 		paint()
 	end)
@@ -287,18 +324,17 @@ function vrmod.VRHub_Open()
 	end)
 end
 
--- Open hub after VR starts when hub mode is on (not when menu-first owns the flow)
+-- Auto-open launcher after VR when hub or openxr launch session
 hook.Add("VRMod_Start", "vrmod_vr_hub", function(ply)
 	if ply and IsValid(LocalPlayer()) and ply ~= LocalPlayer() then return end
-	if not HubEnabled() then return end
-	-- Menu-first owns freefloat MainMenu; hub only if explicitly forced with hub alone
-	local menuVR = GetConVar("vrmod_menu_vr")
-	if menuVR and menuVR:GetBool() then return end
-	timer.Simple(1.2, function()
-		if not HubEnabled() then return end
+	-- Prefer hub whenever launcher session (menu_vr / openxr marker / hub cvar)
+	local force = HubEnabled() or (vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession())
+	if not force then return end
+	timer.Simple(1.0, function()
 		if not (g_VR and g_VR.active) then return end
-		-- Don't fight experience onboarding on first run
 		if vrmod.Experience_ShouldRun and vrmod.Experience_ShouldRun() then return end
+		-- If freefloat MainMenu bound successfully, still open hub as secondary? 
+		-- User wants settings + map selector in launcher → always open hub for launch sessions.
 		vrmod.VRHub_Open()
 	end)
 end)
@@ -312,5 +348,16 @@ concommand.Add("vrmod_hub", function()
 end)
 
 concommand.Add("vrmod_hub_open", function()
+	vrmod.VRHub_Open()
+end)
+
+concommand.Add("vrmod_launcher", function()
+	if not (g_VR and g_VR.active) then
+		if isfunction(VRUtilClientStart) then pcall(VRUtilClientStart) end
+		timer.Simple(1.5, function()
+			if g_VR and g_VR.active then vrmod.VRHub_Open() end
+		end)
+		return
+	end
 	vrmod.VRHub_Open()
 end)
