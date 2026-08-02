@@ -206,26 +206,8 @@ local function maxMapScroll()
 end
 
 ------------------------------------------------------------------------
--- Start (stock order). maxplayers is blocked in-game — handle safely.
+-- Start — shared vrmod.MapStart (same path as classic VR map browser)
 ------------------------------------------------------------------------
-local function tryCmd(cmd, ...)
-	local args = { ... }
-	if IsConCommandBlocked and IsConCommandBlocked(cmd) then
-		-- game.ConsoleCommand sometimes works for host; else skip
-		if game and game.ConsoleCommand then
-			local line = cmd
-			for i = 1, #args do
-				line = line .. " " .. tostring(args[i])
-			end
-			pcall(game.ConsoleCommand, line .. "\n")
-			return true
-		end
-		return false
-	end
-	pcall(RunConsoleCommand, cmd, unpack(args))
-	return true
-end
-
 local function startGame()
 	if not selectedMap or not selectedMap.name then
 		SetStatus("Select a map", 2)
@@ -235,56 +217,30 @@ local function startGame()
 	local gm = gamemodes[gmIndex] and gamemodes[gmIndex].name or "sandbox"
 	local mp = MaxPlayers()
 
-	if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
-	tryCmd("vrmod_autostart", "1")
-	tryCmd("progress_enable")
-	tryCmd("gamemode", gm)
-
-	if mp > 1 then
-		tryCmd("sv_cheats", "0")
-		tryCmd("hostname", hostname ~= "" and hostname or "gVRMod")
-		tryCmd("sv_lan", svLan and "1" or "0")
-		tryCmd("p2p_enabled", p2p and "1" or "0")
-		tryCmd("p2p_friendsonly", p2pFriends and "1" or "0")
+	local MS = vrmod.MapStart
+	if not MS or not MS.StartFromVR then
+		-- Fallback: original map browser one-liner
+		RunConsoleCommand("vrmod_autostart", "1")
+		RunConsoleCommand("changelevel", mapName)
+		vrmod.VRNewGame_Close()
+		return
 	end
 
-	local mpOk = tryCmd("maxplayers", tostring(mp))
-	if not mpOk and mp > 1 then
-		-- In-game client cannot change maxplayers. Disconnect → menu → map.
-		-- Write one-shot cfg the next session / menu can exec (best-effort).
-		pcall(function()
-			if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
-			file.Write("vrmod/pending_start.txt", table.concat({
-				"map=" .. mapName,
-				"gamemode=" .. gm,
-				"maxplayers=" .. tostring(mp),
-				"hostname=" .. (hostname ~= "" and hostname or "gVRMod"),
-				"sv_lan=" .. (svLan and "1" or "0"),
-				"p2p_enabled=" .. (p2p and "1" or "0"),
-				"p2p_friendsonly=" .. (p2pFriends and "1" or "0"),
-			}, "\n"))
-		end)
-		-- Host listen: changelevel keeps current slot count (still playable)
-		SetStatus("maxplayers blocked in-game — changelevel " .. mapName, 4)
-		if vrmod.Toast then
-			vrmod.Toast("Slots locked mid-session — loading map (restart GMod for new maxplayers)", 5, "hint")
-		end
-		timer.Simple(0.2, function()
-			tryCmd("changelevel", mapName)
-		end)
-	else
-		SetStatus("Starting " .. mapName .. "…", 3)
-		if vrmod.Toast then
-			vrmod.Toast(string.format("%s · %s · %sp", mapName, gm, mp), 3, "hint")
-		end
-		timer.Simple(0.25, function()
-			-- Prefer changelevel when already on a map (smoother than map)
-			if game.GetMap and game.GetMap() and game.GetMap() ~= "" and IsInGame and IsInGame() then
-				tryCmd("changelevel", mapName)
-			else
-				tryCmd("map", mapName)
-			end
-		end)
+	SetStatus("Starting " .. mapName .. "…", 3)
+	local ok, msg = MS.StartFromVR(mapName, {
+		gamemode = gm,
+		maxplayers = mp,
+		hostname = hostname ~= "" and hostname or "gVRMod",
+		sv_lan = svLan,
+		p2p_enabled = p2p,
+		p2p_friendsonly = p2pFriends,
+		keepVR = true,
+		delay = 0.2,
+	})
+	if not ok then
+		SetStatus(msg or "start failed", 3)
+	elseif msg and string.find(msg, "unchanged", 1, true) then
+		SetStatus(msg, 4)
 	end
 	vrmod.VRNewGame_Close()
 end
