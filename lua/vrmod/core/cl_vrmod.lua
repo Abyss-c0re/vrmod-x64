@@ -75,38 +75,36 @@ if CLIENT then
 	local convarOverrides = {}
 
 	local wasPaused = false
-	if system.IsLinux() then
-		moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
-	elseif system.IsWindows() then
-		if file.Exists("lua/bin/gmcl_vrmod_win64.dll", "GAME") then
-			moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
-		elseif file.Exists("lua/bin/gmcl_vrmod_win32.dll", "GAME") then
-			moduleFile = "lua/bin/gmcl_vrmod_win32.dll"
+	-- Dual binary: OpenXR = gmcl_vrmod_xr_* (require vrmod_xr), OpenVR = gmcl_vrmod_* (require vrmod).
+	-- Both may coexist under garrysmod/lua/bin; LoadNativeModule picks one.
+	if vrmod.LoadNativeModule then
+		if vrmod.LoadNativeModule() then
+			moduleFile = g_VR.moduleFile
+			local pol = vrmod.DetectBackend and vrmod.DetectBackend() or nil
+			if vrmod.logger then
+				vrmod.logger.Info("Runtime: %s", vrmod.DescribeBackend and vrmod.DescribeBackend() or tostring(pol and pol.backend))
+			end
+			if pol and pol.matQueuePinEveryFrame then
+				SESSION_PIN_CONVARS = SESSION_PIN_CONVARS or {}
+				SESSION_PIN_CONVARS.mat_queue_mode = true
+			end
+		else
+			vrmod.logger.Err("Failed to load module: %s", tostring(vrmod.GetModuleLoadError and vrmod.GetModuleLoadError()))
 		end
 	else
-		vrmod.logger.Err("Unsupported OS.")
-	end
-
-	if moduleFile then
-		vrmod = vrmod or {}
-		local success, err = pcall(function() require("vrmod") end)
+		-- Fallback if cl_runtime missing (should not happen)
+		local success, err = pcall(function() require("vrmod_xr") end)
+		if not success then
+			success, err = pcall(function() require("vrmod") end)
+		end
 		if success then
 			for k, v in pairs(vrmod) do
-				_G["VRMOD_" .. k] = v
+				if isfunction(v) then _G["VRMOD_" .. k] = v end
 			end
-
 			g_VR.moduleVersion = VRMOD_GetVersion and VRMOD_GetVersion() or 0
-			if vrmod.DetectBackend then
-				local pol = vrmod.DetectBackend()
-				if vrmod.logger then
-					vrmod.logger.Info("Runtime: %s", vrmod.DescribeBackend and vrmod.DescribeBackend() or tostring(pol.backend))
-				end
-			end
 		else
 			vrmod.logger.Err("Failed to load module:", err)
 		end
-	else
-		vrmod.logger.Err("No compatible module file found.")
 	end
 
 	-- 0) Helper functions

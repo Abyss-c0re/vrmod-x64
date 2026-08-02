@@ -68,43 +68,52 @@ if CLIENT then
     hook.Add("Think", "VRMod_HeadPoseVelocityCache", function() UpdateHeadVelocitiesFromPose() end)
     function vrmod.GetStartupError()
         local error = nil
-        local moduleFile = nil
-        -- requiredVersion = hard floor (must boot). latestVersion = full feature set (SS eye args, etc).
-        -- Lua degrades gracefully on older modules; only refuse if too ancient / missing.
-        local requiredVersion, latestVersion
-        if system.IsLinux() then
-            requiredVersion = 20
-            latestVersion = 27
-            moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
-        else
-            requiredVersion = 20
-            latestVersion = 27
-            moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
-            if not file.Exists(moduleFile, "GAME") then
-                moduleFile = "lua/bin/gmcl_vrmod_win32.dll"
-            end
-        end
+        if vrmod.DetectBackend then pcall(vrmod.DetectBackend) end
+        local pol = vrmod.GetBackendPolicy and vrmod.GetBackendPolicy() or {}
+        local requiredVersion = pol.requiredModule or 20
+        local latestVersion = pol.latestModule or 27
+        local moduleDownload = pol.moduleDownload
+            or "https://github.com/Abyss-c0re/gVRMod/releases"
 
         g_VR.moduleVersion = g_VR.moduleVersion or 0
+        local inst = vrmod.ListInstalledModules and vrmod.ListInstalledModules() or {}
+        local anyBin = (inst.openxr or inst.openvr) and true or false
+
         if g_VR.moduleVersion == 0 then
-            if not file.Exists(moduleFile, "GAME") then
-                error = "Module not installed.\nPlease follow the workshop instructions to install the module."
+            if not anyBin then
+                error = "No VR module binary installed.\n"
+                    .. "OpenXR: gmcl_vrmod_xr_* from gVRMod\n"
+                    .. "OpenVR: gmcl_vrmod_* from module-master\n"
+                    .. "(both may coexist in garrysmod/lua/bin)\n"
+                    .. moduleDownload
             else
-                error = "Failed to load module.\nModule file exists but could not be loaded. Check antivirus or permissions."
+                error = "Failed to load module.\n"
+                    .. "Installed: XR=" .. tostring(inst.openxr) .. " OVR=" .. tostring(inst.openvr) .. "\n"
+                    .. "prefer: vrmod_prefer_backend auto|openxr|openvr\n"
+                    .. (vrmod.GetModuleLoadError and vrmod.GetModuleLoadError() or "Check antivirus / permissions.")
             end
         elseif g_VR.moduleVersion < requiredVersion then
-            error = "Module update required.\nRun the installer or re-download from the workshop.\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
+            error = "Module update required.\n" .. moduleDownload
+                .. "\nInstalled: v" .. g_VR.moduleVersion .. " Required: v" .. requiredVersion
+                .. "\nBackend: " .. tostring(pol.backend or "?")
         else
             if g_VR.moduleVersion < latestVersion then
                 print(string.format(
-                    "[VRMOD] Module v%d is older than recommended v%d. VR still runs; supersample eye sizing and some crisp-path fixes need the latest modules.zip.",
-                    g_VR.moduleVersion, latestVersion
+                    "[VRMOD] Module v%d older than recommended v%d (%s). VR still runs.",
+                    g_VR.moduleVersion, latestVersion, tostring(pol.label or pol.backend)
                 ))
             elseif g_VR.moduleVersion > latestVersion then
-                print("[VRMOD] Warning: Module version is newer than tested. Installed: v" .. g_VR.moduleVersion .. " | Recommended: v" .. latestVersion .. " | Addon: " .. vrmod.GetVersion() .. " | Most features should work.")
+                print("[VRMOD] Module newer than tested. v" .. g_VR.moduleVersion
+                    .. " | rec v" .. latestVersion
+                    .. " | " .. tostring(pol.backend)
+                    .. " | addon " .. vrmod.GetVersion())
             end
             if VRMOD_IsHMDPresent and not VRMOD_IsHMDPresent() then
-                error = "VR headset not detected."
+                if pol.backend == "openxr" then
+                    error = "VR headset not detected (OpenXR runtime / WiVRn / SteamVR OpenXR)."
+                else
+                    error = "VR headset not detected (SteamVR / OpenVR)."
+                end
             end
         end
         return error

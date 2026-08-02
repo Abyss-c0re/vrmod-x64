@@ -68,9 +68,13 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset", -1.0, 1.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
-    -- mat_queue_mode while VR is active: 0=sync, 1=queued single-thread, 2=queued multithreaded (default).
-    -- Mode 2 is first-class on OpenXR only. Do NOT blind-sync this default into vrmod-x64 (OpenVR).
-    vrmod.AddCallbackedConvar("vrmod_mat_queue_mode", nil, "2", FCVAR_ARCHIVE, "OpenXR mat_queue_mode: 0 sync, 1 queued, 2 multithreaded", 0, 2, tonumber)
+    -- Dual binaries: gmcl_vrmod_xr_* (OpenXR) + gmcl_vrmod_* (OpenVR) may both live in lua/bin.
+    -- auto = prefer OpenXR if installed, else OpenVR. Force with openxr|openvr.
+    vrmod.AddCallbackedConvar("vrmod_prefer_backend", nil, "auto", FCVAR_ARCHIVE,
+        "Native module prefer: auto | openxr | openvr (both DLLs may coexist)", nil, nil, tostring)
+    -- mat_queue while VR is active (clamped by active backend: OpenVR max 1, OpenXR max 2).
+    vrmod.AddCallbackedConvar("vrmod_mat_queue_mode", nil, "2", FCVAR_ARCHIVE,
+        "mat_queue: 0 sync, 1 queued, 2 MT (OpenXR only when that module is loaded)", 0, 2, tonumber)
     vrmod.AddCallbackedConvar("vrmod_skybox", nil, "0", nil, nil, nil, nil, tobool, function(val) RunConsoleCommand("r_3dsky", val and "1" or "0") end)
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")
