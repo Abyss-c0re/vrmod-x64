@@ -141,7 +141,7 @@ local function paint()
 
 		if vrmod.cube and vrmod.cube.DrawChrome then
 			vrmod.cube.DrawChrome(0, 0, W, H, "gVRMod", {
-				subtitle = "CUBE EXPERIENCE · LAUNCHER",
+				subtitle = "PAUSE · CUBE FALLBACK",
 				headerH = HEADER,
 			})
 		else
