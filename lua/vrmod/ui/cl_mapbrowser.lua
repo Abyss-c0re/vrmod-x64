@@ -289,20 +289,14 @@ end
 -- Window
 ------------------------------------------------------------------------
 function VRUtilCreateMapBrowserWindow()
+	-- VR: native Cube New Game (hand RT) — Derma panel2vr was cropped / unclickable / edge-on
+	if inVR() and vrmod.VRNewGame_Open then
+		vrmod.VRNewGame_Open()
+		return nil
+	end
 	if IsValid(window) then
 		window:MakePopup()
 		window:SetVisible(true)
-		if inVR() and vrmod.cube and vrmod.cube.ApplyDermaSkin then
-			vrmod.cube.ApplyDermaSkin(window)
-		end
-		if inVR() and vrmod.panel2vr and vrmod.panel2vr.ManifestPanel then
-			vrmod.panel2vr.ManifestPanel(window, {
-				kind = "mainmenu",
-				place = "cinema",
-				hint = "newgame",
-				uid = "p2v_newgame",
-			})
-		end
 		return window
 	end
 
@@ -774,14 +768,12 @@ function VRUtilCreateMapBrowserWindow()
 	return window
 end
 
-function vrmod.OpenNewGame()
-	return VRUtilCreateMapBrowserWindow()
-end
-
+-- vrmod.OpenNewGame / vrmod_newgame live in cl_vr_newgame.lua (Cube RT).
+-- Desktop-only Derma browser:
 concommand.Add("vrmod_mapbrowser", function()
-	VRUtilCreateMapBrowserWindow()
-end)
-
-concommand.Add("vrmod_newgame", function()
+	if g_VR and g_VR.active and vrmod.VRNewGame_Open then
+		vrmod.VRNewGame_Open()
+		return
+	end
 	VRUtilCreateMapBrowserWindow()
 end)
