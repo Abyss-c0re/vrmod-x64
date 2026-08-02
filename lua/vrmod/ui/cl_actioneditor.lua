@@ -92,14 +92,25 @@ function VRUtilWriteActionManifestWithCustoms()
 	return true
 end
 
-function VRUtilSaveCustomActions()
+--- opts.pushManifest (default true on desktop close): rewrite action manifest.
+--- NEVER call VRMOD_SetActionManifest while a session is live — freezes OpenXR.
+function VRUtilSaveCustomActions(opts)
+	opts = opts or {}
+	local pushManifest = opts.pushManifest
+	if pushManifest == nil then pushManifest = true end
+
 	if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
-	VRUtilSanitizeCustomActions()
+	-- Keep empty names while editing; only sanitize when pushing manifest
+	if pushManifest then
+		VRUtilSanitizeCustomActions()
+	end
 	file.Write(CUSTOM_FILE, util.TableToJSON(g_VR.CustomActions or {}, false))
-	VRUtilWriteActionManifestWithCustoms()
-	-- If already in VR, re-push manifest so new names exist (may need restart on some runtimes)
-	if g_VR and g_VR.active and isfunction(VRMOD_SetActionManifest) then
-		pcall(VRMOD_SetActionManifest, "vrmod/vrmod_action_manifest.txt")
+	if pushManifest then
+		VRUtilWriteActionManifestWithCustoms()
+		-- Module re-bind only when NOT in an active VR session
+		if not (g_VR and g_VR.active) and isfunction(VRMOD_SetActionManifest) then
+			pcall(VRMOD_SetActionManifest, "vrmod/vrmod_action_manifest.txt")
+		end
 	end
 end
 
