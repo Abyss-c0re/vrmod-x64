@@ -382,3 +382,9 @@ function VRUtilCreateMapBrowserWindow()
 
 	return window
 end
+
+concommand.Add("vrmod_mapbrowser", function()
+	if isfunction(VRUtilCreateMapBrowserWindow) then
+		VRUtilCreateMapBrowserWindow()
+	end
+end)

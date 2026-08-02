@@ -427,10 +427,22 @@ if CLIENT then
 		end)
 
 		timer.Simple(2, function()
-			if SysTime() < 120 then GetConVar("vrmod_autostart"):SetBool(false) end
+			-- Legacy: early sessions used to clear autostart in first 120s — that broke
+			-- the gVRMod launcher (+exec gvrmod_hub). Only skip the clear when hub mode
+			-- or prefer_backend openxr was forced this launch.
+			local hub = GetConVar("vrmod_hub")
+			local prefer = GetConVar("vrmod_prefer_backend")
+			local hubMode = hub and hub:GetBool()
+			local forceXR = prefer and string.lower(prefer:GetString() or "") == "openxr"
+			if SysTime() < 120 and not hubMode and not forceXR then
+				local ac = GetConVar("vrmod_autostart")
+				if ac then ac:SetBool(false) end
+			end
 			if GetConVar("vrmod_autostart"):GetBool() then
 				timer.Create("vrutil_timer_tryautostart", 1, 0, function()
-					local pm = LocalPlayer():GetModel()
+					local ply = LocalPlayer()
+					if not IsValid(ply) then return end
+					local pm = ply:GetModel()
 					if pm ~= nil and pm ~= "models/player.mdl" and pm ~= "" then
 						VRUtilClientStart()
 						timer.Remove("vrutil_timer_tryautostart")
