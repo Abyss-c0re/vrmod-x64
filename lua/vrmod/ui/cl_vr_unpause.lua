@@ -19,28 +19,11 @@ function vrmod.VRUnpauseWorld()
 	if gui and gui.HideGameUI then
 		pcall(gui.HideGameUI)
 	end
-	-- SP: GameUI open freezes sim; force unpause if engine exposed it
-	if gui and gui.IsGameUIVisible and gui.IsGameUIVisible() then
-		pcall(gui.HideGameUI)
-	end
 	-- Best-effort; harmless if not paused
-	pcall(function()
-		RunConsoleCommand("unpause")
-	end)
-	pcall(function()
-		RunConsoleCommand("sv_pausable", "0")
-	end)
-	-- Never leave desktop cursor capturing while in VR (breaks laser menus)
-	if gui and gui.EnableScreenClicker and not (vgui and vgui.CursorVisible and vgui.CursorVisible() and not g_VR.active) then
-		-- Only force off when VR menus own input (no desktop derma clicker needed)
-		if not (vgui and vgui.GetHoveredPanel and IsValid(vgui.GetHoveredPanel()) and not (g_VR.menus and next(g_VR.menus))) then
-			-- Keep clicker off for VR-only surfaces
-		end
-	end
+	pcall(function() RunConsoleCommand("unpause") end)
+	pcall(function() RunConsoleCommand("sv_pausable", "0") end)
+	-- VR laser path owns UI — desktop clicker steals / confuses input
 	if gui and gui.EnableScreenClicker then
-		-- VR laser path does not need screen clicker
-		local anyDesktopPopup = false
-		-- Prefer off always in VR for launcher flow
 		pcall(function() gui.EnableScreenClicker(false) end)
 	end
 end
