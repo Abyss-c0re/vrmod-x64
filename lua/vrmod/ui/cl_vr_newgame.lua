@@ -206,8 +206,26 @@ local function maxMapScroll()
 end
 
 ------------------------------------------------------------------------
--- Start (stock order)
+-- Start (stock order). maxplayers is blocked in-game — handle safely.
 ------------------------------------------------------------------------
+local function tryCmd(cmd, ...)
+	local args = { ... }
+	if IsConCommandBlocked and IsConCommandBlocked(cmd) then
+		-- game.ConsoleCommand sometimes works for host; else skip
+		if game and game.ConsoleCommand then
+			local line = cmd
+			for i = 1, #args do
+				line = line .. " " .. tostring(args[i])
+			end
+			pcall(game.ConsoleCommand, line .. "\n")
+			return true
+		end
+		return false
+	end
+	pcall(RunConsoleCommand, cmd, unpack(args))
+	return true
+end
+
 local function startGame()
 	if not selectedMap or not selectedMap.name then
 		SetStatus("Select a map", 2)
@@ -218,25 +236,56 @@ local function startGame()
 	local mp = MaxPlayers()
 
 	if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
-	RunConsoleCommand("vrmod_autostart", "1")
-	RunConsoleCommand("progress_enable")
-	RunConsoleCommand("gamemode", gm)
-	RunConsoleCommand("maxplayers", tostring(mp))
+	tryCmd("vrmod_autostart", "1")
+	tryCmd("progress_enable")
+	tryCmd("gamemode", gm)
+
 	if mp > 1 then
-		RunConsoleCommand("sv_cheats", "0")
-		RunConsoleCommand("hostname", hostname ~= "" and hostname or "gVRMod")
-		RunConsoleCommand("sv_lan", svLan and "1" or "0")
-		RunConsoleCommand("p2p_enabled", p2p and "1" or "0")
-		RunConsoleCommand("p2p_friendsonly", p2pFriends and "1" or "0")
+		tryCmd("sv_cheats", "0")
+		tryCmd("hostname", hostname ~= "" and hostname or "gVRMod")
+		tryCmd("sv_lan", svLan and "1" or "0")
+		tryCmd("p2p_enabled", p2p and "1" or "0")
+		tryCmd("p2p_friendsonly", p2pFriends and "1" or "0")
 	end
-	SetStatus("Starting " .. mapName .. "…", 3)
-	if vrmod.Toast then
-		vrmod.Toast(string.format("%s · %s · %sp", mapName, gm, mp), 3, "hint")
+
+	local mpOk = tryCmd("maxplayers", tostring(mp))
+	if not mpOk and mp > 1 then
+		-- In-game client cannot change maxplayers. Disconnect → menu → map.
+		-- Write one-shot cfg the next session / menu can exec (best-effort).
+		pcall(function()
+			if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
+			file.Write("vrmod/pending_start.txt", table.concat({
+				"map=" .. mapName,
+				"gamemode=" .. gm,
+				"maxplayers=" .. tostring(mp),
+				"hostname=" .. (hostname ~= "" and hostname or "gVRMod"),
+				"sv_lan=" .. (svLan and "1" or "0"),
+				"p2p_enabled=" .. (p2p and "1" or "0"),
+				"p2p_friendsonly=" .. (p2pFriends and "1" or "0"),
+			}, "\n"))
+		end)
+		-- Host listen: changelevel keeps current slot count (still playable)
+		SetStatus("maxplayers blocked in-game — changelevel " .. mapName, 4)
+		if vrmod.Toast then
+			vrmod.Toast("Slots locked mid-session — loading map (restart GMod for new maxplayers)", 5, "hint")
+		end
+		timer.Simple(0.2, function()
+			tryCmd("changelevel", mapName)
+		end)
+	else
+		SetStatus("Starting " .. mapName .. "…", 3)
+		if vrmod.Toast then
+			vrmod.Toast(string.format("%s · %s · %sp", mapName, gm, mp), 3, "hint")
+		end
+		timer.Simple(0.25, function()
+			-- Prefer changelevel when already on a map (smoother than map)
+			if game.GetMap and game.GetMap() and game.GetMap() ~= "" and IsInGame and IsInGame() then
+				tryCmd("changelevel", mapName)
+			else
+				tryCmd("map", mapName)
+			end
+		end)
 	end
-	timer.Simple(0.3, function()
-		RunConsoleCommand("maxplayers", tostring(mp))
-		RunConsoleCommand("map", mapName)
-	end)
 	vrmod.VRNewGame_Close()
 end
 
@@ -335,16 +384,21 @@ local function rebuildButtons()
 end
 
 ------------------------------------------------------------------------
--- Paint
+-- Paint (must never error mid-RT — that causes End2D/PopRT leaks + flicker)
 ------------------------------------------------------------------------
-local function paint()
-	if not open or not (g_VR.menus and g_VR.menus[UID]) then return end
-	if isfunction(VRUtilMenuRenderStart) then VRUtilMenuRenderStart(UID) end
-	local m = g_VR.menus[UID]
-	m.dirty = true
-	m.alwaysRedraw = true
-	m.paintInterval = 0
+local function colRGBA(c, fallback)
+	if IsColor and IsColor(c) then return c.r, c.g, c.b, c.a or 255 end
+	if istable(c) and c.r then return c.r, c.g, c.b, c.a or 255 end
+	if fallback then return colRGBA(fallback, nil) end
+	return 255, 255, 255, 255
+end
 
+local function setCol(c)
+	local r, g, b, a = colRGBA(c)
+	surface.SetDrawColor(r, g, b, a)
+end
+
+local function paintInner()
 	local T = Theme()
 	local focused = g_VR.menuFocus == UID
 	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
@@ -356,9 +410,9 @@ local function paint()
 			headerH = HEADER,
 		})
 	else
-		surface.SetDrawColor(T.bg)
+		setCol(T.bg)
 		surface.DrawRect(0, 0, W, H)
-		surface.SetDrawColor(T.header)
+		setCol(T.header)
 		surface.DrawRect(0, 0, W, 5)
 		draw.SimpleText("NEW GAME", Font("CubeTitle"), PAD, 14, T.header)
 	end
@@ -372,10 +426,10 @@ local function paint()
 		if vrmod.cube and vrmod.cube.DrawSlot then
 			vrmod.cube.DrawSlot(b.x, b.y, b.w, b.h, nil, hov, primary, true)
 		else
-			surface.SetDrawColor(hov and T.rowHot or T.row)
+			setCol(hov and T.rowHot or T.row)
 			surface.DrawRect(b.x, b.y, b.w, b.h)
 			if primary or hov then
-				surface.SetDrawColor(T.header)
+				setCol(T.header)
 				surface.DrawRect(b.x, b.y, 4, b.h)
 			end
 		end
@@ -395,17 +449,18 @@ local function paint()
 			local name = b.label or ""
 			if #name > 14 then name = string.sub(name, 1, 13) .. "…" end
 			draw.SimpleText(name, "DermaDefault", b.x + 10, b.y + b.h * 0.5, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-		elseif b.kind == "cat_scroll" or b.kind == "map_scroll" or b.kind == "gm_nav" or b.kind == "mp_nav" then
+		elseif b.kind == "cat_scroll" or b.kind == "map_scroll" then
 			drawBtn(b, b.dir < 0 and "▲" or "▼", false)
-			if b.kind == "gm_nav" or b.kind == "mp_nav" then
-				drawBtn(b, b.dir < 0 and "◀" or "▶", false)
-			end
+		elseif b.kind == "gm_nav" or b.kind == "mp_nav" then
+			drawBtn(b, b.dir < 0 and "◀" or "▶", false)
 		elseif b.kind == "map" then
 			local sel = selectedMap and b.map and selectedMap.name == b.map.name
 			local hov = hot(b)
-			surface.SetDrawColor(hov or sel and T.rowHot or T.panel)
+			-- Parentheses required: "hov or sel and X" is wrong and passes bool to SetDrawColor
+			local bg = (hov or sel) and T.rowHot or T.panel
+			setCol(bg)
 			surface.DrawRect(b.x, b.y, b.w, b.h)
-			surface.SetDrawColor(sel and T.header or T.headerDim)
+			setCol(sel and T.header or T.headerDim)
 			surface.DrawOutlinedRect(b.x, b.y, b.w, b.h, sel and 3 or 1)
 			if b.map and b.map.icon and not b.map.icon:IsError() then
 				surface.SetDrawColor(255, 255, 255, 255)
@@ -416,9 +471,9 @@ local function paint()
 			if #nm > 12 then nm = string.sub(nm, 1, 11) .. "…" end
 			draw.SimpleText(nm, "DermaDefault", b.x + b.w * 0.5, b.y + b.h - 10, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 		elseif b.kind == "toggle" then
-			surface.SetDrawColor(b.on and T.header or T.row)
+			setCol(b.on and T.header or T.row)
 			surface.DrawRect(b.x, b.y, b.w, b.h)
-			surface.SetDrawColor(T.header)
+			setCol(T.header)
 			surface.DrawOutlinedRect(b.x, b.y, b.w, b.h, 1)
 			if b.on then
 				draw.SimpleText("✓", "DermaDefaultBold", b.x + b.w * 0.5, b.y + b.h * 0.5, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
@@ -433,7 +488,6 @@ local function paint()
 		end
 	end
 
-	-- Static labels for options column / multi tab
 	local bodyY = HEADER + 48
 	if tab == "maps" then
 		local ox = PAD + COL_CAT + COL_MAP + 12
@@ -479,12 +533,34 @@ local function paint()
 	end
 
 	if focused and mx >= 0 and my >= 0 then
-		surface.SetDrawColor(T.hot)
+		setCol(T.hot)
 		surface.DrawRect(mx - 2, my - 12, 4, 24)
 		surface.DrawRect(mx - 12, my - 2, 24, 4)
 	end
+end
 
-	if isfunction(VRUtilMenuRenderEnd) then VRUtilMenuRenderEnd() end
+local function paint()
+	if not open or not (g_VR and g_VR.menus and g_VR.menus[UID]) then return end
+	local m = g_VR.menus[UID]
+	-- Steady paint: no alwaysRedraw thrash (was fighting RT + hand anchor → flicker)
+	m.alwaysRedraw = false
+	m.paintInterval = 0
+	m.paintIntervalFocused = 0
+	m.dirty = true
+
+	local started = false
+	if isfunction(VRUtilMenuRenderStart) then
+		started = VRUtilMenuRenderStart(UID) and true or false
+	end
+	if not started then return end
+
+	local ok, err = pcall(paintInner)
+	if isfunction(VRUtilMenuRenderEnd) then
+		pcall(VRUtilMenuRenderEnd)
+	end
+	if not ok and vrmod.logger then
+		vrmod.logger.Warn("[newgame] paint: %s", tostring(err))
+	end
 end
 
 ------------------------------------------------------------------------
@@ -630,8 +706,9 @@ function vrmod.VRNewGame_Open()
 	sm.attachHand = wrist
 	sm.persistOpen = true
 	sm.keepAlive = true
-	sm.alwaysRedraw = true
+	sm.alwaysRedraw = false
 	sm.paintInterval = 0
+	sm.paintIntervalFocused = 0
 	sm.pos = livePos
 	sm.ang = liveAng
 	sm.scale = liveScale
@@ -645,6 +722,7 @@ function vrmod.VRNewGame_Open()
 		vrmod.Toast("New Game — laser + trigger · Multiplayer tab", 4, "hint")
 	end
 
+	local lastAnchor = 0
 	paint()
 	hook.Add("PreRender", "vr_newgame_paint", function()
 		if not open then
@@ -656,7 +734,10 @@ function vrmod.VRNewGame_Open()
 			return
 		end
 		local m = g_VR.menus[UID]
-		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor then
+		-- Re-anchor at most ~10Hz (every-frame anchor jitters → flicker)
+		local now = CurTime()
+		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor and (now - lastAnchor) > 0.1 then
+			lastAnchor = now
 			livePos, liveAng, liveScale = WristPose()
 			vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 		end
