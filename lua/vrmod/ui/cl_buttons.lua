@@ -80,20 +80,19 @@ local function InitializeMenuItems()
 		end)
 	end, true, nil, "settings")
 
-	-- Pause Menu = stock GameUI projected to wrist (ESC). NOT New Game.
+	-- Pause Menu = Cube hub (ESC). Never ActivateGameUI (freezes SP).
 	add("Pause Menu", 0, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
 			if vrmod.OpenPauseMenuVR then
 				vrmod.OpenPauseMenuVR()
-			elseif vrmod.OpenLauncherUnpaused then
-				vrmod.OpenLauncherUnpaused()
-			else
-				RunConsoleCommand("vrmod_pause_menu")
+			elseif vrmod.VRHub_Open then
+				if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
+				vrmod.VRHub_Open()
 			end
 		end)
-	end, true, "stock pause UI in VR · ESC", "pause_menu")
-	-- New Game = maps / mode / multiplayer only
+	end, true, "Resume · Settings · ESC", "pause_menu")
+	-- New Game = maps only (not a pause dupe)
 	add("New Game", 1, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
