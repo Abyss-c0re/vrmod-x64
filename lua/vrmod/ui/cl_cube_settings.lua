@@ -151,12 +151,32 @@ local function closeCtx()
 end
 
 local function runRowAction(row)
-	if row.cmd then
-		RunConsoleCommand(row.cmd)
-		return
-	end
+	-- Prefer action_id (can close this shell before opening hand panels)
 	if row.action_id and vrmod.SettingsRunAction then
 		vrmod.SettingsRunAction(row.action_id, closeCtx())
+		return
+	end
+	if row.cmd then
+		-- Bindings/actions: never leave settings open under a Derma float
+		if row.cmd == "vrmod_controller_bindings" or row.cmd == "vrmod_bindingeditor" or row.cmd == "vrmod_bindings" then
+			vrmod.CubeSettings_Close()
+			timer.Simple(0, function()
+				if vrmod.BindingsPanel_Open then
+					vrmod.BindingsPanel_Open()
+				else
+					RunConsoleCommand(row.cmd)
+				end
+			end)
+			return
+		end
+		if row.cmd == "vrmod_actioneditor" then
+			vrmod.CubeSettings_Close()
+			timer.Simple(0, function()
+				RunConsoleCommand("vrmod_actioneditor")
+			end)
+			return
+		end
+		RunConsoleCommand(row.cmd)
 	end
 end
 

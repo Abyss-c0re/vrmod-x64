@@ -1567,7 +1567,7 @@ if CLIENT then
 			-- Cube W6: honest toast — silent death left controllers dead with no clue
 			if vrmod.Toast then
 				vrmod.Toast(
-					"Controller bindings failed — reinstall VRMod module; ensure data/vrmod/vrmod_action_manifest.txt exists. SteamVR may need restart.",
+					"Controller bindings failed — reinstall VRMod module; ensure data/vrmod/vrmod_action_manifest.txt exists. Restart VR runtime if needed.",
 					8,
 					"error"
 				)

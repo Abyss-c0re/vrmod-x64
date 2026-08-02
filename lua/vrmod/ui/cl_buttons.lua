@@ -99,6 +99,15 @@ local function InitializeMenuItems()
 	add("Admin Cleanup", 0, 2, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
 
 	-- Row 3 / system (page 2 via layout) — col0 is Admin Cleanup above
+	add("Bindings", 4, 2, function()
+		timer.Simple(0, function()
+			if vrmod.BindingsPanel_Open then
+				vrmod.BindingsPanel_Open()
+			else
+				RunConsoleCommand("vrmod_controller_bindings")
+			end
+		end)
+	end, true, "On foot / Vehicle rebind", "bindings")
 	add("Reset Vehicle View", 1, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
 	add("Close Windows", 2, 2, function()
 		-- Spawn / context / Glide / settings — leave quick menu open

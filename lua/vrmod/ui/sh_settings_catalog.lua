@@ -63,17 +63,18 @@ vrmod.SettingsCatalog = {
 		},
 	},
 	{
-		-- gVRMod OpenXR: primary rebind is vrmod_bindingeditor (not SteamVR UI).
-		-- Custom named actions still use vrmod_actioneditor.
+		-- Replaces SteamVR binding UI. VR settings must open hand panels (action_id), never Derma.
 		id = "bindings",
 		title = "Bindings",
 		icon = "icon16/keyboard.png",
 		rows = {
-			{ kind = "help", label = "OpenXR controller rebind (gVRMod — replaces SteamVR binding UI)" },
-			{ kind = "action", label = "Open OpenXR binding editor", cmd = "vrmod_bindingeditor" },
-			{ kind = "help", label = "Custom named console actions" },
-			{ kind = "action", label = "Open action editor", cmd = "vrmod_actioneditor" },
-			{ kind = "help", label = "OpenXR binds: data/vrmod/vrmod_openxr_bindings.json" },
+			{ kind = "help", label = "Replaces SteamVR binding UI — rebind here, not in SteamVR" },
+			{ kind = "help", label = "Quest 3 / Touch defaults active out of the box" },
+			{ kind = "action", label = "Controller rebind", action_id = "open_controller_bindings" },
+			{ kind = "help", label = "On foot / Vehicle · Bind · Chord · conflicts" },
+			{ kind = "help", label = "Custom named console actions (desktop text edit)" },
+			{ kind = "action", label = "Custom actions", action_id = "open_custom_actions" },
+			{ kind = "help", label = "Saved: data/vrmod/vrmod_openxr_bindings.json" },
 		},
 	},
 	{
@@ -542,6 +543,36 @@ end
 --- Shared action handlers (VR + desktop). Host may wrap close.
 function vrmod.SettingsRunAction(action_id, ctx)
 	ctx = ctx or {}
+
+	-- Settings → Bindings: never Derma in HMD (closes settings shell first)
+	if action_id == "open_controller_bindings" then
+		if ctx.close then pcall(ctx.close) end
+		timer.Simple(0, function()
+			if g_VR and g_VR.active and vrmod.BindingsPanel_Open then
+				vrmod.BindingsPanel_Open()
+			else
+				RunConsoleCommand("vrmod_bindingeditor")
+			end
+		end)
+		return true
+	end
+	if action_id == "open_custom_actions" then
+		if ctx.close then pcall(ctx.close) end
+		timer.Simple(0, function()
+			if g_VR and g_VR.active then
+				-- Text-heavy editor: desktop only until native panel exists
+				if vrmod.Toast then
+					vrmod.Toast("Custom actions: edit on desktop (not in HMD)", 4, "hint")
+				else
+					print("[VRMod] Custom actions editor is desktop-only (no Derma in HMD)")
+				end
+			else
+				RunConsoleCommand("vrmod_actioneditor")
+			end
+		end)
+		return true
+	end
+
 	if action_id == "apply_offsets" then
 		local function f(n, d)
 			local c = GetConVar(n)

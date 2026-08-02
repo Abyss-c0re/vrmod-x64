@@ -9,6 +9,15 @@ end
 
 concommand.Add("vrmod_actioneditor", function(ply, cmd, args)
 	if open then return end
+	-- Never float Derma into the HMD (ruins VR settings chrome)
+	if g_VR and g_VR.active then
+		if vrmod.Toast then
+			vrmod.Toast("Custom actions: edit on desktop (not in HMD)", 4, "hint")
+		else
+			print("[VRMod] Custom actions editor is desktop-only while in VR")
+		end
+		return
+	end
 	open = true
 	local window = vgui.Create("DFrame")
 	window:SetPos(ScrW() / 2 - 350, ScrH() / 2 - 256)
