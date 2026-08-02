@@ -44,9 +44,10 @@ if CLIENT then
 		return n
 	end
 
+	-- Performance pins. Under mat_queue_mode 2 NEVER touch gmod_mcore_test /
+	-- cl_threaded_bone_setup — stacking MT systems with material workers is a
+	-- primary "Illegal termination of worker thread" / SIGBUS crash source.
 	local PERFORMANCE_CONVARS = {
-		cl_threaded_bone_setup = "1",
-		gmod_mcore_test = "1",
 		-- Filled at VR start from WantedMatQueueMode()
 		mat_queue_mode = "2",
 		mat_disable_bloom = "1",
@@ -56,7 +57,6 @@ if CLIENT then
 		mat_motion_blur_enabled = "0",
 		mat_fastspecular = "0",
 		r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
-		r_threaded_particles = "1",
 		r_queued_ropes = "1",
 		-- Keep world + model decals on for both eye passes (stereo flicker if off/intermittent)
 		r_drawdecals = "1",
@@ -66,9 +66,9 @@ if CLIENT then
 		snd_mute_losefocus = "0",
 	}
 	-- mat_queue is set ONCE at start (re-SetInt every frame restarts workers → crash).
-	-- Other pins can be re-asserted if needed.
+	-- Other pins can be re-asserted if needed — NEVER mat_queue_mode.
 	local SESSION_PIN_CONVARS = {
-		-- mat_queue_mode deliberately NOT here
+		-- mat_queue_mode deliberately NOT here (even if policy says pin — OpenXR forbids)
 	}
 	local matQueueAppliedForSession = false
 	-- Stores original convar values so we can restore them on VR exit
@@ -84,7 +84,9 @@ if CLIENT then
 			if vrmod.logger then
 				vrmod.logger.Info("Runtime: %s", vrmod.DescribeBackend and vrmod.DescribeBackend() or tostring(pol and pol.backend))
 			end
-			if pol and pol.matQueuePinEveryFrame then
+			-- Never pin mat_queue every frame under OpenXR (worker thrash → crash).
+			-- OpenVR policy may request pin; we still refuse for safety on mode 2.
+			if pol and pol.matQueuePinEveryFrame and WantedMatQueueMode() < 2 then
 				SESSION_PIN_CONVARS = SESSION_PIN_CONVARS or {}
 				SESSION_PIN_CONVARS.mat_queue_mode = true
 			end
@@ -1174,28 +1176,36 @@ if CLIENT then
 		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
 		RefreshMatQueuePin()
 
-		-- Non-mat_queue pins only. mat_queue restarts CThread workers — treat carefully.
+		local mq = WantedMatQueueMode()
+		-- Soft pins first (never mat_queue). Under mode 2 skip extra MT cvars.
 		for cvar, val in pairs(PERFORMANCE_CONVARS) do
 			if cvar ~= "mat_queue_mode" then
 				overrideConvar(cvar, val)
 			end
 		end
+		-- Mode 0/1 can use light threading; mode 2 = material workers only.
+		if mq < 2 then
+			overrideConvar("cl_threaded_bone_setup", "1")
+			overrideConvar("r_threaded_particles", "1")
+			-- gmod_mcore_test stays off always — crashes with VR stereo + mat queue
+		end
 
 		-- mat_queue: set ONCE, only if different, BEFORE RT share / RenderScene.
 		-- Never re-SetInt later (worker thrash → crash under mode 2).
+		-- Never restore on exit (2→0 kills CThread workers).
 		if not matQueueAppliedForSession then
-			local mq = WantedMatQueueMode()
 			local cv = GetConVar("mat_queue_mode")
 			local cur = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or nil
 			if cur == nil or cur ~= mq then
-				-- Remember pre-VR value for logging only — we do not restore mat_queue on exit.
 				if cv and convarOverrides["mat_queue_mode"] == nil then
 					convarOverrides["mat_queue_mode"] = cv:GetString()
 				end
+				-- Brief settle: applying mode 2 mid-frame races workers. We only
+				-- call this before RT share / first RenderScene, so main-thread is OK.
 				setConvarValue("mat_queue_mode", tostring(mq))
 				if vrmod.logger then
 					vrmod.logger.Info(
-						"mat_queue_mode %s→%s (once at start; no exit restore)",
+						"mat_queue_mode %s→%s (once at start; no exit restore; no mcore)",
 						tostring(cur), tostring(mq)
 					)
 				end
@@ -1206,6 +1216,7 @@ if CLIENT then
 			end
 			matQueueAppliedForSession = true
 			PERFORMANCE_CONVARS.mat_queue_mode = tostring(mq)
+			g_VR._matQueueMode = mq
 		end
 	end
 

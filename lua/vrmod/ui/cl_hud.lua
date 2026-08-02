@@ -625,6 +625,14 @@ local function CaptureRadar3D(ply, range)
 	-- Hard isolation: never under stereo RT, HUD RT, or mid-capture
 	if g_VR.stereoEye or g_VR.stereoRtActive or g_VR._renderingHudRT then return false end
 	if g_VR._radarCapturing then return false end
+	-- mat_queue_mode 2: nested ortho RenderView races material workers → crash.
+	-- Use 2D radar only (buildings/blips); 3D photo stays off under mode 2.
+	local mq = g_VR._matQueueMode
+	if mq == nil then
+		local cv = GetConVar("mat_queue_mode")
+		mq = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 0
+	end
+	if tonumber(mq) == 2 then return false end
 
 	local pos = ply:GetPos()
 	local yaw = RadarYaw(ply)
