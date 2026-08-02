@@ -22,12 +22,17 @@ local cv_enabled = CreateClientConVar(
 local LABEL = "DESKTOP"
 local SUB = "window unfocused"
 
+local accentMat = Material("vrmod/tpbeam", "smooth noclamp")
+
 local function Theme()
+	if vrmod.cube and vrmod.cube.ThemeLive then return vrmod.cube.ThemeLive() end
 	if vrmod.cube and vrmod.cube.Theme then return vrmod.cube.Theme end
 	return {
 		bgGlass = Color(22, 10, 16, 230),
 		crimson = Color(196, 30, 58, 255),
 		crimsonHot = Color(255, 70, 100, 255),
+		header = Color(196, 30, 58, 255),
+		hot = Color(255, 70, 100, 255),
 		text = Color(255, 240, 244, 255),
 		muted = Color(200, 150, 165, 230),
 		warn = Color(255, 200, 100, 255),
@@ -35,7 +40,12 @@ local function Theme()
 end
 
 local function Font(name)
-	if vrmod.cube and vrmod.cube.Font then return vrmod.cube.Font(name) end
+	if vrmod.cube and vrmod.cube.Font then
+		if name == "title" or name == "huge" then return vrmod.cube.Font("CubeTitle") or "DermaLarge" end
+		if name == "label" then return vrmod.cube.Font("CubeLabel") or "DermaDefaultBold" end
+		if name == "small" then return vrmod.cube.Font("CubeSmall") or "DermaDefault" end
+		return vrmod.cube.Font(name) or "DermaDefault"
+	end
 	if name == "title" or name == "huge" then return "DermaLarge" end
 	if name == "label" then return "DermaDefaultBold" end
 	return "DermaDefault"
@@ -59,29 +69,30 @@ local function DrawChipAt(pos, ang)
 	local th = Theme()
 	local scale = 0.045
 	cam.Start3D2D(pos, ang, scale)
-	-- Glass plate (additive / translucent — not a black wall)
-	local w, h = 220, 72
+	local w, h = 240, 78
 	local x, y = -w * 0.5, -h * 0.5
+
+	-- Soft beam wash (shared vrmod-x64 material)
+	if accentMat and not accentMat:IsError() then
+		surface.SetMaterial(accentMat)
+		surface.SetDrawColor(196, 30, 58, 70)
+		surface.DrawTexturedRectRotated(0, 0, w + 40, h + 24, CurTime() * 12)
+	end
+
 	surface.SetDrawColor(th.bgGlass or Color(22, 10, 16, 220))
 	surface.DrawRect(x, y, w, h)
-	-- Crimson accent bar (Cube energy)
-	surface.SetDrawColor(th.crimson or Color(196, 30, 58, 255))
-	surface.DrawRect(x, y, 8, h)
-	surface.SetDrawColor(th.crimsonHot or Color(255, 70, 100, 255))
+	surface.SetDrawColor(th.header or th.crimson or Color(196, 30, 58, 255))
+	surface.DrawRect(x, y, 10, h)
+	surface.SetDrawColor(th.hot or th.crimsonHot or Color(255, 70, 100, 255))
 	surface.DrawOutlinedRect(x, y, w, h, 2)
-	-- Pulse edge (time-based soft breath)
+
 	local pulse = 0.55 + 0.45 * math.abs(math.sin(CurTime() * 2.2))
-	local edge = Color(
-		(th.crimsonHot and th.crimsonHot.r) or 255,
-		(th.crimsonHot and th.crimsonHot.g) or 70,
-		(th.crimsonHot and th.crimsonHot.b) or 100,
-		math.floor(80 + 120 * pulse)
-	)
+	local edge = Color(255, 70, 100, math.floor(70 + 130 * pulse))
 	surface.SetDrawColor(edge)
 	surface.DrawOutlinedRect(x + 2, y + 2, w - 4, h - 4, 1)
 
-	draw.SimpleText(LABEL, Font("label"), 0, y + 18, th.warn or Color(255, 200, 100), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-	draw.SimpleText(SUB, Font("small"), 0, y + 44, th.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	draw.SimpleText(LABEL, Font("label"), 6, y + 20, th.warn or Color(255, 200, 100), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	draw.SimpleText(SUB, Font("small"), 6, y + 48, th.muted or Color(200, 150, 165), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	cam.End3D2D()
 end
 
