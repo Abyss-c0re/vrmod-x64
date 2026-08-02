@@ -89,10 +89,13 @@ function vrmod.ApplyOpenXRLaunchMarker()
 		autostart = wantAuto,
 		menu = wantMenu,
 		hub = wantHub,
+		bg_map = t.bg_map or "gm_construct",
+		map_mode = t.map_mode or "background",
 		ts = tonumber(t.ts) or 0,
 	}
-	log("marker applied mode=%s autostart=%s menu_vr=%s hub=%s",
-		mode, tostring(wantAuto), tostring(wantMenu), tostring(wantHub))
+	log("marker applied mode=%s autostart=%s menu_vr=%s hub=%s bg=%s/%s",
+		mode, tostring(wantAuto), tostring(wantMenu), tostring(wantHub),
+		tostring(t.map_mode or "background"), tostring(t.bg_map or "gm_construct"))
 	return true
 end
 
@@ -137,16 +140,28 @@ local function bootFromLaunch()
 		if not (auto and auto:GetBool()) then return end
 	end
 
+	local function afterVRLive()
+		log("VR active map=%s", tostring(game.GetMap and game.GetMap() or "?"))
+		-- HL2VR: GameUI lives over background world — activate + freefloat cinema
+		timer.Simple(0.5, function()
+			if not (g_VR and g_VR.active) then return end
+			if gui and gui.ActivateGameUI then pcall(gui.ActivateGameUI) end
+			if isfunction(vrmod.BindMainMenuToVR) then
+				if not vrmod.BindMainMenuToVR() then
+					timer.Simple(1.0, function()
+						if isfunction(vrmod.BindMainMenuToVR) then pcall(vrmod.BindMainMenuToVR) end
+					end)
+				end
+			elseif g_VR._openxrLaunch and g_VR._openxrLaunch.hub and vrmod.VRHub_Open then
+				pcall(vrmod.VRHub_Open)
+			end
+		end)
+	end
+
 	timer.Create("vrmod_openxr_launch_start", 0.5, 0, function()
 		if g_VR and g_VR.active then
 			timer.Remove("vrmod_openxr_launch_start")
-			log("VR active")
-			-- Kick menu bind path
-			if isfunction(vrmod.BindMainMenuToVR) then
-				timer.Simple(0.6, function()
-					pcall(vrmod.BindMainMenuToVR)
-				end)
-			end
+			afterVRLive()
 			return
 		end
 		if startAttempts >= MAX_START_ATTEMPTS then
@@ -157,7 +172,21 @@ local function bootFromLaunch()
 			end
 			return
 		end
-		forceStartVR()
+		-- Prefer start once LocalPlayer exists (bg map / full map). Still try early.
+		local ply = LocalPlayer()
+		if IsValid(ply) then
+			local pm = ply.GetModel and ply:GetModel() or nil
+			if pm and pm ~= "" and pm ~= "models/player.mdl" then
+				forceStartVR()
+				return
+			end
+		end
+		-- Early / menu-only attempt every other tick
+		if startAttempts % 2 == 0 then
+			forceStartVR()
+		else
+			startAttempts = startAttempts + 1
+		end
 	end)
 end
 
@@ -167,16 +196,23 @@ hook.Add("Think", "vrmod_openxr_launch_boot", function()
 	timer.Simple(0.2, bootFromLaunch)
 end)
 
+-- map_background gm_construct (or full map): world is ready → force VR
 hook.Add("InitPostEntity", "vrmod_openxr_launch_map", function()
-	-- Map load (hub path): re-apply if marker still there, keep starting
 	if file.Exists(MARKER, "DATA") then
 		vrmod.ApplyOpenXRLaunchMarker()
 	end
-	if vrmod.IsOpenXRLaunchSession() or (GetConVar("vrmod_autostart") and GetConVar("vrmod_autostart"):GetBool()) then
-		timer.Simple(1.0, function()
-			if not (g_VR and g_VR.active) then forceStartVR() end
-		end)
-	end
+	local want = vrmod.IsOpenXRLaunchSession()
+		or (GetConVar("vrmod_autostart") and GetConVar("vrmod_autostart"):GetBool())
+	if not want then return end
+	log("InitPostEntity map=%s — force VR (bg/full world ready)", tostring(game.GetMap and game.GetMap() or "?"))
+	timer.Simple(0.8, function()
+		if g_VR and g_VR.active then return end
+		forceStartVR()
+	end)
+	timer.Simple(2.0, function()
+		if g_VR and g_VR.active then return end
+		forceStartVR()
+	end)
 end)
 
 concommand.Add("vrmod_openxr_launch_status", function()
