@@ -1,10 +1,10 @@
 if SERVER then return end
 -- =============================================================================
--- Cube Launcher Hub — freefloat Cube chrome in front of HMD (the actual experience)
+-- Cube Launcher Hub — LEFT-HAND Cube chrome (same pose family as settings/QM)
 --
--- Not desktop GameUI. Not empty construct + laser.
--- Opens unpaused on every launcher/VR start; billboards in front of the headset
--- until the player grabs it. Quick menu: "Launcher".
+-- Freefloat billboard was edge-on (thin red strip on grass). Hand-docked
+-- panels are the proven Cube path: VRUtilHandMenuPose + MenuApplyHandAnchor.
+-- Unpaused world. Laser + trigger. Quick menu: "Launcher".
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -14,12 +14,10 @@ local UID = "vr_hub"
 local open = false
 local buttons = {}
 local statusMsg, statusUntil = "", 0
-local followHmd = true -- until user grabs (freeFloat grab)
 
--- Large cinema panel — readable in HMD
-local W, H = 640, 720
-local livePos, liveAng, liveScale = Vector(0, 0, 0), Angle(0, 0, 90), 0.042
-local HEADER, PAD, ROW_H = 88, 20, 56
+local W, H = 560, 680
+local livePos, liveAng, liveScale = Vector(4, 5, 6), Angle(0, -90, 55), 0.028
+local HEADER, PAD, ROW_H = 80, 18, 54
 
 local function Theme()
 	if vrmod.cube and vrmod.cube.ThemeLive then return vrmod.cube.ThemeLive() end
@@ -54,22 +52,16 @@ local function LauncherSession()
 	return HubEnabled()
 end
 
---- World-space pose → origin-local for VRUtilMenuOpen (same as panel2vr)
-local function HmdBillboardPose(distance, heightOffset)
-	distance = distance or 30
-	heightOffset = heightOffset or -4
-	if not (g_VR and g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.pos) then
-		return Vector(20, 0, 56), Angle(0, 180, 90)
+local function WristHand()
+	return (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+end
+
+local function WristPose()
+	local wrist = WristHand()
+	if isfunction(VRUtilHandMenuPose) then
+		return VRUtilHandMenuPose(W, H, 0.028, Vector(4, 5, 6), Angle(0, -90, 55), wrist)
 	end
-	local hmd = g_VR.tracking.hmd
-	local yawOnly = Angle(0, hmd.ang.yaw, 0)
-	local pos = hmd.pos + yawOnly:Forward() * distance + Vector(0, 0, heightOffset)
-	-- 3D2D: face player (same convention as panel2vr.ComputeFloatPose)
-	local ang = Angle(0, yawOnly.yaw + 180, 90)
-	if g_VR.origin and g_VR.originAngle then
-		pos, ang = WorldToLocal(pos, ang, g_VR.origin, g_VR.originAngle)
-	end
-	return pos, ang
+	return Vector(4, 5, 6), Angle(0, -90, 55), 0.028
 end
 
 local function SetStatus(msg, sec)
@@ -91,10 +83,10 @@ end
 
 local function rebuildButtons()
 	buttons = {}
-	buttons[#buttons + 1] = { x = W - 56, y = 16, w = 40, h = 40, kind = "close" }
-	local y0 = HEADER + 16
+	buttons[#buttons + 1] = { x = W - 52, y = 14, w = 38, h = 38, kind = "close" }
+	local y0 = HEADER + 14
 	for i, item in ipairs(MenuItems()) do
-		local y = y0 + (i - 1) * (ROW_H + 10)
+		local y = y0 + (i - 1) * (ROW_H + 8)
 		buttons[#buttons + 1] = {
 			x = PAD, y = y, w = W - PAD * 2, h = ROW_H,
 			kind = "item", id = item.id, item = item,
@@ -110,7 +102,6 @@ local function openNewGame()
 			if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 			vrmod.OpenNewGame()
 		elseif isfunction(VRUtilCreateMapBrowserWindow) then
-			if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 			VRUtilCreateMapBrowserWindow()
 		end
 	end)
@@ -130,16 +121,16 @@ end
 local function paint()
 	if not open or not (g_VR and g_VR.menus and g_VR.menus[UID]) then return end
 	if isfunction(VRUtilMenuRenderStart) then VRUtilMenuRenderStart(UID) end
-	g_VR.menus[UID].dirty = true
-	g_VR.menus[UID].alwaysRedraw = true
-	g_VR.menus[UID].paintInterval = 0
+	local m = g_VR.menus[UID]
+	m.dirty = true
+	m.alwaysRedraw = true
+	m.paintInterval = 0
 
 	local T = Theme()
 	local focused = g_VR.menuFocus == UID
 	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
 	rebuildButtons()
 
-	-- Full Cube chrome plate
 	if vrmod.cube and vrmod.cube.DrawChrome then
 		vrmod.cube.DrawChrome(0, 0, W, H, "gVRMod", {
 			subtitle = "CUBE EXPERIENCE · LAUNCHER",
@@ -151,20 +142,16 @@ local function paint()
 		surface.SetDrawColor(T.headerDim)
 		surface.DrawRect(0, 0, W, HEADER)
 		surface.SetDrawColor(T.header)
-		surface.DrawRect(0, 0, W, 6)
+		surface.DrawRect(0, 0, W, 5)
 		surface.DrawRect(0, HEADER - 4, W, 4)
-		draw.SimpleText("gVRMod", Font("CubeTitle"), PAD, 18, T.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-		draw.SimpleText("CUBE EXPERIENCE · LAUNCHER", "DermaDefault", PAD, 52, T.muted)
+		draw.SimpleText("gVRMod", Font("CubeTitle"), PAD, 16, T.header, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		draw.SimpleText("CUBE EXPERIENCE · LAUNCHER", "DermaDefault", PAD, 50, T.muted)
 	end
 
-	-- Crimson side rail
-	surface.SetDrawColor(T.header)
-	surface.DrawRect(0, HEADER, 4, H - HEADER)
-
-	local closeHot = focused and mx >= W - 56 and mx <= W - 16 and my >= 16 and my <= 56
+	local closeHot = focused and mx >= W - 52 and mx <= W - 14 and my >= 14 and my <= 52
 	surface.SetDrawColor(closeHot and T.hot or T.header)
-	surface.DrawRect(W - 56, 16, 40, 40)
-	draw.SimpleText("X", "DermaLarge", W - 36, 36, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	surface.DrawRect(W - 52, 14, 38, 38)
+	draw.SimpleText("X", "DermaLarge", W - 33, 33, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 	for _, btn in ipairs(buttons) do
 		if btn.kind == "item" then
@@ -175,33 +162,31 @@ local function paint()
 			else
 				surface.SetDrawColor(hot and T.rowHot or T.row)
 				surface.DrawRect(btn.x, btn.y, btn.w, btn.h)
-			end
-			if hot or primary then
-				surface.SetDrawColor(T.header)
-				surface.DrawRect(btn.x, btn.y, 6, btn.h)
+				if hot or primary then
+					surface.SetDrawColor(T.header)
+					surface.DrawRect(btn.x, btn.y, 5, btn.h)
+				end
 			end
 			draw.SimpleText(btn.item.label, Font("CubeLabel") or "DermaDefaultBold",
-				btn.x + 20, btn.y + 16, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				btn.x + 18, btn.y + 14, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 			draw.SimpleText(btn.item.hint or "", "DermaDefault",
-				btn.x + 20, btn.y + 38, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				btn.x + 18, btn.y + 36, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 		end
 	end
 
 	local gm = engine.ActiveGamemode and engine.ActiveGamemode() or "?"
 	local map = game.GetMap and game.GetMap() or "?"
 	draw.SimpleText(string.format("%s  ·  %s", map, gm), "DermaDefault",
-		PAD, H - 40, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		PAD, H - 36, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 	if statusMsg ~= "" and CurTime() < statusUntil then
 		draw.SimpleText(statusMsg, Font("CubeLabel") or "DermaDefaultBold",
-			W - PAD, H - 40, T.ok, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+			W - PAD, H - 36, T.ok, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
 	end
 
-	-- Laser cursor crosshair when focused
 	if focused and mx >= 0 and my >= 0 then
 		surface.SetDrawColor(T.hot)
-		surface.DrawRect(mx - 2, my - 16, 4, 32)
-		surface.SetDrawColor(T.hot)
-		surface.DrawRect(mx - 16, my - 2, 32, 4)
+		surface.DrawRect(mx - 2, my - 14, 4, 28)
+		surface.DrawRect(mx - 14, my - 2, 28, 4)
 	end
 
 	if isfunction(VRUtilMenuRenderEnd) then VRUtilMenuRenderEnd() end
@@ -251,7 +236,6 @@ function vrmod.VRHub_Close()
 		return
 	end
 	open = false
-	followHmd = true
 	hook.Remove("PreRender", "vr_hub_paint")
 	hook.Remove("VRMod_Input", "vr_hub_input")
 	hook.Remove("VRMod_Exit", "vr_hub_exit")
@@ -272,23 +256,18 @@ function vrmod.VRHub_Open()
 	end
 	if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 
-	-- Drop saved layout for hub — bad free-float poses park it out of view
-	if isfunction(vrmod.ClearMenuFloatPose) then
-		pcall(vrmod.ClearMenuFloatPose, UID)
-	elseif isfunction(vrmod.SaveMenuLayout) then
-		-- force wipe via layouts if available
-		pcall(function()
-			if file.Exists("vrmod/panel_layouts.json", "DATA") then
-				local raw = file.Read("vrmod/panel_layouts.json", "DATA") or "{}"
-				local t = util.JSONToTable(raw) or {}
+	-- Never restore a bad free-float layout for hub
+	pcall(function()
+		if file.Exists("vrmod/panel_layouts.json", "DATA") then
+			local t = util.JSONToTable(file.Read("vrmod/panel_layouts.json", "DATA") or "{}") or {}
+			if t[UID] then
 				t[UID] = nil
 				file.Write("vrmod/panel_layouts.json", util.TableToJSON(t, true))
 			end
-		end)
-	end
+		end
+	end)
 
 	if open and g_VR.menus and g_VR.menus[UID] then
-		followHmd = true
 		g_VR.menus[UID].dirty = true
 		return
 	end
@@ -297,7 +276,6 @@ function vrmod.VRHub_Open()
 		return
 	end
 
-	-- Close competing system shells only
 	if g_VR.menus then
 		for _, uid in ipairs({ "miscmenu", "heightmenu" }) do
 			if g_VR.menus[uid] and isfunction(VRUtilMenuClose) then
@@ -308,13 +286,12 @@ function vrmod.VRHub_Open()
 	end
 
 	open = true
-	followHmd = true
-	livePos, liveAng = HmdBillboardPose(30, -4)
-	liveScale = 0.042
+	livePos, liveAng, liveScale = WristPose()
+	local wrist = WristHand()
 
-	VRUtilMenuOpen(UID, W, H, nil, false, livePos, liveAng, liveScale, true, function()
+	-- attachment=true → left/secondary hand (Cube standard)
+	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()
 		open = false
-		followHmd = true
 		hook.Remove("PreRender", "vr_hub_paint")
 		hook.Remove("VRMod_Input", "vr_hub_input")
 	end)
@@ -329,26 +306,28 @@ function vrmod.VRHub_Open()
 	sm.cubeMenu = true
 	sm.grabbable = true
 	sm.resizable = true
-	sm.freeFloat = true
-	sm.attachment = false
+	sm.attachment = true
+	sm.freeFloat = false
+	sm.attachHand = wrist
 	sm.persistOpen = true
 	sm.keepAlive = true
 	sm.alwaysRedraw = true
 	sm.paintInterval = 0
 	sm.paintIntervalFocused = 0
-	-- Don't re-apply a dead layout next frame
 	sm.pos = livePos
 	sm.ang = liveAng
 	sm.scale = liveScale
 	sm.baseScale = liveScale
 
-	-- Laser on for menu use
-	pcall(function() RunConsoleCommand("vrmod_laserpointer", "1") end)
-
-	if vrmod.Toast then
-		vrmod.Toast("Cube Launcher — laser + trigger", 4, "hint")
+	if vrmod.MenuApplyHandAnchor then
+		vrmod.MenuApplyHandAnchor(sm, liveScale, livePos, liveAng, wrist)
 	end
-	print("[gVRMod] Cube launcher open (freefloat cinema)")
+
+	pcall(function() RunConsoleCommand("vrmod_laserpointer", "1") end)
+	if vrmod.Toast then
+		vrmod.Toast("Cube Launcher — look at left hand", 4, "hint")
+	end
+	print("[gVRMod] Cube launcher on " .. tostring(wrist) .. " hand")
 
 	paint()
 	hook.Add("PreRender", "vr_hub_paint", function()
@@ -361,16 +340,9 @@ function vrmod.VRHub_Open()
 			return
 		end
 		local m = g_VR.menus[UID]
-		-- Follow HMD until grabbed (grabHand set) so panel is always in view
-		if followHmd and not m.grabHand then
-			local p, a = HmdBillboardPose(30, -4)
-			m.pos = p
-			m.ang = a
-			m.freeFloat = true
-			m.attachment = false
-			livePos, liveAng = p, a
-		elseif m.grabHand then
-			followHmd = false -- user took ownership
+		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor then
+			livePos, liveAng, liveScale = WristPose()
+			vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
 		end
 		paint()
 	end)
@@ -387,31 +359,32 @@ function vrmod.VRHub_Open()
 	end)
 end
 
---- Force open with retries (tracking may be late first frames)
 function vrmod.VRHub_OpenWhenReady()
 	local n = 0
-	timer.Create("vrmod_hub_ready", 0.4, 15, function()
+	timer.Create("vrmod_hub_ready", 0.35, 20, function()
 		n = n + 1
 		if not (g_VR and g_VR.active) then return end
 		if open and g_VR.menus and g_VR.menus[UID] then
 			timer.Remove("vrmod_hub_ready")
 			return
 		end
-		if g_VR.threePoints or (g_VR.tracking and g_VR.tracking.hmd) or n >= 3 then
+		-- Need hand pose for wrist dock
+		local hasHand = g_VR.tracking and (
+			(g_VR.tracking.pose_lefthand and g_VR.tracking.pose_lefthand.pos)
+			or (g_VR.tracking.pose_righthand and g_VR.tracking.pose_righthand.pos)
+			or g_VR.threePoints
+		)
+		if hasHand or n >= 4 then
 			vrmod.VRHub_Open()
 		end
 		if open then timer.Remove("vrmod_hub_ready") end
 	end)
 end
 
--- Always open Cube launcher when VR starts from launcher path
 hook.Add("VRMod_Start", "vrmod_vr_hub", function(ply)
 	if ply and IsValid(LocalPlayer()) and ply ~= LocalPlayer() then return end
-	local force = LauncherSession()
-	if not force then return end
-	-- Do NOT wait on Experience_ShouldRun — launcher IS the Cube face.
-	-- Onboarding can stack; hub must still appear.
-	timer.Simple(0.6, function()
+	if not LauncherSession() then return end
+	timer.Simple(0.8, function()
 		if not (g_VR and g_VR.active) then return end
 		if vrmod.OpenLauncherUnpaused then
 			vrmod.OpenLauncherUnpaused()
@@ -419,7 +392,7 @@ hook.Add("VRMod_Start", "vrmod_vr_hub", function(ply)
 			vrmod.VRHub_OpenWhenReady()
 		end
 	end)
-	timer.Simple(2.0, function()
+	timer.Simple(2.5, function()
 		if g_VR and g_VR.active and not open then
 			vrmod.VRHub_OpenWhenReady()
 		end
@@ -435,11 +408,8 @@ concommand.Add("vrmod_hub", function()
 end)
 
 concommand.Add("vrmod_hub_open", function()
-	if vrmod.OpenLauncherUnpaused then
-		vrmod.OpenLauncherUnpaused()
-	else
-		vrmod.VRHub_Open()
-	end
+	if vrmod.OpenLauncherUnpaused then vrmod.OpenLauncherUnpaused()
+	else vrmod.VRHub_Open() end
 end)
 
 concommand.Add("vrmod_launcher", function()
