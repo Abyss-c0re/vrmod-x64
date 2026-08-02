@@ -31,12 +31,20 @@ end
 --- Open launcher hub without pausing the game.
 function vrmod.OpenLauncherUnpaused()
 	vrmod.VRUnpauseWorld()
-	if vrmod.VRHub_Open then
+	if vrmod.VRHub_OpenWhenReady then
+		vrmod.VRHub_OpenWhenReady()
+	elseif vrmod.VRHub_Open then
 		vrmod.VRHub_Open()
 	end
-	-- Unpause again after derma/open races
 	timer.Simple(0.05, vrmod.VRUnpauseWorld)
 	timer.Simple(0.25, vrmod.VRUnpauseWorld)
+	timer.Simple(1.0, function()
+		vrmod.VRUnpauseWorld()
+		-- Second chance if first open raced tracking
+		if vrmod.VRHub_IsOpen and not vrmod.VRHub_IsOpen() and vrmod.VRHub_Open then
+			vrmod.VRHub_Open()
+		end
+	end)
 end
 
 --- Open New Game (map/mode/settings) without GameUI pause.
