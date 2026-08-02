@@ -387,16 +387,7 @@ local function paint()
 	local m = g_VR.menus[UID]
 	m.paintInterval = m.paintInterval or 12
 	m.paintIntervalFocused = 0 -- dirty/cursor only (no full-rate DrawText)
-	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
-	elseif not m.freeFloat and not m.grabHand then
-		if not m.scaleLocked then m.scale = liveScale end
-		m.pos = livePos
-		m.ang = liveAng
-		m.cubeMenu = true
-		m.attachment = true
-		m.attachHand = WristHand()
-	end
+	-- Do not re-anchor every paint (glues free-float back to wrist)
 
 	local focused = (g_VR.menuFocus == UID)
 	local mx = g_VR.menuCursorX or -1

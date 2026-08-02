@@ -26,15 +26,19 @@ function vrmod.VRUnpauseWorld()
 	end
 end
 
---- Pause menu path → Cube hub (see cl_vr_pausemenu).
+--- Native Cube launcher surface (not a toggle — always open hub).
 function vrmod.OpenLauncherUnpaused()
 	if not vrLive() then return end
-	if vrmod.OpenPauseMenuVR then
-		vrmod.OpenPauseMenuVR()
-		return
-	end
 	vrmod.VRUnpauseWorld()
-	if vrmod.VRHub_Open then vrmod.VRHub_Open() end
+	-- Prefer direct hub open; OpenPauseMenuVR toggles and can close an open hub
+	if vrmod.VRHub_IsOpen and vrmod.VRHub_IsOpen() then return end
+	if vrmod.VRHub_Open then
+		vrmod.VRHub_Open()
+	elseif vrmod.VRHub_OpenWhenReady then
+		vrmod.VRHub_OpenWhenReady()
+	elseif vrmod.OpenPauseMenuVR then
+		vrmod.OpenPauseMenuVR()
+	end
 end
 
 function vrmod.OpenNewGameUnpaused()

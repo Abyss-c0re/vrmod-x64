@@ -446,44 +446,45 @@ if CLIENT then
 			net.SendToServer()
 		end)
 
-		timer.Simple(2, function()
-			-- Legacy: early sessions used to clear autostart in first 120s — that broke
-			-- the gVRMod launcher. Keep autostart when hub, menu-first, or forced OpenXR.
+		timer.Simple(0.5, function()
+			-- Keep autostart for Cube wrapper / hub / OpenXR (never strip in first 120s).
 			local hub = GetConVar("vrmod_hub")
 			local menuVR = GetConVar("vrmod_menu_vr")
 			local prefer = GetConVar("vrmod_prefer_backend")
+			local auto = GetConVar("vrmod_autostart")
 			local hubMode = hub and hub:GetBool()
 			local menuMode = menuVR and menuVR:GetBool()
 			local forceXR = prefer and string.lower(prefer:GetString() or "") == "openxr"
-			if SysTime() < 120 and not hubMode and not menuMode and not forceXR then
-				local ac = GetConVar("vrmod_autostart")
-				if ac then ac:SetBool(false) end
+			local launch = vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession()
+			-- Native Cube wrapper: hub + openxr + marker = start NOW (no player-model wait)
+			local cubeWrapper = launch or hubMode or forceXR or menuMode
+			if SysTime() < 120 and not cubeWrapper then
+				if auto then auto:SetBool(false) end
 			end
-			if GetConVar("vrmod_autostart"):GetBool() then
-				timer.Create("vrutil_timer_tryautostart", 1, 0, function()
+			if not (auto and auto:GetBool()) then return end
+			timer.Create("vrutil_timer_tryautostart", 0.5, 0, function()
+				if g_VR and g_VR.active then
+					timer.Remove("vrutil_timer_tryautostart")
+					return
+				end
+				-- Cube / OpenXR / menu-first: never gate on LocalPlayer model (stuck logo)
+				if cubeWrapper or hubMode or menuMode or launch then
+					if isfunction(VRUtilClientStart) then
+						pcall(VRUtilClientStart)
+					end
 					if g_VR and g_VR.active then
 						timer.Remove("vrutil_timer_tryautostart")
-						return
 					end
-					-- Menu-first: start without waiting for player model / map spawn
-					if menuMode then
-						if isfunction(VRUtilClientStart) then
-							pcall(VRUtilClientStart)
-							if g_VR and g_VR.active then
-								timer.Remove("vrutil_timer_tryautostart")
-							end
-						end
-						return
-					end
-					local ply = LocalPlayer()
-					if not IsValid(ply) then return end
-					local pm = ply:GetModel()
-					if pm ~= nil and pm ~= "models/player.mdl" and pm ~= "" then
-						VRUtilClientStart()
-						timer.Remove("vrutil_timer_tryautostart")
-					end
-				end)
-			end
+					return
+				end
+				local ply = LocalPlayer()
+				if not IsValid(ply) then return end
+				local pm = ply:GetModel()
+				if pm ~= nil and pm ~= "models/player.mdl" and pm ~= "" then
+					if isfunction(VRUtilClientStart) then pcall(VRUtilClientStart) end
+					timer.Remove("vrutil_timer_tryautostart")
+				end
+			end)
 		end)
 	end)
 

@@ -1,9 +1,10 @@
 if SERVER then return end
 -- =============================================================================
--- vrmod.GameUIProject — find / size / bind stock GameUI (pause & main) into VR
+-- vrmod.GameUIProject — find / size / bind stock GameUI into VR
 --
--- Shared by pause-menu projection and optional menu-first cinema.
--- Does NOT own open/close policy (callers set g_VR._gameUIProjected).
+-- Routes through vrmod.VirtualDisplay so launcher cinema and in-game projection
+-- share one pipeline (module virtual monitor + panel2vr present).
+-- Does NOT ActivateGameUI (SP freeze). Callers own open/close policy.
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -11,15 +12,18 @@ vrmod.GameUIProject = vrmod.GameUIProject or {}
 
 local G = vrmod.GameUIProject
 
-local boundUid = nil
-local boundPanel = nil
+local SESSION = "gameui"
 
 function G.IsBound()
-	return boundUid ~= nil and g_VR and g_VR.menus and g_VR.menus[boundUid] ~= nil
+	if vrmod.VirtualDisplay and vrmod.VirtualDisplay.IsOpen then
+		return vrmod.VirtualDisplay.IsOpen(SESSION)
+	end
+	return false
 end
 
 function G.GetBoundUid()
-	return boundUid
+	local s = vrmod.VirtualDisplay and vrmod.VirtualDisplay.GetSession and vrmod.VirtualDisplay.GetSession(SESSION)
+	return s and s.uid or nil
 end
 
 --- Score VGUI tree for GameUI / main / pause shells
@@ -76,90 +80,41 @@ function G.Metrics()
 end
 
 function G.Unbind()
-	if boundUid and vrmod.panel2vr and vrmod.panel2vr.Close then
-		pcall(vrmod.panel2vr.Close, boundUid)
+	if vrmod.VirtualDisplay and vrmod.VirtualDisplay.Close then
+		vrmod.VirtualDisplay.Close(SESSION)
 	end
-	if IsValid(boundPanel) and boundPanel.SetPaintedManually then
-		pcall(function() boundPanel:SetPaintedManually(false) end)
-	end
-	boundUid = nil
-	boundPanel = nil
 end
 
---- Bind panel to wrist (faces user — freefloat cinema was edge-on).
+--- Bind panel through VirtualDisplay (hand by default — faces user).
 -- @param panel Panel
--- @param opts { uid=, place= "hand"|"cinema" }
+-- @param opts { uid=, place= "hand"|"cinema", capture=bool, session= }
 function G.BindPanel(panel, opts)
 	opts = opts or {}
 	if not (g_VR and g_VR.active) then return nil end
 	if not IsValid(panel) then return nil end
-	if not (vrmod.panel2vr and vrmod.panel2vr.ManifestPanel) then return nil end
+	if not (vrmod.VirtualDisplay and vrmod.VirtualDisplay.Present) then return nil end
 
-	if boundPanel == panel and boundUid and g_VR.menus and g_VR.menus[boundUid] then
-		g_VR.menus[boundUid].dirty = true
-		g_VR.menus[boundUid].alwaysRedraw = true
-		return boundUid
-	end
-	G.Unbind()
+	local w, h = G.Metrics()
+	w = math.min(w, opts.width or 720)
+	h = math.min(h, opts.height or 560)
+	local session = opts.session or SESSION
 
-	local w, h, msc = G.Metrics()
-	w = math.min(w, 720)
-	h = math.min(h, 560)
-	if panel.SetSize then pcall(function() panel:SetSize(w, h) end) end
-	if panel.SetPos then pcall(function() panel:SetPos(0, 0) end) end
-	if panel.SetVisible then panel:SetVisible(true) end
-	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
-	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
-	-- Avoid MakePopup in VR — focus steal / pause
-
-	local place = opts.place or "hand"
-	local placeOverride = nil
-	if place == "hand" then
-		local wrist = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
-		local pos, ang, sc = Vector(5, 5.5, 7), Angle(0, -90, 55), msc or 0.02
-		if isfunction(VRUtilHandMenuPose) then
-			pos, ang, sc = VRUtilHandMenuPose(w, h, sc or 0.02, Vector(5, 5.5, 7), Angle(0, -90, 55), wrist)
-		end
-		placeOverride = {
-			attachment = true,
-			pos = pos,
-			ang = ang,
-			scale = sc or 0.02,
-		}
-	end
-
-	local uid = vrmod.panel2vr.ManifestPanel(panel, {
-		kind = "mainmenu",
-		place = place,
-		hint = "gameui",
-		uid = opts.uid or "p2v_gameui",
+	local s = vrmod.VirtualDisplay.Present(session, {
+		mode = opts.capture and "capture" or "vgui",
+		panel = panel,
+		place = opts.place or "float",
 		width = w,
 		height = h,
-		placeOverride = placeOverride,
+		uid = opts.uid or ("vdisp_" .. session),
+		kind = "mainmenu",
+		hint = "gameui",
+		capture = opts.capture,
 	})
-	if not uid then return nil end
-
-	boundUid = uid
-	boundPanel = panel
-	if g_VR.menus and g_VR.menus[uid] then
-		local m = g_VR.menus[uid]
-		m.dirty = true
-		m.alwaysRedraw = true
-		m.paintInterval = 0
-		m.paintIntervalFocused = 0
-		m.persistOpen = true
-		m.keepAlive = true
-		m.cubeMenu = true
-		if place == "hand" then
-			m.attachment = true
-			m.freeFloat = false
-			m.attachHand = (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
-		end
-	end
-	return uid
+	return s and s.uid or nil
 end
 
 function G.ActivateStockUI()
+	-- Intentionally weak: callers must not rely on this in VR (freezes SP).
 	if gui and gui.ActivateGameUI then
 		pcall(gui.ActivateGameUI)
 		return true

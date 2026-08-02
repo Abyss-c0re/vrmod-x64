@@ -25,10 +25,9 @@ if not GetConVar("vrmod_menu_vr") then
 end
 
 local function MenuVR()
+	-- Native Cube wrapper always uses hub — never stock MainMenu cinema
 	if vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession() then
-		local s = g_VR and g_VR._openxrLaunch
-		if s and s.menu then return true end
-		if s and s.hub then return false end
+		return false
 	end
 	local c = GetConVar("vrmod_menu_vr")
 	return c and c:GetBool()
@@ -111,23 +110,47 @@ local function UnbindMenu()
 	boundPanel = nil
 end
 
---- Project stock GameUI / pause into VR (hand panel via GameUIProject).
+--- Project launcher surface into VR via VirtualDisplay (shared with pause).
+-- Prefer live MainMenu VGUI when found; else Cube hub delegate.
 function vrmod.BindMainMenuToVR()
 	if not (g_VR and g_VR.active) then return false end
+
+	-- Optional: stock main-menu VGUI already visible (no ActivateGameUI)
+	local panel = nil
+	if vrmod.GameUIProject and vrmod.GameUIProject.FindPanel then
+		panel = vrmod.GameUIProject.FindPanel()
+	elseif vrmod.FindMainMenuPanel then
+		panel = vrmod.FindMainMenuPanel()
+	end
+
+	if vrmod.VirtualDisplay and vrmod.VirtualDisplay.PresentLauncher then
+		local s = vrmod.VirtualDisplay.PresentLauncher({
+			panel = panel,
+			place = "float", -- free-float; hand-stacking broke close/focus UX
+			uid = "vdisp_launcher",
+			-- capture = true  -- enable when desktop mirror should tick module FBO
+		})
+		if s then
+			boundUid = s.uid
+			boundPanel = s.panel
+			return true
+		end
+	end
+
+	-- Fallback: pause/hub path
 	if vrmod.OpenPauseMenuVR then
 		return vrmod.OpenPauseMenuVR() and true or false
 	end
-	-- Legacy path: util bind only
-	if vrmod.GameUIProject and vrmod.GameUIProject.FindPanel then
-		local panel = vrmod.GameUIProject.FindPanel()
-		if IsValid(panel) then
-			return vrmod.GameUIProject.BindPanel(panel, { uid = "p2v_mainmenu", place = "hand" }) ~= nil
-		end
+	if vrmod.GameUIProject and IsValid(panel) then
+		return vrmod.GameUIProject.BindPanel(panel, { uid = "p2v_mainmenu", place = "hand" }) ~= nil
 	end
 	return false
 end
 
 function vrmod.UnbindMainMenuFromVR()
+	if vrmod.VirtualDisplay and vrmod.VirtualDisplay.Close then
+		pcall(vrmod.VirtualDisplay.Close, "launcher")
+	end
 	UnbindMenu()
 end
 

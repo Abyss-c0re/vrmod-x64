@@ -1,10 +1,10 @@
 if SERVER then return end
 -- =============================================================================
--- Cube Launcher Hub — LEFT-HAND Cube chrome (same pose family as settings/QM)
+-- Cube Native VR Launcher (product shell)
 --
--- Freefloat billboard was edge-on (thin red strip on grass). Hand-docked
--- panels are the proven Cube path: VRUtilHandMenuPose + MenuApplyHandAnchor.
--- Unpaused world. Laser + trigger. Quick menu: "Launcher".
+-- Opened automatically by OpenXR wrapper (openxr_launch marker + vrmod_hub).
+-- Wrist-docked Cube chrome: Resume · New Game · Settings · Bindings · Quit.
+-- Unpaused world. Laser + trigger. Desktop window is only a mirror.
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -99,6 +99,8 @@ local function rebuildButtons()
 end
 
 local function openNewGame()
+	-- Close hub first so New Game owns laser focus (stacked hand panels = un-closeable UX)
+	vrmod.VRHub_Close()
 	timer.Simple(0.05, function()
 		if vrmod.OpenNewGameUnpaused then
 			vrmod.OpenNewGameUnpaused()
@@ -112,6 +114,7 @@ local function openNewGame()
 end
 
 local function openSettings()
+	vrmod.VRHub_Close()
 	timer.Simple(0.05, function()
 		if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 		if vrmod.CubeSettings_Open then
@@ -239,21 +242,17 @@ local function activateAt(mx, my)
 end
 
 function vrmod.VRHub_Close()
-	if not open then
-		if isfunction(VRUtilMenuClose) and g_VR and g_VR.menus and g_VR.menus[UID] then
-			g_VR.menus[UID].closeFunc = nil
-			VRUtilMenuClose(UID)
-		end
-		return
-	end
 	open = false
 	hook.Remove("PreRender", "vr_hub_paint")
 	hook.Remove("VRMod_Input", "vr_hub_input")
 	hook.Remove("VRMod_Exit", "vr_hub_exit")
 	if g_VR and g_VR.menus and g_VR.menus[UID] then
-		g_VR.menus[UID].closeFunc = nil
+		local m = g_VR.menus[UID]
+		m.closeFunc = nil
+		m.persistOpen = false
+		m.keepAlive = false
 	end
-	if isfunction(VRUtilMenuClose) then VRUtilMenuClose(UID) end
+	if isfunction(VRUtilMenuClose) then pcall(VRUtilMenuClose, UID) end
 end
 
 function vrmod.VRHub_IsOpen()
@@ -321,8 +320,9 @@ function vrmod.VRHub_Open()
 	sm.attachment = true
 	sm.freeFloat = false
 	sm.attachHand = wrist
-	sm.persistOpen = true
-	sm.keepAlive = true
+	-- Allow close; do not fight VRUtilMenuClose
+	sm.persistOpen = false
+	sm.keepAlive = false
 	sm.alwaysRedraw = false
 	sm.paintInterval = 0
 	sm.paintIntervalFocused = 0
@@ -331,17 +331,17 @@ function vrmod.VRHub_Open()
 	sm.scale = liveScale
 	sm.baseScale = liveScale
 
+	-- Anchor ONCE at open — continuous re-dock glued every panel to the hand and ruined UX
 	if vrmod.MenuApplyHandAnchor then
 		vrmod.MenuApplyHandAnchor(sm, liveScale, livePos, liveAng, wrist)
 	end
 
 	pcall(function() RunConsoleCommand("vrmod_laserpointer", "1") end)
 	if vrmod.Toast then
-		vrmod.Toast("Cube Launcher — look at left hand", 4, "hint")
+		vrmod.Toast("Cube Pause — wrist dock · grip to free-move · X to close", 4, "hint")
 	end
 	print("[gVRMod] Cube launcher on " .. tostring(wrist) .. " hand")
 
-	local lastAnchor = 0
 	paint(true)
 	hook.Add("PreRender", "vr_hub_paint", function()
 		if not open then
@@ -352,24 +352,17 @@ function vrmod.VRHub_Open()
 			open = false
 			return
 		end
-		local m = g_VR.menus[UID]
-		local now = CurTime()
-		-- Rare re-anchor only (MenuApplyHandAnchor every frame = flicker)
-		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor and (now - lastAnchor) > 0.35 then
-			lastAnchor = now
-			local np, na, ns = WristPose()
-			if not livePos or np:DistToSqr(livePos) > 0.25 or math.abs((na and na.y or 0) - (liveAng and liveAng.y or 0)) > 2 then
-				livePos, liveAng, liveScale = np, na, ns
-				vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
-				-- pose change only — no full RT repaint required for 3D placement
-			end
-		end
+		-- No periodic MenuApplyHandAnchor (was yanking free-float back to wrist)
 		paint(false)
 	end)
 
 	hook.Add("VRMod_Input", "vr_hub_input", function(action, pressed)
 		if not open or not pressed then return end
 		if g_VR.menuFocus ~= UID then return end
+		if vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
+			vrmod.VRHub_Close()
+			return
+		end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
 		dirty()
@@ -405,17 +398,21 @@ end
 hook.Add("VRMod_Start", "vrmod_vr_hub", function(ply)
 	if ply and IsValid(LocalPlayer()) and ply ~= LocalPlayer() then return end
 	if not LauncherSession() then return end
-	timer.Simple(0.8, function()
+	-- Automatic product surface — no concommand
+	timer.Simple(0.35, function()
 		if not (g_VR and g_VR.active) then return end
-		if vrmod.OpenLauncherUnpaused then
-			vrmod.OpenLauncherUnpaused()
-		else
-			vrmod.VRHub_OpenWhenReady()
+		if vrmod.VRUnpauseWorld then pcall(vrmod.VRUnpauseWorld) end
+		if not open and vrmod.VRHub_Open then vrmod.VRHub_Open() end
+	end)
+	timer.Simple(1.2, function()
+		if g_VR and g_VR.active and not open then
+			if vrmod.VRHub_OpenWhenReady then vrmod.VRHub_OpenWhenReady()
+			elseif vrmod.VRHub_Open then vrmod.VRHub_Open() end
 		end
 	end)
 	timer.Simple(2.5, function()
 		if g_VR and g_VR.active and not open then
-			vrmod.VRHub_OpenWhenReady()
+			if vrmod.VRHub_Open then vrmod.VRHub_Open() end
 		end
 	end)
 end)

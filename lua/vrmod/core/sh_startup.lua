@@ -111,17 +111,24 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_armstretcher", "armStretcher", "0", FCVAR_ARCHIVE, "Enable arm stretching", nil, nil, tobool)
     ----------------------------------------------------------------------------
     concommand.Add("vrmod_start", function(ply, cmd, args)
-        -- force=1 or OpenXR launcher / menu-first: do not wait for cursor hide
-        -- (main menu always has a cursor — old gate blocked all menu VR starts)
+        -- force / Cube hub / OpenXR wrapper: never wait for cursor (loading logo has cursor)
         local force = args and (args[1] == "force" or args[1] == "1")
         local menuVR = GetConVar("vrmod_menu_vr")
+        local hub = GetConVar("vrmod_hub")
+        local auto = GetConVar("vrmod_autostart")
         local launch = vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession()
-        if force or launch or (menuVR and menuVR:GetBool()) then
-            print("[gVRMod] vrmod_start force/menu path")
+        local cube = force or launch
+            or (hub and hub:GetBool())
+            or (menuVR and menuVR:GetBool())
+            or (auto and auto:GetBool() and launch)
+        if cube or force or launch or (menuVR and menuVR:GetBool()) or (hub and hub:GetBool()) then
+            print("[gVRMod] vrmod_start Cube/force path (no cursor wait)")
             if isfunction(VRUtilClientStart) then pcall(VRUtilClientStart) end
             return
         end
-        if vgui.CursorVisible() then print("vrmod: waiting for unpause (or use vrmod_start force)") end
+        if vgui.CursorVisible() then
+            print("vrmod: waiting for unpause (or use vrmod_start force)")
+        end
         timer.Create("vrmod_start", 0.1, 0, function()
             if not vgui.CursorVisible() then
                 timer.Remove("vrmod_start")

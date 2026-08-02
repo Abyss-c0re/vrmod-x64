@@ -44,7 +44,7 @@ function vrmod.CloseGameUIProjection()
 	if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
 end
 
---- ESC / pause in VR: Cube hub only (never stock GameUI).
+--- ESC / pause in VR: VirtualDisplay "pause" session → Cube hub (never stock GameUI).
 function vrmod.OpenPauseMenuVR()
 	if not vrLive() then
 		if gui and gui.ActivateGameUI then pcall(gui.ActivateGameUI) end
@@ -55,12 +55,20 @@ function vrmod.OpenPauseMenuVR()
 
 	-- Toggle: if hub already open, close (Resume)
 	if vrmod.VRHub_IsOpen and vrmod.VRHub_IsOpen() then
+		if vrmod.VirtualDisplay and vrmod.VirtualDisplay.Close then
+			pcall(vrmod.VirtualDisplay.Close, "pause")
+		end
 		if vrmod.VRHub_Close then vrmod.VRHub_Close() end
 		forceUnpause()
 		return false
 	end
 
-	if vrmod.VRHub_Open then
+	-- Shared pipeline with launcher (module virtual monitor + hub present)
+	if vrmod.VirtualDisplay and vrmod.VirtualDisplay.PresentPause then
+		vrmod.VirtualDisplay.PresentPause({
+			onClose = forceUnpause,
+		})
+	elseif vrmod.VRHub_Open then
 		vrmod.VRHub_Open()
 	elseif vrmod.VRHub_OpenWhenReady then
 		vrmod.VRHub_OpenWhenReady()

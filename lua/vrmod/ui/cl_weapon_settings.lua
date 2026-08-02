@@ -320,13 +320,7 @@ local function paint()
 	if not (g_VR.menus and g_VR.menus[UID]) then return end
 
 	local m = g_VR.menus[UID]
-	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
-	elseif not m.freeFloat and not m.grabHand then
-		if not m.scaleLocked then m.scale = liveScale end
-		m.pos, m.ang = livePos, liveAng
-		m.cubeMenu, m.attachment, m.attachHand = true, true, WristHand()
-	end
+	-- Anchor only at open — not every paint
 
 	rebuildButtons()
 	local T = Theme()
@@ -497,16 +491,7 @@ function vrmod.WeaponSettings_Open()
 		if c and vrmod.EnsureWeaponViewModelEntry then
 			vrmod.EnsureWeaponViewModelEntry(c)
 		end
-		if vrmod.MenuApplyHandAnchor then
-			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
-		elseif not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
-			local wm = g_VR.menus[UID]
-			if not wm.scaleLocked then wm.scale = liveScale end
-			wm.pos, wm.ang = livePos, liveAng
-			wm.attachment = true
-			wm.attachHand = WristHand()
-			wm.cubeMenu = true
-		end
+		-- no continuous hand re-dock
 		paint()
 	end)
 

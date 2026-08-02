@@ -604,9 +604,7 @@ function vrmod.BindingsPanel_Open()
 			StopListen()
 			return
 		end
-		if vrmod.MenuApplyHandAnchor and not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
-			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
-		end
+		-- Anchor once at open only (continuous re-dock ruins free-float / UX)
 		paint()
 	end)
 

@@ -422,6 +422,9 @@ function VRUtilCreateMapBrowserWindow()
 	hostEntry:SetText(hostname)
 	hostEntry:SetUpdateOnType(true)
 	hostEntry.OnValueChange = function(_, v) hostname = v end
+	if vrmod.VRKeyboard_BindPanel then
+		vrmod.VRKeyboard_BindPanel(hostEntry, { title = "SERVER NAME", role = "form" })
+	end
 
 	local function mkCheck(parent, text, initial, onChange)
 		local c = vgui.Create("DCheckBoxLabel", parent)
@@ -496,6 +499,16 @@ function VRUtilCreateMapBrowserWindow()
 				e:SetNumeric(true)
 				e:SetUpdateOnType(true)
 				e.OnValueChange = function(_, v) row.value = v end
+				if vrmod.VRKeyboard_BindPanel then
+					vrmod.VRKeyboard_BindPanel(e, {
+						title = label or "NUMBER",
+						role = "form",
+						filter = function(ch)
+							if string.find("0123456789.-", ch, 1, true) then return ch end
+							return false
+						end,
+					})
+				end
 			else -- text
 				local l = vgui.Create("DLabel", self)
 				l:SetText(label)
@@ -509,6 +522,9 @@ function VRUtilCreateMapBrowserWindow()
 				e:SetTall(22)
 				e:SetUpdateOnType(true)
 				e.OnValueChange = function(_, v) row.value = v end
+				if vrmod.VRKeyboard_BindPanel then
+					vrmod.VRKeyboard_BindPanel(e, { title = label or "TEXT", role = "form" })
+				end
 			end
 		end
 	end
@@ -621,6 +637,9 @@ function VRUtilCreateMapBrowserWindow()
 	search:Dock(TOP)
 	search:SetTall(28)
 	search:DockMargin(0, 0, 0, 6)
+	if vrmod.VRKeyboard_BindPanel then
+		vrmod.VRKeyboard_BindPanel(search, { title = "MAP SEARCH", role = "form" })
+	end
 	search:SetPlaceholderText("Search maps…")
 	search:SetUpdateOnType(true)
 

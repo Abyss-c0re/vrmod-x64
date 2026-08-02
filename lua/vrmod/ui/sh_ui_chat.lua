@@ -101,13 +101,11 @@ if CLIENT then
 	local VRClipboard = CreateClientConVar("vrmod_Clipboard", "", false, false, "")
 	local scrollOffset = 0
 	local maxVisibleLines = 10
-	local lowerCase = "1234567890\1\nqwertyuiop\nasdfghjkl\2\n\3zxcvbnm?\4\3\n "
-	local upperCase = "!@%\"*+=-_:\1\nQWERTYUIOP\nASDFGHJKL\2\n\3ZXCVBNM/\4\3\n "
-	local selectedCase = lowerCase
 	local currentMessage = ""
 	local keyboardOpen = false
 	local wasClicking = false
 	local justClicked = false
+	-- Keyboard geometry lives in module driver (v46+); chat uses shared VRKeyboard
 	-- Define fonts
 	surface.CreateFont("vrmod_chat_normal", {
 		font = "Trebuchet24",
@@ -220,12 +218,13 @@ if CLIENT then
 		currentMessage = ""
 		showConsole = false
 		VRUtilMenuOpen("chat", SIZE.MENU_WIDTH, SIZE.MENU_HEIGHT, nil, true, Vector(10, 4, 8), Angle(0, -90, 50), 0.03, true, function()
-			VRUtilMenuClose("keyboard")
+			if vrmod.VRKeyboard_IsOpen and vrmod.VRKeyboard_IsOpen() then
+				vrmod.VRKeyboard_Close(false)
+			end
 			keyboardOpen = false
 			currentMessage = ""
 			showConsole = false
 			hook.Remove("PreRender", "vrutil_hook_renderchat")
-			hook.Remove("PreRender", "vrutil_hook_renderkeyboard")
 			hook.Remove("VRMod_Input", "vrmod_chat_clickdetect")
 			wasClicking = false
 			justClicked = false
@@ -364,6 +363,13 @@ if CLIENT then
 				if py > chatHeight then break end
 			end
 
+			-- Live draft from shared module keyboard
+			if keyboardOpen and vrmod.VRKeyboard_IsOpen and vrmod.VRKeyboard_IsOpen() then
+				currentMessage = vrmod.VRKeyboard_GetText and (vrmod.VRKeyboard_GetText() or "") or currentMessage
+			elseif keyboardOpen and not (vrmod.VRKeyboard_IsOpen and vrmod.VRKeyboard_IsOpen()) then
+				keyboardOpen = false
+			end
+
 			-- Message bar if keyboard open
 			if keyboardOpen then
 				local barY = SIZE.CHAT_HEIGHT_KEYBOARD
@@ -409,15 +415,43 @@ if CLIENT then
 					active = function() return keyboardOpen end,
 					action = function()
 						if keyboardOpen then
-							VRUtilMenuClose("keyboard")
+							if vrmod.VRKeyboard_Close then vrmod.VRKeyboard_Close(false) end
 							keyboardOpen = false
-						else
-							keyboardOpen = true
-							VRUtilMenuOpen("keyboard", SIZE.KEYBOARD_WIDTH, SIZE.KEYBOARD_HEIGHT, nil, true, Vector(5, 4, 3.5), Angle(0, -90, 10), 0.03, true, function()
+							return
+						end
+						if not isfunction(vrmod.VRKeyboard_Open) then
+							if vrmod.Toast then vrmod.Toast("VR keyboard missing", 3, "error") end
+							return
+						end
+						keyboardOpen = true
+						local ok = vrmod.VRKeyboard_Open({
+							title = showConsole and "CONSOLE" or "CHAT",
+							text = currentMessage or "",
+							role = "chat",
+							place = "float",
+							uid = "vrmod_shared_keyboard",
+							onDone = function(result)
 								keyboardOpen = false
-								currentMessage = ""
-							end)
-							markCubeMenu("keyboard")
+								result = result or ""
+								if showConsole then
+									LocalPlayer():ConCommand(result)
+									VRClipboard:SetString(result)
+									if SetClipboardText then SetClipboardText(result) end
+									currentMessage = result
+								else
+									if result ~= "" then
+										LocalPlayer():ConCommand("say " .. result)
+									end
+									currentMessage = ""
+								end
+							end,
+							onCancel = function()
+								keyboardOpen = false
+							end,
+						})
+						if not ok then
+							keyboardOpen = false
+							if vrmod.Toast then vrmod.Toast("Keyboard failed to open", 3, "error") end
 						end
 					end
 				},
@@ -470,121 +504,6 @@ if CLIENT then
 						end
 					end
 				end
-			end
-
-			VRUtilMenuRenderEnd()
-			if not keyboardOpen then justClicked = false end
-		end)
-
-		hook.Add("PreRender", "vrutil_hook_renderkeyboard", function()
-			if not VRUtilIsMenuOpen("keyboard") or not keyboardOpen then return end
-			markCubeMenu("keyboard")
-
-			local C, T = chatTheme()
-			local midFont = chatFont("CubeSmall", "vrmod_chat_mid")
-			local keyFont = chatFont("CubeLabel", "vrmod_chat_normal")
-			local textCol = T.text or Color(255, 240, 244, 255)
-			-- Compact chrome: accent bar + thin title so 5 key rows still fit
-			local headerH = 22
-
-			VRUtilMenuRenderStart("keyboard")
-
-			if C and C.DrawChrome then
-				C.DrawChrome(0, 0, SIZE.KEYBOARD_WIDTH, SIZE.KEYBOARD_HEIGHT, "KEYBOARD", {
-					subtitle = showConsole and "console" or "say",
-					pad = 6,
-					headerH = headerH,
-					barH = 3,
-				})
-			else
-				surface.SetDrawColor(12, 6, 10, 245)
-				surface.DrawRect(0, 0, SIZE.KEYBOARD_WIDTH, SIZE.KEYBOARD_HEIGHT)
-				surface.SetDrawColor(196, 30, 58, 255)
-				surface.DrawRect(0, 0, SIZE.KEYBOARD_WIDTH, 3)
-			end
-
-			-- Keys sit below compact chrome header
-			local x = SIZE.KEYBOARD_KEY_SPACING
-			local y = headerH + SIZE.KEYBOARD_KEY_SPACING
-			local rowIndex = 0
-			local closeKeyCount = 0
-			local focused = (g_VR.menuFocus == "keyboard")
-			local cx, cy = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
-
-			for i = 1, #selectedCase do
-				local char = selectedCase[i]
-				if char == "\n" then
-					y = y + SIZE.KEYBOARD_KEY_HEIGHT + SIZE.KEYBOARD_KEY_SPACING
-					rowIndex = rowIndex + 1
-					-- Stagger rows like QWERTY
-					x = (rowIndex == 1 and 20) or (rowIndex == 2 and 35) or (rowIndex == 3 and 5) or (rowIndex == 4 and 127) or 5
-					continue
-				end
-
-				if char == "\3" then closeKeyCount = closeKeyCount + 1 end
-				local txt
-				if char == "\1" then
-					txt = "Del"
-				elseif char == "\2" then
-					txt = "Enter"
-				elseif char == "\4" then
-					txt = "Shift"
-				elseif char == "\3" then
-					txt = closeKeyCount == 1 and "Exit" or "Close"
-				else
-					txt = char
-				end
-
-				local special = char == "\1" or char == "\2" or char == "\3" or char == "\4"
-				local w = char == " " and SIZE.KEYBOARD_SPACE_WIDTH or char == "\2" and SIZE.KEYBOARD_ENTER_WIDTH or (char == "\4" or char == "\3") and SIZE.KEYBOARD_SPECIAL_WIDTH or SIZE.KEYBOARD_KEY_WIDTH
-				local h = SIZE.KEYBOARD_KEY_HEIGHT
-				-- Clamp last rows into keyboard height
-				if y + h > SIZE.KEYBOARD_HEIGHT - 2 then
-					h = math.max(20, SIZE.KEYBOARD_HEIGHT - 2 - y)
-				end
-				local hovered = focused and cx > x and cx < x + w and cy > y and cy < y + h
-
-				if C and C.DrawSlot then
-					C.DrawSlot(x, y, w, h, txt, hovered, special and hovered, true)
-				else
-					surface.SetDrawColor(hovered and Color(100, 22, 38, 255) or Color(55, 14, 24, 220))
-					surface.DrawRect(x, y, w, h)
-					surface.SetDrawColor(196, 30, 58, hovered and 255 or 140)
-					surface.DrawOutlinedRect(x, y, w, h, 2)
-					local font = special and midFont or keyFont
-					draw.SimpleText(txt, font, x + w * 0.5, y + h * 0.5, textCol, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-				end
-
-				if hovered and justClicked and focused then
-					if txt == "Del" then
-						currentMessage = string.sub(currentMessage, 1, #currentMessage - 1)
-					elseif txt == "Enter" then
-						if showConsole then
-							LocalPlayer():ConCommand(currentMessage)
-							VRClipboard:SetString(currentMessage)
-							SetClipboardText(currentMessage)
-						else
-							LocalPlayer():ConCommand("say " .. currentMessage)
-							currentMessage = ""
-						end
-
-						VRUtilMenuClose("keyboard")
-						keyboardOpen = false
-					elseif txt == "Shift" then
-						selectedCase = selectedCase == lowerCase and upperCase or lowerCase
-					elseif txt == "Exit" then
-						VRUtilMenuClose("chat")
-						VRUtilMenuClose("keyboard")
-						keyboardOpen = false
-					elseif txt == "Close" then
-						VRUtilMenuClose("keyboard")
-						keyboardOpen = false
-					else
-						currentMessage = currentMessage .. txt
-					end
-				end
-
-				x = x + (w == SIZE.KEYBOARD_SPACE_WIDTH and w + SIZE.KEYBOARD_KEY_SPACING or w == SIZE.KEYBOARD_ENTER_WIDTH and w + SIZE.KEYBOARD_KEY_SPACING or SIZE.KEYBOARD_SPECIAL_WIDTH + SIZE.KEYBOARD_KEY_SPACING)
 			end
 
 			VRUtilMenuRenderEnd()

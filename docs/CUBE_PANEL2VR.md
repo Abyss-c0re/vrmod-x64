@@ -99,11 +99,18 @@ vrmod_vgui_reset           -- close all VRUtil menus
 2. `vrmod.panel2vr.ManifestNative(...)` for the surface.
 3. Optionally `RegisterNative("classname_or_name", openFn)` so MakePopup never shows the flat Derma pane.
 
+## VirtualDisplay (launcher + pause)
+
+Shared “monitor” pipeline: `vrmod.VirtualDisplay` (`utils/cl_virtual_display.lua`) + module
+`VRMOD_VirtualDisplay*` (v45+). Launcher and pause both `Present` through it — see
+`state/PROPHECY_VIRTUAL_DISPLAY.md`.
+
 ## Files
 
 | File | Role |
 |------|------|
 | `lua/vrmod/ui/cl_panel2vr.lua` | Framework, intercepts, placement, adapters |
+| `lua/vrmod/utils/cl_virtual_display.lua` | Reusable Present/Close (launcher + pause) |
 | `lua/vrmod/ui/cl_cube_settings.lua` | Glorious Crimson Cube settings |
 | `lua/vrmod/ui/cl_dermapopups.lua` | Thin bridge / emergency fallback |
 | `lua/vrmod/ui/cl_ui.lua` | RT menu system, laser, mouse inject |

@@ -211,13 +211,7 @@ local function paint()
 	if not m.rt then return end
 	m.paintInterval = m.paintInterval or 12
 	m.paintIntervalFocused = 0
-	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
-	elseif not m.freeFloat and not m.grabHand then
-		if not m.scaleLocked then m.scale = liveScale end
-		m.pos, m.ang = livePos, liveAng
-		m.cubeMenu, m.attachment, m.attachHand = true, true, WristHand()
-	end
+	-- Anchor only at open
 
 	local focused = (g_VR.menuFocus == UID)
 	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
@@ -605,17 +599,7 @@ function vrmod.AvatarMenu_Open()
 			open = false
 			return
 		end
-		if vrmod.MenuApplyHandAnchor then
-			vrmod.MenuApplyHandAnchor(g_VR.menus[UID], liveScale, livePos, liveAng, WristHand())
-		elseif not g_VR.menus[UID].freeFloat and not g_VR.menus[UID].grabHand then
-			local am = g_VR.menus[UID]
-			if not am.scaleLocked then am.scale = liveScale end
-			am.pos = livePos
-			am.ang = liveAng
-			am.attachment = true
-		am.attachHand = WristHand()
-			am.cubeMenu = true
-		end
+		-- no continuous hand re-dock
 		paint()
 	end)
 

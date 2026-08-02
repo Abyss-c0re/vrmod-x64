@@ -1,10 +1,12 @@
 if SERVER then return end
 -- =============================================================================
--- Cube New Game — pure VR hand surface (NOT Derma/panel2vr)
+-- Cube New Game — pure VR free-float surface (NOT Derma/panel2vr)
 --
 -- Matches stock GMod New Game + multiplayer host options:
 --   Maps (categories) · Gamemode · Max players · Hostname · LAN · P2P · Start
--- Layout fits the RT. Laser + trigger. Wrist-dock like settings (faces user).
+--
+-- UX: large panel floats in front of HMD (not glued to the hand). Grip to move.
+-- Opens after closing hub/settings so close (X) and laser focus actually work.
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -15,9 +17,9 @@ local open = false
 local buttons = {}
 local statusMsg, statusUntil = "", 0
 
--- Wide enough for 3 columns; height fits wrist cinema
+-- Wide enough for 3 columns; free-float cinema scale (readable, not wrist-tiny)
 local W, H = 720, 640
-local livePos, liveAng, liveScale = Vector(4, 5, 6), Angle(0, -90, 55), 0.022
+local livePos, liveAng, liveScale = Vector(0, 0, 0), Angle(0, 0, 90), 0.028
 local HEADER, PAD = 64, 10
 local COL_CAT, COL_MAP, COL_OPT = 150, 320, 230 -- sum + pads ≈ 720
 
@@ -64,17 +66,46 @@ local function Font(key)
 	return "DermaDefaultBold"
 end
 
-local function WristHand()
-	return (vrmod.GetSecondaryHand and vrmod.GetSecondaryHand()) or "left"
+--- Free-float in front of HMD, face user (not edge-on). Grip-grabbable world panel.
+local function FloatPose()
+	if g_VR and g_VR.tracking and g_VR.tracking.hmd then
+		local hmd = g_VR.tracking.hmd
+		local yaw = Angle(0, hmd.ang.yaw, 0)
+		local pos = hmd.pos + yaw:Forward() * 28 + Vector(0, 0, -8)
+		-- 3D2D: yaw-90, roll 90 faces HMD (yaw+180 was sideways / edge-on)
+		local ang = Angle(0, yaw.yaw - 90, 90)
+		if g_VR.origin and g_VR.originAngle then
+			pos, ang = WorldToLocal(pos, ang, g_VR.origin, g_VR.originAngle)
+		end
+		return pos, ang, 0.026
+	end
+	if vrmod.panel2vr and isfunction(vrmod.panel2vr.ComputeFloatPose) then
+		local p, a = vrmod.panel2vr.ComputeFloatPose(28, -8)
+		if p and a then
+			-- Override ang if stock cinema pose is edge-on
+			a = Angle(0, (a.y or 0) - 90, 90)
+			return p, a, 0.026
+		end
+	end
+	return Vector(0, 20, 60), Angle(0, -90, 90), 0.026
 end
 
-local function WristPose()
-	local wrist = WristHand()
-	-- Slightly farther / larger shell so 720 RT is readable
-	if isfunction(VRUtilHandMenuPose) then
-		return VRUtilHandMenuPose(W, H, 0.022, Vector(5, 5.5, 7), Angle(0, -90, 55), wrist)
+local function CloseCompetitors()
+	-- Hub / settings / bindings on the same hand steal laser + break X-close
+	if vrmod.VRHub_Close then pcall(vrmod.VRHub_Close) end
+	if g_VR and g_VR.menus and isfunction(VRUtilMenuClose) then
+		for _, uid in ipairs({
+			"vr_hub", "miscmenu", "cube_settings", "bindings_panel",
+			"actions_panel", "heightmenu", "p2v_spawnmenu", "p2v_contextmenu",
+		}) do
+			if g_VR.menus[uid] then
+				g_VR.menus[uid].closeFunc = nil
+				g_VR.menus[uid].persistOpen = false
+				g_VR.menus[uid].keepAlive = false
+				pcall(VRUtilMenuClose, uid)
+			end
+		end
 	end
-	return Vector(5, 5.5, 7), Angle(0, -90, 55), 0.022
 end
 
 local function SetStatus(msg, sec)
@@ -336,8 +367,9 @@ local function rebuildButtons()
 			oy = oy + 36
 			buttons[#buttons + 1] = { x = ox, y = oy, w = 28, h = 28, kind = "toggle", id = "p2pf", on = p2pFriends }
 			oy = oy + 40
-			-- Hostname cycle presets (keyboard later)
-			buttons[#buttons + 1] = { x = ox, y = oy, w = 200, h = 32, kind = "host_cycle" }
+			-- Hostname — shared module keyboard (launcher role)
+			buttons[#buttons + 1] = { x = ox, y = oy, w = 200, h = 32, kind = "host_edit" }
+			buttons[#buttons + 1] = { x = ox + 208, y = oy, w = 72, h = 32, kind = "host_cycle" }
 		end
 	end
 
@@ -443,11 +475,13 @@ local function paintInner()
 			if b.on then
 				draw.SimpleText("✓", "DermaDefaultBold", b.x + b.w * 0.5, b.y + b.h * 0.5, T.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 			end
-		elseif b.kind == "host_cycle" then
+		elseif b.kind == "host_edit" then
 			drawBtn(b, nil, false)
 			local hn = hostname
 			if #hn > 18 then hn = string.sub(hn, 1, 17) .. "…" end
 			draw.SimpleText(hn, "DermaDefault", b.x + 10, b.y + b.h * 0.5, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+		elseif b.kind == "host_cycle" then
+			drawBtn(b, "↻", false)
 		elseif b.kind == "start" then
 			drawBtn(b, selectedMap and ("START  " .. string.upper(string.sub(selectedMap.name, 1, 14))) or "SELECT MAP", true)
 		end
@@ -578,6 +612,20 @@ local function activateAt(mx, my)
 			end
 			dirty()
 			return
+		elseif b.kind == "host_edit" then
+			if isfunction(vrmod.VRKeyboard_Open) then
+				vrmod.VRKeyboard_Open({
+					title = "HOSTNAME",
+					text = hostname or "",
+					role = "launcher",
+					place = "float",
+					onDone = function(t)
+						hostname = (t and t ~= "") and t or "gVRMod"
+						dirty()
+					end,
+				})
+			end
+			return
 		elseif b.kind == "host_cycle" then
 			local found = 1
 			for i, h in ipairs(HOST_PRESETS) do
@@ -597,25 +645,30 @@ end
 -- Open / close
 ------------------------------------------------------------------------
 function vrmod.VRNewGame_Close()
-	if not open then
-		if isfunction(VRUtilMenuClose) and g_VR and g_VR.menus and g_VR.menus[UID] then
-			g_VR.menus[UID].closeFunc = nil
-			VRUtilMenuClose(UID)
-		end
-		return
-	end
 	open = false
 	hook.Remove("PreRender", "vr_newgame_paint")
 	hook.Remove("VRMod_Input", "vr_newgame_input")
 	hook.Remove("VRMod_Exit", "vr_newgame_exit")
+	-- Don't cancel shared keyboard mid-type unless it's ours (leave open for hostname)
 	if g_VR and g_VR.menus and g_VR.menus[UID] then
-		g_VR.menus[UID].closeFunc = nil
+		local m = g_VR.menus[UID]
+		m.closeFunc = nil
+		m.persistOpen = false
+		m.keepAlive = false
+		m.attachment = false
+		m.freeFloat = true
 	end
-	if isfunction(VRUtilMenuClose) then VRUtilMenuClose(UID) end
+	if isfunction(VRUtilMenuClose) then
+		pcall(VRUtilMenuClose, UID)
+	end
+	-- Belt: drop layout sticky hand so reopen is free-float again
+	if isfunction(vrmod.ClearMenuFloatPose) then
+		pcall(vrmod.ClearMenuFloatPose, UID)
+	end
 end
 
 function vrmod.VRNewGame_IsOpen()
-	return open
+	return open == true and g_VR and g_VR.menus and g_VR.menus[UID] ~= nil
 end
 
 function vrmod.VRNewGame_Open()
@@ -627,8 +680,20 @@ function vrmod.VRNewGame_Open()
 		return
 	end
 	if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
+
+	-- Already open: bring to front (re-float pose once), do not re-dock to hand
 	if open and g_VR.menus and g_VR.menus[UID] then
-		g_VR.menus[UID].dirty = true
+		local m = g_VR.menus[UID]
+		m.dirty = true
+		m.attachment = false
+		m.freeFloat = true
+		m.persistOpen = false
+		m.keepAlive = false
+		if not m.grabHand then
+			livePos, liveAng, liveScale = FloatPose()
+			m.pos, m.ang, m.scale = livePos, liveAng, liveScale
+			m.baseScale = liveScale
+		end
 		return
 	end
 	if not isfunction(VRUtilMenuOpen) then return end
@@ -638,24 +703,17 @@ function vrmod.VRNewGame_Open()
 	mapScroll = 0
 	catScroll = 0
 
-	-- Close competing hand shells
-	if g_VR.menus then
-		for _, uid in ipairs({ "miscmenu", "cube_settings", "bindings_panel", "actions_panel" }) do
-			if g_VR.menus[uid] and isfunction(VRUtilMenuClose) then
-				g_VR.menus[uid].closeFunc = nil
-				VRUtilMenuClose(uid)
-			end
-		end
-	end
+	CloseCompetitors()
 
 	open = true
-	livePos, liveAng, liveScale = WristPose()
-	local wrist = WristHand()
+	livePos, liveAng, liveScale = FloatPose()
 
-	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()
+	-- attachment=false → free-float (do not glue to wrist)
+	VRUtilMenuOpen(UID, W, H, nil, false, livePos, liveAng, liveScale, true, function()
 		open = false
 		hook.Remove("PreRender", "vr_newgame_paint")
 		hook.Remove("VRMod_Input", "vr_newgame_input")
+		hook.Remove("VRMod_Exit", "vr_newgame_exit")
 	end)
 
 	if not (g_VR.menus and g_VR.menus[UID]) then
@@ -665,13 +723,14 @@ function vrmod.VRNewGame_Open()
 
 	local sm = g_VR.menus[UID]
 	sm.cubeMenu = true
-	sm.grabbable = true
+	sm.grabbable = true -- grip + laser to free-move
 	sm.resizable = true
-	sm.attachment = true
-	sm.freeFloat = false
-	sm.attachHand = wrist
-	sm.persistOpen = true
-	sm.keepAlive = true
+	sm.attachment = false
+	sm.freeFloat = true
+	sm.attachHand = nil
+	sm.cursorEnabled = true
+	sm.persistOpen = false
+	sm.keepAlive = false
 	sm.alwaysRedraw = false
 	sm.paintInterval = 0
 	sm.paintIntervalFocused = 0
@@ -679,16 +738,25 @@ function vrmod.VRNewGame_Open()
 	sm.ang = liveAng
 	sm.scale = liveScale
 	sm.baseScale = liveScale
-	if vrmod.MenuApplyHandAnchor then
-		vrmod.MenuApplyHandAnchor(sm, liveScale, livePos, liveAng, wrist)
-	end
+	sm._lastAssignedScale = liveScale
+	sm.grabHand = nil
+
+	-- Always clear saved layout for this panel (bad freeFloat ang = sideways ungrabbable)
+	pcall(function()
+		if not file.Exists("vrmod/panel_layouts.json", "DATA") then return end
+		local t = util.JSONToTable(file.Read("vrmod/panel_layouts.json", "DATA") or "{}") or {}
+		if t[UID] then
+			t[UID] = nil
+			file.Write("vrmod/panel_layouts.json", util.TableToJSON(t, true))
+		end
+	end)
+	-- Do NOT ApplyMenuLayout — restores sideways poses
 
 	pcall(function() RunConsoleCommand("vrmod_laserpointer", "1") end)
 	if vrmod.Toast then
-		vrmod.Toast("New Game — laser + trigger · Multiplayer tab", 4, "hint")
+		vrmod.Toast("New Game — faces you · laser + grip to move · X to close", 4, "hint")
 	end
 
-	local lastAnchor = 0
 	paint(true)
 	hook.Add("PreRender", "vr_newgame_paint", function()
 		if not open then
@@ -699,27 +767,24 @@ function vrmod.VRNewGame_Open()
 			open = false
 			return
 		end
+		-- No hand re-anchor loop (that glued the panel and broke focus/close)
 		local m = g_VR.menus[UID]
-		local now = CurTime()
-		if not m.grabHand and not m.freeFloat and vrmod.MenuApplyHandAnchor and (now - lastAnchor) > 0.35 then
-			lastAnchor = now
-			local np, na, ns = WristPose()
-			if not livePos or np:DistToSqr(livePos) > 0.25 then
-				livePos, liveAng, liveScale = np, na, ns
-				vrmod.MenuApplyHandAnchor(m, liveScale, livePos, liveAng, WristHand())
-			end
+		if m.attachment and not m.grabHand then
+			m.attachment = false
+			m.freeFloat = true
 		end
 		paint(false)
 	end)
 
 	hook.Add("VRMod_Input", "vr_newgame_input", function(action, pressed)
-		if not open then return end
-		if pressed and (vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action)) then
+		if not open or not pressed then return end
+		-- Close only when this menu is focused (don't steal from keyboard)
+		local focused = (g_VR.menuFocus == UID)
+		if focused and vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
 			vrmod.VRNewGame_Close()
 			return
 		end
-		if not pressed then return end
-		if g_VR.menuFocus ~= UID then return end
+		if not focused then return end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
 		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
 		dirty()

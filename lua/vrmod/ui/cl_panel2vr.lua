@@ -229,7 +229,8 @@ function W.ComputeFloatPose(distance, heightOffset)
 	local fwd = yawOnly:Forward()
 	local pos = hmd.pos + fwd * distance + Vector(0, 0, heightOffset)
 	-- 3D2D: ang.up is panel normal; face the player
-	local ang = Angle(0, yawOnly.yaw + 180, 90)
+	-- Face the player (yaw+180 was edge-on / sideways for many free-float shells)
+	local ang = Angle(0, yawOnly.yaw - 90, 90)
 	-- Convert to origin-relative if not attachment
 	if g_VR.origin and g_VR.originAngle then
 		pos, ang = WorldToLocal(pos, ang, g_VR.origin, g_VR.originAngle)
