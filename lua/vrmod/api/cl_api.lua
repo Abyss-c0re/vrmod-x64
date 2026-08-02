@@ -71,7 +71,7 @@ if CLIENT then
         if vrmod.DetectBackend then pcall(vrmod.DetectBackend) end
         local pol = vrmod.GetBackendPolicy and vrmod.GetBackendPolicy() or {}
         local requiredVersion = pol.requiredModule or 20
-        local latestVersion = pol.latestModule or 28
+        local latestVersion = pol.latestModule or 29
         local moduleDownload = pol.moduleDownload
             or "https://github.com/Abyss-c0re/gVRMod/releases"
 
@@ -110,9 +110,9 @@ if CLIENT then
             end
             if VRMOD_IsHMDPresent and not VRMOD_IsHMDPresent() then
                 if pol.backend == "openxr" then
-                    error = "VR headset not detected (OpenXR runtime / WiVRn / SteamVR OpenXR)."
+                    error = "VR headset not detected (OpenXR runtime not seeing an HMD)."
                 else
-                    error = "VR headset not detected (SteamVR / OpenVR)."
+                    error = "VR headset not detected (OpenVR / SteamVR)."
                 end
             end
         end
@@ -125,7 +125,7 @@ if CLIENT then
     end
 
     function vrmod.GetModuleVersion()
-        return g_VR.moduleVersion, 20, 27
+        return g_VR.moduleVersion, 20, 29
     end
 
     function vrmod.IsPlayerInVR(ply)
