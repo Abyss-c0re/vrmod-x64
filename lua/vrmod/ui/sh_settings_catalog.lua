@@ -559,8 +559,12 @@ function vrmod.SettingsRunAction(action_id, ctx)
 	if action_id == "open_custom_actions" then
 		if ctx.close then pcall(ctx.close) end
 		timer.Simple(0, function()
-			-- Always the custom action editor — never open controller bindings.
-			RunConsoleCommand("vrmod_actioneditor")
+			-- Custom actions panel only — never controller bindings.
+			if g_VR and g_VR.active and vrmod.ActionsPanel_Open then
+				vrmod.ActionsPanel_Open()
+			else
+				RunConsoleCommand("vrmod_actioneditor")
+			end
 		end)
 		return true
 	end

@@ -105,6 +105,15 @@ end
 
 concommand.Add("vrmod_actioneditor", function()
 	if open then return end
+	-- VR: native hand panel (same chrome as settings / controller rebind)
+	if g_VR and g_VR.active then
+		if vrmod.ActionsPanel_Open then
+			vrmod.ActionsPanel_Open()
+		else
+			print("[VRMod] ActionsPanel_Open missing — need cl_actions_panel.lua")
+		end
+		return
+	end
 
 	open = true
 	VRUtilLoadCustomActions()
@@ -113,7 +122,6 @@ concommand.Add("vrmod_actioneditor", function()
 	window:SetPos(ScrW() / 2 - 350, ScrH() / 2 - 256)
 	window:SetSize(700, 512)
 	window:SetTitle("VRMod Custom Input Action Editor")
-	-- Mark so panel2vr can still surface it, but this is the action editor — not bindings.
 	window._vrmod_action_editor = true
 	window:MakePopup()
 
