@@ -488,44 +488,13 @@ function VRUtilCreateMapBrowserWindow()
 	function settingsHost:Rebuild()
 		self:Clear()
 		settingRows = loadGamemodeSettings(selectedGm)
-		for _, row in ipairs(settingRows) do
-			if maxPlayers <= 1 or row.singleplayer or not row.singleplayer then
-				-- show SP rows in SP; show all non-SP always; show SP-flagged in both for sandbox
-			end
-			local show = true
-			if maxPlayers > 1 and row.singleplayer then
-				-- stock still shows Singleplayer flag in SP only; keep important ones
-				-- Show if Singleplayer tag means "also in SP" not "SP only" — stock: ng-show MaxPlayers>1 || Singleplayer
-				show = true -- stock: (MaxPlayers > 1 || s.Singleplayer) — so SP-only settings hide in MP
-				-- Actually: show when MaxPlayers>1 OR Singleplayer — so hide when MaxPlayers<=1 AND not Singleplayer?
-				-- ng-show="MaxPlayers > 1 || s.Singleplayer" → hide only when SP session AND setting is NOT singleplayer-tagged
-				-- Wait: when MaxPlayers is 1 (SP), show if Singleplayer OR always? 
-				-- MaxPlayers > 1 || Singleplayer → in SP (1): only show if Singleplayer true
-				-- in MP: show all
-				if maxPlayers <= 1 then
-					show = row.singleplayer or row.type == "checkbox" -- show singleplayer-tagged; also show most sandbox toggles
-					-- Better exact stock:
-					show = (maxPlayers > 1) or row.singleplayer
-					-- But many sandbox settings lack singleplayer flag and still show in SP stock HTML...
-					-- Stock: ng-show="MaxPlayers > 1 || s.Singleplayer" — so in SP only Singleplayer:true settings show.
-					-- That would hide max_props in SP which seems wrong... Looking at sandbox.txt many have singleplayer "1".
-					-- Without flag, only shown in MP. OK follow stock:
-					show = (maxPlayers > 1) or row.singleplayer
-				else
-					show = true
-				end
-			end
-			if maxPlayers <= 1 then
-				show = (maxPlayers > 1) or row.singleplayer
-				-- Always show settings without singleplayer flag in SP too if they're the bulk of sandbox — stock is strict.
-				-- User asked to match real one — keep stock filter, but if zero rows, show all:
-			end
-		end
-		-- If filter empties list (common for SP), fall back to all settings
+		-- Stock CEF: ng-show="MaxPlayers > 1 || s.Singleplayer"
+		-- If that filters everything (common), show full list so SP sandbox stays useful.
 		local visible = {}
 		for _, row in ipairs(settingRows) do
-			local show = (maxPlayers > 1) or row.singleplayer
-			if show then visible[#visible + 1] = row end
+			if (maxPlayers > 1) or row.singleplayer then
+				visible[#visible + 1] = row
+			end
 		end
 		if #visible == 0 then visible = settingRows end
 
