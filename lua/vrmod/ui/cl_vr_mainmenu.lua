@@ -25,6 +25,11 @@ if not GetConVar("vrmod_menu_vr") then
 end
 
 local function MenuVR()
+	if vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession() then
+		local s = g_VR and g_VR._openxrLaunch
+		if s and s.menu then return true end
+		if s and s.hub then return false end
+	end
 	local c = GetConVar("vrmod_menu_vr")
 	return c and c:GetBool()
 end
