@@ -567,9 +567,8 @@ local function PaintBuildingMap(cx, cy, radius, yaw, range, origin)
 end
 
 -- Guard: never nest RenderView while stereo SBS RT is active (map-wide flicker).
--- Also restore fog / clip state — short radar zfar used to leak into eye views
--- and clip the whole world (player “render distance” collapse).
--- 3D capture state — dirty only when view actually changed
+-- Ortho + short zfar + fog MUST be fully scrubbed or eye RenderView inherits them
+-- → model flicker / clipped world ("radar leak").
 local radar3d = {
 	frame = -999,
 	origin = Vector(0, 0, 0),
@@ -577,11 +576,55 @@ local radar3d = {
 	range = 0,
 }
 
+--- Scrub GPU / fog / clip state left by nested world captures (radar ortho).
+--- Safe to call after any PreStereoCapture work before PushRenderTarget(g_VR.rt).
+local function SanitizeAfterNestedWorldCapture()
+	pcall(function()
+		if render.SetStencilEnable then render.SetStencilEnable(false) end
+		if render.OverrideDepthEnable then render.OverrideDepthEnable(false, false) end
+		if render.OverrideBlend then render.OverrideBlend(false) end
+		if render.OverrideColorWriteEnable then render.OverrideColorWriteEnable(false) end
+		if render.OverrideAlphaWriteEnable then render.OverrideAlphaWriteEnable(false) end
+		if render.SuppressEngineLighting then render.SuppressEngineLighting(false) end
+		if render.SetBlend then render.SetBlend(1) end
+		if render.SetColorModulation then render.SetColorModulation(1, 1, 1) end
+		if render.DepthRange then render.DepthRange(0, 1) end
+		if render.SetScissorRect then render.SetScissorRect(0, 0, 0, 0, false) end
+		if render.SetColorMaterial then render.SetColorMaterial() end
+		if cam.IgnoreZ then cam.IgnoreZ(false) end
+		-- Kill leftover fog overrides (SetupWorldFog will reapply next eye)
+		if render.FogMode then render.FogMode(MATERIAL_FOG_NONE or 0) end
+		if render.FogMaxDensity then render.FogMaxDensity(1) end
+		if render.FogStart then render.FogStart(0) end
+		if render.FogEnd then render.FogEnd(100000) end
+	end)
+	if g_VR then
+		g_VR._radarCapturing = false
+		g_VR._renderingHudRT = false
+		-- Force perspective on public view SoT (ortho fields leak → model flicker)
+		if g_VR.view then
+			g_VR.view.ortho = false
+			g_VR.view.ortholeft = nil
+			g_VR.view.orthoright = nil
+			g_VR.view.orthotop = nil
+			g_VR.view.orthobottom = nil
+			if (tonumber(g_VR.view.zfar) or 0) < 256 then
+				g_VR.view.zfar = 32768
+			end
+		end
+	end
+end
+-- Export for cl_vrmod post-capture barrier
+vrmod = vrmod or {}
+vrmod.SanitizeAfterNestedWorldCapture = SanitizeAfterNestedWorldCapture
+
 local function CaptureRadar3D(ply, range)
 	if not cv_radar_3d:GetBool() or not radarRT then return false end
 	if not IsValid(ply) then return false end
-	if g_VR and g_VR.stereoEye then return false end
-	if g_VR and g_VR._renderingHudRT then return false end
+	if not g_VR or not g_VR.active then return false end
+	-- Hard isolation: never under stereo RT, HUD RT, or mid-capture
+	if g_VR.stereoEye or g_VR.stereoRtActive or g_VR._renderingHudRT then return false end
+	if g_VR._radarCapturing then return false end
 
 	local pos = ply:GetPos()
 	local yaw = RadarYaw(ply)
@@ -597,27 +640,37 @@ local function CaptureRadar3D(ply, range)
 
 	-- Higher camera so building roofs read clearly
 	local height = math.Clamp(range * 1.1, 600, 3200)
+	-- Cap far plane — huge zfar on ortho was a common leak into eye views
+	local zfarCap = math.min(height + range * 1.5, 8000)
 
 	-- Snapshot fog so ortho capture cannot leave short fog end on the frame
 	local fogMode, fogStart, fogEnd, fogMax, fr, fg, fb
-	if render.GetFogMode then fogMode = render.GetFogMode() end
-	if render.GetFogDistances then
-		local a, b = render.GetFogDistances()
-		fogStart, fogEnd = a, b
-	end
-	if render.GetFogColor then
-		fr, fg, fb = render.GetFogColor()
-	end
-	if render.GetFogMaxDensity then fogMax = render.GetFogMaxDensity() end
+	pcall(function()
+		if render.GetFogMode then fogMode = render.GetFogMode() end
+		if render.GetFogDistances then
+			local a, b = render.GetFogDistances()
+			fogStart, fogEnd = a, b
+		end
+		if render.GetFogColor then
+			fr, fg, fb = render.GetFogColor()
+		end
+		if render.GetFogMaxDensity then fogMax = render.GetFogMaxDensity() end
+	end)
+
+	local wp = rawget(_G, "wp")
+	local wpWas = wp and wp.drawing
+	if istable(wp) then wp.drawing = true end
 
 	g_VR._radarCapturing = true
-	render.PushRenderTarget(radarRT)
-	render.Clear(8, 4, 6, 220, true, true)
-	local ok = pcall(function()
-		-- Kill fog for this pass so distant roofs stay visible
+	local pushed = false
+	local ok = false
+	pcall(function()
+		render.PushRenderTarget(radarRT)
+		pushed = true
+		render.Clear(8, 4, 6, 220, true, true)
 		if render.FogMode then render.FogMode(MATERIAL_FOG_NONE or 0) end
 		if render.FogMaxDensity then render.FogMaxDensity(0) end
-		-- Prefer engine RealRenderView if present (avoid portal wrappers)
+		-- Engine RealRenderView only — never portal wrapper / never under g_VR.rt
 		local rv = (isfunction(render.RealRenderView) and render.RealRenderView) or render.RenderView
 		rv({
 			origin = pos + Vector(0, 0, height),
@@ -636,23 +689,23 @@ local function CaptureRadar3D(ply, range)
 			orthotop = -range,
 			orthobottom = range,
 			znear = 8,
-			zfar = height + range * 2.5,
+			zfar = zfarCap,
 		})
+		ok = true
 	end)
-	render.PopRenderTarget()
+	if pushed then pcall(render.PopRenderTarget) end
 	g_VR._radarCapturing = false
+	if istable(wp) then wp.drawing = wpWas end
 
-	-- Undo fog / density pollution from the short ortho pass
+	-- Full scrub (fog restore + kill ortho pollution)
 	pcall(function()
 		if fogMode ~= nil and render.FogMode then render.FogMode(fogMode) end
 		if fogStart ~= nil and render.FogStart then render.FogStart(fogStart) end
 		if fogEnd ~= nil and render.FogEnd then render.FogEnd(fogEnd) end
 		if fogMax ~= nil and render.FogMaxDensity then render.FogMaxDensity(fogMax) end
 		if fr and render.FogColor then render.FogColor(fr, fg, fb) end
-		if render.OverrideDepthEnable then render.OverrideDepthEnable(false, false) end
-		if render.SetScissorRect then render.SetScissorRect(0, 0, 0, 0, false) end
-		if render.DepthRange then render.DepthRange(0, 1) end
 	end)
+	SanitizeAfterNestedWorldCapture()
 
 	if ok then
 		radar3d.frame = fn
@@ -868,43 +921,49 @@ local function PaintVitals(w, h)
 end
 
 local function CaptureHudRT(w, h, pScale)
-	render.PushRenderTarget(rt)
-	render.OverrideAlphaWriteEnable(true, true)
-	render.Clear(0, 0, 0, 0, true, true)
+	if not rt then return end
+	if g_VR and (g_VR.stereoRtActive or g_VR._radarCapturing) then return end
 
 	local oldX, oldY, oldW, oldH = 0, 0, ScrW(), ScrH()
 	if render.GetViewPort then
 		oldX, oldY, oldW, oldH = render.GetViewPort()
 	end
-	render.SetViewPort(0, 0, w, h)
 
-	cam.Start2D()
+	local pushed = false
+	pcall(function()
+		render.PushRenderTarget(rt)
+		pushed = true
+		render.OverrideAlphaWriteEnable(true, true)
+		render.Clear(0, 0, 0, 0, true, true)
+		render.SetViewPort(0, 0, w, h)
 
-	local bgA = math.Clamp(CVFloat("vrmod_hudtestalpha", 0), 0, 255)
-	if bgA > 0 then
-		surface.SetDrawColor(0, 0, 0, bgA)
-		surface.DrawRect(0, 0, w, h)
-	end
+		cam.Start2D()
+		local bgA = math.Clamp(CVFloat("vrmod_hudtestalpha", 0), 0, 255)
+		if bgA > 0 then
+			surface.SetDrawColor(0, 0, 0, bgA)
+			surface.DrawRect(0, 0, w, h)
+		end
 
-	g_VR._renderingHudRT = true
-	-- Optional engine HUD only if explicitly enabled (avoids loose desktop HUD copy)
-	if cv_engine:GetBool() then
-		pcall(render.RenderHUD, 0, 0, w, h)
-	end
+		if g_VR then g_VR._renderingHudRT = true end
+		-- Optional engine HUD only if explicitly enabled (avoids loose desktop HUD copy)
+		if cv_engine:GetBool() then
+			pcall(render.RenderHUD, 0, 0, w, h)
+		end
+		-- Never CaptureRadar3D here — only paint cached 3D RT + blips
+		pcall(PaintVitals, w, h)
+		pcall(PaintAimCrosshair, w, h, pScale or plateScale)
+		if g_VR then g_VR._renderingHudRT = false end
+		cam.End2D()
+	end)
 
-	-- Radar 3D is captured on VRMod_PreStereoCapture (no nested RenderView here).
-	-- PaintVitals / blips run every stereo frame for realtime HUD.
-
-	pcall(PaintVitals, w, h)
-	-- Optional aim reticle: weapon muzzle / hand aim projected onto plate
-	pcall(PaintAimCrosshair, w, h, pScale or plateScale)
-	g_VR._renderingHudRT = false
-
-	cam.End2D()
-
-	render.SetViewPort(oldX, oldY, oldW, oldH)
-	render.OverrideAlphaWriteEnable(false)
-	render.PopRenderTarget()
+	-- Always restore (error-safe) — alpha override / viewport leaks cause model flicker
+	pcall(function()
+		render.SetViewPort(oldX, oldY, oldW, oldH)
+		if render.OverrideAlphaWriteEnable then render.OverrideAlphaWriteEnable(false) end
+		if render.DepthRange then render.DepthRange(0, 1) end
+	end)
+	if pushed then pcall(render.PopRenderTarget) end
+	if g_VR then g_VR._renderingHudRT = false end
 end
 
 local function DrawHudMesh()
@@ -912,15 +971,19 @@ local function DrawHudMesh()
 	if not g_VR or not g_VR.active then return end
 	if not g_VR.tracking or not g_VR.tracking.hmd then return end
 	if not CVBool("vrmod_hud", true) then return end
+	if g_VR._radarCapturing or g_VR._renderingHudRT then return end
 
 	mat:SetTexture("$basetexture", rt)
 	mat:SetInt("$translucent", 1)
 	mat:SetInt("$additive", 0)
 	render.SetMaterial(mat)
 	cam.PushModelMatrix(mtx)
-	render.DepthRange(0, 0.01)
-	hudMesh:Draw()
-	render.DepthRange(0, 1)
+	-- DepthRange must always restore — leak → prop/decal flicker in both eyes
+	pcall(function()
+		render.DepthRange(0, 0.01)
+		hudMesh:Draw()
+	end)
+	pcall(function() render.DepthRange(0, 1) end)
 	cam.PopModelMatrix()
 end
 
@@ -990,6 +1053,7 @@ local function Bind()
 	-- Buildings: time-sliced TraceLine budget. 3D: dirty + interval (never every frame).
 	hook.Add("VRMod_PreStereoCapture", "vrmod_radar_world", function()
 		if not g_VR or not g_VR.active then return end
+		if g_VR.stereoRtActive or g_VR.stereoEye then return end
 		if not cv_radar:GetBool() then return end
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
@@ -1000,6 +1064,8 @@ local function Bind()
 		if cv_radar_3d:GetBool() then
 			pcall(CaptureRadar3D, ply, range)
 		end
+		-- Always scrub after radar work (even buildings-only path)
+		SanitizeAfterNestedWorldCapture()
 	end)
 
 	-- Capture HUD RT once per stereo frame BEFORE stereo RT push (Cube: no nested RT under g_VR.rt).

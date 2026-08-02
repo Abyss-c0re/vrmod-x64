@@ -913,7 +913,12 @@ if CLIENT then
 		dst.drawviewmodel = false
 		dst.drawhud = false
 		dst.bloomtone = false
-		dst.ortho = false -- radar uses ortho; must clear or eyes stay orthographic-clipped
+		-- Radar ortho must not leak: clear all orthographic fields (not just the flag)
+		dst.ortho = false
+		dst.ortholeft = nil
+		dst.orthoright = nil
+		dst.orthotop = nil
+		dst.orthobottom = nil
 	end
 
 	local function PerformRenderViews()
@@ -986,8 +991,23 @@ if CLIENT then
 			-- World RT captures (radar ortho, etc.) MUST run with no stereo RT pushed.
 			-- Nested RenderView under g_VR.rt flickers the entire map.
 			g_VR.stereoEye = nil
+			g_VR.stereoRtActive = false
 			g_VR.stereoFrame = (g_VR.stereoFrame or 0) + 1
 			hook.Call("VRMod_PreStereoCapture", nil)
+			-- Barrier: radar ortho / fog / DepthRange / alpha override must not
+			-- leak into SBS eyes (model flicker + clipped world).
+			if vrmod.SanitizeAfterNestedWorldCapture then
+				pcall(vrmod.SanitizeAfterNestedWorldCapture)
+			end
+			ResetStereoEyeState()
+			if view then
+				view.ortho = false
+				view.ortholeft = nil
+				view.orthoright = nil
+				view.orthotop = nil
+				view.orthobottom = nil
+				view.zfar = VIEW_ZFAR
+			end
 
 			render.PushRenderTarget(g_VR.rt)
 			-- Menu / HUD panel RTs must NEVER nest while this is true (malloc crash ~2s after menu open).
