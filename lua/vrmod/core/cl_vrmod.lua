@@ -1519,8 +1519,12 @@ if CLIENT then
 	-- Module resolves: getcwd()/garrysmod/data/<arg> — files must live in DATA/vrmod/.
 	local function RewriteActionManifestFiles()
 		if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
-		-- Full binding set when available (self-heal corrupt/empty DATA)
-		if g_VR.action_manifest then
+		-- Load customs first, then write base manifest WITH custom boolean actions injected.
+		-- Without this, every VR start wiped custom actions from the module.
+		if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
+		if isfunction(VRUtilWriteActionManifestWithCustoms) then
+			pcall(VRUtilWriteActionManifestWithCustoms)
+		elseif g_VR.action_manifest then
 			file.Write("vrmod/vrmod_action_manifest.txt", g_VR.action_manifest)
 		end
 		if g_VR.bindings_holographic then
@@ -1564,7 +1568,6 @@ if CLIENT then
 			if vrmod.logger then
 				vrmod.logger.Err("SetActionManifest failed (VR continues without bindings): %s hasFile=%s", detail, tostring(hasFile))
 			end
-			-- Cube W6: honest toast — silent death left controllers dead with no clue
 			if vrmod.Toast then
 				vrmod.Toast(
 					"Controller bindings failed — reinstall VRMod module; ensure data/vrmod/vrmod_action_manifest.txt exists. Restart VR runtime if needed.",
@@ -1584,6 +1587,7 @@ if CLIENT then
 
 		local set = LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main"
 		pcall(VRMOD_SetActiveActionSets, "/actions/base", set)
+		-- Customs already loaded in RewriteActionManifestFiles
 		if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
 		if isfunction(VRMOD_GetActions) then
 			local okA, a, b = pcall(VRMOD_GetActions)

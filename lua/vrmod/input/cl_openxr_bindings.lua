@@ -83,6 +83,13 @@ local function NormalizeSet(action, set)
 	if set == "main" or set == "driving" then return set end
 	if DRIVING_ACTION_IDS[action] then return "driving" end
 	if MAIN_ONLY_ACTION_IDS[action] then return "main" end
+	-- Custom actions: honor their driving flag from CustomActions table
+	for _, row in ipairs(g_VR.CustomActions or {}) do
+		if row and row[1] == action then
+			if row.driving or row[4] == "1" then return "driving" end
+			return "main"
+		end
+	end
 	return nil -- both / either set
 end
 
@@ -415,7 +422,7 @@ end
 
 function vrmod.bindings.ListLogicalActions()
 	-- Stable list for editor UI. group = "main" | "driving" | "both" for filters.
-	return {
+	local list = {
 		{ id = "boolean_primaryfire", label = "Primary Fire", group = "main" },
 		{ id = "boolean_secondaryfire", label = "Secondary Fire", group = "main" },
 		{ id = "boolean_left_primaryfire", label = "Left Primary Fire", group = "main" },
@@ -449,6 +456,20 @@ function vrmod.bindings.ListLogicalActions()
 		{ id = "boolean_siren", label = "Siren", group = "driving" },
 		{ id = "boolean_toggle_engine", label = "Toggle Engine", group = "driving" },
 	}
+	-- User custom actions (name → console cmds). Must be bound under Controller rebind on OpenXR.
+	if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
+	for _, row in ipairs(g_VR.CustomActions or {}) do
+		local name = row and row[1]
+		if type(name) == "string" and name ~= "" then
+			local driving = row.driving or row[4] == "1"
+			list[#list + 1] = {
+				id = name,
+				label = "Custom: " .. name,
+				group = driving and "driving" or "main",
+			}
+		end
+	end
+	return list
 end
 
 --- Filtered action list for editor UI (filter: "all"|"main"|"driving").

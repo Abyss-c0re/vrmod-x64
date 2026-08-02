@@ -560,11 +560,12 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		if ctx.close then pcall(ctx.close) end
 		timer.Simple(0, function()
 			if g_VR and g_VR.active then
-				-- Text-heavy editor: desktop only until native panel exists
 				if vrmod.Toast then
-					vrmod.Toast("Custom actions: edit on desktop (not in HMD)", 4, "hint")
-				else
-					print("[VRMod] Custom actions editor is desktop-only (no Derma in HMD)")
+					vrmod.Toast("Edit custom action names/cmds on desktop; bind them under Controller rebind", 5, "hint")
+				end
+				-- Jump to rebind so user can bind existing custom names in VR
+				if vrmod.BindingsPanel_Open then
+					vrmod.BindingsPanel_Open()
 				end
 			else
 				RunConsoleCommand("vrmod_actioneditor")
