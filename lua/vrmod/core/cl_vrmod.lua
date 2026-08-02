@@ -567,6 +567,10 @@ if CLIENT then
 			if isRight or isLeft then
 				local offsetPos = (isRight and g_VR.rightControllerOffsetPos or g_VR.leftControllerOffsetPos) * 0.01 * g_VR.scale
 				local offsetAng = isRight and g_VR.rightControllerOffsetAng or g_VR.leftControllerOffsetAng
+				-- Offsets are authored for the right hand; left uses mirrored yaw/roll.
+				if isLeft and offsetAng then
+					offsetAng = Angle(offsetAng.p, -offsetAng.y, -offsetAng.r)
+				end
 				local offsetWorldPos, offsetWorldAng = LocalToWorld(offsetPos, offsetAng, vector_origin, rawPose.ang)
 				rawPose.pos = rawPose.pos + offsetWorldPos
 				rawPose.ang = offsetWorldAng
