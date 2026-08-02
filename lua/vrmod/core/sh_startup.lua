@@ -68,8 +68,9 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset", -1.0, 1.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
-    -- OpenVR only supports 0/1. Mode 2 is clamped to 1 in cl_vrmod (gVRMod OpenXR may use 2).
-    vrmod.AddCallbackedConvar("vrmod_mat_queue_mode", nil, "1", FCVAR_ARCHIVE, "OpenVR mat_queue_mode: 0 sync, 1 queued (2 unsupported)", 0, 1, tonumber)
+    -- 0/1 always safe. Mode 2 only used when OpenXR module is detected (clamped in cl_runtime).
+    vrmod.AddCallbackedConvar("vrmod_mat_queue_mode", nil, "1", FCVAR_ARCHIVE,
+        "mat_queue: 0 sync, 1 queued (OpenVR max), 2 MT (OpenXR only — auto-clamped by backend)", 0, 2, tonumber)
     vrmod.AddCallbackedConvar("vrmod_skybox", nil, "0", nil, nil, nil, nil, tobool, function(val) RunConsoleCommand("r_3dsky", val and "1" or "0") end)
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")

@@ -44,6 +44,22 @@ This build focuses on **optimization** by merging essential features from semi-o
 - Likely more small fixes and improvements under the hood
 
 
+### 🔀 Dual module backend (OpenVR / OpenXR)
+
+This addon auto-detects which **native** `gmcl_vrmod_*.dll` is installed:
+
+| Module | Detect | mat_queue max | Notes |
+|--------|--------|---------------|--------|
+| **OpenVR** (`vrmod-module-master`) | no `GetBackend` / classic API | **1** | SteamVR / classic path — fully compatible |
+| **OpenXR** (`gVRMod` v24+) | `GetBackend()=="openxr"` or OpenXR exports | **2** | WiVRn / Monado / SteamVR OpenXR |
+
+```
+vrmod_backend   -- console: print detected backend + module version
+```
+
+Only **one** module binary can live in `garrysmod/lua/bin` at a time (same filename).  
+Swap the DLL to switch backends; Lua adapts without a separate addon.
+
 ### 📦 Installation
 
 **Requirements:**

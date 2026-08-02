@@ -63,17 +63,16 @@ vrmod.SettingsCatalog = {
 		},
 	},
 	{
-		-- gVRMod OpenXR: primary rebind is vrmod_bindingeditor (not SteamVR UI).
-		-- Custom named actions still use vrmod_actioneditor.
+		-- Bindings UI depends on detected module backend (OpenVR vs OpenXR).
 		id = "bindings",
 		title = "Bindings",
 		icon = "icon16/keyboard.png",
 		rows = {
-			{ kind = "help", label = "OpenXR controller rebind (gVRMod — replaces SteamVR binding UI)" },
-			{ kind = "action", label = "Open OpenXR binding editor", cmd = "vrmod_bindingeditor" },
-			{ kind = "help", label = "Custom named console actions" },
-			{ kind = "action", label = "Open action editor", cmd = "vrmod_actioneditor" },
+			{ kind = "help", label = "Backend auto-detect: vrmod_backend (console)" },
+			{ kind = "action", label = "Open OpenXR binding editor (if OpenXR module)", cmd = "vrmod_bindingeditor" },
 			{ kind = "help", label = "OpenXR binds: data/vrmod/vrmod_openxr_bindings.json" },
+			{ kind = "help", label = "Custom named console actions (both backends)" },
+			{ kind = "action", label = "Open action editor", cmd = "vrmod_actioneditor" },
 		},
 	},
 	{
@@ -88,10 +87,11 @@ vrmod.SettingsCatalog = {
 			}},
 			{ kind = "bool", label = "Engine post-processing", cvar = "vrmod_postprocess" },
 			{ kind = "combo", label = "Material queue (mat_queue_mode)", cvar = "vrmod_mat_queue_mode", choices = {
-				{ text = "0 — sync (single-thread)", value = 0 },
-				{ text = "1 — queued (OpenVR default)", value = 1 },
+				{ text = "0 — sync", value = 0 },
+				{ text = "1 — queued (OpenVR max / default)", value = 1 },
+				{ text = "2 — multithreaded (OpenXR only)", value = 2 },
 			}},
-			{ kind = "help", label = "OpenVR: mode 2 unsupported (use gVRMod/OpenXR for MT). Default 1." },
+			{ kind = "help", label = "Auto-clamped to active module: OpenVR max 1 · OpenXR max 2" },
 			{ kind = "bool", label = "Auto render offset", cvar = "vrmod_renderoffset" },
 			{ kind = "help", label = "Disable if rendering glitches" },
 			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },

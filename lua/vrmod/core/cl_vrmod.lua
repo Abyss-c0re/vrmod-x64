@@ -32,26 +32,35 @@ if CLIENT then
 	-- Desired values applied while VR is active.
 	-- Do NOT include cvars on GMod's Blocked_ConCommands list (mat_reduceparticles,
 	-- r_shadowrendertotexture, etc.) — Lua cannot change them without console spam.
-	-- OpenVR (vrmod-x64): mat_queue_mode 2 is NOT supported — dual-eye Submit races
-	-- material workers (flicker #348 / zero-dim / worker abort). Always pin 0 or 1.
-	-- gVRMod OpenXR may use mode 2; do NOT blind-sync that path into this tree.
+	-- mat_queue policy is backend-aware (see cl_runtime.lua):
+	--   OpenVR  → max 1, pin every frame, restore on exit
+	--   OpenXR  → max 2, set once if different, never restore mat_queue
+	local matQueueAppliedForSession = false
+
+	local function BackendPolicy()
+		if vrmod.GetBackendPolicy then
+			return vrmod.GetBackendPolicy()
+		end
+		return { matQueueMax = 1, matQueueDefault = 1, matQueuePinEveryFrame = true, matQueueRestoreOnExit = true }
+	end
+
 	local function WantedMatQueueMode()
+		local pol = BackendPolicy()
 		local cv = convars and convars.vrmod_mat_queue_mode
 		if not cv and GetConVar then cv = GetConVar("vrmod_mat_queue_mode") end
-		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 1
+		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or (pol.matQueueDefault or 1)
+		if vrmod.ClampMatQueueMode then
+			return vrmod.ClampMatQueueMode(n)
+		end
 		n = math.floor(tonumber(n) or 1)
 		if n < 0 then n = 0 end
-		if n >= 2 then
-			-- Clamp 2+ → 1 (OpenVR)
-			n = 1
-		end
+		if n > (pol.matQueueMax or 1) then n = pol.matQueueMax or 1 end
 		return n
 	end
 
 	local PERFORMANCE_CONVARS = {
 		cl_threaded_bone_setup = "1",
 		gmod_mcore_test = "1",
-		-- Always "1" for OpenVR unless user forces 0 via convar (clamped above).
 		mat_queue_mode = "1",
 		mat_disable_bloom = "1",
 		mat_disable_fancy_blending = "1",
@@ -62,18 +71,13 @@ if CLIENT then
 		r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0),
 		r_threaded_particles = "1",
 		r_queued_ropes = "1",
-		-- Keep world + model decals on for both eye passes (stereo flicker if off/intermittent)
 		r_drawdecals = "1",
 		r_drawmodeldecals = "1",
 		r_drawbatchdecals = "1",
-		-- Glide WebAudio mutes entirely when the game window loses focus (ALVR/SteamVR).
 		snd_mute_losefocus = "0",
 	}
-	-- Re-assert mat_queue every frame while VR active (OpenVR law: stay on 0/1).
-	local SESSION_PIN_CONVARS = {
-		mat_queue_mode = true,
-	}
-	-- Stores original convar values so we can restore them on VR exit
+	-- Filled after backend detect (OpenVR pins mat_queue; OpenXR does not).
+	local SESSION_PIN_CONVARS = {}
 	local convarOverrides = {}
 
 	local wasPaused = false
@@ -96,8 +100,21 @@ if CLIENT then
 			for k, v in pairs(vrmod) do
 				_G["VRMOD_" .. k] = v
 			end
-
 			g_VR.moduleVersion = VRMOD_GetVersion and VRMOD_GetVersion() or 0
+			-- Auto-detect OpenVR vs OpenXR from module exports / GetBackend.
+			if vrmod.DetectBackend then
+				local pol = vrmod.DetectBackend()
+				if vrmod.logger then
+					vrmod.logger.Info("Runtime: %s", vrmod.DescribeBackend and vrmod.DescribeBackend() or tostring(pol.backend))
+				end
+				if pol.matQueuePinEveryFrame then
+					SESSION_PIN_CONVARS.mat_queue_mode = true
+				else
+					SESSION_PIN_CONVARS.mat_queue_mode = nil
+				end
+			else
+				SESSION_PIN_CONVARS.mat_queue_mode = true
+			end
 		else
 			vrmod.logger.Err("Failed to load module:", err)
 		end
@@ -106,15 +123,12 @@ if CLIENT then
 	end
 
 	-- 0) Helper functions
-	-- Only ConVar setters — never RunConsoleCommand (GMod blacklists many engine cvars
-	-- and prints "Command is blocked!" even when pcall'd).
-	-- mat_queue_mode OpenVR: 0 sync · 1 queued (required for stereo). Mode 2 clamped away.
+	-- Only ConVar setters — never RunConsoleCommand (GMod blacklists many engine cvars).
 	local function setConvarValue(name, value)
 		local cv = GetConVar(name)
 		if not cv then return false end
 		value = tostring(value)
 		local ok = pcall(function()
-			-- Prefer SetInt for numeric engine cvars (mat_queue_mode is an int)
 			local n = tonumber(value)
 			if n ~= nil and cv.SetInt then
 				cv:SetInt(n)
@@ -123,7 +137,6 @@ if CLIENT then
 			end
 		end)
 		if not ok then
-			-- Fallback SetString only
 			ok = pcall(function() cv:SetString(value) end)
 		end
 		if not ok then
@@ -152,23 +165,36 @@ if CLIENT then
 		if not cv then return end
 		local previous = cv:GetString()
 		if not setConvarValue(name, value) then return end
-		-- Remember original so VR exit can restore (including mat_queue_mode).
 		if convarOverrides[name] == nil then
 			convarOverrides[name] = previous
 		end
 	end
 
 	local function restoreConvarOverrides()
-		-- Restore pre-VR values (including user's desktop mat_queue_mode).
+		local pol = BackendPolicy()
 		for k, v in pairs(convarOverrides) do
-			setConvarValue(k, v)
+			-- OpenXR: never flip mat_queue_mode on exit (worker thrash).
+			if k == "mat_queue_mode" and pol.matQueueRestoreOnExit == false then
+				-- skip
+			else
+				setConvarValue(k, v)
+			end
 		end
 		convarOverrides = {}
 	end
 
-	-- While VR is active, force pinned cvars every frame (mat_queue 0/1 only).
+	-- While VR is active: re-pin only backends that need it (OpenVR mat_queue).
 	local function EnsurePinnedConvars()
 		if not g_VR.active then return end
+		if vrmod.IsOpenXR and vrmod.IsOpenXR() and isfunction(VRMOD_SetKnownSubmitSize) then
+			local w = tonumber(g_VR.rtWidth)
+			local h = tonumber(g_VR.rtHeight)
+			if w and h and w >= 32 and h >= 32 then
+				pcall(VRMOD_SetKnownSubmitSize, w, h)
+			end
+		end
+		local pol = BackendPolicy()
+		if not pol.matQueuePinEveryFrame then return end
 		RefreshMatQueuePin()
 		for name, _ in pairs(SESSION_PIN_CONVARS) do
 			local want = PERFORMANCE_CONVARS[name]
@@ -1051,6 +1077,9 @@ if CLIENT then
 
 	-- 1) Startup checks & init
 	local function PerformStartup()
+		-- Re-detect in case module was replaced without map change
+		if vrmod.DetectBackend then vrmod.DetectBackend() end
+
 		local err = vrmod.GetStartupError()
 		if err then
 			vrmod.logger.Err("Failed to start: " .. err)
@@ -1060,33 +1089,67 @@ if CLIENT then
 			return false
 		end
 
-		VRMOD_Shutdown() -- ensure clean state
-		if VRMOD_Init() == false then
-			vrmod.logger.Err("Init failed")
+		timer.Remove("vrmod_async_shutdown")
+		matQueueAppliedForSession = false
+		pcall(function()
+			if isfunction(VRMOD_SetSubmitEnabled) then VRMOD_SetSubmitEnabled(false) end
+			if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end
+		end)
+
+		local okInit, initErr = pcall(function()
+			if VRMOD_Init() == false then error("VRMOD_Init returned false") end
+		end)
+		if not okInit then
+			vrmod.logger.Err("Init failed: %s", tostring(initErr))
 			if vrmod.Toast then
-				vrmod.Toast("VR_Init failed — SteamVR/OpenXR running? Check module version.", 8, "error")
+				local hint = (vrmod.IsOpenXR and vrmod.IsOpenXR()) and "OpenXR runtime" or "SteamVR/OpenVR"
+				vrmod.Toast("VR_Init failed — is " .. hint .. " running?", 8, "error")
 			end
 			return false
 		end
+		if vrmod.DetectBackend then vrmod.DetectBackend() end
 		return true
 	end
 
-	-- 2) Convar overrides for performance
+	-- 2) Convar overrides for performance (backend-aware mat_queue)
 	local function OverridePerformanceConvars()
-		-- Keep skybox flag in sync with current settings at start time
+		local pol = BackendPolicy()
 		PERFORMANCE_CONVARS.r_3dsky = tostring(convars.vrmod_skybox:GetBool() and 1 or 0)
 		RefreshMatQueuePin()
+
 		for cvar, val in pairs(PERFORMANCE_CONVARS) do
-			overrideConvar(cvar, val)
+			if cvar ~= "mat_queue_mode" then
+				overrideConvar(cvar, val)
+			end
 		end
-		local mq = WantedMatQueueMode()
-		if vrmod.logger then
-			vrmod.logger.Info("mat_queue_mode=%s (OpenVR pin 0/1 only; mode 2 unsupported)", tostring(mq))
-		end
-		local req = convars.vrmod_mat_queue_mode
-		local raw = req and (req.GetInt and req:GetInt() or tonumber(req:GetString())) or 1
-		if raw and tonumber(raw) and tonumber(raw) >= 2 and vrmod.Toast then
-			vrmod.Toast("mat_queue 2 not supported on OpenVR (vrmod-x64) — using 1", 5, "warn")
+
+		-- mat_queue once: only if different from current; OpenXR never thrash mid-session.
+		if not matQueueAppliedForSession then
+			local mq = WantedMatQueueMode()
+			local cv = GetConVar("mat_queue_mode")
+			local cur = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or nil
+			if cur == nil or cur ~= mq then
+				overrideConvar("mat_queue_mode", tostring(mq))
+			end
+			matQueueAppliedForSession = true
+			PERFORMANCE_CONVARS.mat_queue_mode = tostring(mq)
+
+			local req = convars.vrmod_mat_queue_mode
+			local raw = req and (req.GetInt and req:GetInt() or tonumber(req:GetString())) or mq
+			if raw and tonumber(raw) and tonumber(raw) > (pol.matQueueMax or 1) and vrmod.Toast then
+				vrmod.Toast(
+					string.format("mat_queue %s not supported on %s — using %s",
+						tostring(raw), tostring(pol.backend), tostring(mq)),
+					5, "warn"
+				)
+			end
+			if vrmod.logger then
+				vrmod.logger.Info(
+					"mat_queue_mode=%s (%s; max=%s pin=%s restore=%s)",
+					tostring(mq), tostring(pol.backend), tostring(pol.matQueueMax),
+					tostring(pol.matQueuePinEveryFrame), tostring(pol.matQueueRestoreOnExit)
+				)
+			end
 		end
 	end
 
@@ -1505,8 +1568,24 @@ if CLIENT then
 		function VRUtilClientExit()
 			if not g_VR.active then return end
 			timer.Remove("vrmod_stereo_selftest")
+			timer.Remove("vrmod_async_shutdown")
 			g_VR._stereoSelfTestDone = true
-			restoreConvarOverrides()
+			matQueueAppliedForSession = false
+
+			-- Stop frame ownership first
+			g_VR.active = false
+			hook.Remove("RenderScene", "vrutil_hook_renderscene")
+			hook.Remove("CalcViewModelView", "vrutil_hook_calcviewmodelview")
+			hook.Remove("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel")
+			hook.Remove("PreDrawPlayerHands", "vrutil_hook_predrawplayerhands")
+			hook.Remove("PreDrawViewModel", "vrutil_hook_predrawviewmodel")
+			hook.Remove("ShouldDrawLocalPlayer", "vrutil_hook_shoulddrawlocalplayer")
+			hook.Remove("CalcView", "vrutil_hook_calcview")
+
+			pcall(function()
+				if isfunction(VRMOD_SetSubmitEnabled) then VRMOD_SetSubmitEnabled(false) end
+			end)
+
 			VRUtilMenuClose()
 			VRUtilNetworkCleanup()
 			vrmod.StopLocomotion()
@@ -1521,36 +1600,57 @@ if CLIENT then
 					vm:RemoveEffects(EF_NODRAW)
 				end
 			end
-			hook.Remove("RenderScene", "vrutil_hook_renderscene")
-			hook.Remove("CalcViewModelView", "vrutil_hook_calcviewmodelview")
-			hook.Remove("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel")
-			hook.Remove("PreDrawPlayerHands", "vrutil_hook_predrawplayerhands")
-			hook.Remove("PreDrawViewModel", "vrutil_hook_predrawviewmodel")
-			hook.Remove("ShouldDrawLocalPlayer", "vrutil_hook_shoulddrawlocalplayer")
-			hook.Remove("CalcView", "vrutil_hook_calcview")
 			g_VR.tracking = {}
 			g_VR.rawTracking = {}
 			g_VR.threePoints = false
 			g_VR.sixPoints = false
-			if g_VR.rt then
-				render.PushRenderTarget(g_VR.rt)
-				render.Clear(0, 0, 0, 255, true, true)
-				render.PopRenderTarget()
-				g_VR.rt = nil
+			-- OpenVR: safe RT clear. OpenXR/mat_queue2: skip forced clear blit.
+			if g_VR.rt and not (vrmod.IsOpenXR and vrmod.IsOpenXR()) then
+				pcall(function()
+					render.PushRenderTarget(g_VR.rt)
+					render.Clear(0, 0, 0, 255, true, true)
+					render.PopRenderTarget()
+				end)
 			end
+			g_VR.rt = nil
 			g_VR.rtWidth, g_VR.rtHeight = nil, nil
 			g_VR.stereoEye = nil
-			g_VR.active = false
 			EndVRNestedRenderLock()
-			VRMOD_Shutdown()
-			vrmod.logger.Info("Ended VR session")
+
+			local pol = BackendPolicy()
+			if pol.backend == "openxr" then
+				-- Defer full teardown so restart works (gVRMod full Shutdown).
+				timer.Create("vrmod_async_shutdown", 0.05, 1, function()
+					if g_VR and g_VR.active then return end
+					pcall(function() if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end end)
+				end)
+				-- Soft pins only; mat_queue left alone
+				timer.Simple(0.15, function()
+					if g_VR and g_VR.active then return end
+					restoreConvarOverrides()
+				end)
+			else
+				-- OpenVR: shutdown sync (classic path) + restore including mat_queue
+				pcall(function() if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end end)
+				restoreConvarOverrides()
+			end
+
+			vrmod.logger.Info("Ended VR session (%s)", tostring(pol.backend or "?"))
 		end
 
-		hook.Add("ShutDown", "vrutil_hook_shutdown", function() if IsValid(LocalPlayer()) and g_VR.net[LocalPlayer():SteamID()] then VRUtilClientExit() end end)
+		hook.Add("ShutDown", "vrutil_hook_shutdown", function()
+			if IsValid(LocalPlayer()) and g_VR.net and g_VR.net[LocalPlayer():SteamID()] then
+				if g_VR.active then VRUtilClientExit() end
+			end
+		end)
 	end
 
 	-- Main ----------------------------------------------------------------------
 	function VRUtilClientStart()
+		if g_VR.active then
+			if vrmod.logger then vrmod.logger.Warn("VR already active — stop first") end
+			return
+		end
 		if not PerformStartup() then return end
 		OverridePerformanceConvars()
 		-- RT setup is mandatory; if it fails, do not bind RenderScene
@@ -1562,6 +1662,7 @@ if CLIENT then
 			if vrmod.Toast then
 				vrmod.Toast("Render targets failed — cannot start VR eyes. Check console / module.", 8, "error")
 			end
+			pcall(function() if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end end)
 			return
 		end
 		-- Actions may fail (manifest path) — never block eyes/HUD
