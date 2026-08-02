@@ -653,7 +653,7 @@ if CLIENT then
 	end
 
 	------------------------------------------------------------------------
-	-- WayVR-style free panel grab + corner resize
+	-- Free panel grab + corner resize
 	-- Point laser at panel + grip → detach from hand, drag freely, release to float in world.
 	-- Point laser at bottom-right corner + grip → pull to scale; release saves layout.
 	------------------------------------------------------------------------
