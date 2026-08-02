@@ -80,35 +80,32 @@ local function InitializeMenuItems()
 		end)
 	end, true, nil, "settings")
 
-	-- Launcher hub — unpaused VR menu (never GameUI / SP pause)
-	add("Launcher", 0, 1, function()
+	-- Pause Menu = stock GameUI projected to wrist (ESC). NOT New Game.
+	add("Pause Menu", 0, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
-			if vrmod.OpenLauncherUnpaused then
+			if vrmod.OpenPauseMenuVR then
+				vrmod.OpenPauseMenuVR()
+			elseif vrmod.OpenLauncherUnpaused then
 				vrmod.OpenLauncherUnpaused()
-			elseif vrmod.VRHub_Open then
-				if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
-				vrmod.VRHub_Open()
 			else
-				RunConsoleCommand("vrmod_hub_open")
+				RunConsoleCommand("vrmod_pause_menu")
 			end
 		end)
-	end, true, "unpaused · New Game · Settings", "launcher")
+	end, true, "stock pause UI in VR · ESC", "pause_menu")
+	-- New Game = maps / mode / multiplayer only
 	add("New Game", 1, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
 			if vrmod.OpenNewGameUnpaused then
 				vrmod.OpenNewGameUnpaused()
-			elseif vrmod.OpenNewGame then
-				if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
-				vrmod.OpenNewGame()
-			elseif isfunction(VRUtilCreateMapBrowserWindow) then
-				VRUtilCreateMapBrowserWindow()
+			elseif vrmod.VRNewGame_Open then
+				vrmod.VRNewGame_Open()
 			else
 				RunConsoleCommand("vrmod_newgame")
 			end
 		end)
-	end, true, "maps · mode · maxplayers · settings", "newgame")
+	end, true, "maps · gamemode · multiplayer", "newgame")
 
 	-- Row 2 (shifted — launcher takes col 0–1)
 	add("Flashlight", 2, 1, function() LocalPlayer():ConCommand("impulse 100") end, true, nil, "flashlight")

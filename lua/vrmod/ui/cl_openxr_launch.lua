@@ -142,14 +142,13 @@ local function bootFromLaunch()
 
 	local function afterVRLive()
 		log("VR active map=%s", tostring(game.GetMap and game.GetMap() or "?"))
-		-- Never GameUI (pauses SP / breaks VR input). Unpaused world + VR hub only.
-		timer.Simple(0.35, function()
+		-- Unpaused world; optional pause UI on demand (ESC / Quick Menu).
+		-- Do not auto-open New Game or spam hub — toast only.
+		timer.Simple(0.4, function()
 			if not (g_VR and g_VR.active) then return end
-			if vrmod.OpenLauncherUnpaused then
-				pcall(vrmod.OpenLauncherUnpaused)
-			else
-				if vrmod.VRUnpauseWorld then pcall(vrmod.VRUnpauseWorld) end
-				if vrmod.VRHub_Open then pcall(vrmod.VRHub_Open) end
+			if vrmod.VRUnpauseWorld then pcall(vrmod.VRUnpauseWorld) end
+			if vrmod.Toast then
+				vrmod.Toast("ESC or Quick Menu → Pause Menu · New Game for maps", 5, "hint")
 			end
 		end)
 	end

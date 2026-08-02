@@ -71,11 +71,12 @@ end
 
 local function MenuItems()
 	local map = game.GetMap and game.GetMap() or "?"
+	-- Cube pause fallback (when stock GameUI projection fails)
 	return {
-		{ id = "newgame", label = "NEW GAME", hint = "Maps · gamemode · players · settings" },
+		{ id = "resume", label = "RESUME", hint = "Close menu · stay in VR · " .. map },
+		{ id = "newgame", label = "NEW GAME", hint = "Maps · gamemode · multiplayer" },
 		{ id = "settings", label = "VR SETTINGS", hint = "Comfort · render · locomotion · UI" },
 		{ id = "bindings", label = "BINDINGS", hint = "OpenXR rebind · chords" },
-		{ id = "resume", label = "RESUME", hint = "Close launcher · stay in VR · " .. map },
 		{ id = "disconnect", label = "DISCONNECT", hint = "Leave map / server" },
 		{ id = "quit", label = "QUIT", hint = "Exit Garry's Mod" },
 	}

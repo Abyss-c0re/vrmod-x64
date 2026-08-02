@@ -111,91 +111,20 @@ local function UnbindMenu()
 	boundPanel = nil
 end
 
---- Bind real main menu / game UI into freefloat cinema VR surface
+--- Project stock GameUI / pause into VR (hand panel via GameUIProject).
 function vrmod.BindMainMenuToVR()
 	if not (g_VR and g_VR.active) then return false end
-	if not (vrmod.panel2vr and vrmod.panel2vr.ManifestPanel) then return false end
-
-	-- Never ActivateGameUI in VR — it pauses singleplayer and freezes VR input.
-	-- Prefer the unpaused VR hub launcher instead.
-	if g_VR and g_VR.active then
-		if vrmod.OpenLauncherUnpaused then
-			vrmod.OpenLauncherUnpaused()
-			return true
-		end
-		if vrmod.VRHub_Open then
-			if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
-			vrmod.VRHub_Open()
-			return true
+	if vrmod.OpenPauseMenuVR then
+		return vrmod.OpenPauseMenuVR() and true or false
+	end
+	-- Legacy path: util bind only
+	if vrmod.GameUIProject and vrmod.GameUIProject.FindPanel then
+		local panel = vrmod.GameUIProject.FindPanel()
+		if IsValid(panel) then
+			return vrmod.GameUIProject.BindPanel(panel, { uid = "p2v_mainmenu", place = "hand" }) ~= nil
 		end
 	end
-
-	local panel, meta = vrmod.FindMainMenuPanel()
-	if not IsValid(panel) then return false end
-
-	if boundPanel == panel and boundUid and g_VR.menus and g_VR.menus[boundUid] then
-		g_VR.menus[boundUid].dirty = true
-		g_VR.menus[boundUid].alwaysRedraw = true
-		return true
-	end
-	UnbindMenu()
-
-	local w, h, msc = CinemaMetrics()
-	if panel.SetSize then pcall(function() panel:SetSize(w, h) end) end
-	if panel.SetPos then pcall(function() panel:SetPos(0, 0) end) end
-	if panel.SetVisible then panel:SetVisible(true) end
-	if panel.MakePopup then pcall(function() panel:MakePopup() end) end
-
-	local pos, ang
-	if vrmod.panel2vr.ComputeFloatPose then
-		pos, ang = vrmod.panel2vr.ComputeFloatPose(36, -2)
-	else
-		pos, ang = Vector(0, 0, 48), Angle(0, 0, 90)
-	end
-
-	local uid = vrmod.panel2vr.ManifestPanel(panel, {
-		kind = "mainmenu",
-		place = "cinema",
-		hint = "mainmenu",
-		uid = "p2v_mainmenu",
-		width = w,
-		height = h,
-		placeOverride = {
-			attachment = false,
-			pos = pos,
-			ang = ang,
-			scale = msc or 0.038,
-		},
-	})
-
-	if not uid then return false end
-	boundUid = uid
-	boundPanel = panel
-
-	if g_VR.menus and g_VR.menus[uid] then
-		local m = g_VR.menus[uid]
-		m.dirty = true
-		m.alwaysRedraw = true
-		m.freeFloat = true
-		m.attachment = false
-		m.paintInterval = 0
-		m.paintIntervalFocused = 0
-		m.persistOpen = true
-		m.keepAlive = true
-		m.grabbable = true
-		m.cubeMenu = true
-	end
-
-	if vrmod.logger then
-		vrmod.logger.Info("[menu-vr] cinema bound %s %sx%s score=%s",
-			tostring(meta and meta.name or "?"),
-			tostring(w), tostring(h),
-			tostring(meta and meta.score or 0))
-	end
-	if vrmod.Toast then
-		vrmod.Toast("Main menu in VR — laser + trigger", 4, "hint")
-	end
-	return true
+	return false
 end
 
 function vrmod.UnbindMainMenuFromVR()
