@@ -45,9 +45,12 @@ if CLIENT then
 
     vrmod.AddCallbackedConvar("vrmod_althead", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_autostart", nil, "0")
-    -- Hub mode: VR main-menu replacement (launcher sets this). Open with vrmod_hub.
+    -- Menu-first: freefloat real MainMenu/GameUI (default launcher path)
+    vrmod.AddCallbackedConvar("vrmod_menu_vr", nil, "0", FCVAR_ARCHIVE,
+        "1 = menu-first VR: freefloat real MainMenu / GameUI cinema", nil, nil, tobool)
+    -- Hub: Cube launcher surface fallback (or force with vrmod_hub 1 alone)
     vrmod.AddCallbackedConvar("vrmod_hub", nil, "0", FCVAR_ARCHIVE,
-        "1 = VR hub menu after auto-start (gVRMod launcher)", nil, nil, tobool)
+        "1 = open VR hub after auto-start (fallback; menu-first preferred)", nil, nil, tobool)
     vrmod.AddCallbackedConvar("vrmod_scale", nil, "32.7")
     vrmod.AddCallbackedConvar("vrmod_heightmenu", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")

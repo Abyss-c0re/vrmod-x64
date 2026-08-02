@@ -129,6 +129,10 @@ if CLIENT then
 		-- Glide Styled_TabbedFrame design is 850×600 — need enough RT for form rows
 		popup = { fracW = 0.52, fracH = 0.62, designPhys = 14, minW = 420, minH = 360 },
 		panel = { fracW = 0.48, fracH = 0.55, designPhys = 13, minW = 320, minH = 280 },
+		-- Menu-first freefloat cinema (real MainMenu / GameUI)
+		mainmenu = { fracW = 0.78, fracH = 0.72, designPhys = 22, minW = 720, minH = 480 },
+		cinema = { fracW = 0.78, fracH = 0.72, designPhys = 22, minW = 720, minH = 480 },
+		html = { fracW = 0.72, fracH = 0.68, designPhys = 20, minW = 640, minH = 420 },
 	}
 
 	--- One-eye pixel size from the active VR stereo RT (SBS → half width).

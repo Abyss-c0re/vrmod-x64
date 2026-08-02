@@ -178,27 +178,42 @@ if CLIENT then
 
 	function VRUtilNetworkInit() --called by localplayer when they enter vr
 		lastDesktopFocused = nil
-		-- transmit loop
+		-- Menu-first: no LocalPlayer / no game server yet — skip net, keep local XR only
+		local ply = LocalPlayer()
+		local inGame = IsValid(ply)
+		if isfunction(IsInGame) then
+			inGame = inGame and IsInGame()
+		end
+
+		-- transmit loop (only useful when connected)
 		timer.Create("vrmod_transmit", 1 / convarValues.vrmod_net_tickrate, 0, function()
-			if g_VR.threePoints and g_VR.active then
-				local frame = buildClientFrame(true)
-				if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
-					SendFrame(frame)
-				else
-					vrmod.logger.Debug("Skipping identical frame")
-					if not lastSentFrame then SendFrame(frame) end
-				end
-				PollDesktopFocus()
+			if not (g_VR.threePoints and g_VR.active) then return end
+			if not IsValid(LocalPlayer()) then return end
+			local frame = buildClientFrame(true)
+			if lastSentFrame and not vrmod.utils.FramesAreEqual(frame, lastSentFrame) then
+				SendFrame(frame)
+			else
+				vrmod.logger.Debug("Skipping identical frame")
+				if not lastSentFrame then SendFrame(frame) end
 			end
+			PollDesktopFocus()
 		end)
 		-- Also poll focus on a slow timer (tick may skip identical pose frames)
 		timer.Create("vrmod_desktop_focus", 0.35, 0, PollDesktopFocus)
 
-		net.Start("vrutil_net_join", true)
-		--send some stuff here that doesnt need to be in every frame
-		net.WriteBool(GetConVar("vrmod_althead"):GetBool())
-		net.WriteBool(GetConVar("vrmod_floatinghands"):GetBool())
-		net.SendToServer()
+		if inGame then
+			local okJoin = pcall(function()
+				net.Start("vrutil_net_join", true)
+				net.WriteBool(GetConVar("vrmod_althead"):GetBool())
+				net.WriteBool(GetConVar("vrmod_floatinghands"):GetBool())
+				net.SendToServer()
+			end)
+			if not okJoin and vrmod.logger then
+				vrmod.logger.Debug("vrutil_net_join skipped (menu-only or no net)")
+			end
+		elseif vrmod.logger then
+			vrmod.logger.Info("Menu-first VR: local session only (no net join yet)")
+		end
 		-- Initial presence (usually focused at start)
 		timer.Simple(0.2, PollDesktopFocus)
 	end
@@ -258,8 +273,13 @@ if CLIENT then
 		timer.Remove("vrmod_desktop_focus")
 		lastDesktopFocused = nil
 		if g_VR then g_VR.desktopFocused = nil end
-		net.Start("vrutil_net_exit")
-		net.SendToServer()
+		-- Menu-first may never have joined a server
+		if IsValid(LocalPlayer()) then
+			pcall(function()
+				net.Start("vrutil_net_exit")
+				net.SendToServer()
+			end)
+		end
 	end
 
 	-- Remote players: desktop unfocused chip state
@@ -428,18 +448,33 @@ if CLIENT then
 
 		timer.Simple(2, function()
 			-- Legacy: early sessions used to clear autostart in first 120s — that broke
-			-- the gVRMod launcher (+exec gvrmod_hub). Only skip the clear when hub mode
-			-- or prefer_backend openxr was forced this launch.
+			-- the gVRMod launcher. Keep autostart when hub, menu-first, or forced OpenXR.
 			local hub = GetConVar("vrmod_hub")
+			local menuVR = GetConVar("vrmod_menu_vr")
 			local prefer = GetConVar("vrmod_prefer_backend")
 			local hubMode = hub and hub:GetBool()
+			local menuMode = menuVR and menuVR:GetBool()
 			local forceXR = prefer and string.lower(prefer:GetString() or "") == "openxr"
-			if SysTime() < 120 and not hubMode and not forceXR then
+			if SysTime() < 120 and not hubMode and not menuMode and not forceXR then
 				local ac = GetConVar("vrmod_autostart")
 				if ac then ac:SetBool(false) end
 			end
 			if GetConVar("vrmod_autostart"):GetBool() then
 				timer.Create("vrutil_timer_tryautostart", 1, 0, function()
+					if g_VR and g_VR.active then
+						timer.Remove("vrutil_timer_tryautostart")
+						return
+					end
+					-- Menu-first: start without waiting for player model / map spawn
+					if menuMode then
+						if isfunction(VRUtilClientStart) then
+							pcall(VRUtilClientStart)
+							if g_VR and g_VR.active then
+								timer.Remove("vrutil_timer_tryautostart")
+							end
+						end
+						return
+					end
 					local ply = LocalPlayer()
 					if not IsValid(ply) then return end
 					local pm = ply:GetModel()

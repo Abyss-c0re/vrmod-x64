@@ -1,11 +1,12 @@
 if SERVER then return end
 -- =============================================================================
--- VR Hub — full main-menu style shell in VR (not stock Source MainMenu VGUI).
--- Stock GMod main menu is pre-map VGUI and cannot be reliably stereo'd.
--- This hub is the intentional replacement for "menu fully in VR" (HL2VR-like UX).
+-- VR Hub — Cube-chrome launcher surface (maps / settings / bindings / quit).
 --
--- Opens when: vrmod_hub 1 and VR active (launcher sets this).
--- Auto-starts VR via existing vrmod_autostart (also set by launcher).
+-- Primary path is menu-first freefloat of the REAL MainMenu (cl_vr_mainmenu.lua).
+-- Hub is the fallback when stock VGUI cannot be found, or when vrmod_hub 1.
+--
+-- Opens when: vrmod_hub 1 and VR active, OR menu-vr bind exhausted retries.
+-- Manual: vrmod_hub / vrmod_hub_open
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -286,10 +287,13 @@ function vrmod.VRHub_Open()
 	end)
 end
 
--- Open hub after VR starts when hub mode is on
+-- Open hub after VR starts when hub mode is on (not when menu-first owns the flow)
 hook.Add("VRMod_Start", "vrmod_vr_hub", function(ply)
-	if ply and ply ~= LocalPlayer() then return end
+	if ply and IsValid(LocalPlayer()) and ply ~= LocalPlayer() then return end
 	if not HubEnabled() then return end
+	-- Menu-first owns freefloat MainMenu; hub only if explicitly forced with hub alone
+	local menuVR = GetConVar("vrmod_menu_vr")
+	if menuVR and menuVR:GetBool() then return end
 	timer.Simple(1.2, function()
 		if not HubEnabled() then return end
 		if not (g_VR and g_VR.active) then return end

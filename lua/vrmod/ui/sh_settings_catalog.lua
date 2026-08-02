@@ -57,6 +57,7 @@ vrmod.SettingsCatalog = {
 			{ kind = "bool", label = "Seated offset", cvar = "vrmod_seated" },
 			{ kind = "help", label = "Adjust seated offset from Avatar menu" },
 			{ kind = "bool", label = "Autostart VR after map load", cvar = "vrmod_autostart" },
+			{ kind = "bool", label = "Menu-first VR (freefloat MainMenu)", cvar = "vrmod_menu_vr" },
 			{ kind = "bool", label = "Climbing mechanics", cvar = "vrmod_climbing" },
 			{ kind = "bool", label = "Door use mechanics", cvar = "vrmod_doors" },
 			{ kind = "action", label = "Reset all settings", cmd = "vrmod_reset" },

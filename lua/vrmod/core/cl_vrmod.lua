@@ -1585,7 +1585,10 @@ if CLIENT then
 			g_VR._actionManifestOk = true
 		end
 
-		local set = LocalPlayer():InVehicle() and "/actions/driving" or "/actions/main"
+		-- Menu-first: LocalPlayer may be invalid before a map loads
+		local ply = LocalPlayer()
+		local inVeh = IsValid(ply) and ply.InVehicle and ply:InVehicle()
+		local set = inVeh and "/actions/driving" or "/actions/main"
 		pcall(VRMOD_SetActiveActionSets, "/actions/base", set)
 		-- Customs already loaded in RewriteActionManifestFiles
 		if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
@@ -1639,9 +1642,14 @@ if CLIENT then
 	-- EmptyPose / EnsurePoseIndependence defined above (before UpdateTracking).
 	local function InitializeTracking()
 		lastPosePos = {}
-		local origin = LocalPlayer():GetPos()
+		-- Menu-first / pre-map: no LocalPlayer — seed at origin so XR session still boots
+		local ply = LocalPlayer()
+		local origin = (IsValid(ply) and ply.GetPos and ply:GetPos()) or Vector(0, 0, 0)
+		local eyeZ = 66.8
+		local cvEye = GetConVar("vrmod_charactereyeheight")
+		if cvEye then eyeZ = cvEye:GetFloat() end
 		g_VR.tracking = {
-			hmd = EmptyPose(origin + Vector(0, 0, 66.8)),
+			hmd = EmptyPose(origin + Vector(0, 0, eyeZ)),
 			pose_lefthand = EmptyPose(origin),
 			pose_righthand = EmptyPose(origin),
 		}

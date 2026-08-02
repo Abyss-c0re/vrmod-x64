@@ -59,6 +59,13 @@ W.Place = {
 		ang = nil,
 		scale = 0.022,
 	},
+	-- Full-view main menu / GameUI cinema plane (menu-first VR)
+	cinema = {
+		attachment = false,
+		pos = nil,
+		ang = nil,
+		scale = 0.038,
+	},
 	-- Spawn / context: wrist shell (center is palm-forward, NOT top-left).
 	-- scale here is fallback only — ManifestPanel overwrites from GetVRUIPanelMetrics.
 	workbench = {
@@ -191,6 +198,7 @@ end
 local STABLE_UID = {
 	spawnmenu = "p2v_spawnmenu",
 	contextmenu = "p2v_contextmenu",
+	mainmenu = "p2v_mainmenu",
 }
 
 local function uidFor(panel, hint, kind)
@@ -267,7 +275,10 @@ function W.ResolvePlace(placeName, override, pixelW, pixelH)
 		base._centerLocal = center
 		base._pixelW, base._pixelH = pw, ph
 	elseif not base.attachment and (not base.pos or not base.ang) then
-		base.pos, base.ang = W.ComputeFloatPose(28, -4)
+		-- Cinema plane sits farther and larger than generic float popups
+		local dist = (placeName == "cinema") and 36 or 28
+		local hOff = (placeName == "cinema") and -2 or -4
+		base.pos, base.ang = W.ComputeFloatPose(dist, hOff)
 		base.attachment = false
 	end
 	return base
@@ -287,6 +298,11 @@ local function detectKind(panel)
 	if not IsValid(panel) then return "panel" end
 	local class = panel.ClassName or panel:GetClassName() or ""
 	local name = panel:GetName() or ""
+	local nl, cl = string.lower(name), string.lower(class)
+	if nl:find("mainmenu", 1, true) or cl:find("mainmenu", 1, true)
+		or nl:find("gamemenu", 1, true) or nl == "mainmenu" or nl:find("gmodmenu", 1, true) then
+		return "mainmenu"
+	end
 	class = string.lower(tostring(class))
 	name = string.lower(tostring(name))
 	if class:find("dhtml", 1, true) or class:find("html", 1, true) or name:find("html", 1, true) then
@@ -560,6 +576,7 @@ function W.ManifestPanel(panel, opts)
 	end
 	local placeName = opts.place
 		or ((kind == "spawnmenu" or kind == "contextmenu") and "hand")
+		or ((kind == "mainmenu" or kind == "cinema" or kind == "html") and "cinema")
 		or "popup"
 	if placeName == "workbench" then placeName = "hand" end
 
@@ -573,6 +590,11 @@ function W.ManifestPanel(panel, opts)
 		shellBaseScale = msc
 		if panel.SetSize then panel:SetSize(pw, ph) end
 		if panel.SetPos then panel:SetPos(0, 0) end
+	elseif kind == "mainmenu" or kind == "cinema" or kind == "html" then
+		local mw, mh, msc = shellMetrics(kind == "html" and "html" or "mainmenu")
+		pw, ph = opts.width or mw, opts.height or mh
+		shellBaseScale = msc
+		forcePanelIntoVRBox(panel, pw, ph)
 	elseif kind == "popup" or kind == "panel" then
 		local mw, mh, msc = shellMetrics(kind == "popup" and "popup" or "panel")
 		shellBaseScale = msc
@@ -599,9 +621,10 @@ function W.ManifestPanel(panel, opts)
 	panel:SetPaintedManually(true)
 
 	local isShell = (kind == "spawnmenu" or kind == "contextmenu")
+	local isCinema = (kind == "mainmenu" or kind == "cinema" or kind == "html")
 	-- Restore free-float placement: session cache, then disk layout (panel_layouts.json)
 	-- Skip poses that are too far from the player (classic "spawn menu got lost").
-	local saved = isShell and shellFloatPose[kind] or nil
+	local saved = (isShell or isCinema) and shellFloatPose[kind] or nil
 	if not saved and isfunction(vrmod.GetMenuLayout) then
 		local lay = vrmod.GetMenuLayout(uid)
 		if lay and lay.freeFloat and lay.pos and lay.ang then
@@ -699,17 +722,25 @@ function W.ManifestPanel(panel, opts)
 		end
 		m.cubeMenu = true
 		m.grabbable = true
-		m.resizable = true
+		m.resizable = not isCinema -- cinema stays large and stable
 		-- Stay alive while QM / other menus open (IsVisible flicker must not kill shell)
-		m.persistOpen = isShell
-		m.keepAlive = isShell
-		m.allowHiddenPanel = isShell
+		m.persistOpen = isShell or isCinema
+		m.keepAlive = isShell or isCinema
+		m.allowHiddenPanel = isShell or isCinema
+		-- CEF / GameUI animate constantly — always redraw freefloat cinema
+		if isCinema then
+			m.alwaysRedraw = true
+			m.paintInterval = 0
+			m.paintIntervalFocused = 0
+			m.freeFloat = true
+			m.attachment = false
+		end
 		if place._centerLocal then m._centerLocal = place._centerLocal end
 		if place.attachHand then m.attachHand = place.attachHand end
-		if useFloat or m.freeFloat then
+		if useFloat or m.freeFloat or isCinema then
 			m.attachment = false
 			m.freeFloat = true
-			if useFloat then
+			if useFloat or isCinema then
 				m.pos = place.pos
 				m.ang = place.ang
 				if place.scale and not (disk and disk.scale) then
@@ -730,8 +761,8 @@ function W.ManifestPanel(panel, opts)
 		panel = panel,
 		kind = kind,
 		place = placeName,
-		html = (kind == "html"),
-		alwaysPaint = (kind == "settings" or kind == "html" or kind == "spawnmenu" or kind == "contextmenu"),
+		html = (kind == "html" or kind == "mainmenu"),
+		alwaysPaint = (kind == "settings" or kind == "html" or kind == "mainmenu" or kind == "cinema" or kind == "spawnmenu" or kind == "contextmenu"),
 		handPos = place.pos,
 		handAng = place.ang,
 		handScale = place.scale,
