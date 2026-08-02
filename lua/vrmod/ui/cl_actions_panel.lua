@@ -68,10 +68,19 @@ local function SetStatus(msg, sec)
 	statusUntil = CurTime() + (sec or 2.5)
 end
 
+local loadedOnce = false
+
+--- In-memory list only. Do NOT reload from disk here (wipes pending Add).
 local function List()
-	if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
 	g_VR.CustomActions = g_VR.CustomActions or {}
 	return g_VR.CustomActions
+end
+
+local function EnsureLoaded()
+	if loadedOnce then return end
+	if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
+	g_VR.CustomActions = g_VR.CustomActions or {}
+	loadedOnce = true
 end
 
 local function maxScroll()
@@ -82,33 +91,34 @@ local function IsDriving(row)
 	return row and (row.driving or row[4] == "1")
 end
 
--- Soft save: JSON only. Never call SetActionManifest here (freezes XR session).
+-- Soft save: JSON only from memory. Never reload before write.
 local function SoftSave()
 	if not file.Exists("vrmod", "DATA") then file.CreateDir("vrmod") end
 	file.Write("vrmod/vrmod_custom_actions.txt", util.TableToJSON(List(), false))
 end
 
--- Hard save on close: JSON + manifest (restart VR if module needs re-attach)
+-- Hard save on close: JSON + manifest (no SetActionManifest while in VR)
 local function HardSave()
-	if isfunction(VRUtilSaveCustomActions) then
-		-- Prefer soft path inside if we add opts later
-		if isfunction(VRUtilSanitizeCustomActions) then pcall(VRUtilSanitizeCustomActions) end
-		SoftSave()
-		if isfunction(VRUtilWriteActionManifestWithCustoms) then
-			pcall(VRUtilWriteActionManifestWithCustoms)
-		end
-	else
-		SoftSave()
+	if isfunction(VRUtilSanitizeCustomActions) then pcall(VRUtilSanitizeCustomActions) end
+	SoftSave()
+	if isfunction(VRUtilWriteActionManifestWithCustoms) then
+		pcall(VRUtilWriteActionManifestWithCustoms)
 	end
 end
 
 local editing = nil -- { index, field } while keyboard open
 
 local function StartEdit(index, field)
+	EnsureLoaded()
 	local list = List()
 	local row = list[index]
 	if not row then
-		SetStatus("No row to edit", 2)
+		-- Defensive: if index stale, edit last row
+		index = #list
+		row = list[index]
+	end
+	if not row then
+		SetStatus("No row to edit — press Add first", 3)
 		return
 	end
 	local text = ""
@@ -127,11 +137,18 @@ local function StartEdit(index, field)
 		or (field == "press" and "PRESS CMD")
 		or "RELEASE CMD"
 
-	editing = { index = index, field = field }
+	local editIndex = index
+	editing = { index = editIndex, field = field }
 
 	-- Defer so the Add/Name click does not steal focus from the new keyboard menu
-	timer.Simple(0.12, function()
+	timer.Simple(0.15, function()
 		if not open then return end
+		-- Re-resolve row (must still exist in memory — no disk reload)
+		if not List()[editIndex] then
+			SetStatus("Row vanished — try Add again", 3)
+			editing = nil
+			return
+		end
 		local ok = vrmod.VRKeyboard_Open({
 			title = title,
 			text = text,
@@ -144,11 +161,14 @@ local function StartEdit(index, field)
 			end or nil,
 			onDone = function(result)
 				editing = nil
-				local r = List()[index]
-				if not r then return end
+				local r = List()[editIndex]
+				if not r then
+					SetStatus("Row lost on save", 3)
+					return
+				end
 				if field == "name" then
 					local n = string.lower(string.gsub(result or "", "[^a-z0-9_]", ""))
-					if n == "" then n = "action_" .. tostring(index) end
+					if n == "" then n = "action_" .. tostring(editIndex) end
 					r[1] = n
 				elseif field == "press" then
 					r[2] = result or ""
@@ -156,7 +176,7 @@ local function StartEdit(index, field)
 					r[3] = result or ""
 				end
 				SoftSave()
-				SetStatus("Saved " .. field .. ": " .. tostring(result or ""), 3)
+				SetStatus("Saved " .. field .. ": " .. tostring(r[field == "name" and 1 or field == "press" and 2 or 3] or ""), 3)
 				if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
 			end,
 			onCancel = function()
@@ -343,15 +363,16 @@ local function activateAt(mx, my)
 				SetStatus("Removed", 2)
 				return
 			elseif btn.kind == "add" then
-				-- Do NOT push manifest / SetActionManifest here — freezes OpenXR.
-				g_VR.CustomActions = g_VR.CustomActions or {}
-				local n = #g_VR.CustomActions + 1
+				-- Do NOT reload from disk or SetActionManifest here.
+				EnsureLoaded()
+				local list = List()
+				local n = #list + 1
 				local name = "action_" .. tostring(n)
-				g_VR.CustomActions[n] = { name, "echo " .. name, "", "" }
-				SoftSave()
+				list[n] = { name, "echo " .. name, "", "" }
+				SoftSave() -- write memory → disk only (no Load)
 				rowScroll = maxScroll()
 				selected = n
-				SetStatus("Added " .. name .. " — keyboard for rename…", 3)
+				SetStatus("Added " .. name, 2)
 				StartEdit(n, "name")
 				return
 			elseif btn.kind == "save" then
@@ -412,12 +433,14 @@ function vrmod.ActionsPanel_Open()
 	if vrmod.CubeSettings_Close then pcall(vrmod.CubeSettings_Close) end
 	if vrmod.BindingsPanel_Close then pcall(vrmod.BindingsPanel_Close) end
 
-	if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
+	loadedOnce = false
+	EnsureLoaded()
 	ApplyDensity()
 	open = true
 	rowScroll = 0
-	selected = 1
+	selected = math.max(1, #List())
 	statusMsg = ""
+	editing = nil
 	livePos, liveAng, liveScale = WristPose()
 
 	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()
