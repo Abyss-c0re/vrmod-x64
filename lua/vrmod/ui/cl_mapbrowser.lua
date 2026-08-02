@@ -228,61 +228,33 @@ local function loadGamemodeSettings(gmName)
 end
 
 ------------------------------------------------------------------------
--- Start game (stock control.NewGame.js order)
+-- Start game — shared vrmod.MapStart (classic VR: changelevel)
 ------------------------------------------------------------------------
 local function startGame(mapName, gmName, maxPlayers, serverOpts, settingRows)
 	if not mapName or mapName == "" then return end
 	mapName = string.Trim(mapName)
-	gmName = gmName or "sandbox"
-	maxPlayers = tonumber(maxPlayers) or 1
 	serverOpts = serverOpts or {}
 	settingRows = settingRows or {}
 
+	local MS = vrmod.MapStart
+	if MS and MS.StartFromVR then
+		MS.StartFromVR(mapName, {
+			gamemode = gmName or "sandbox",
+			maxplayers = tonumber(maxPlayers) or 1,
+			hostname = serverOpts.hostname,
+			sv_lan = serverOpts.sv_lan,
+			p2p_enabled = serverOpts.p2p_enabled,
+			p2p_friendsonly = serverOpts.p2p_friendsonly,
+			settings = settingRows,
+			keepVR = true,
+			delay = 0.2,
+		})
+		return
+	end
+
+	-- Legacy one-liner (original VR map browser)
 	RunConsoleCommand("vrmod_autostart", "1")
-	RunConsoleCommand("progress_enable")
-
-	-- Apply gamemode first
-	RunConsoleCommand("gamemode", gmName)
-	RunConsoleCommand("maxplayers", tostring(maxPlayers))
-
-	if maxPlayers > 1 then
-		RunConsoleCommand("sv_cheats", "0")
-	end
-
-	if serverOpts.hostname and serverOpts.hostname ~= "" then
-		RunConsoleCommand("hostname", serverOpts.hostname)
-	end
-	if serverOpts.sv_lan ~= nil then
-		RunConsoleCommand("sv_lan", serverOpts.sv_lan and "1" or "0")
-	end
-	if serverOpts.p2p_enabled ~= nil then
-		RunConsoleCommand("p2p_enabled", serverOpts.p2p_enabled and "1" or "0")
-	end
-	if serverOpts.p2p_friendsonly ~= nil then
-		RunConsoleCommand("p2p_friendsonly", serverOpts.p2p_friendsonly and "1" or "0")
-	end
-
-	for _, row in ipairs(settingRows) do
-		if not row.name then continue end
-		-- Skip SP-only when multiplayer and vice-versa stock-style: show both when SP or flagged
-		local show = (maxPlayers <= 1) or (not row.singleplayer) or row.singleplayer
-		if not show and maxPlayers > 1 and row.singleplayer then continue end
-		local v = row.value
-		if row.type == "checkbox" then
-			v = tobool(v) and "1" or "0"
-		end
-		RunConsoleCommand(row.name, tostring(v))
-	end
-
-	-- Delay map like stock JS (settings apply first)
-	timer.Simple(0.25, function()
-		RunConsoleCommand("maxplayers", tostring(maxPlayers))
-		RunConsoleCommand("map", mapName)
-	end)
-
-	if vrmod.Toast then
-		vrmod.Toast(string.format("Starting %s · %s · %sp", mapName, gmName, maxPlayers), 3, "hint")
-	end
+	RunConsoleCommand("changelevel", mapName)
 end
 
 ------------------------------------------------------------------------
