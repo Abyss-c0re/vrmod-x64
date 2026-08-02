@@ -147,10 +147,11 @@ local function forceStartVR()
 	-- Ask native launcher to drop OpenXR first (only one session). Wait ~1.2s once.
 	if not handoffSignaled then
 		handoffSignaled = true
-		handoffDelayUntil = CurTime() + 1.25
+		-- Native orderly release needs room for xrRequestExitSession + STOPPING (research-3 race)
+		handoffDelayUntil = CurTime() + 2.5
 		writeHandoff("take_xr")
 		writeStatus("take_xr_signaled")
-		log("signaled cube_webui take_xr — waiting for native to release session")
+		log("signaled cube_webui take_xr — waiting for native to release session (2.5s)")
 		return false
 	end
 	if CurTime() < handoffDelayUntil then

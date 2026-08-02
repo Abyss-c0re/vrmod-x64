@@ -235,9 +235,10 @@ local function onInput(action, pressed)
 		if action == "boolean_primaryfire" or action == "boolean_use" or action == "boolean_changeweapon" then
 			phaseVision()
 		elseif action == "boolean_secondaryfire" or action == "boolean_left_pickup" or action == "boolean_right_pickup" then
-			-- Skip entire experience
+			-- Skip forever: seal Experience and suppress height menu (research-4 heresy if left open)
 			vrmod.Experience_MarkComplete()
-			toast("Experience skipped", 2)
+			RunConsoleCommand("vrmod_heightmenu", "0")
+			toast("Experience skipped · height menu off", 2)
 			vrmod.Experience_Stop()
 		end
 		return
