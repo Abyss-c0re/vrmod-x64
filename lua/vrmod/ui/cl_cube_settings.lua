@@ -172,6 +172,7 @@ local function runRowAction(row)
 		if row.cmd == "vrmod_actioneditor" then
 			vrmod.CubeSettings_Close()
 			timer.Simple(0, function()
+				-- Custom actions only — do not open bindings panel
 				RunConsoleCommand("vrmod_actioneditor")
 			end)
 			return

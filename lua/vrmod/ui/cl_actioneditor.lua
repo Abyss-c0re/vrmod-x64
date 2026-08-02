@@ -105,15 +105,6 @@ end
 
 concommand.Add("vrmod_actioneditor", function()
 	if open then return end
-	-- Derma is desktop-only (no HMD float). VR: toast + bind customs via Controller rebind.
-	if g_VR and g_VR.active then
-		if vrmod.Toast then
-			vrmod.Toast("Custom actions: edit names/cmds on desktop; bind them under Controller rebind", 5, "hint")
-		else
-			print("[VRMod] Custom action editor is desktop-only. Bind them under Controller rebind in VR.")
-		end
-		return
-	end
 
 	open = true
 	VRUtilLoadCustomActions()
@@ -122,6 +113,8 @@ concommand.Add("vrmod_actioneditor", function()
 	window:SetPos(ScrW() / 2 - 350, ScrH() / 2 - 256)
 	window:SetSize(700, 512)
 	window:SetTitle("VRMod Custom Input Action Editor")
+	-- Mark so panel2vr can still surface it, but this is the action editor — not bindings.
+	window._vrmod_action_editor = true
 	window:MakePopup()
 
 	local DLabel = vgui.Create("DLabel", window)

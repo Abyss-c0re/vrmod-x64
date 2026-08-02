@@ -559,17 +559,8 @@ function vrmod.SettingsRunAction(action_id, ctx)
 	if action_id == "open_custom_actions" then
 		if ctx.close then pcall(ctx.close) end
 		timer.Simple(0, function()
-			if g_VR and g_VR.active then
-				if vrmod.Toast then
-					vrmod.Toast("Edit custom action names/cmds on desktop; bind them under Controller rebind", 5, "hint")
-				end
-				-- Jump to rebind so user can bind existing custom names in VR
-				if vrmod.BindingsPanel_Open then
-					vrmod.BindingsPanel_Open()
-				end
-			else
-				RunConsoleCommand("vrmod_actioneditor")
-			end
+			-- Always the custom action editor — never open controller bindings.
+			RunConsoleCommand("vrmod_actioneditor")
 		end)
 		return true
 	end
