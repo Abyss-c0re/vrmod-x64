@@ -18,7 +18,14 @@ local function SourceLabel(id)
 end
 
 local function BeginListen(action, chord)
-	listen = { action = action, chord = not not chord, collected = {} }
+	local held = (vrmod.bindings.SnapshotHeldSources and vrmod.bindings.SnapshotHeldSources()) or {}
+	listen = {
+		action = action,
+		chord = not not chord,
+		collected = {},
+		held = held,
+		armUntil = CurTime() + 0.2,
+	}
 	if vrmod.bindings.SetListenSuppress then
 		vrmod.bindings.SetListenSuppress(true)
 	end
@@ -363,47 +370,56 @@ concommand.Add("vrmod_bindingeditor", function()
 			hook.Remove("Think", "vrmod_binding_listen")
 			return
 		end
+		if not vrmod.bindings.HasSourcesAPI or not vrmod.bindings.HasSourcesAPI() then
+			srcLabel:SetText("Sources: need OpenXR module (GetControllerSources). OpenVR uses SteamVR bind UI.")
+			return
+		end
+
 		local sources = vrmod.bindings.GetSources()
 		if sources then
 			local pressed = {}
 			for id, s in pairs(sources) do
-				if type(s) == "table" and s.pressed then
+				if type(s) == "table" and vrmod.bindings.SourceIsPressed and vrmod.bindings.SourceIsPressed(s) then
+					pressed[#pressed + 1] = s.label or id
+				elseif type(s) == "table" and s.pressed then
 					pressed[#pressed + 1] = s.label or id
 				end
 			end
 			table.sort(pressed)
-			srcLabel:SetText("Live: " .. (#pressed > 0 and table.concat(pressed, ", ") or "(none)"))
+			srcLabel:SetText("Live: " .. (#pressed > 0 and table.concat(pressed, ", ") or "(none) — press a controller button"))
 
-			if listen then
-				for id, s in pairs(sources) do
-					if type(s) == "table" and s.pressed then
-						if listen.chord then
-							local found = false
-							for _, c in ipairs(listen.collected) do
-								if c == id then found = true break end
-							end
-							if not found then
-								listen.collected[#listen.collected + 1] = id
-								if CurTime() - lastListenRefresh > 0.15 then
-									lastListenRefresh = CurTime()
-									if IsValid(editorScroll) then
-										RefreshList(editorScroll, editorScroll:GetVBar():GetScroll())
-									end
+			if listen and CurTime() >= (listen.armUntil or 0) then
+				local news = {}
+				if vrmod.bindings.PollListenPresses then
+					news = vrmod.bindings.PollListenPresses(listen.held)
+				end
+				for _, id in ipairs(news) do
+					if listen.chord then
+						local found = false
+						for _, c in ipairs(listen.collected) do
+							if c == id then found = true break end
+						end
+						if not found then
+							listen.collected[#listen.collected + 1] = id
+							if CurTime() - lastListenRefresh > 0.1 then
+								lastListenRefresh = CurTime()
+								if IsValid(editorScroll) then
+									RefreshList(editorScroll, editorScroll:GetVBar():GetScroll())
 								end
 							end
-						else
-							local prev = vrmod.bindings.GetMap().actions[listen.action]
-							local set = prev and prev.set or nil
-							vrmod.bindings.SetActionBinding(listen.action, { id }, "any", set)
-							StopListen()
-							FullRefresh()
-							break
 						end
+					else
+						local prev = vrmod.bindings.GetMap().actions[listen.action]
+						local set = prev and prev.set or nil
+						vrmod.bindings.SetActionBinding(listen.action, { id }, "any", set)
+						StopListen()
+						FullRefresh()
+						break
 					end
 				end
 			end
 		else
-			srcLabel:SetText("Sources: no GetControllerSources (OpenXR module) or VR not started")
+			srcLabel:SetText("Sources: empty — start VR with OpenXR (Quest/WiVRn)")
 		end
 	end)
 end)

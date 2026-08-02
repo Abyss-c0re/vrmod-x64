@@ -105,17 +105,29 @@ local function StopListen()
 end
 
 local function BeginListen(action, chord)
-	listen = { action = action, chord = not not chord, collected = {} }
+	-- Ignore buttons still held from laser/trigger UI click; only NEW presses count.
+	local held = (vrmod.bindings.SnapshotHeldSources and vrmod.bindings.SnapshotHeldSources()) or {}
+	listen = {
+		action = action,
+		chord = not not chord,
+		collected = {},
+		held = held,
+		armUntil = CurTime() + 0.35,
+	}
 	if vrmod.bindings and vrmod.bindings.SetListenSuppress then
 		vrmod.bindings.SetListenSuppress(true)
 	end
-	SetStatus(chord and "Hold 2+ buttons, then Confirm" or "Press one button…", 8)
+	if not (vrmod.bindings.HasSourcesAPI and vrmod.bindings.HasSourcesAPI()) then
+		SetStatus("No controller source API (need OpenXR module)", 5)
+		return
+	end
+	SetStatus(chord and "Release UI click, then hold 2+ buttons → Confirm" or "Release UI click, then press ONE button", 8)
 end
 
 local function ConfirmChord()
 	if not listen or not listen.chord then return end
 	if #(listen.collected or {}) < 2 then
-		SetStatus("Chord needs 2+ buttons", 2)
+		SetStatus("Chord needs 2+ buttons (got " .. tostring(#(listen.collected or {})) .. ")", 2)
 		return
 	end
 	local prev = vrmod.bindings.GetMap().actions[listen.action]
@@ -438,28 +450,61 @@ end
 
 local function pollListen()
 	if not listen or not open then return end
-	local sources = vrmod.bindings.GetSources()
-	if not sources then return end
-	for id, s in pairs(sources) do
-		if type(s) == "table" and s.pressed then
-			if listen.chord then
-				local found = false
-				for _, c in ipairs(listen.collected) do
-					if c == id then found = true break end
+	if CurTime() < (listen.armUntil or 0) then return end
+
+	local news, live, hasAPI = {}, 0, false
+	if vrmod.bindings.PollListenPresses then
+		news, live, hasAPI = vrmod.bindings.PollListenPresses(listen.held)
+	else
+		-- Fallback: raw pressed scan
+		local sources = vrmod.bindings.GetSources()
+		hasAPI = sources ~= nil
+		if sources then
+			for id, s in pairs(sources) do
+				if type(s) == "table" and (s.pressed or (s.value or 0) >= 0.5) then
+					if not listen.held[id] then
+						news[#news + 1] = id
+						listen.held[id] = true
+					end
+				elseif type(id) == "string" then
+					listen.held[id] = nil
 				end
-				if not found then
-					listen.collected[#listen.collected + 1] = id
-					lastListenRefresh = CurTime()
-				end
-			else
-				local prev = vrmod.bindings.GetMap().actions[listen.action]
-				local set = prev and prev.set or nil
-				vrmod.bindings.SetActionBinding(listen.action, { id }, "any", set)
-				vrmod.bindings.Save()
-				StopListen()
-				SetStatus("Bound → " .. SourceLabel(id), 2)
-				return
 			end
+		end
+	end
+
+	if not hasAPI then
+		SetStatus("No GetControllerSources — OpenXR module required", 3)
+		return
+	end
+	if live == 0 and CurTime() > (listen.armUntil or 0) + 1.5 then
+		-- Soft hint once in a while
+		if not listen.warnedDead or CurTime() > listen.warnedDead then
+			listen.warnedDead = CurTime() + 3
+			SetStatus("No live buttons — is OpenXR + controllers tracking?", 3)
+		end
+	end
+
+	for _, id in ipairs(news) do
+		if listen.chord then
+			local found = false
+			for _, c in ipairs(listen.collected) do
+				if c == id then found = true break end
+			end
+			if not found then
+				listen.collected[#listen.collected + 1] = id
+				lastListenRefresh = CurTime()
+				SetStatus("Chord: " .. table.concat(listen.collected, " + ") .. "  (Confirm when ready)", 4)
+			end
+		else
+			local prev = vrmod.bindings.GetMap().actions[listen.action]
+			local set = prev and prev.set or nil
+			vrmod.bindings.SetActionBinding(listen.action, { id }, "any", set)
+			vrmod.bindings.Save()
+			StopListen()
+			SetStatus("Bound → " .. SourceLabel(id), 3)
+			if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
+			return
 		end
 	end
 end

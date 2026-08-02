@@ -601,5 +601,60 @@ function vrmod.bindings.HasSourcesAPI()
 	return isfunction(VRMOD_GetControllerSources)
 end
 
+--- Treat as pressed even if isActive is flaky (value still updates on some runtimes).
+function vrmod.bindings.SourceIsPressed(s)
+	if type(s) ~= "table" then return false end
+	if s.pressed then return true end
+	local v = tonumber(s.value) or 0
+	if s.analog then return v >= THRESHOLD end
+	return v >= 0.5
+end
+
+--- Snapshot of currently held source ids (for arming listen without eating the UI click).
+function vrmod.bindings.SnapshotHeldSources()
+	local held = {}
+	local src = vrmod.bindings.GetSources()
+	if not src then return held end
+	for id, s in pairs(src) do
+		if type(id) == "string" and vrmod.bindings.SourceIsPressed(s) then
+			held[id] = true
+		end
+	end
+	return held
+end
+
+--- Rising-edge poll for rebind listen.
+--- held: table mutated across frames (id → true while down).
+--- Returns: newPressIds{}, liveCount, hasAPI
+function vrmod.bindings.PollListenPresses(held)
+	held = held or {}
+	if not vrmod.bindings.HasSourcesAPI() then
+		return {}, 0, false
+	end
+	local src = vrmod.bindings.GetSources()
+	if not src then
+		return {}, 0, true
+	end
+	local news = {}
+	local live = 0
+	for id, s in pairs(src) do
+		if type(id) == "string" and type(s) == "table" then
+			if s.active or vrmod.bindings.SourceIsPressed(s) then
+				live = live + 1
+			end
+			local down = vrmod.bindings.SourceIsPressed(s)
+			if down then
+				if not held[id] then
+					news[#news + 1] = id
+					held[id] = true
+				end
+			else
+				held[id] = nil
+			end
+		end
+	end
+	return news, live, true
+end
+
 -- Load on file include
 vrmod.bindings.Load()
