@@ -1102,13 +1102,14 @@ if CLIENT then
 			return false
 		end
 
-		-- Cancel any deferred exit teardown so restart is deterministic.
+		-- Cancel any deferred exit pause so restart is deterministic.
 		timer.Remove("vrmod_async_shutdown")
 		timer.Remove("vrmod_mat_queue_restore")
 		timer.Remove("vrmod_mat_queue_apply")
 		matQueueAppliedForSession = false
 
-		-- Full module teardown (v26+) so re-Init recreates session/swapchains/actions.
+		-- Soft pause only (keeps OpenXR instance). Do not force a hard kill here —
+		-- that required map/module reload to start VR again.
 		pcall(function()
 			if isfunction(VRMOD_SetSubmitEnabled) then VRMOD_SetSubmitEnabled(false) end
 			if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end
@@ -1122,7 +1123,8 @@ if CLIENT then
 		if not okInit then
 			vrmod.logger.Err("Init failed: %s", tostring(initErr))
 			if vrmod.Toast then
-				vrmod.Toast("VR_Init failed — OpenXR runtime running? Check module version.", 8, "error")
+				local hint = (vrmod.IsOpenXR and vrmod.IsOpenXR()) and "OpenXR runtime" or "SteamVR/OpenVR"
+				vrmod.Toast("VR_Init failed — is " .. hint .. " running?", 8, "error")
 			end
 			return false
 		end
@@ -1634,7 +1636,8 @@ if CLIENT then
 			g_VR.stereoEye = nil
 			EndVRNestedRenderLock()
 
-			-- 3) Full OpenXR teardown next tick (hooks already off — safe for restart).
+			-- 3) Soft-pause OpenXR next tick (hooks already off). Keeps instance warm
+			--    so vrmod_start works without map/module reload.
 			timer.Create("vrmod_async_shutdown", 0.05, 1, function()
 				if g_VR and g_VR.active then return end
 				pcall(function()
@@ -1642,13 +1645,14 @@ if CLIENT then
 				end)
 			end)
 
-			-- 4) Restore soft pins only — never mat_queue_mode.
+			-- 4) Restore soft pins only — never mat_queue_mode under OpenXR.
 			ScheduleConvarRestore(0.2)
 
-			vrmod.logger.Info("Ended VR session (full teardown scheduled; restart OK)")
+			vrmod.logger.Info("Ended VR session (soft-pause; restart without reload)")
 		end
 
 		hook.Add("ShutDown", "vrutil_hook_shutdown", function()
+			-- Game/process exit: soft pause is enough; module unload does full XR kill.
 			if IsValid(LocalPlayer()) and g_VR.net and g_VR.net[LocalPlayer():SteamID()] then
 				if g_VR.active then
 					g_VR.active = false
