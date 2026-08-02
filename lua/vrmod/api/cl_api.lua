@@ -69,52 +69,42 @@ if CLIENT then
     function vrmod.GetStartupError()
         local error = nil
         local moduleFile = nil
+        -- requiredVersion = hard floor (must boot). latestVersion = full feature set (SS eye args, etc).
+        -- Lua degrades gracefully on older modules; only refuse if too ancient / missing.
+        local requiredVersion, latestVersion
         if system.IsLinux() then
+            requiredVersion = 20
+            latestVersion = 27
             moduleFile = "lua/bin/gmcl_vrmod_linux64.dll"
         else
+            requiredVersion = 20
+            latestVersion = 27
             moduleFile = "lua/bin/gmcl_vrmod_win64.dll"
             if not file.Exists(moduleFile, "GAME") then
                 moduleFile = "lua/bin/gmcl_vrmod_win32.dll"
             end
         end
 
-        -- Backend-aware floors (OpenVR vs OpenXR) — auto after require("vrmod").
-        if vrmod.DetectBackend then pcall(vrmod.DetectBackend) end
-        local pol = vrmod.GetBackendPolicy and vrmod.GetBackendPolicy() or {}
-        local requiredVersion = pol.requiredModule or 20
-        local latestVersion = pol.latestModule or 23
-        local moduleDownload = pol.moduleDownload
-            or "https://github.com/Abyss-c0re/vrmod-module-master/releases"
-
         g_VR.moduleVersion = g_VR.moduleVersion or 0
         if g_VR.moduleVersion == 0 then
             if not file.Exists(moduleFile, "GAME") then
-                error = "Module not installed.\nDownload modules.zip:\n" .. moduleDownload .. "\nExtract into garrysmod/ (lua/bin + bin)."
+                error = "Module not installed.\nPlease follow the workshop instructions to install the module."
             else
                 error = "Failed to load module.\nModule file exists but could not be loaded. Check antivirus or permissions."
             end
         elseif g_VR.moduleVersion < requiredVersion then
-            error = "Module update required.\nDownload latest modules.zip:\n" .. moduleDownload
-                .. "\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
-                .. "\nBackend: " .. tostring(pol.backend or "?")
+            error = "Module update required.\nRun the installer or re-download from the workshop.\n\nInstalled: v" .. g_VR.moduleVersion .. "\nRequired: v" .. requiredVersion
         else
             if g_VR.moduleVersion < latestVersion then
                 print(string.format(
-                    "[VRMOD] Module v%d older than recommended v%d (%s). VR still runs.",
-                    g_VR.moduleVersion, latestVersion, tostring(pol.label or pol.backend)
+                    "[VRMOD] Module v%d is older than recommended v%d. VR still runs; supersample eye sizing and some crisp-path fixes need the latest modules.zip.",
+                    g_VR.moduleVersion, latestVersion
                 ))
             elseif g_VR.moduleVersion > latestVersion then
-                print("[VRMOD] Module newer than tested. Installed: v" .. g_VR.moduleVersion
-                    .. " | Recommended: v" .. latestVersion
-                    .. " | Backend: " .. tostring(pol.backend)
-                    .. " | Addon: " .. vrmod.GetVersion())
+                print("[VRMOD] Warning: Module version is newer than tested. Installed: v" .. g_VR.moduleVersion .. " | Recommended: v" .. latestVersion .. " | Addon: " .. vrmod.GetVersion() .. " | Most features should work.")
             end
             if VRMOD_IsHMDPresent and not VRMOD_IsHMDPresent() then
-                if pol.backend == "openxr" then
-                    error = "VR headset not detected (OpenXR runtime / WiVRn / SteamVR OpenXR)."
-                else
-                    error = "VR headset not detected (SteamVR / OpenVR)."
-                end
+                error = "VR headset not detected."
             end
         end
         return error
@@ -122,16 +112,11 @@ if CLIENT then
 
     --- Feature flags for optional module APIs (never hard-crash on missing exports).
     function vrmod.ModuleSupportsEyeSizeArgs()
-        local pol = vrmod.GetBackendPolicy and vrmod.GetBackendPolicy()
-        if pol and pol.supportsEyeSizeArgs ~= nil then
-            return pol.supportsEyeSizeArgs and true or false
-        end
         return (g_VR.moduleVersion or 0) >= 23
     end
 
     function vrmod.GetModuleVersion()
-        local pol = vrmod.GetBackendPolicy and vrmod.GetBackendPolicy() or {}
-        return g_VR.moduleVersion, pol.requiredModule or 20, pol.latestModule or 23
+        return g_VR.moduleVersion, 20, 27
     end
 
     function vrmod.IsPlayerInVR(ply)
