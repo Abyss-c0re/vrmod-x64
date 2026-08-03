@@ -167,21 +167,11 @@ function QM.ValidateLayout(L)
 		end
 	end
 	local ver = tonumber(L.version) or 1
-	if ver < 2 then
-		-- Pull front-page defaults (pause + video cal) without wiping whole custom layout:
-		-- if Main lacks pause_menu / video_cal, append default Main page from v2.
+	if ver < 3 then
+		-- v3: admin_cleanup on Main; settings/pause/newgame/video_cal/bindings/weapon_vr on System
 		local def = DefaultLayout()
-		local main = L.pages[1]
-		if main and main.items then
-			local have = {}
-			for _, it in ipairs(main.items) do have[it.id] = true end
-			if not have["pause_menu"] or not have["video_cal"] then
-				L.pages[1] = def.pages[1]
-			end
-		else
-			L.pages = def.pages
-		end
-		ver = 2
+		L.pages = def.pages
+		ver = 3
 	end
 	L.version = ver
 	return L
@@ -192,9 +182,9 @@ function QM.Load()
 	if raw and raw ~= "" then
 		local ok, decoded = pcall(util.JSONToTable, raw)
 		if ok and type(decoded) == "table" then
+			local oldVer = tonumber(decoded.version) or 1
 			layout = QM.ValidateLayout(decoded)
-			-- Persist migration once
-			if (tonumber(decoded.version) or 1) < 2 then
+			if oldVer < 3 then
 				QM.Save()
 			end
 			return layout
