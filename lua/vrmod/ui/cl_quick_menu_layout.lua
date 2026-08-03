@@ -45,6 +45,9 @@ local NAME_TO_ID = {
 	["Exit Game"] = "exit_game",
 	["Calibrate Full-body Tracking"] = "fbt_calibrate",
 	["Disable Full-body Tracking"] = "fbt_disable",
+	["VRClimb"] = "vrclimb",
+	["VR Climb"] = "vrclimb",
+	["VR Climbing"] = "vrclimb",
 }
 
 -- Default multi-page layout (cols 0-5, rows 0+)

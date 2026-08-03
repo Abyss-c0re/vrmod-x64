@@ -183,6 +183,9 @@ local function InitializeMenuItems()
 			pcall(function() RunConsoleCommand("quit") end)
 		end)
 	end, true, "close Garry's Mod", "exit_game")
+	if vrmod.DedupInGameMenuItems then
+		vrmod.DedupInGameMenuItems()
+	end
 end
 
 hook.Add("VRMod_Start", "ReloadMenuItems", function() InitializeMenuItems() end)

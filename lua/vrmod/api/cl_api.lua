@@ -695,8 +695,63 @@ if CLIENT then
         g_VR.originAngle = ang
     end
 
-    local function GetMenuItemID(name, func)
-        return name .. "_" .. tostring(func)
+    local function NormalizeMenuName(name)
+        return string.lower(string.Trim(tostring(name or "")))
+    end
+
+    --- Stable backup / dedupe key. Prefer layout id; never use function identity
+    --- (addons re-call AddInGameMenuItem with new anonymous funcs every Start → dupes).
+    local function MenuItemStableKey(name, id)
+        if id and tostring(id) ~= "" then
+            return "id:" .. string.lower(tostring(id))
+        end
+        return "name:" .. NormalizeMenuName(name)
+    end
+
+    local function MenuItemsMatch(item, name, id, func)
+        if not item then return false end
+        if id and item.id and string.lower(tostring(item.id)) == string.lower(tostring(id)) then
+            return true
+        end
+        if NormalizeMenuName(item.name) == NormalizeMenuName(name) then
+            return true
+        end
+        -- Legacy exact match (same func ref)
+        if func and item.name == name and item.func == func then
+            return true
+        end
+        return false
+    end
+
+    --- Drop duplicate menuItems / menuBackup entries (same id or name).
+    function vrmod.DedupInGameMenuItems()
+        g_VR.menuItems = g_VR.menuItems or {}
+        g_VR.menuBackup = g_VR.menuBackup or {}
+        local seen = {}
+        for i = #g_VR.menuItems, 1, -1 do
+            local item = g_VR.menuItems[i]
+            local key = MenuItemStableKey(item.name, item.id)
+            if seen[key] then
+                table.remove(g_VR.menuItems, i)
+            else
+                seen[key] = true
+                if not item.id and vrmod.QuickMenu and vrmod.QuickMenu.IdFromName then
+                    item.id = vrmod.QuickMenu.IdFromName(item.name)
+                end
+            end
+        end
+        -- Collapse backup to one entry per stable key (keep last)
+        local byKey = {}
+        for bakId, data in pairs(g_VR.menuBackup) do
+            if data and data.name then
+                local key = MenuItemStableKey(data.name, data.id)
+                byKey[key] = data
+            end
+            g_VR.menuBackup[bakId] = nil
+        end
+        for key, data in pairs(byKey) do
+            g_VR.menuBackup[key] = data
+        end
     end
 
     -- Add or restore a menu item
@@ -704,10 +759,44 @@ if CLIENT then
     function vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot, hint, id)
         g_VR.menuItems = g_VR.menuItems or {}
         g_VR.menuBackup = g_VR.menuBackup or {}
+        name = tostring(name or "Item")
         -- Stable layout id (for multi-page quick menu)
         if not id and vrmod.QuickMenu and vrmod.QuickMenu.IdFromName then
             id = vrmod.QuickMenu.IdFromName(name)
         end
+
+        -- Already present by id or name → update in place (no second button)
+        for _, item in ipairs(g_VR.menuItems) do
+            if MenuItemsMatch(item, name, id, func) then
+                if isfunction(func) then item.func = func end
+                if hint ~= nil then item.hint = hint end
+                if id then item.id = id end
+                item.name = name -- keep latest label
+                if forceSlot then
+                    item.slot = slot
+                    item.slotPos = slotpos
+                    item.internal = true
+                end
+                local bakId = MenuItemStableKey(name, id)
+                -- Drop any legacy name_function backup rows for this item
+                for k, v in pairs(g_VR.menuBackup) do
+                    if v and MenuItemsMatch(v, name, id, nil) then
+                        g_VR.menuBackup[k] = nil
+                    end
+                end
+                g_VR.menuBackup[bakId] = {
+                    name = name,
+                    slot = item.slot,
+                    slotPos = item.slotPos,
+                    func = item.func,
+                    internal = item.internal == true or forceSlot == true,
+                    hint = item.hint,
+                    id = item.id,
+                }
+                return
+            end
+        end
+
         -- Determine slot if not forced
         if not forceSlot then
             local occupied = {}
@@ -732,15 +821,6 @@ if CLIENT then
             end
         end
 
-        -- Avoid exact duplicates
-        for _, item in ipairs(g_VR.menuItems) do
-            if item.name == name and item.func == func then
-                -- Upgrade id if newer call provides one
-                if id and not item.id then item.id = id end
-                return
-            end
-        end
-
         table.insert(g_VR.menuItems, {
             name = name,
             slot = slot,
@@ -748,10 +828,15 @@ if CLIENT then
             func = func,
             hint = hint,
             id = id,
+            internal = forceSlot == true,
         })
 
-        -- Store in backup with unique ID (name+func; not layout id)
-        local bakId = GetMenuItemID(name, func)
+        local bakId = MenuItemStableKey(name, id)
+        for k, v in pairs(g_VR.menuBackup) do
+            if v and MenuItemsMatch(v, name, id, nil) then
+                g_VR.menuBackup[k] = nil
+            end
+        end
         g_VR.menuBackup[bakId] = {
             name = name,
             slot = slot,
@@ -765,13 +850,22 @@ if CLIENT then
 
     -- Remove menu item, optionally permanently
     function vrmod.RemoveInGameMenuItem(name, func, permanent)
+        g_VR.menuItems = g_VR.menuItems or {}
+        local n = NormalizeMenuName(name)
         for i = #g_VR.menuItems, 1, -1 do
-            if g_VR.menuItems[i].name == name and (not func or g_VR.menuItems[i].func == func) then table.remove(g_VR.menuItems, i) end
+            local item = g_VR.menuItems[i]
+            if NormalizeMenuName(item.name) == n and (not func or item.func == func) then
+                table.remove(g_VR.menuItems, i)
+            end
         end
 
         if permanent then
-            local id = GetMenuItemID(name, func)
-            g_VR.menuBackup[id] = nil
+            g_VR.menuBackup = g_VR.menuBackup or {}
+            for k, v in pairs(g_VR.menuBackup) do
+                if v and NormalizeMenuName(v.name) == n then
+                    g_VR.menuBackup[k] = nil
+                end
+            end
         end
     end
 

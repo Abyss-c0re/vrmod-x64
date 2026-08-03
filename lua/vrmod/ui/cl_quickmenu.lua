@@ -38,6 +38,10 @@ function g_VR.MenuOpen()
 			pcall(vrmod.RebuildInGameMenuItems)
 		end
 	end
+	-- Collapse addon re-injects (e.g. VRClimb timer + VRMod_Start both add with new funcs)
+	if isfunction(vrmod.DedupInGameMenuItems) then
+		pcall(vrmod.DedupInGameMenuItems)
+	end
 
 	open = true
 	ensureLayout()
@@ -427,12 +431,19 @@ function g_VR.MenuClose()
 end
 
 local function AddMenuItemInternal(name, slot, slotpos, func, forceSlot, hint, id)
-	g_VR.menuItems = g_VR.menuItems or {}
-	for _, item in ipairs(g_VR.menuItems) do
-		if item.name == name and item.func == func then return end
+	-- Always go through API so id/name dedupe applies (addons inject new funcs each Start)
+	if vrmod.AddInGameMenuItem then
+		vrmod.AddInGameMenuItem(name, slot, slotpos, func, forceSlot, hint, id)
+		return
 	end
+	g_VR.menuItems = g_VR.menuItems or {}
 	local q = QM()
 	id = id or (q and q.IdFromName and q.IdFromName(name)) or nil
+	local nkey = string.lower(tostring(name or ""))
+	for _, item in ipairs(g_VR.menuItems) do
+		if item.id and id and item.id == id then return end
+		if string.lower(tostring(item.name or "")) == nkey then return end
+	end
 	table.insert(g_VR.menuItems, {
 		name = name,
 		slot = slot,
@@ -449,10 +460,20 @@ local lastRestore = 0
 hook.Add("Think", "SafeRestoreVRMenuItems", function()
 	if CurTime() - lastRestore < restoreCooldown then return end
 	lastRestore = CurTime()
-	for id, data in pairs(g_VR.menuBackup) do
+	if vrmod.DedupInGameMenuItems then
+		vrmod.DedupInGameMenuItems()
+	end
+	for _, data in pairs(g_VR.menuBackup or {}) do
+		if not data or not data.name then continue end
 		local exists = false
+		local nkey = string.lower(tostring(data.name))
+		local did = data.id and string.lower(tostring(data.id)) or nil
 		for _, item in ipairs(g_VR.menuItems or {}) do
-			if item.name == data.name and item.func == data.func then
+			if did and item.id and string.lower(tostring(item.id)) == did then
+				exists = true
+				break
+			end
+			if string.lower(tostring(item.name or "")) == nkey then
 				exists = true
 				break
 			end
