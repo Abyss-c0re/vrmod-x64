@@ -92,10 +92,6 @@ if CLIENT then
     -- Mode 2: one engine RenderView (left) only — dual nested RenderView races MatQueue workers.
     vrmod.AddCallbackedConvar("vrmod_mq2_single_pass", nil, "1", FCVAR_ARCHIVE,
         "Under mat_queue_mode 2: 1 = single-pass stereo (safer), 0 = dual RenderView (may crash)", nil, nil, tobool)
-    -- Meta Cam / WiVRn filming: skip desktop SBS mirror (composites fight HMD present → flicker).
-    -- Single-pass also blits left→right so SBS is never half-black.
-    vrmod.AddCallbackedConvar("vrmod_film_stable", nil, "1", FCVAR_ARCHIVE,
-        "1 = film-stable: no desktop SBS mirror; mq2 blits left eye into right half", nil, nil, tobool)
     vrmod.AddCallbackedConvar("vrmod_skybox", nil, "0", nil, nil, nil, nil, tobool, function(val) RunConsoleCommand("r_3dsky", val and "1" or "0") end)
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_x", nil, "-15")
     vrmod.AddCallbackedConvar("vrmod_controlleroffset_y", nil, "-1")

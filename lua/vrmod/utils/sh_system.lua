@@ -52,33 +52,25 @@ function vrmod.utils.UnblockInputActions(hookName, identifier)
 end
 
 if CLIENT then
-    -- Once: wrap climbing input cache so weapons block RH climb. Never re-hook every Think
-    -- (that thrash rewrote VRMod_Input and felt like dead/random input).
-    local climbingHookID = "vrmod_brush_climbing_inputcache"
-    local rightHandActions = {
-        ["boolean_right_pickup"] = true,
-        ["boolean_primaryfire"] = true,
-        ["boolean_secondaryfire"] = true,
-    }
-    local wrapped = false
     hook.Add("Think", "vrmod_climbing_hook_blocker_weapon", function()
-        if wrapped then return end
         local cv = GetConVar("vrmod_brushclimb_enable")
         if not cv or not cv:GetBool() then return end
+        local climbingHookID = "vrmod_brush_climbing_inputcache"
         local hooks = hook.GetTable()["VRMod_Input"]
         if not hooks or not hooks[climbingHookID] then return end
         local originalHook = hooks[climbingHookID]
-        if not isfunction(originalHook) then return end
-        wrapped = true
+        local rightHandActions = {
+            ["boolean_right_pickup"] = true,
+            ["boolean_primaryfire"] = true,
+            ["boolean_secondaryfire"] = true
+        }
+
         hook.Add("VRMod_Input", climbingHookID, function(action, pressed)
             local ply = LocalPlayer()
-            if rightHandActions[action] and vrmod.UsingEmptyHands and not vrmod.UsingEmptyHands(ply) then
+            if rightHandActions[action] and not vrmod.UsingEmptyHands(ply) then
                 return -- block right-hand climbing actions while holding a weapon
             end
             return originalHook(action, pressed)
         end)
-    end)
-    hook.Add("VRMod_Exit", "vrmod_climbing_hook_blocker_reset", function()
-        wrapped = false
     end)
 end
