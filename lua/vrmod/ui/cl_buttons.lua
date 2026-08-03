@@ -135,13 +135,7 @@ local function InitializeMenuItems()
 		end)
 	end, true, "On foot / Vehicle rebind", "bindings")
 	add("Reset Vehicle View", 4, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
-	add("Close Windows", 5, 2, function()
-		if vrmod.CloseAllWindows then
-			vrmod.CloseAllWindows()
-		else
-			LocalPlayer():ConCommand("vrmod_close_all_windows")
-		end
-	end, true, "close spawn · context · glide · popups", "close_windows")
+	-- no "Close Windows" on quick menu (menu button release already closes QM)
 	add("Recover Menus", 0, 3, function()
 		if vrmod.RecoverLostMenus then
 			local n = vrmod.RecoverLostMenus({ toast = true })
@@ -166,7 +160,8 @@ local function InitializeMenuItems()
 			LocalPlayer():ConCommand("vrmod_vgui_reset")
 		end
 	end, true, "full clear layouts + reopen QM", "ui_reset")
-	add("Border Cal", 3, 3, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, nil, "border_cal")
+	-- Video Calibration (was Border Cal) — front-page slot via layout id video_cal
+	add("Video Calibration", 3, 3, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, "scale · V · H · save", "video_cal")
 	add("Toggle blacklist weapon", 4, 3, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
 	-- Map Browser aliases New Game (stock-style modes/settings)
 	add("Map Browser", 5, 3, function()

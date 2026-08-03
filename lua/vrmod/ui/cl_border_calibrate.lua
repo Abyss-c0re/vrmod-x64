@@ -79,7 +79,7 @@ function vrmod.BorderCal_SaveProfile()
 		"ts=" .. tostring(os.time()),
 	}
 	file.Write(PROFILE, table.concat(lines, "\n"))
-	toast("Border profile saved", 3)
+	toast("Video calibration saved", 3)
 	return true
 end
 
@@ -100,7 +100,7 @@ function vrmod.BorderCal_LoadProfile()
 			RunConsoleCommand(map[k], v)
 		end
 	end
-	toast("Border profile loaded", 2)
+	toast("Video calibration loaded", 2)
 	return true
 end
 
@@ -139,7 +139,7 @@ function vrmod.BorderCal_Stop(completed)
 	hook.Remove("PostDrawTranslucentRenderables", "vrmod_border_cal_3d")
 	hook.Remove("Think", "vrmod_border_cal_keys")
 	hook.Remove("PlayerButtonDown", "vrmod_border_cal_keys")
-	toast(completed and "Vision locked in" or "Border cal ended", 2)
+	toast(completed and "Vision locked in" or "Video calibration ended", 2)
 	-- completed=true when user finished the path (saved profile); false on cancel
 	hook.Run("VRMod_BorderCalEnded", completed and true or false)
 end
@@ -159,7 +159,7 @@ function vrmod.BorderCal_Start()
 	RunConsoleCommand("vrmod_scalefactor", "1.0")
 	RunConsoleCommand("vrmod_verticaloffset", "0")
 	RunConsoleCommand("vrmod_horizontaloffset", "0")
-	toast("Border cal · look center · Trigger start", 4)
+	toast("Video calibration · look center · Trigger start", 4)
 
 	hook.Add("VRMod_Input", "vrmod_border_cal", function(action, pressed)
 		if not pressed or not Cal.active then return end

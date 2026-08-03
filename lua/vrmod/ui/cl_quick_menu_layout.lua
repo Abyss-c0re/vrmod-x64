@@ -31,8 +31,13 @@ local NAME_TO_ID = {
 	["Admin Cleanup"] = "admin_cleanup",
 	["Reset Vehicle View"] = "vehicle_view",
 	["UI Reset"] = "ui_reset",
-	["Border Cal"] = "border_cal",
+	["Video Calibration"] = "video_cal",
+	["Border Cal"] = "video_cal", -- legacy name → same id
 	["Toggle blacklist weapon"] = "blacklist",
+	["Pause Menu"] = "pause_menu",
+	["New Game"] = "newgame",
+	["Bindings"] = "bindings",
+	["Close Windows"] = "close_windows", -- legacy id (removed from defaults)
 	["Map Browser"] = "map",
 	["RESPAWN"] = "respawn",
 	["VR EXIT"] = "vr_exit",
@@ -44,7 +49,7 @@ local NAME_TO_ID = {
 -- Default multi-page layout (cols 0-5, rows 0+)
 local function DefaultLayout()
 	return {
-		version = 1,
+		version = 2,
 		pages = {
 			{
 				name = "Main",
@@ -55,12 +60,17 @@ local function DefaultLayout()
 					{ id = "numpad", col = 3, row = 0 },
 					{ id = "avatar", col = 4, row = 0 },
 					{ id = "settings", col = 5, row = 0 },
-					{ id = "flashlight", col = 0, row = 1 },
-					{ id = "laser", col = 1, row = 1 },
-					{ id = "weapon_vr", col = 2, row = 1 },
-					{ id = "noclip", col = 3, row = 1 },
-					{ id = "undo", col = 4, row = 1 },
-					{ id = "cleanup", col = 5, row = 1 },
+					-- Front row: pause + video calibration (was buried as Border Cal)
+					{ id = "pause_menu", col = 0, row = 1 },
+					{ id = "newgame", col = 1, row = 1 },
+					{ id = "video_cal", col = 2, row = 1 },
+					{ id = "flashlight", col = 3, row = 1 },
+					{ id = "laser", col = 4, row = 1 },
+					{ id = "weapon_vr", col = 5, row = 1 },
+					{ id = "noclip", col = 0, row = 2 },
+					{ id = "undo", col = 1, row = 2 },
+					{ id = "cleanup", col = 2, row = 2 },
+					{ id = "bindings", col = 3, row = 2 },
 				},
 			},
 			{
@@ -69,9 +79,8 @@ local function DefaultLayout()
 					{ id = "admin_cleanup", col = 0, row = 0 },
 					{ id = "vehicle_view", col = 1, row = 0 },
 					{ id = "ui_reset", col = 2, row = 0 },
-					{ id = "border_cal", col = 3, row = 0 },
-					{ id = "blacklist", col = 4, row = 0 },
-					{ id = "map", col = 5, row = 0 },
+					{ id = "blacklist", col = 3, row = 0 },
+					{ id = "map", col = 4, row = 0 },
 					{ id = "respawn", col = 0, row = 1 },
 					{ id = "vr_exit", col = 1, row = 1 },
 					{ id = "disconnect", col = 2, row = 1 },
@@ -81,7 +90,7 @@ local function DefaultLayout()
 			},
 		},
 		-- ids explicitly hidden (not shown on any page)
-		hidden = {},
+		hidden = { close_windows = true },
 	}
 end
 
@@ -150,7 +159,31 @@ function QM.ValidateLayout(L)
 		end
 	end
 	L.hidden = hid
-	L.version = 1
+	-- Migrate legacy border_cal → video_cal; hide removed close_windows
+	L.hidden["close_windows"] = true
+	for _, page in ipairs(L.pages or {}) do
+		for _, it in ipairs(page.items or {}) do
+			if it.id == "border_cal" then it.id = "video_cal" end
+		end
+	end
+	local ver = tonumber(L.version) or 1
+	if ver < 2 then
+		-- Pull front-page defaults (pause + video cal) without wiping whole custom layout:
+		-- if Main lacks pause_menu / video_cal, append default Main page from v2.
+		local def = DefaultLayout()
+		local main = L.pages[1]
+		if main and main.items then
+			local have = {}
+			for _, it in ipairs(main.items) do have[it.id] = true end
+			if not have["pause_menu"] or not have["video_cal"] then
+				L.pages[1] = def.pages[1]
+			end
+		else
+			L.pages = def.pages
+		end
+		ver = 2
+	end
+	L.version = ver
 	return L
 end
 
@@ -160,6 +193,10 @@ function QM.Load()
 		local ok, decoded = pcall(util.JSONToTable, raw)
 		if ok and type(decoded) == "table" then
 			layout = QM.ValidateLayout(decoded)
+			-- Persist migration once
+			if (tonumber(decoded.version) or 1) < 2 then
+				QM.Save()
+			end
 			return layout
 		end
 	end

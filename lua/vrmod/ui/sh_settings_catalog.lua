@@ -117,7 +117,7 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Scale factor", cvar = "vrmod_scalefactor", min = 0.05, max = 4.0, decimals = 2 },
 			{ kind = "slider", label = "Vertical offset", cvar = "vrmod_verticaloffset", min = -1.0, max = 1.0, decimals = 2 },
 			{ kind = "slider", label = "Horizontal offset", cvar = "vrmod_horizontaloffset", min = -1.0, max = 1.0, decimals = 2 },
-			{ kind = "action", label = "Border calibrate", cmd = "vrmod_border_calibrate" },
+			{ kind = "action", label = "Video calibration", cmd = "vrmod_border_calibrate" },
 			{ kind = "action", label = "Load border profile", cmd = "vrmod_border_profile_load" },
 			{ kind = "action", label = "Reset vision defaults", action_id = "reset_vision" },
 		},
