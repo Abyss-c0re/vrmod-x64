@@ -694,7 +694,9 @@ if CLIENT then
 
 		-- Keep tracking floor under the player's feet (standing height / stairs / ladders).
 		-- Locomotion also sets origin.z; do it here so even without loco the view follows.
-		if g_VR.origin and not ply:InVehicle() then
+		-- EXCEPTION: brush climbing owns origin (incl. Z) while holding a surface —
+		-- stomping z from feet each frame fought climb and filmed as flicker.
+		if g_VR.origin and not ply:InVehicle() and not g_VR._brushClimbingHold then
 			local feet = ply:GetPos()
 			g_VR.origin.z = feet.z
 		end
@@ -1125,12 +1127,25 @@ if CLIENT then
 			SafeRenderView(viewLeft)
 
 			if singlePass then
-				-- mat_queue_mode 2: NO second RenderView and NO RT self-copy (both race workers).
-				-- Right half stays clear/black; left eye still drives HMD (better than crash).
+				-- mat_queue_mode 2: NO second RenderView (CThread crash on Linux).
+				-- Blit left half → right half so SBS is not half-black.
+				-- Meta Cam / WiVRn filming of a half-black SBS reads as hard flicker.
 				render.SetScissorRect(0, 0, 0, 0, false)
 				ResetStereoEyeState()
 				g_VR.stereoEye = "right"
 				hook.Call("VRMod_PreRender", nil, "right")
+				pcall(function()
+					if not g_VR.rtMaterial then return end
+					cam.Start2D()
+					surface.SetDrawColor(255, 255, 255, 255)
+					surface.SetMaterial(g_VR.rtMaterial)
+					-- UV: left half of RT (0..0.5) → right half pixels. V flipped for Source.
+					local u0, u1 = 0, 0.5
+					if swapEyes then u0, u1 = 0.5, 1 end
+					surface.DrawTexturedRectUV(rightX, 0, rtHalfW, rtH, u0, 0, u1, 1)
+					cam.End2D()
+				end)
+				ResetStereoEyeState()
 			else
 				-- Depth only — never Clear colour (would wipe left-eye world + decals).
 				ResetStereoEyeState()
@@ -1187,7 +1202,15 @@ if CLIENT then
 			pcall(render.PopRenderTarget)
 		end
 
-		if g_VR.desktopView and g_VR.desktopView > 1 and g_VR.rtMaterial then
+		-- Desktop mirror of SBS RT. When filming (Meta Cam) the desktop paint can
+		-- fight the HMD present path and look like flicker on the composite.
+		-- vrmod_desktopview 0/1 = off/minimal; >1 mirrors. Skip mirror if film-stable.
+		local filmStable = false
+		do
+			local cv = GetConVar and GetConVar("vrmod_film_stable")
+			filmStable = cv and cv:GetBool()
+		end
+		if not filmStable and g_VR.desktopView and g_VR.desktopView > 1 and g_VR.rtMaterial then
 			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(g_VR.rtMaterial)
