@@ -562,10 +562,26 @@ function vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
     return adjustedPos
 end
 
+--- Per-hand brush-climb hold. When true, wall push must not fight climb hand snap.
 function vrmod.utils.GetClimbingGripState()
     local climb = vrmod and vrmod.climbing
-    if not climb or not climb.IsHoldingLeft or not climb.IsHoldingRight then return false, false end
-    return climb.IsHoldingLeft(), climb.IsHoldingRight()
+    if not climb then return false, false end
+    local left, right = false, false
+    if isfunction(climb.IsHoldingLeft) then left = climb.IsHoldingLeft() and true or false end
+    if isfunction(climb.IsHoldingRight) then right = climb.IsHoldingRight() and true or false end
+    -- Fallback: aggregate state (older builds / partial API)
+    if not left and not right and isfunction(climb.GetState) then
+        local st = climb.GetState()
+        if st and st.holding then
+            -- Unknown which hand — exempt both so wall push cannot thrash origin
+            return true, true
+        end
+    end
+    -- Frame flag from climb addon (set while a hand is attached this stereo pair)
+    if g_VR and g_VR._brushClimbingHold then
+        if not left and not right then return true, true end
+    end
+    return left, right
 end
 
 local PRECHECK_MOVE_SQR = PRECHECK_MOVE_THRESHOLD * PRECHECK_MOVE_THRESHOLD
@@ -1082,10 +1098,29 @@ local function MakeHandShape(samplePos, radius, ang, clipped, pushOut, normal, r
 end
 
 local function ClearHandWallState(handKey)
+    if not handWall[handKey] then return end
     handWall[handKey].hasFree = false
     lastNonClippedPos[handKey] = nil
     lastNonClippedNormal[handKey] = nil
     cachedPushOutPos[handKey] = nil
+end
+
+--- Drop free-sample anchors so climb grab does not inherit a wall-push tether.
+function vrmod.utils.ClearHandWallCollision(hand)
+    if hand == "both" or hand == "all" or hand == true then
+        ClearHandWallState("left")
+        ClearHandWallState("right")
+        vrmod._lastGoodShapeLeft = nil
+        vrmod._lastGoodShapeRight = nil
+        return
+    end
+    if hand == "left" or hand == 1 then
+        ClearHandWallState("left")
+        vrmod._lastGoodShapeLeft = nil
+    elseif hand == "right" or hand == 2 then
+        ClearHandWallState("right")
+        vrmod._lastGoodShapeRight = nil
+    end
 end
 
 --- Real-time hand wall collisions.
