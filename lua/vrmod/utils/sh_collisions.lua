@@ -603,6 +603,9 @@ end
 
 --- Floor/ceiling hits must not lock hands — they yank grabs to the floor and fight climb.
 local function IsFloorOrCeilingNormal(n)
+    if vrmod.utils.IsFloorOrCeilingNormal then
+        return vrmod.utils.IsFloorOrCeilingNormal(n, 0.55)
+    end
     if not n or n.z == nil then return false end
     return math.abs(n.z) > 0.55
 end

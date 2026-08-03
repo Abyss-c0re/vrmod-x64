@@ -425,6 +425,9 @@ end
 -- Color helpers — "r,g,b,a" strings (vrmod_beam_color / vrmod_laser_color)
 ------------------------------------------------------------------------
 function vrmod.SettingsParseColor(str, fallback)
+	if vrmod.utils and vrmod.utils.ParseColor then
+		return vrmod.utils.ParseColor(str, fallback)
+	end
 	fallback = fallback or Color(255, 0, 0, 255)
 	if not str or str == "" then return Color(fallback.r, fallback.g, fallback.b, fallback.a) end
 	local r, g, b, a = string.match(tostring(str), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
@@ -437,6 +440,9 @@ function vrmod.SettingsParseColor(str, fallback)
 end
 
 function vrmod.SettingsFormatColor(col)
+	if vrmod.utils and vrmod.utils.FormatColor then
+		return vrmod.utils.FormatColor(col)
+	end
 	if not col then return "255,0,0,255" end
 	return string.format("%d,%d,%d,%d",
 		math.Clamp(math.floor(col.r or 255), 0, 255),
