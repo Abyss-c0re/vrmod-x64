@@ -52,25 +52,41 @@ function vrmod.utils.UnblockInputActions(hookName, identifier)
 end
 
 if CLIENT then
+    -- Wrap climb input cache ONCE. Re-hooking every Think nested wrappers forever
+    -- and starved primaryfire edges used by pause hub / quick menu clicks.
+    local climbingHookID = "vrmod_brush_climbing_inputcache"
+    local rightHandActions = {
+        ["boolean_right_pickup"] = true,
+        ["boolean_primaryfire"] = true,
+        ["boolean_secondaryfire"] = true,
+    }
+    local climbWrapDone = false
     hook.Add("Think", "vrmod_climbing_hook_blocker_weapon", function()
+        if climbWrapDone then return end
         local cv = GetConVar("vrmod_brushclimb_enable")
         if not cv or not cv:GetBool() then return end
-        local climbingHookID = "vrmod_brush_climbing_inputcache"
         local hooks = hook.GetTable()["VRMod_Input"]
         if not hooks or not hooks[climbingHookID] then return end
         local originalHook = hooks[climbingHookID]
-        local rightHandActions = {
-            ["boolean_right_pickup"] = true,
-            ["boolean_primaryfire"] = true,
-            ["boolean_secondaryfire"] = true
-        }
-
-        hook.Add("VRMod_Input", climbingHookID, function(action, pressed)
+        if not isfunction(originalHook) then return end
+        -- Do not wrap an already-wrapped function
+        if originalHook._vrmodClimbWeaponWrap then
+            climbWrapDone = true
+            return
+        end
+        climbWrapDone = true
+        local wrapped
+        wrapped = function(action, pressed)
             local ply = LocalPlayer()
-            if rightHandActions[action] and not vrmod.UsingEmptyHands(ply) then
-                return -- block right-hand climbing actions while holding a weapon
+            if rightHandActions[action] and vrmod.UsingEmptyHands and not vrmod.UsingEmptyHands(ply) then
+                return -- block right-hand climbing while holding a weapon
             end
             return originalHook(action, pressed)
-        end)
+        end
+        wrapped._vrmodClimbWeaponWrap = true
+        hook.Add("VRMod_Input", climbingHookID, wrapped)
+    end)
+    hook.Add("VRMod_Exit", "vrmod_climbing_hook_blocker_reset", function()
+        climbWrapDone = false
     end)
 end

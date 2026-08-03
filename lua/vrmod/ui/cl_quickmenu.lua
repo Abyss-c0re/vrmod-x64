@@ -26,7 +26,10 @@ local function ensureLayout()
 end
 
 function g_VR.MenuOpen()
-	if hook.Call("VRMod_OpenQuickMenu") == false then return end
+	-- Never hard-block QM on a false return from a side panel (avatar etc.) —
+	-- only skip when a hook explicitly returns false AND we are not recovering.
+	local qmHook = hook.Call("VRMod_OpenQuickMenu")
+	if qmHook == false then return end
 	-- Recover if flag stuck after UI reset / crash / failed open
 	if open and not (g_VR.menus and g_VR.menus.miscmenu) then open = false end
 	if open then return end
@@ -36,7 +39,18 @@ function g_VR.MenuOpen()
 	if not g_VR.menuItems or #g_VR.menuItems == 0 then
 		if isfunction(vrmod.RebuildInGameMenuItems) then
 			pcall(vrmod.RebuildInGameMenuItems)
+		elseif isfunction(vrmod.AddInGameMenuItem) then
+			-- last resort: buttons module may re-init
+			pcall(function()
+				if concommand.GetTable and concommand.GetTable()["vrmod_quickmenu_rebuild_items"] then
+					RunConsoleCommand("vrmod_quickmenu_rebuild_items")
+				end
+			end)
 		end
+	end
+	if not g_VR.menuItems or #g_VR.menuItems == 0 then
+		if vrmod.logger then vrmod.logger.Warn("MenuOpen: no menuItems") end
+		return
 	end
 
 	open = true

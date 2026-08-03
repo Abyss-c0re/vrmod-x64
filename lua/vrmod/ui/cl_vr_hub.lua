@@ -358,13 +358,25 @@ function vrmod.VRHub_Open()
 
 	hook.Add("VRMod_Input", "vr_hub_input", function(action, pressed)
 		if not open or not pressed then return end
-		if g_VR.menuFocus ~= UID then return end
+		-- Prefer live focus; fall back to last laser UV on this panel (focus can miss a frame)
+		local m = g_VR.menus and g_VR.menus[UID]
+		local focused = (g_VR.menuFocus == UID)
+			or (m and m.lastCursorX and m.lastCursorY
+				and m.lastCursorX >= 0 and m.lastCursorX <= W
+				and m.lastCursorY >= 0 and m.lastCursorY <= H)
+		if not focused then return end
 		if vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
 			vrmod.VRHub_Close()
 			return
 		end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
-		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+		local mx = g_VR.menuCursorX or (m and m.lastCursorX) or 0
+		local my = g_VR.menuCursorY or (m and m.lastCursorY) or 0
+		if g_VR.menuFocus ~= UID and m then
+			mx = m.lastCursorX or mx
+			my = m.lastCursorY or my
+		end
+		activateAt(mx, my)
 		dirty()
 	end)
 

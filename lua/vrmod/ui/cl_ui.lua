@@ -1411,14 +1411,20 @@ if CLIENT then
 				local dir = laserAng:Forward()
 				local normal = ang:Up()
 				local A = normal:Dot(dir)
-				if A < 0 then
-					local B = normal:Dot(pos - laserPos)
-					if B < 0 then
-						hitDist = B / A
-						hitWorld = laserPos + dir * hitDist
+				-- Two-sided menu hit: one-sided (A<0 only) dropped focus when the panel
+				-- faced the wrong way → no menuFocus → Resume / quick menu unclickable.
+				if math.abs(A) > 1e-6 then
+					local t = normal:Dot(pos - laserPos) / A
+					if t > 0.01 and t < 12 then
+						hitDist = t
+						hitWorld = laserPos + dir * t
 						local tp = WorldToLocal(hitWorld, Angle(0, 0, 0), pos, ang)
 						hitCursorX = tp.x / drawScale
 						hitCursorY = -tp.y / drawScale
+						-- Back-face view: mirror U so buttons still line up with the texture
+						if A > 0 then
+							hitCursorX = v.width - hitCursorX
+						end
 						v._hitX, v._hitY, v._hitDist, v._hitWorld = hitCursorX, hitCursorY, hitDist, hitWorld
 						v._hitFrame = sf
 						v._hitScale = drawScale
