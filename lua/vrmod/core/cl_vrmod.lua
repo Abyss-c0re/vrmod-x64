@@ -694,10 +694,10 @@ if CLIENT then
 
 		-- Keep tracking floor under the player's feet (standing height / stairs / ladders).
 		-- Locomotion also sets origin.z; do it here so even without loco the view follows.
-		-- NEVER stomp while brush-climbing owns origin — that fights hand pull + wall push
-		-- and reads as hardcam shake.
-		local climbHold = g_VR._brushClimbingHold
-		if not climbHold and vrmod.climbing then
+		-- While brush-climb is holding a hand, climb owns origin — stomping z from feet
+		-- collapses world hand height and makes the next grab attach near the floor.
+		local climbHold = false
+		if vrmod.climbing then
 			if isfunction(vrmod.climbing.IsHoldingLeft) and vrmod.climbing.IsHoldingLeft() then climbHold = true end
 			if not climbHold and isfunction(vrmod.climbing.IsHoldingRight) and vrmod.climbing.IsHoldingRight() then climbHold = true end
 		end

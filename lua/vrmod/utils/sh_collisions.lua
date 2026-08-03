@@ -562,25 +562,64 @@ function vrmod.utils.AdjustCollisionsBox(pos, ang, isMelee)
     return adjustedPos
 end
 
---- Per-hand brush-climb hold. When true, wall push must not fight climb hand snap.
-function vrmod.utils.GetClimbingGripState()
-    local climb = vrmod and vrmod.climbing
-    if not climb then return false, false end
-    local left, right = false, false
-    if isfunction(climb.IsHoldingLeft) then left = climb.IsHoldingLeft() and true or false end
-    if isfunction(climb.IsHoldingRight) then right = climb.IsHoldingRight() and true or false end
-    -- Fallback: aggregate state (older builds / partial API)
-    if not left and not right and isfunction(climb.GetState) then
-        local st = climb.GetState()
-        if st and st.holding then
-            -- Unknown which hand — exempt both so wall push cannot thrash origin
-            return true, true
+--- True if brush-climb addon is enabled (convar may be absent when addon disabled).
+local function BrushClimbEnabled()
+    local cv = GetConVar("vrmod_brushclimb_enable")
+    return cv and cv:GetBool() or false
+end
+
+--- Climb grab intent from live VR input (mirrors vrmod_climbing bind modes).
+--- 0=grip+trigger, 1=grip, 2=trigger. Used so wall push does not move hands
+--- while the player is trying to grab (before IsHolding becomes true).
+local function ClimbGrabIntentFromInput(handKey)
+    if not BrushClimbEnabled() then return false end
+    if not g_VR or not g_VR.input then return false end
+    local inp = g_VR.input
+    local modeCv = GetConVar("vrmod_brushclimb_bind_mode")
+    local mode = modeCv and modeCv:GetInt() or 0
+
+    local grip, trigger
+    if handKey == "left" then
+        grip = inp.boolean_left_pickup
+        trigger = inp.boolean_reload or inp.boolean_left_primaryfire or inp.boolean_left_secondaryfire
+        if not trigger then
+            local a = inp.vector1_left_primaryfire
+            if isnumber(a) and a > 0.6 then trigger = true end
+        end
+    else
+        grip = inp.boolean_right_pickup
+        trigger = inp.boolean_primaryfire or inp.boolean_secondaryfire
+        if not trigger then
+            local a = inp.vector1_primaryfire
+            if isnumber(a) and a > 0.6 then trigger = true end
         end
     end
-    -- Frame flag from climb addon (set while a hand is attached this stereo pair)
-    if g_VR and g_VR._brushClimbingHold then
-        if not left and not right then return true, true end
+    grip = grip and true or false
+    trigger = trigger and true or false
+    if mode == 1 then return grip end
+    if mode == 2 then return trigger end
+    return grip and trigger
+end
+
+--- Floor/ceiling hits must not lock hands — they yank grabs to the floor and fight climb.
+local function IsFloorOrCeilingNormal(n)
+    if not n or n.z == nil then return false end
+    return math.abs(n.z) > 0.55
+end
+
+--- Per-hand: climb is holding OR player is actively grab-binding this hand.
+--- When true, wall push must not rewrite tracking (climb + grab height stay real).
+function vrmod.utils.GetClimbingGripState()
+    local left, right = false, false
+    local climb = vrmod and vrmod.climbing
+    if climb then
+        if isfunction(climb.IsHoldingLeft) then left = climb.IsHoldingLeft() and true or false end
+        if isfunction(climb.IsHoldingRight) then right = climb.IsHoldingRight() and true or false end
     end
+    -- Pre-grab frames: IsHolding is still false but buttons are down — wall push
+    -- was sliding the sample down walls/floors so grabs attached near the floor.
+    if not left and ClimbGrabIntentFromInput("left") then left = true end
+    if not right and ClimbGrabIntentFromInput("right") then right = true end
     return left, right
 end
 
@@ -1074,6 +1113,10 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		if not IsVec(n) or n:LengthSqr() < 0.01 then
 			n = ZERO_UP
 		end
+		-- Floors/ceilings are not "walls" — locking hands to them sinks grabs to the ground.
+		if IsFloorOrCeilingNormal(n) then
+			return desiredSample, false, nil
+		end
 		-- vrmod_hand_collision_push is the full extra clearance past the surface
 		local restPad = math.max(0.05, pad)
 		return WallRestPos(tr.HitPos, n, restPad, startPos), true, n
@@ -1217,6 +1260,27 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         if not IsVec(safeSample) then
             safeSample = desiredSample
             clipped = false
+        end
+
+        -- Floor/ceiling "walls" yank hands to the ground (climb then grabs near floor).
+        -- Only treat vertical-ish surfaces as hand walls.
+        if clipped and IsFloorOrCeilingNormal(normal) then
+            clipped = false
+            safeSample = desiredSample
+            normal = nil
+            ClearHandWallState(handKey)
+        end
+
+        -- Also reject corrections that mostly drag the hand down toward the playspace floor
+        -- (bad lastFree sweeps along walls into the ground plane).
+        if clipped and IsVec(safeSample) and IsVec(desiredSample) then
+            local drop = desiredSample.z - safeSample.z
+            if drop > 6 then
+                clipped = false
+                safeSample = desiredSample
+                normal = nil
+                ClearHandWallState(handKey)
+            end
         end
 
         -- Reach probe only when debug shapes need it (saves a TraceLine every hand every frame)
