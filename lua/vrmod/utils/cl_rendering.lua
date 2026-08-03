@@ -29,7 +29,14 @@ function vrmod.utils.CalculateProjectionParams(projMatrix, worldScale)
     }
 end
 
+--- Stereo RT UV crop for desktop blit.
+--- desktopView: 1=none 2=left 3=right 4=follow-cam (no stereo crop — use DesktopCam RT)
 function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
+    desktopView = tonumber(desktopView) or 1
+    if desktopView == 4 then
+        -- Follow-cam uses its own RT; crop unused
+        return 0, 0
+    end
     local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
     local hoffset = desktopView == 3 and 0.5 or 0
     return vmargin, hoffset

@@ -1194,12 +1194,27 @@ if CLIENT then
 			pcall(render.PopRenderTarget)
 		end
 
-		if g_VR.desktopView and g_VR.desktopView > 1 and g_VR.rtMaterial then
+		-- Desktop mirror: eye crop (2/3) or invisible follow-cam (4)
+		local dv = g_VR.desktopView or 1
+		if dv == 4 and vrmod.DesktopCam then
+			if vrmod.DesktopCam.SyncFromDesktopView then
+				vrmod.DesktopCam.SyncFromDesktopView(4)
+			end
+			-- Capture after stereo RT is popped (never nest under g_VR.rt)
+			if vrmod.DesktopCam.CaptureFrame then
+				pcall(vrmod.DesktopCam.CaptureFrame)
+			end
+			if vrmod.DesktopCam.PresentDesktop then
+				pcall(vrmod.DesktopCam.PresentDesktop)
+			end
+		elseif dv > 1 and g_VR.rtMaterial then
 			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(g_VR.rtMaterial)
 			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
 			render.CullMode(0)
+		elseif vrmod.DesktopCam and vrmod.DesktopCam.SyncFromDesktopView then
+			vrmod.DesktopCam.SyncFromDesktopView(dv)
 		end
 	end
 

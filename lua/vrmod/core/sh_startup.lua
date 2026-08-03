@@ -56,7 +56,9 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_floatinghands", nil, "0")
     -- Used by ArcVR (and worldmodel VM path); must exist or ArcVR PostDrawViewModel nils
     vrmod.AddCallbackedConvar("vrmod_useworldmodels", nil, "0")
-    vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3")
+    -- 1=none 2=left eye 3=right eye 4=invisible follow camera (broadcast seam)
+    vrmod.AddCallbackedConvar("vrmod_desktopview", nil, "3", FCVAR_ARCHIVE,
+        "Desktop view: 1=none 2=left 3=right 4=follow camera", 1, 4, tonumber)
     vrmod.AddCallbackedConvar("vrmod_laserpointer", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_znear", nil, "1")
     vrmod.AddCallbackedConvar("vrmod_renderoffset", nil, "1")
