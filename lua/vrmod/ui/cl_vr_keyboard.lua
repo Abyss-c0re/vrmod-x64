@@ -76,6 +76,24 @@ function vrmod.VRKeyboard_GetText()
 	return session and session.fallbackText or ""
 end
 
+--- Replace keyboard buffer text (console command history, form fill).
+function vrmod.VRKeyboard_SetText(text)
+	text = tostring(text or "")
+	if session then
+		session.fallbackText = text
+	end
+	if session and session.moduleId and isfunction(VRMOD_KeyboardSetText) then
+		local ok, r = pcall(VRMOD_KeyboardSetText, session.moduleId, text)
+		if ok and r then
+			if g_VR and g_VR.menus and session.uid and g_VR.menus[session.uid] then
+				g_VR.menus[session.uid].dirty = true
+			end
+			return true
+		end
+	end
+	return session ~= nil
+end
+
 function vrmod.VRKeyboard_GetModuleId()
 	return session and session.moduleId or nil
 end
