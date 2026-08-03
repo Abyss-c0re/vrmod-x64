@@ -192,9 +192,21 @@ function vrmod.bindings.Save()
 end
 
 function vrmod.bindings.ResetDefaults()
+	-- Same Quest 3 gold as C++ Bindings_DefaultMap / launcher RESET button.
+	-- Writes garrysmod/data/vrmod/vrmod_openxr_bindings.json (shared with launcher).
 	state.map = DefaultMap()
+	state.map.preset = "quest3_touch"
 	state.prev = {}
+	-- Best-effort backup of previous user file
+	if file.Exists(BIND_FILE, "DATA") then
+		local raw = file.Read(BIND_FILE, "DATA")
+		if raw and #raw > 0 then
+			local stamp = os.date("%Y%m%d_%H%M%S")
+			file.Write("vrmod/vrmod_openxr_bindings.json.bak." .. stamp, raw)
+		end
+	end
 	vrmod.bindings.Save()
+	vrmod.logger.Info("OpenXR bindings reset to Quest 3 gold (%s)", BIND_FILE)
 end
 
 --- Dedupe sources, drop empties, stable order.
