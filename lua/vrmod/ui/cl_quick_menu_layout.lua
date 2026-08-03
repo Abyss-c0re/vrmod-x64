@@ -50,7 +50,7 @@ local NAME_TO_ID = {
 -- Default multi-page layout (cols 0-5, rows 0+)
 local function DefaultLayout()
 	return {
-		version = 3,
+		version = 4,
 		pages = {
 			{
 				name = "Main",
@@ -70,7 +70,7 @@ local function DefaultLayout()
 				},
 			},
 			{
-				-- Settings / pause / maps / cal / binds / weapon VR
+				-- Settings / pause / maps / cal / binds / weapon VR / exit game
 				name = "System",
 				items = {
 					{ id = "settings", col = 0, row = 0 },
@@ -85,8 +85,9 @@ local function DefaultLayout()
 					{ id = "respawn", col = 0, row = 2 },
 					{ id = "vr_exit", col = 1, row = 2 },
 					{ id = "disconnect", col = 2, row = 2 },
-					{ id = "fbt_calibrate", col = 3, row = 2 },
-					{ id = "fbt_disable", col = 4, row = 2 },
+					{ id = "exit_game", col = 3, row = 2 },
+					{ id = "fbt_calibrate", col = 4, row = 2 },
+					{ id = "fbt_disable", col = 5, row = 2 },
 				},
 			},
 		},
@@ -168,11 +169,11 @@ function QM.ValidateLayout(L)
 		end
 	end
 	local ver = tonumber(L.version) or 1
-	if ver < 3 then
-		-- v3: admin_cleanup on Main; settings/pause/newgame/video_cal/bindings/weapon_vr on System
+	if ver < 4 then
+		-- v4: System page includes Exit Game; Main keeps admin_cleanup
 		local def = DefaultLayout()
 		L.pages = def.pages
-		ver = 3
+		ver = 4
 	end
 	L.version = ver
 	return L
@@ -185,7 +186,7 @@ function QM.Load()
 		if ok and type(decoded) == "table" then
 			local oldVer = tonumber(decoded.version) or 1
 			layout = QM.ValidateLayout(decoded)
-			if oldVer < 3 then
+			if oldVer < 4 then
 				QM.Save()
 			end
 			return layout
