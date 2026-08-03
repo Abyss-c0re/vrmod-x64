@@ -42,6 +42,7 @@ local NAME_TO_ID = {
 	["RESPAWN"] = "respawn",
 	["VR EXIT"] = "vr_exit",
 	["DISCONNECT"] = "disconnect",
+	["Exit Game"] = "exit_game",
 	["Calibrate Full-body Tracking"] = "fbt_calibrate",
 	["Disable Full-body Tracking"] = "fbt_disable",
 }

@@ -176,6 +176,13 @@ local function InitializeMenuItems()
 	add("RESPAWN", 0, 4, function() LocalPlayer():ConCommand("kill") end, true, nil, "respawn")
 	add("VR EXIT", 1, 4, function() LocalPlayer():ConCommand("vrmod_exit") end, true, nil, "vr_exit")
 	add("DISCONNECT", 2, 4, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
+	-- Quit GMod entirely (System page)
+	add("Exit Game", 3, 4, function()
+		timer.Simple(0, function()
+			pcall(function() RunConsoleCommand("gamemenucommand", "quit") end)
+			pcall(function() RunConsoleCommand("quit") end)
+		end)
+	end, true, "close Garry's Mod", "exit_game")
 end
 
 hook.Add("VRMod_Start", "ReloadMenuItems", function() InitializeMenuItems() end)
