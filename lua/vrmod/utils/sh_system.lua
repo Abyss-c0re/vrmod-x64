@@ -69,22 +69,15 @@ if CLIENT then
         if not hooks or not hooks[climbingHookID] then return end
         local originalHook = hooks[climbingHookID]
         if not isfunction(originalHook) then return end
-        -- Do not wrap an already-wrapped function
-        if originalHook._vrmodClimbWeaponWrap then
-            climbWrapDone = true
-            return
-        end
+        -- Mark before replace so we never nest (Lua functions cannot hold fields)
         climbWrapDone = true
-        local wrapped
-        wrapped = function(action, pressed)
+        hook.Add("VRMod_Input", climbingHookID, function(action, pressed)
             local ply = LocalPlayer()
             if rightHandActions[action] and vrmod.UsingEmptyHands and not vrmod.UsingEmptyHands(ply) then
                 return -- block right-hand climbing while holding a weapon
             end
             return originalHook(action, pressed)
-        end
-        wrapped._vrmodClimbWeaponWrap = true
-        hook.Add("VRMod_Input", climbingHookID, wrapped)
+        end)
     end)
     hook.Add("VRMod_Exit", "vrmod_climbing_hook_blocker_reset", function()
         climbWrapDone = false
