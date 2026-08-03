@@ -490,7 +490,22 @@ local function activate(mx, my)
 				statusUntil = CurTime() + 3
 			end
 		elseif k == "restart_twin" then
+			-- Full player + twin IK reload (clears twisted bones from stale maps)
+			local ply = LocalPlayer()
+			if IsValid(ply) and g_VR and g_VR.active and g_VR.ReloadCharacterSystem then
+				pcall(g_VR.ReloadCharacterSystem, ply, "restart_twin")
+			end
 			StartTwin()
+			timer.Simple(0.2, function()
+				if vrmod.avatar and vrmod.avatar.ReloadAllIK then
+					pcall(vrmod.avatar.ReloadAllIK)
+				end
+				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+					pcall(vrmod.character.ForceLocalIKAndPublish)
+				end
+			end)
+			statusMsg = "PLAYER + TWIN IK RELOADED"
+			statusUntil = CurTime() + 3
 		end
 		return
 		end -- hit box

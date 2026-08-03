@@ -734,7 +734,24 @@ if CLIENT then
 		return false
 	end
 
-	--- Full character + FBT + twin snap reload after PM apply (player or twin→player).
+	--- Zero bone manipulates + bone cache so a new skeleton cannot inherit old offsets
+	--- (messed-up limbs / twisted twins after PM change).
+	local function ClearEntityBoneState(ent)
+		if not IsValid(ent) then return end
+		pcall(function()
+			local n = ent:GetBoneCount() or 0
+			local zeroA, zeroV, oneS = Angle(0, 0, 0), Vector(0, 0, 0), Vector(1, 1, 1)
+			for i = 0, n - 1 do
+				ent:ManipulateBoneAngles(i, zeroA)
+				ent:ManipulateBonePosition(i, zeroV)
+				ent:ManipulateBoneScale(i, oneS)
+			end
+			if ent.InvalidateBoneCache then ent:InvalidateBoneCache() end
+			ent:SetupBones()
+		end)
+	end
+
+	--- Full character + FBT + twin IK reload after PM apply (player or twin→player).
 	function g_VR.ReloadCharacterSystem(ply, reason)
 		if not IsValid(ply) then return false end
 		if not g_VR or not g_VR.active then return false end
@@ -749,16 +766,37 @@ if CLIENT then
 			vrmod_fbt.characterInfo[sid].modelName = nil
 		end
 		if g_VR.fbtActive then g_VR.fbtActive[sid] = nil end
+		if g_VR.avatarPoseSnap then g_VR.avatarPoseSnap = nil end
 
+		ClearEntityBoneState(ply)
 		pcall(g_VR.StopCharacterSystem, sid)
 
 		timer.Simple(0, function()
 			if not IsValid(ply) or not g_VR or not g_VR.active then return end
+			ClearEntityBoneState(ply)
+			-- Force model cache string so CharacterInit never skips
+			ply.vrmod_pm = ply.vrmod_pm or ply:GetModel()
 			pcall(g_VR.StartCharacterSystem, ply, true)
 			if vrmod_fbt and vrmod_fbt.Init then
 				pcall(vrmod_fbt.Init, ply)
 			end
 			timer.Simple(0.05, function()
+				if not IsValid(ply) or not g_VR or not g_VR.active then return end
+				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+					pcall(vrmod.character.ForceLocalIKAndPublish)
+				end
+			end)
+			-- Twin: full bone/IK rebuild after player skeleton is live
+			timer.Simple(0.12, function()
+				if not IsValid(ply) or not g_VR or not g_VR.active then return end
+				if vrmod.avatar and vrmod.avatar.ReloadAllIK then
+					pcall(vrmod.avatar.ReloadAllIK)
+				end
+				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+					pcall(vrmod.character.ForceLocalIKAndPublish)
+				end
+			end)
+			timer.Simple(0.28, function()
 				if not IsValid(ply) or not g_VR or not g_VR.active then return end
 				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
 					pcall(vrmod.character.ForceLocalIKAndPublish)
@@ -772,6 +810,7 @@ if CLIENT then
 	vrmod.character.Reload = function(ply, reason)
 		return g_VR.ReloadCharacterSystem(ply or LocalPlayer(), reason)
 	end
+	vrmod.character.ClearEntityBoneState = ClearEntityBoneState
 
 	function g_VR.StopCharacterSystem(steamid)
 		if not activePlayers[steamid] then return end

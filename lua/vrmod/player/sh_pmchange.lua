@@ -21,6 +21,12 @@ if CLIENT then
 				elseif g_VR.StartCharacterSystem then
 					pcall(g_VR.StartCharacterSystem, ply, true)
 				end
+				-- Twin must remap skeleton after PM swap
+				timer.Simple(0.2, function()
+					if vrmod.avatar and vrmod.avatar.ReloadAllIK then
+						pcall(vrmod.avatar.ReloadAllIK)
+					end
+				end)
 			end
 		end)
 	elseif SERVER then

@@ -366,6 +366,39 @@ function Session:_measureArms()
 	end
 end
 
+--- Full twin skeleton/IK rebuild after model change (avoids twisted limbs from stale bone maps).
+function Session:ReloadIK()
+	if not self:IsValid() then return false end
+	local e = self.ent
+	if vrmod.character and vrmod.character.ClearEntityBoneState then
+		pcall(vrmod.character.ClearEntityBoneState, e)
+	else
+		pcall(function()
+			e:InvalidateBoneCache()
+			e:SetupBones()
+		end)
+	end
+	self.targets = {}
+	self.ik = nil
+	self.mirrorBoneMap = {}
+	self:_cacheBones()
+	self:_measureArms()
+	local charik0 = vrmod.charik or vrmod.frameik
+	if charik0 and charik0.Init then
+		self.ik = charik0.Init(e, {
+			noStretch = true,
+			headDampen = self.headDampen ~= false,
+			headMaxPitch = self.headMaxPitch or 55,
+		})
+	end
+	self:_applyHideBones()
+	if vrmod.logger then
+		vrmod.logger.Info("[Avatar] twin ReloadIK model=%s bones=%s",
+			tostring(self.model or e:GetModel()), tostring(table.Count(self.bones or {})))
+	end
+	return true
+end
+
 function Session:SetModel(path, opts)
 	if not self:IsValid() or not path or path == "" then return false end
 	opts = opts or {}
@@ -385,17 +418,10 @@ function Session:SetModel(path, opts)
 		self.ent:SetSkin(0)
 	end
 
-	self.ent:SetupBones()
-	self:_cacheBones()
-	self:_measureArms()
-	-- Pure-paste path: drop any IK state; clear targets so next frame rebuilds
-	self.ik = nil
-	self.targets = {}
-	self.hideHead = false
-	self.hideHands = false
-	self:_applyHideBones()
+	-- Always rebuild twin IK caches for the new skeleton
+	self:ReloadIK()
 
-	-- Preview twin model change: refresh snap from live player IK (no full player reload)
+	-- Preview twin model change: refresh snap from live player IK
 	timer.Simple(0, function()
 		if not self.active then return end
 		if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
@@ -403,7 +429,7 @@ function Session:SetModel(path, opts)
 		end
 	end)
 	if vrmod.logger then
-		vrmod.logger.Info("[Avatar] twin model → %s (preview, bone cache refresh)", path)
+		vrmod.logger.Info("[Avatar] twin model → %s (IK reload)", path)
 	end
 	return true
 end
@@ -483,31 +509,33 @@ function Session:ApplyToPlayer()
 		pcall(vrmod.character.Reload, ply, "avatar_apply")
 	end
 
-	-- 3) Twin follows after reload settles
+	-- 3) Twin follows after reload settles — full ReloadIK (not half-cache)
 	timer.Simple(0.15, function()
 		if not IsValid(ply) or not g_VR or not g_VR.active then return end
 		pcall(ApplyLooksToEnt, ply, path, skin, bodyMap)
 		ply.vrmod_pm = path
-		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
-		if twin and twin:IsValid() then
-			if path and twin.SetModel then
-				twin:SetModel(path, { persist = true, keepLooks = true })
+		if vrmod.avatar and vrmod.avatar.ReloadAllIK then
+			pcall(vrmod.avatar.ReloadAllIK)
+		else
+			local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
+			if twin and twin:IsValid() then
+				if path and twin.SetModel then
+					twin:SetModel(path, { persist = true, keepLooks = true })
+				end
+				if twin.ReloadIK then twin:ReloadIK() end
 			end
-			if twin.SetSkin then twin:SetSkin(skin) end
-			if IsValid(twin.ent) and bodyMap then
-				ApplyBodygroups(twin.ent, bodyMap)
-			end
-			twin.hideHead = false
-			twin.hideHands = false
-			if twin._applyHideBones then twin:_applyHideBones() end
-			if twin._cacheBones then twin:_cacheBones() end
-			if twin._measureArms then twin:_measureArms() end
 		end
 		if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
 			pcall(vrmod.character.ForceLocalIKAndPublish)
 		end
 		if vrmod.logger then
-			vrmod.logger.Info("[Avatar] character IK reloaded after apply PM=%s", tostring(name or path))
+			vrmod.logger.Info("[Avatar] character+twin IK reloaded after apply PM=%s", tostring(name or path))
+		end
+	end)
+	timer.Simple(0.35, function()
+		if not IsValid(ply) or not g_VR or not g_VR.active then return end
+		if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+			pcall(vrmod.character.ForceLocalIKAndPublish)
 		end
 	end)
 
@@ -1366,6 +1394,20 @@ end
 function vrmod.avatar.IsOpen(id)
 	local s = sessions[id]
 	return s and s:IsValid()
+end
+
+--- Rebuild IK for every open twin (after player PM / character reload).
+function vrmod.avatar.ReloadAllIK()
+	local n = 0
+	for id, s in pairs(sessions) do
+		if s and s:IsValid() and s.ReloadIK then
+			if s.ReloadIK(s) then n = n + 1 end
+		end
+	end
+	if vrmod.logger then
+		vrmod.logger.Info("[Avatar] ReloadAllIK twins=%d", n)
+	end
+	return n
 end
 
 function vrmod.avatar.ListPlayerModels()
