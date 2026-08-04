@@ -278,7 +278,12 @@ if CLIENT then
 		local rawVs = convars.vrmod_viewscale:GetFloat()
 		local viewscale = (vrmod.utils and vrmod.utils.ViewScaleLaw_Clamp
 			and vrmod.utils.ViewScaleLaw_Clamp(rawVs)) or rawVs
-		local fovX, fovY = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
+		-- G36 / W5: clamp FOV scales (extreme FOV → one-eye wrap)
+		local rawFx, rawFy = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
+		local fovX = (vrmod.utils and vrmod.utils.FovZLaw_ClampFovScale
+			and vrmod.utils.FovZLaw_ClampFovScale(rawFx)) or rawFx
+		local fovY = (vrmod.utils and vrmod.utils.FovZLaw_ClampFovScale
+			and vrmod.utils.FovZLaw_ClampFovScale(rawFy)) or rawFy
 		if not isfunction(VRMOD_GetDisplayInfo) then
 			return nil
 		end
@@ -1433,6 +1438,7 @@ if CLIENT then
 	end
 
 	-- Live update: UV bounds + crop mode (offsets/scale/eye dials)
+	-- G36 / W5: border cvars → submit_bounds only (never mid-frame FOV fight)
 	local function BindBorderConvarCallbacks()
 		local names = {
 			"vrmod_horizontaloffset",
@@ -1445,7 +1451,24 @@ if CLIENT then
 			cvars.RemoveChangeCallback(name, "vrmod_submit_bounds")
 			cvars.AddChangeCallback(name, function()
 				if not g_VR.active then return end
-				ApplySubmitBounds()
+				local kind = vrmod.utils and vrmod.utils.FovZLaw_RefreshKind
+					and vrmod.utils.FovZLaw_RefreshKind(name) or "submit_bounds"
+				if kind == "submit_bounds" or kind == "none" then
+					ApplySubmitBounds()
+				end
+				if vrmod.utils and vrmod.utils.FovZLaw_Decide then
+					local d = vrmod.utils.FovZLaw_Decide({
+						cvar = name,
+						vr_active = true,
+						soft_refreshed = false,
+						mid_frame_uv_and_fov = false,
+					})
+					g_VR._fovZLaw = d
+					g_VR._fovZLawLabel = vrmod.utils.FovZLaw_StatusLabel
+						and vrmod.utils.FovZLaw_StatusLabel(d) or nil
+					g_VR._fovZLawHmdExpect = vrmod.utils.FovZLaw_HmdExpect
+						and vrmod.utils.FovZLaw_HmdExpect(d) or nil
+				end
 			end, "vrmod_submit_bounds")
 		end
 	end
@@ -1540,6 +1563,7 @@ if CLIENT then
 	end
 
 	local function BindRenderProfileCallbacks()
+		-- G36 / W5: FOV profile → SoftRefresh only; znear/session → session path
 		local names = {
 			"vrmod_fovscale_x",
 			"vrmod_fovscale_y",
@@ -1554,10 +1578,37 @@ if CLIENT then
 			cvars.RemoveChangeCallback(name, "vrmod_render_profile")
 			cvars.AddChangeCallback(name, function()
 				if not g_VR.active then return end
-				if name == "vrmod_znear" or name == "vrmod_postprocess" then
+				local kind = vrmod.utils and vrmod.utils.FovZLaw_RefreshKind
+					and vrmod.utils.FovZLaw_RefreshKind(name)
+				if not kind then
+					kind = (name == "vrmod_znear" or name == "vrmod_postprocess") and "session" or "soft_display"
+				end
+				local softOk = false
+				if kind == "session" then
 					ApplySessionSettingsFromConvars()
+					softOk = true -- session path includes SoftRefresh
 				else
 					SoftRefreshDisplayParams()
+					softOk = true -- soft path invoked (proj may still be deferred)
+				end
+				if vrmod.utils and vrmod.utils.FovZLaw_Decide then
+					local fx = convars.vrmod_fovscale_x and convars.vrmod_fovscale_x:GetFloat() or 1
+					local fy = convars.vrmod_fovscale_y and convars.vrmod_fovscale_y:GetFloat() or 1
+					local zn = convars.vrmod_znear and convars.vrmod_znear:GetFloat() or 1
+					local d = vrmod.utils.FovZLaw_Decide({
+						cvar = name,
+						vr_active = true,
+						soft_refreshed = softOk,
+						fov_x = fx,
+						fov_y = fy,
+						znear = zn,
+						mid_frame_uv_and_fov = false,
+					})
+					g_VR._fovZLaw = d
+					g_VR._fovZLawLabel = vrmod.utils.FovZLaw_StatusLabel
+						and vrmod.utils.FovZLaw_StatusLabel(d) or nil
+					g_VR._fovZLawHmdExpect = vrmod.utils.FovZLaw_HmdExpect
+						and vrmod.utils.FovZLaw_HmdExpect(d) or nil
 				end
 			end, "vrmod_render_profile")
 		end
