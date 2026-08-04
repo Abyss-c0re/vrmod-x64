@@ -69,7 +69,22 @@ if CLIENT then
     -- Requires VR restart. Lua applies SS then clamps SBS ≤ 4096.
     vrmod.AddCallbackedConvar("vrmod_supersample", nil, "1.5", FCVAR_ARCHIVE, "VR render supersample 0.5–2.0 (restart VR)", 0.5, 2.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_scalefactor", nil, "1", FCVAR_ARCHIVE, "Submit UV scale factor (border crop)", 0.05, 4.0, tonumber)
-    vrmod.AddCallbackedConvar("vrmod_eyescale", nil, "0.5")
+    -- Synthetic IPD multiplier when eye mode is synthetic (2) or auto falls back.
+    -- 1.0 = full headset IPD; 0.5 = half (legacy default). Live while VR active.
+    vrmod.AddCallbackedConvar("vrmod_eyescale", nil, "0.5", FCVAR_ARCHIVE,
+        "Synthetic eye IPD scale 0–1 (1=full IPD). Used when stereo_eye_mode forces synthetic", 0.0, 1.0, tonumber)
+    -- Stereo eye placement (head-tilt / roll warp dial):
+    --   0 auto      = OpenXR locateViews eyes if valid, else synthetic head-Right()
+    --   1 xr        = force OpenXR eye positions (shared HMD orientation)
+    --   2 synthetic = force pure translation along head Right() (best roll test)
+    vrmod.AddCallbackedConvar("vrmod_stereo_eye_mode", nil, "0", FCVAR_ARCHIVE,
+        "Stereo eyes: 0=auto 1=OpenXR poses 2=synthetic head-Right IPD", 0, 2, tonumber)
+    -- Per-eye submit UV (C++ XR_SetSubmitCropMode). NEVER leave FOV_CROP on by default.
+    --   0 safe     = full per-eye rect; SBS uses Lua bounds (default, stable)
+    --   1 full     = force full-eye UV (debug borders)
+    --   2 fov_crop = experimental asymmetric FOV crop (can cross stereo — opt-in only)
+    vrmod.AddCallbackedConvar("vrmod_submit_crop", nil, "0", FCVAR_ARCHIVE,
+        "Submit UV: 0=safe 1=full 2=fov_crop experimental", 0, 2, tonumber)
     -- Workshop: inverted stereo / "seeing double" (PSVR2 etc.) — swap SBS halves without dual pose truth
     vrmod.AddCallbackedConvar("vrmod_swap_eyes", nil, "0", FCVAR_ARCHIVE, "Swap left/right eye submit halves", nil, nil, tobool)
     vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV vertical offset", -1.0, 1.0, tonumber)
