@@ -1194,27 +1194,39 @@ if CLIENT then
 			pcall(render.PopRenderTarget)
 		end
 
-		-- Desktop mirror: eye crop (2/3) or invisible follow-cam (4)
+		-- Desktop mirror: eye crop (2/3) or invisible follow-cam (4). G23: never
+		-- fall through mode 4 into stereo crop (wrong half-eye when DesktopCam late).
 		local dv = g_VR.desktopView or 1
-		if dv == 4 and vrmod.DesktopCam then
-			if vrmod.DesktopCam.SyncFromDesktopView then
-				vrmod.DesktopCam.SyncFromDesktopView(4)
+		local DC = vrmod.DesktopCam
+		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv))
+			or (tonumber(dv) == 4)
+		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv))
+			or (tonumber(dv) == 2 or tonumber(dv) == 3)
+		if isFollow then
+			if DC then
+				if DC.SyncFromDesktopView then
+					pcall(DC.SyncFromDesktopView, dv)
+				end
+				-- Capture after stereo RT is popped (never nest under g_VR.rt)
+				if DC.CaptureFrame then
+					pcall(DC.CaptureFrame)
+				end
+				if DC.PresentDesktop then
+					pcall(DC.PresentDesktop)
+				end
 			end
-			-- Capture after stereo RT is popped (never nest under g_VR.rt)
-			if vrmod.DesktopCam.CaptureFrame then
-				pcall(vrmod.DesktopCam.CaptureFrame)
-			end
-			if vrmod.DesktopCam.PresentDesktop then
-				pcall(vrmod.DesktopCam.PresentDesktop)
-			end
-		elseif dv > 1 and g_VR.rtMaterial then
+			-- No stereo RT blit for follow mode even if module missing
+		elseif isEyeCrop and g_VR.rtMaterial then
 			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(g_VR.rtMaterial)
 			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
 			render.CullMode(0)
-		elseif vrmod.DesktopCam and vrmod.DesktopCam.SyncFromDesktopView then
-			vrmod.DesktopCam.SyncFromDesktopView(dv)
+			if DC and DC.SyncFromDesktopView then
+				pcall(DC.SyncFromDesktopView, dv) -- ensure follow session stopped
+			end
+		elseif DC and DC.SyncFromDesktopView then
+			pcall(DC.SyncFromDesktopView, dv)
 		end
 	end
 

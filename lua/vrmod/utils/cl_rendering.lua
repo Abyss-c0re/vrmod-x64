@@ -33,8 +33,9 @@ end
 --- desktopView: 1=none 2=left 3=right 4=follow-cam (no stereo crop — use DesktopCam RT)
 function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
     desktopView = tonumber(desktopView) or 1
-    if desktopView == 4 then
-        -- Follow-cam uses its own RT; crop unused
+    -- G23: only left/right eye crop; follow-cam and none skip stereo half-blit
+    if desktopView == 4 or desktopView == 1 then
+        -- Follow-cam uses its own RT; none draws nothing — crop unused
         return 0, 0
     end
     local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2

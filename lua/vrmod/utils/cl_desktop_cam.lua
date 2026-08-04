@@ -79,6 +79,37 @@ function DC.IsFollowMode(desktopView)
 	return tonumber(desktopView) == DC.VIEW_FOLLOW_CAM
 end
 
+--- Clamp to 1..4 (none / left / right / follow-cam). Pure — G23 call-site SoT.
+function DC.ClampDesktopView(desktopView)
+	local v = math.floor(tonumber(desktopView) or DC.VIEW_NONE)
+	if v < DC.VIEW_NONE then return DC.VIEW_NONE end
+	if v > DC.VIEW_FOLLOW_CAM then return DC.VIEW_FOLLOW_CAM end
+	return v
+end
+
+--- Cycle desktop view (dir ±1). Pure.
+function DC.CycleDesktopView(desktopView, dir)
+	dir = tonumber(dir) or 1
+	if dir == 0 then dir = 1 end
+	local v = DC.ClampDesktopView(desktopView)
+	return 1 + ((v - 1 + dir) % 4 + 4) % 4
+end
+
+--- Short label for UI / logs.
+function DC.DesktopViewLabel(desktopView)
+	local v = DC.ClampDesktopView(desktopView)
+	if v == DC.VIEW_LEFT then return "left" end
+	if v == DC.VIEW_RIGHT then return "right" end
+	if v == DC.VIEW_FOLLOW_CAM then return "follow_cam" end
+	return "none"
+end
+
+--- True when desktop should use stereo eye crop blit (modes 2/3 only — never 4).
+function DC.IsEyeCropMode(desktopView)
+	local v = DC.ClampDesktopView(desktopView)
+	return v == DC.VIEW_LEFT or v == DC.VIEW_RIGHT
+end
+
 -- ─── Broadcast module registry (future control + video app) ───────────────
 
 --- Register an external control/broadcast module.
