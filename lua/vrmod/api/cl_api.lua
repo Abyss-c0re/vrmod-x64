@@ -695,13 +695,20 @@ if CLIENT then
         g_VR.originAngle = ang
     end
 
+    -- G26: prefer pure MenuLaw_* (pain #9 climb/id thrash); local fallbacks kept.
     local function NormalizeMenuName(name)
+        if vrmod.utils and vrmod.utils.MenuLaw_NormalizeName then
+            return vrmod.utils.MenuLaw_NormalizeName(name)
+        end
         return string.lower(string.Trim(tostring(name or "")))
     end
 
     --- Stable backup / dedupe key. Prefer layout id; never use function identity
     --- (addons re-call AddInGameMenuItem with new anonymous funcs every Start → dupes).
     local function MenuItemStableKey(name, id)
+        if vrmod.utils and vrmod.utils.MenuLaw_StableKey then
+            return vrmod.utils.MenuLaw_StableKey(name, id)
+        end
         if id and tostring(id) ~= "" then
             return "id:" .. string.lower(tostring(id))
         end
@@ -709,6 +716,12 @@ if CLIENT then
     end
 
     local function MenuItemsMatch(item, name, id, func)
+        if vrmod.utils and vrmod.utils.MenuLaw_ItemsMatch then
+            if vrmod.utils.MenuLaw_ItemsMatch(item, name, id) then return true end
+            -- Legacy exact match (same func ref) only as last resort
+            if func and item and item.name == name and item.func == func then return true end
+            return false
+        end
         if not item then return false end
         if id and item.id and string.lower(tostring(item.id)) == string.lower(tostring(id)) then
             return true
@@ -716,7 +729,6 @@ if CLIENT then
         if NormalizeMenuName(item.name) == NormalizeMenuName(name) then
             return true
         end
-        -- Legacy exact match (same func ref)
         if func and item.name == name and item.func == func then
             return true
         end
@@ -727,6 +739,7 @@ if CLIENT then
     function vrmod.DedupInGameMenuItems()
         g_VR.menuItems = g_VR.menuItems or {}
         g_VR.menuBackup = g_VR.menuBackup or {}
+        local before = #g_VR.menuItems
         local seen = {}
         for i = #g_VR.menuItems, 1, -1 do
             local item = g_VR.menuItems[i]
@@ -751,6 +764,31 @@ if CLIENT then
         end
         for key, data in pairs(byKey) do
             g_VR.menuBackup[key] = data
+        end
+        -- G26 observer snapshot (offline-tested pure helpers)
+        if vrmod.utils and vrmod.utils.MenuLaw_Decide then
+            local d = vrmod.utils.MenuLaw_Decide({
+                items = g_VR.menuItems,
+                vr_active = g_VR.active and true or false,
+            })
+            -- If we dropped rows this pass, thrash was present pre-dedupe
+            if before > #g_VR.menuItems then
+                d = vrmod.utils.MenuLaw_Decide({
+                    items = g_VR.menuItems,
+                    vr_active = g_VR.active and true or false,
+                })
+                d.dropped = before - #g_VR.menuItems
+                if d.dropped > 0 and d.risk == "none" then
+                    d.risk = "thrash"
+                    d.reason = "deduped_this_pass"
+                    d.path_ok = true -- clean after pass
+                end
+            end
+            g_VR._menuLawDecision = d
+            g_VR._menuLawLabel = vrmod.utils.MenuLaw_StatusLabel
+                and vrmod.utils.MenuLaw_StatusLabel(d) or nil
+            g_VR._menuLawHmdExpect = vrmod.utils.MenuLaw_HmdExpect
+                and vrmod.utils.MenuLaw_HmdExpect(d) or nil
         end
     end
 
