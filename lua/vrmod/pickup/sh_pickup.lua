@@ -22,15 +22,39 @@ if CLIENT then
 	local pickupTargetEntRight = nil
 	local haloTargetsLeft = {}
 	local haloTargetsRight = {}
-	-- Cleanup clones only for normal props on drop
+	-- G44: per-hand drop cooldown after grab_end (pure GrabEndLaw_*).
+	-- Prevents re-grab storms; never thrash climb grip path.
 	hook.Add("VRMod_Drop", "vrmod_drop_cooldown", function(ply, ent)
-		if not IsValid(ent) or vrmod.utils.IsIgnoredProp(ent) then return end
+		local U = vrmod.utils
+		local ignored = IsValid(ent) and U and U.IsIgnoredProp and U.IsIgnoredProp(ent)
+		if not IsValid(ent) or ignored then return end
+		local startCd = true
+		if U and U.GrabEndLaw_ShouldStartCooldown then
+			startCd = U.GrabEndLaw_ShouldStartCooldown({
+				ent_valid = true,
+				ignored_prop = false,
+			})
+		end
+		if not startCd then return end
+		local cd = (U and U.GrabEndLaw_CooldownSeconds and U.GrabEndLaw_CooldownSeconds()) or 0.1
 		for _, hand in ipairs({"Left", "Right"}) do
 			if g_VR then
 				local key = hand == "Left" and "cooldownLeft" or "cooldownRight"
 				g_VR[key] = true
-				timer.Simple(0.1, function() if g_VR then g_VR[key] = false end end)
+				timer.Simple(cd, function() if g_VR then g_VR[key] = false end end)
 			end
+		end
+		if U and U.GrabEndLaw_Decide then
+			local d = U.GrabEndLaw_Decide({
+				hand = "right",
+				cooldown_active = true,
+				ent_valid = true,
+				primary_hand = (vrmod.GetPrimaryHand and vrmod.GetPrimaryHand()) or "right",
+			})
+			g_VR = g_VR or {}
+			g_VR._grabEndLaw = d
+			g_VR._grabEndLawLabel = U.GrabEndLaw_StatusLabel and U.GrabEndLaw_StatusLabel(d) or nil
+			g_VR._grabEndLawHmdExpect = U.GrabEndLaw_HmdExpect and U.GrabEndLaw_HmdExpect(d) or nil
 		end
 	end)
 
