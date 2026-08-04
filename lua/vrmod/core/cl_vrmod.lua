@@ -1079,12 +1079,28 @@ if CLIENT then
 			aspR = tonumber(eR.aspectratio)
 		end
 
-		-- Optional eye swap (PSVR2 / inverted-stereo reports): content for logical L/R
-		-- still uses correct IPD/FOV, but is written into the opposite SBS half.
+		-- G33 / W4: optional eye swap — SBS content only; IPD/FOV/pose single path
 		local swapEyes = convars.vrmod_swap_eyes and convars.vrmod_swap_eyes:GetBool()
-		local leftX, rightX = 0, rtHalfW
-		if swapEyes then
-			leftX, rightX = rtHalfW, 0
+		local leftX, rightX
+		if vrmod.utils and vrmod.utils.SwapEyesLaw_ResolveSbsHalves then
+			leftX, rightX = vrmod.utils.SwapEyesLaw_ResolveSbsHalves(rtHalfW, swapEyes)
+		else
+			leftX, rightX = 0, rtHalfW
+			if swapEyes then leftX, rightX = rtHalfW, 0 end
+		end
+		if vrmod.utils and vrmod.utils.SwapEyesLaw_Decide then
+			local ed = vrmod.utils.SwapEyesLaw_Decide({
+				swap = swapEyes,
+				rt_half_w = rtHalfW,
+				dual_pose_fork = false,
+				ipd_mutated = false,
+				fov_swapped = false,
+			})
+			g_VR._swapEyesLaw = ed
+			g_VR._swapEyesLawLabel = vrmod.utils.SwapEyesLaw_StatusLabel
+				and vrmod.utils.SwapEyesLaw_StatusLabel(ed) or nil
+			g_VR._swapEyesLawHmdExpect = vrmod.utils.SwapEyesLaw_HmdExpect
+				and vrmod.utils.SwapEyesLaw_HmdExpect(ed) or nil
 		end
 
 		SyncEyeView(viewLeft, g_VR.eyePosLeft, fovL, aspL, leftX, 0, rtHalfW, rtH, baseAngles, znear, dopost, zfar)
