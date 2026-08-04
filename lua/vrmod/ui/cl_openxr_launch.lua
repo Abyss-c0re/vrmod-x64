@@ -83,6 +83,7 @@ function vrmod.ApplyOpenXRLaunchMarker()
 			string.format("applied=%s mode=%s auto=%s\n", os.date("%Y-%m-%d %H:%M:%S"), mode, tostring(wantAuto)))
 	end)
 
+	local nativeWrapper = (t.native_wrapper == "1" or t.native_wrapper == "true")
 	applied = true
 	g_VR._openxrLaunch = {
 		mode = mode,
@@ -91,10 +92,11 @@ function vrmod.ApplyOpenXRLaunchMarker()
 		hub = wantHub,
 		bg_map = t.bg_map or "gm_construct",
 		map_mode = t.map_mode or "full",
+		native_wrapper = nativeWrapper,
 		ts = tonumber(t.ts) or 0,
 	}
-	log("marker applied mode=%s autostart=%s hub=1 (native Cube launcher)",
-		mode, tostring(wantAuto))
+	log("marker applied mode=%s autostart=%s native_wrapper=%s hub=1 (native Cube launcher)",
+		mode, tostring(wantAuto), tostring(nativeWrapper))
 	return true
 end
 
@@ -106,6 +108,22 @@ end
 
 function vrmod.IsOpenXRLaunchSession()
 	return applied or (g_VR and g_VR._openxrLaunch ~= nil)
+end
+
+--- True when Start came from cube_webui / gvrmod_launcher (marker native_wrapper=1).
+function vrmod.IsNativeWrapperLaunch()
+	if g_VR and g_VR._openxrLaunch and g_VR._openxrLaunch.native_wrapper then
+		return true
+	end
+	-- Marker may still be on disk before apply; treat as wrapper product path
+	if file.Exists(MARKER, "DATA") then
+		local raw = file.Read(MARKER, "DATA") or ""
+		if string.find(raw, "native_wrapper=1", 1, true)
+			or string.find(raw, "native_wrapper=true", 1, true) then
+			return true
+		end
+	end
+	return false
 end
 
 local function writeStatus(line)
@@ -255,6 +273,8 @@ local function bootFromLaunch()
 			autostart = true,
 			hub = true,
 			menu = false,
+			-- cfg path is always the native Cube product wrapper
+			native_wrapper = true,
 		}
 		setBoolCvar("vrmod_hub", true)
 		setBoolCvar("vrmod_menu_vr", false)

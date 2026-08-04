@@ -34,6 +34,8 @@ local function toast(s, t)
 	notification.AddLegacy("[VRMod] " .. s, NOTIFY_GENERIC, t or 2.5)
 end
 
+local BORDER_PROFILE = "vrmod/border_profile.txt"
+
 local function isComplete()
 	if file.Exists(EXP_FILE, "DATA") then
 		local raw = file.Read(EXP_FILE, "DATA") or ""
@@ -43,16 +45,41 @@ local function isComplete()
 	return c and c:GetBool() or false
 end
 
+--- Prior Vision/cal evidence (border profile on disk). File check for G10.
+local function hasPriorCal()
+	return file.Exists(BORDER_PROFILE, "DATA")
+end
+
 function vrmod.Experience_IsComplete()
 	return isComplete()
 end
 
 function vrmod.Experience_ShouldRun()
 	local force = GetConVar("vrmod_experience_force")
-	if force and force:GetBool() then return true end
 	local en = GetConVar("vrmod_experience")
-	if en and not en:GetBool() then return false end
-	return not isComplete()
+	local native = false
+	if vrmod.IsNativeWrapperLaunch then
+		native = vrmod.IsNativeWrapperLaunch() and true or false
+	elseif g_VR and g_VR._openxrLaunch and g_VR._openxrLaunch.native_wrapper then
+		native = true
+	end
+	-- Pure decision: vrmod.Experience_ShouldRunFromState (utils/sh_experience.lua)
+	local decide = vrmod.Experience_ShouldRunFromState
+	if not decide then
+		-- Fallback if util not loaded yet (should not happen in product boot order)
+		if force and force:GetBool() then return true end
+		if en and not en:GetBool() then return false end
+		if isComplete() then return false end
+		if native and hasPriorCal() then return false end
+		return true
+	end
+	return decide({
+		force = force and force:GetBool() or false,
+		enabled = not (en and not en:GetBool()),
+		complete = isComplete(),
+		native_wrapper = native,
+		has_prior_cal = hasPriorCal(),
+	})
 end
 
 function vrmod.Experience_MarkComplete()
