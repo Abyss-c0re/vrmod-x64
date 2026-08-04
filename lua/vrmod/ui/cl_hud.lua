@@ -160,8 +160,14 @@ local mat = CreateMaterial("vrmod_hud_mesh_paint_v2", "UnlitGeneric", {
 })
 if mat and not mat:IsError() then
 	mat:SetTexture("$basetexture", rt)
-	mat:SetInt("$translucent", 1)
-	mat:SetInt("$additive", 0)
+	-- G15 PROPHECY: clear plate → translucent; dim plate → additive (no black wall)
+	local law = (vrmod.utils and vrmod.utils.HudLaw_Decide)
+			and vrmod.utils.HudLaw_Decide({ clear_alpha = 0 })
+		or { additive = 0, translucent = 1 }
+	local flags = (vrmod.utils and vrmod.utils.HudLaw_MaterialFlags
+		and vrmod.utils.HudLaw_MaterialFlags(law)) or law
+	mat:SetInt("$translucent", flags.translucent or 1)
+	mat:SetInt("$additive", flags.additive or 0)
 end
 
 local hudMeshes = {}
@@ -982,8 +988,20 @@ local function DrawHudMesh()
 	if g_VR._radarCapturing or g_VR._renderingHudRT then return end
 
 	mat:SetTexture("$basetexture", rt)
-	mat:SetInt("$translucent", 1)
-	mat:SetInt("$additive", 0)
+	-- G15: composite from pure law (dim plate → additive so black is light, not slab)
+	local clearA = math.Clamp(CVFloat("vrmod_hudtestalpha", 0), 0, 255)
+	local law = (vrmod.utils and vrmod.utils.HudLaw_Decide)
+			and vrmod.utils.HudLaw_Decide({ clear_alpha = clearA })
+		or { additive = 0, translucent = 1, valid = true, clear_alpha = clearA }
+	local flags = (vrmod.utils and vrmod.utils.HudLaw_MaterialFlags
+		and vrmod.utils.HudLaw_MaterialFlags(law)) or law
+	mat:SetInt("$translucent", flags.translucent or 1)
+	mat:SetInt("$additive", flags.additive or 0)
+	if g_VR then
+		g_VR._hudLaw = law
+		g_VR._hudLawLabel = (vrmod.utils and vrmod.utils.HudLaw_StatusLabel
+			and vrmod.utils.HudLaw_StatusLabel(law)) or nil
+	end
 	render.SetMaterial(mat)
 	cam.PushModelMatrix(mtx)
 	-- DepthRange must always restore — leak → prop/decal flicker in both eyes
