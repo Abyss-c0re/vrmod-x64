@@ -89,7 +89,7 @@ if CLIENT then
             else
                 error = "Failed to load module.\n"
                     .. "Installed: XR=" .. tostring(inst.openxr) .. " OVR=" .. tostring(inst.openvr) .. "\n"
-                    .. "prefer: vrmod_prefer_backend auto|openxr|openvr\n"
+                    .. "prefer: vrmod_prefer_backend auto|openxr|openvr|quest\n"
                     .. (vrmod.GetModuleLoadError and vrmod.GetModuleLoadError() or "Check antivirus / permissions.")
             end
         elseif g_VR.moduleVersion < requiredVersion then

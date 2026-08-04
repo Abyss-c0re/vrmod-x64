@@ -91,10 +91,10 @@ if CLIENT then
     vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset", -1.0, 1.0, tonumber)
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
-    -- Dual binaries: gmcl_vrmod_xr_* (OpenXR) + gmcl_vrmod_* (OpenVR) may both live in lua/bin.
-    -- auto = prefer OpenXR if installed, else OpenVR. Force with openxr|openvr.
+    -- Binaries may coexist in lua/bin: XR (WiVRn), OpenVR, optional quest (gVRLink).
+    -- auto = OpenXR if present else OpenVR. quest is NEVER auto — explicit only.
     vrmod.AddCallbackedConvar("vrmod_prefer_backend", nil, "auto", FCVAR_ARCHIVE,
-        "Native module prefer: auto | openxr | openvr (both DLLs may coexist)", nil, nil, tostring)
+        "Native module: auto | openxr | openvr | quest (quest = gVRLink thin; never auto)", nil, nil, tostring)
     -- mat_queue_mode: engine cvar only (no vrmod_mat_*). VR never SetInt's it —
     -- changing workers mid-session = Illegal termination of CThread.
     -- Desktop window focus: default OFF so HMD play works alt-tabbed / Wayland compositor focus loss.

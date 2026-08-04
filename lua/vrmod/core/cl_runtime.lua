@@ -1,8 +1,9 @@
--- Dual native modules (both may live in garrysmod/lua/bin at once):
---   OpenVR  → require("vrmod")    → gmcl_vrmod_linux64.dll / gmcl_vrmod_win64.dll
---   OpenXR  → require("vrmod_xr") → gmcl_vrmod_xr_linux64.dll / gmcl_vrmod_xr_win64.dll
+-- Native modules (all may live in garrysmod/lua/bin at once):
+--   OpenVR  → require("vrmod")       → gmcl_vrmod_linux64.dll
+--   OpenXR  → require("vrmod_xr")    → gmcl_vrmod_xr_linux64.dll   (WiVRn / local XR)
+--   Quest   → require("vrmod_quest") → gmcl_vrmod_quest_linux64.dll (gVRLink thin; opt-in)
 --
--- Law: never break OpenVR. Feature policy is selected AFTER a successful require.
+-- Law: never break OpenVR/OpenXR. Quest is NEVER auto-selected.
 
 vrmod = vrmod or {}
 g_VR = g_VR or {}
@@ -10,6 +11,7 @@ g_VR = g_VR or {}
 local BACKEND_NONE = "none"
 local BACKEND_OPENVR = "openvr"
 local BACKEND_OPENXR = "openxr"
+local BACKEND_QUEST = "quest"
 
 local DEFAULT_POLICY = {
 	backend = BACKEND_NONE,
@@ -74,6 +76,28 @@ local OPENVR_POLICY = {
 	label = "OpenVR (SteamVR / module-master)",
 }
 
+-- Thin gVRLink client (standalone Quest host). Never auto; explicit prefer only.
+local QUEST_POLICY = {
+	backend = BACKEND_QUEST,
+	moduleVersion = 0,
+	requireName = "vrmod_quest",
+	moduleFile = nil,
+	matQueueMin = 0,
+	matQueueMax = 2,
+	matQueueDefault = 1,
+	matQueuePinEveryFrame = false,
+	matQueueRestoreOnExit = false,
+	requiredModule = 100,
+	latestModule = 100,
+	moduleDownload = "https://github.com/Abyss-c0re/gVRMod/releases",
+	supportsEyeSizeArgs = true,
+	supportsKnownSubmitSize = true,
+	supportsSubmitGate = true,
+	supportsOpenXRBindings = false,
+	supportsRTTextureFlip = true,
+	label = "Quest gVRLink (thin / standalone host)",
+}
+
 local policy = table.Copy(DEFAULT_POLICY)
 local loadError = nil
 
@@ -82,28 +106,32 @@ local function platformModuleFiles()
 		return {
 			xr = "lua/bin/gmcl_vrmod_xr_linux64.dll",
 			openvr = "lua/bin/gmcl_vrmod_linux64.dll",
+			quest = "lua/bin/gmcl_vrmod_quest_linux64.dll",
 		}
 	end
 	if system.IsWindows() then
 		local xr = "lua/bin/gmcl_vrmod_xr_win64.dll"
 		local ovr = "lua/bin/gmcl_vrmod_win64.dll"
+		local quest = "lua/bin/gmcl_vrmod_quest_win64.dll"
 		if not file.Exists(ovr, "GAME") and file.Exists("lua/bin/gmcl_vrmod_win32.dll", "GAME") then
 			ovr = "lua/bin/gmcl_vrmod_win32.dll"
 		end
 		if not file.Exists(xr, "GAME") and file.Exists("lua/bin/gmcl_vrmod_xr_win32.dll", "GAME") then
 			xr = "lua/bin/gmcl_vrmod_xr_win32.dll"
 		end
-		return { xr = xr, openvr = ovr }
+		return { xr = xr, openvr = ovr, quest = quest }
 	end
-	return { xr = nil, openvr = nil }
+	return { xr = nil, openvr = nil, quest = nil }
 end
 
---- Prefer auto | openxr | openvr (convar vrmod_prefer_backend).
+--- Prefer auto | openxr | openvr | quest (convar vrmod_prefer_backend).
+--- quest is NEVER returned for "auto" — must be explicit.
 local function PreferBackend()
 	local cv = GetConVar and GetConVar("vrmod_prefer_backend")
 	local s = cv and string.lower(tostring(cv:GetString() or "auto")) or "auto"
 	if s == "openxr" or s == "xr" then return BACKEND_OPENXR end
 	if s == "openvr" or s == "ovr" or s == "steamvr" then return BACKEND_OPENVR end
+	if s == "quest" or s == "remote_quest" or s == "gvlink" then return BACKEND_QUEST end
 	return "auto"
 end
 
@@ -122,6 +150,12 @@ local function copyPolicy(src, ver, requireName, moduleFile)
 		p.supportsKnownSubmitSize = isfunction(VRMOD_SetKnownSubmitSize)
 		p.supportsSubmitGate = isfunction(VRMOD_SetSubmitEnabled)
 		p.supportsOpenXRBindings = isfunction(VRMOD_GetControllerSources)
+		p.supportsRTTextureFlip = isfunction(VRMOD_SetRTTextureFlip)
+	elseif p.backend == BACKEND_QUEST then
+		p.supportsEyeSizeArgs = true
+		p.supportsKnownSubmitSize = isfunction(VRMOD_SetKnownSubmitSize)
+		p.supportsSubmitGate = isfunction(VRMOD_SetSubmitEnabled)
+		p.supportsOpenXRBindings = false
 		p.supportsRTTextureFlip = isfunction(VRMOD_SetRTTextureFlip)
 	end
 	return p
@@ -152,16 +186,22 @@ function vrmod.LoadNativeModule()
 	local prefer = PreferBackend()
 	local haveXr = files.xr and file.Exists(files.xr, "GAME")
 	local haveOvr = files.openvr and file.Exists(files.openvr, "GAME")
+	local haveQuest = files.quest and file.Exists(files.quest, "GAME")
 
 	local order = {}
-	if prefer == BACKEND_OPENXR then
+	if prefer == BACKEND_QUEST then
+		-- Explicit only: try quest, then fall back to XR/OpenVR so a missing binary is not fatal
+		if haveQuest then table.insert(order, { "vrmod_quest", files.quest, BACKEND_QUEST }) end
+		if haveXr then table.insert(order, { "vrmod_xr", files.xr, BACKEND_OPENXR }) end
+		if haveOvr then table.insert(order, { "vrmod", files.openvr, BACKEND_OPENVR }) end
+	elseif prefer == BACKEND_OPENXR then
 		if haveXr then table.insert(order, { "vrmod_xr", files.xr, BACKEND_OPENXR }) end
 		if haveOvr then table.insert(order, { "vrmod", files.openvr, BACKEND_OPENVR }) end
 	elseif prefer == BACKEND_OPENVR then
 		if haveOvr then table.insert(order, { "vrmod", files.openvr, BACKEND_OPENVR }) end
 		if haveXr then table.insert(order, { "vrmod_xr", files.xr, BACKEND_OPENXR }) end
 	else
-		-- auto: OpenXR first if present (dual install prefers XR when available)
+		-- auto: OpenXR first — NEVER quest (standalone is opt-in)
 		if haveXr then table.insert(order, { "vrmod_xr", files.xr, BACKEND_OPENXR }) end
 		if haveOvr then table.insert(order, { "vrmod", files.openvr, BACKEND_OPENVR }) end
 	end
@@ -189,21 +229,26 @@ function vrmod.LoadNativeModule()
 			g_VR.moduleRequire = reqName
 			g_VR.moduleFile = path
 
-			-- Confirm backend (export / heuristics)
-			local isXr = (backend == BACKEND_OPENXR)
+			-- Confirm backend via export when present
+			local resolved = backend
 			if isfunction(VRMOD_GetBackend) then
 				local bok, name = pcall(VRMOD_GetBackend)
-				if bok and isstring(name) and string.lower(name) == "openxr" then
-					isXr = true
-				elseif bok and isstring(name) and string.lower(name) == "openvr" then
-					isXr = false
+				if bok and isstring(name) then
+					local n = string.lower(name)
+					if n == "quest" or n == "remote_quest" then
+						resolved = BACKEND_QUEST
+					elseif n == "openxr" then
+						resolved = BACKEND_OPENXR
+					elseif n == "openvr" then
+						resolved = BACKEND_OPENVR
+					end
 				end
-			elseif backend == BACKEND_OPENVR then
-				-- Safety: never treat a classic OpenVR binary as XR just by path
-				isXr = isfunction(VRMOD_SetKnownSubmitSize) or isfunction(VRMOD_SetSubmitEnabled)
 			end
 
-			if isXr then
+			if resolved == BACKEND_QUEST then
+				policy = copyPolicy(QUEST_POLICY, ver, reqName, path)
+				g_VR.backend = BACKEND_QUEST
+			elseif resolved == BACKEND_OPENXR then
 				policy = copyPolicy(OPENXR_POLICY, ver, reqName, path)
 				g_VR.backend = BACKEND_OPENXR
 			else
@@ -241,6 +286,7 @@ function vrmod.ListInstalledModules()
 	return {
 		openxr = files.xr and file.Exists(files.xr, "GAME") and files.xr or nil,
 		openvr = files.openvr and file.Exists(files.openvr, "GAME") and files.openvr or nil,
+		quest = files.quest and file.Exists(files.quest, "GAME") and files.quest or nil,
 	}
 end
 
@@ -264,10 +310,18 @@ function vrmod.DetectBackend()
 
 	if isfunction(VRMOD_GetBackend) then
 		local ok, name = pcall(VRMOD_GetBackend)
-		if ok and isstring(name) and string.lower(name) == "openxr" then
-			policy = copyPolicy(OPENXR_POLICY, ver, g_VR.moduleRequire or "vrmod_xr", g_VR.moduleFile)
-			g_VR.backend = BACKEND_OPENXR
-			return policy
+		if ok and isstring(name) then
+			local n = string.lower(name)
+			if n == "quest" or n == "remote_quest" then
+				policy = copyPolicy(QUEST_POLICY, ver, g_VR.moduleRequire or "vrmod_quest", g_VR.moduleFile)
+				g_VR.backend = BACKEND_QUEST
+				return policy
+			end
+			if n == "openxr" then
+				policy = copyPolicy(OPENXR_POLICY, ver, g_VR.moduleRequire or "vrmod_xr", g_VR.moduleFile)
+				g_VR.backend = BACKEND_OPENXR
+				return policy
+			end
 		end
 	end
 
@@ -307,6 +361,10 @@ end
 
 function vrmod.IsOpenVR()
 	return vrmod.GetBackend() == BACKEND_OPENVR
+end
+
+function vrmod.IsQuest()
+	return vrmod.GetBackend() == BACKEND_QUEST
 end
 
 function vrmod.ClampMatQueueMode(n)
