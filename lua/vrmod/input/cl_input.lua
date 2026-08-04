@@ -117,14 +117,53 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 				if not IsValid(ply) or not g_VR.vehicle.inside or not g_VR.vehicle.glide then return end
 				g_VR.vehicle.driving = ResolveGlideDriving(ply)
 			end)
-			-- Cube W3 / G14: honest toast — stick drives; wheel is optional assist
-			if g_VR.vehicle.driving and vrmod.Toast then
-				vrmod.Toast("Glide seat — use thumbstick; wheel is optional", 5, "hint")
+			-- Cube W3 / G14: pure HmdExpect toast + checklist (stick SoT)
+			if g_VR.vehicle.driving then
+				local expect = (vrmod.utils and vrmod.utils.Glide_HmdExpect)
+						and vrmod.utils.Glide_HmdExpect({
+							in_vehicle = true,
+							is_glide = true,
+							is_driver = true,
+							steer_source = "stick",
+							has_steer_action = true, -- refined after bind check
+						})
+					or nil
+				g_VR._glideHmdExpect = expect
+				g_VR._glideStatusLabel = (expect and vrmod.utils.Glide_StatusLabel
+					and vrmod.utils.Glide_StatusLabel(expect)) or nil
+				if expect and expect.checklist and vrmod.logger then
+					vrmod.logger.Info("G14 HMD %s", tostring(expect.checklist))
+				end
+				if vrmod.Toast and vrmod.utils and vrmod.utils.Glide_ShouldToastEnter
+					and vrmod.utils.Glide_ShouldToastEnter(expect, g_VR._glideEnterToasted) then
+					g_VR._glideEnterToasted = true
+					local t = vrmod.utils.Glide_EnterToast and vrmod.utils.Glide_EnterToast(expect)
+					if t then vrmod.Toast(t, 5, "hint") end
+				elseif vrmod.Toast then
+					vrmod.Toast("Glide seat — use thumbstick; wheel is optional", 5, "hint")
+				end
 				-- If driving actions never bound, warn once (was silent dead car)
 				timer.Create("vrmod_glide_bind_check", 1.5, 1, function()
 					if not g_VR.vehicle.inside or not g_VR.vehicle.glide or not g_VR.vehicle.driving then return end
 					local inp = g_VR.input
-					if not inp or inp.vector2_steer == nil then
+					local bound = inp and inp.vector2_steer ~= nil
+					if vrmod.utils and vrmod.utils.Glide_HmdExpect then
+						local ex = vrmod.utils.Glide_HmdExpect({
+							in_vehicle = true,
+							is_glide = true,
+							is_driver = true,
+							steer_source = "stick",
+							has_steer_action = bound and true or false,
+						})
+						g_VR._glideHmdExpect = ex
+						if ex and ex.checklist and vrmod.logger then
+							vrmod.logger.Info("G14 HMD %s", tostring(ex.checklist))
+						end
+						if not bound and vrmod.Toast then
+							local t = vrmod.utils.Glide_EnterToast and vrmod.utils.Glide_EnterToast(ex)
+							vrmod.Toast(t or "Glide inputs unbound — rebind /actions/driving or reinstall module", 7, "error")
+						end
+					elseif not bound and vrmod.Toast then
 						vrmod.Toast(
 							"Glide inputs unbound — rebind /actions/driving or reinstall module",
 							7,
@@ -398,11 +437,14 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 		local stickY = (inp.vector2_steer and inp.vector2_steer.y) or 0
 		local wheelSteer = (g_VR.wheelGripped and g_VR.analog_input.steer) or 0
 		local steer = stickX
+		local steerSrc = "stick"
 		if vrmod.utils and vrmod.utils.GlidePreferStickSteer then
-			steer = vrmod.utils.GlidePreferStickSteer(stickX, wheelSteer)
+			steer, steerSrc = vrmod.utils.GlidePreferStickSteer(stickX, wheelSteer)
 		elseif math.abs(stickX) < 0.05 and math.abs(wheelSteer) > 0.02 then
 			steer = wheelSteer
+			steerSrc = "wheel"
 		end
+		g_VR._glideSteerSource = steerSrc
 		if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
 		local pitch = (g_VR.analog_input.pitch or 0) + stickY
 		local yaw = (g_VR.analog_input.yaw or 0) + stickX
