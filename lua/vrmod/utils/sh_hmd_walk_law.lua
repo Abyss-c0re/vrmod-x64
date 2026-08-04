@@ -36,6 +36,8 @@ function vrmod.utils.HmdWalk_Catalog()
 		{ id = "G38", pri = "P1", section = "0.25", pure = "WorldModelLaw_HmdExpect", snap = "_worldModelLawHmdExpect", theme = "worldmodel single path" },
 		{ id = "G39", pri = "P1", section = "0.26", pure = "InitLaw_HmdExpect", snap = "_initLawHmdExpect", theme = "VR_Init human surface" },
 		{ id = "G40", pri = "P0", section = "0.27", pure = "BorderLaw_HmdExpect", snap = "_borderLawHmdExpect", theme = "Vision border fill" },
+		{ id = "G41", pri = "P1", section = "0.28", pure = "HmdWalk_HmdExpect", snap = "_hmdWalkLawHmdExpect", theme = "HMD walk inventory dump" },
+		{ id = "G42", pri = "P1", section = "0.29", pure = "HandStuckLaw_HmdExpect", snap = "_handStuckLawHmdExpect", theme = "hands stuck unstick" },
 	}
 end
 

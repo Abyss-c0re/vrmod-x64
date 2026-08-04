@@ -490,9 +490,9 @@ if CLIENT then
 	end
 
 	--- Ensure two pose tables never share Vector/Angle identity (runtime heal).
-	-- Workshop: "hands stuck together" / "hands tied" — shared Vector identity or
-	-- collision collapse to same world point. Heal identity always; if positions
-	-- coincide but raw still has separation, restore from raw.
+	-- G42 / ship bar: "hands stuck together" — pure HandStuckLaw_* owns thresholds.
+	-- Heal identity always; if track collapsed but raw separated, restore from raw.
+	-- Skip unstick while stock foregrip owns left (no climb/wall thrash).
 	local function EnsurePoseIndependence()
 		local tr = g_VR.tracking
 		if not tr then return end
@@ -500,6 +500,8 @@ if CLIENT then
 		local raw = g_VR.rawTracking
 		local rL = raw and raw.pose_lefthand
 		local rR = raw and raw.pose_righthand
+		local U = vrmod.utils
+		local identityHealed, unstuckApplied = false, false
 
 		local function cloneVec(v)
 			return Vector(v.x, v.y, v.z)
@@ -508,35 +510,65 @@ if CLIENT then
 			return Angle(a.p, a.y, a.r)
 		end
 
-		-- 1) Identity glue (same userdata) — always split
-		if L and R and L.pos and R.pos and L.pos == R.pos then
-			R.pos = cloneVec(R.pos)
-			if vrmod.logger then
-				vrmod.logger.Warn("Healed glued hand pos identity (L==R Vector)")
+		-- 1) Identity glue (same userdata) — always split (pure: ShouldSplitIdentity)
+		local posIdLR = L and R and L.pos and R.pos and L.pos == R.pos
+		local angIdLR = L and R and L.ang and R.ang and L.ang == R.ang
+		local posIdHL = H and L and H.pos and L.pos and H.pos == L.pos
+		local posIdHR = H and R and H.pos and R.pos and H.pos == R.pos
+		local posIdRaw = rL and rR and rL.pos and rR.pos and rL.pos == rR.pos
+		local angIdRaw = rL and rR and rL.ang and rR.ang and rL.ang == rR.ang
+		local split = true
+		if U and U.HandStuckLaw_ShouldSplitIdentity then
+			split = U.HandStuckLaw_ShouldSplitIdentity(
+				posIdLR or angIdLR or posIdHL or posIdHR or posIdRaw or angIdRaw
+			)
+		end
+		if split then
+			if posIdLR then
+				R.pos = cloneVec(R.pos)
+				identityHealed = true
+				if vrmod.logger then
+					vrmod.logger.Warn("Healed glued hand pos identity (L==R Vector)")
+				end
 			end
-		end
-		if L and R and L.ang and R.ang and L.ang == R.ang then
-			R.ang = cloneAng(R.ang)
-		end
-		if H and L and H.pos and L.pos and H.pos == L.pos then
-			L.pos = cloneVec(L.pos)
-		end
-		if H and R and H.pos and R.pos and H.pos == R.pos then
-			R.pos = cloneVec(R.pos)
-		end
-		if rL and rR and rL.pos and rR.pos and rL.pos == rR.pos then
-			rR.pos = cloneVec(rR.pos)
-		end
-		if rL and rR and rL.ang and rR.ang and rL.ang == rR.ang then
-			rR.ang = cloneAng(rR.ang)
+			if angIdLR then
+				R.ang = cloneAng(R.ang)
+				identityHealed = true
+			end
+			if posIdHL then
+				L.pos = cloneVec(L.pos)
+				identityHealed = true
+			end
+			if posIdHR then
+				R.pos = cloneVec(R.pos)
+				identityHealed = true
+			end
+			if posIdRaw then
+				rR.pos = cloneVec(rR.pos)
+				identityHealed = true
+			end
+			if angIdRaw then
+				rR.ang = cloneAng(rR.ang)
+				identityHealed = true
+			end
 		end
 
 		-- 2) Value collapse: L/R nearly same world pos but raw is separated → un-stick
-		-- Skip while stock foregrip owns left hand (attach may sit near RH on short guns).
-		if not g_VR.foregripActive and L and R and L.pos and R.pos and rL and rR and rL.pos and rR.pos then
-			local trackDist = L.pos:DistToSqr(R.pos)
-			local rawDist = rL.pos:DistToSqr(rR.pos)
-			if trackDist < 4 and rawDist > 36 then -- <2u glued, raw >6u apart
+		local trackDist, rawDist
+		if L and R and L.pos and R.pos and rL and rR and rL.pos and rR.pos then
+			trackDist = L.pos:DistToSqr(R.pos)
+			rawDist = rL.pos:DistToSqr(rR.pos)
+			local wantRaw = false
+			if U and U.HandStuckLaw_ShouldUnstickFromRaw then
+				wantRaw = U.HandStuckLaw_ShouldUnstickFromRaw({
+					track_dist_sqr = trackDist,
+					raw_dist_sqr = rawDist,
+					foregrip_active = g_VR.foregripActive and true or false,
+				})
+			else
+				wantRaw = not g_VR.foregripActive and trackDist < 4 and rawDist > 36
+			end
+			if wantRaw then
 				L.pos.x, L.pos.y, L.pos.z = rL.pos.x, rL.pos.y, rL.pos.z
 				R.pos.x, R.pos.y, R.pos.z = rR.pos.x, rR.pos.y, rR.pos.z
 				if rL.ang and L.ang then
@@ -545,10 +577,30 @@ if CLIENT then
 				if rR.ang and R.ang then
 					R.ang.p, R.ang.y, R.ang.r = rR.ang.p, rR.ang.y, rR.ang.r
 				end
+				unstuckApplied = true
 				if vrmod.logger then
 					vrmod.logger.Warn("Unstuck hands from rawTracking (track collapsed, raw separated)")
 				end
 			end
+		end
+
+		if U and U.HandStuckLaw_Decide then
+			local d = U.HandStuckLaw_Decide({
+				pos_identity_lr = posIdLR,
+				ang_identity_lr = angIdLR,
+				pos_identity_hl = posIdHL,
+				pos_identity_hr = posIdHR,
+				pos_identity_raw_lr = posIdRaw,
+				ang_identity_raw_lr = angIdRaw,
+				track_dist_sqr = trackDist,
+				raw_dist_sqr = rawDist,
+				foregrip_active = g_VR.foregripActive and true or false,
+				identity_healed = identityHealed,
+				unstuck_applied = unstuckApplied,
+			})
+			g_VR._handStuckLaw = d
+			g_VR._handStuckLawLabel = U.HandStuckLaw_StatusLabel and U.HandStuckLaw_StatusLabel(d) or nil
+			g_VR._handStuckLawHmdExpect = U.HandStuckLaw_HmdExpect and U.HandStuckLaw_HmdExpect(d) or nil
 		end
 	end
 
