@@ -1346,13 +1346,30 @@ if CLIENT then
 			pcall(render.PopRenderTarget)
 		end
 
-		-- Desktop mirror (b1a5e9e-era): after PopRenderTarget, CullMode(1)+NDC UV.
+		-- Desktop mirror (b1a5e9e-era mid-frame): CullMode(1)+NDC UV after PopRT.
+		-- G46: pure DesktopMirror_* snapshots risk; mid-frame live RT allowed (legacy).
 		local dv = g_VR.desktopView or 1
 		local DC = vrmod.DesktopCam
 		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv))
 			or (tonumber(dv) == 4)
 		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv))
 			or (tonumber(dv) == 2 or tonumber(dv) == 3)
+		local U = vrmod.utils
+		if U and U.DesktopMirror_Decide then
+			local d = U.DesktopMirror_Decide({
+				desktop_view = dv,
+				vr_active = true,
+				mid_frame = true,
+				after_submit = false,
+				sample_stereo_rt = isEyeCrop and true or false,
+				attempt_present = isEyeCrop or isFollow,
+			})
+			g_VR._desktopMirrorLaw = d
+			g_VR._desktopMirrorLawLabel = U.DesktopMirror_StatusLabel
+				and U.DesktopMirror_StatusLabel(d) or nil
+			g_VR._desktopMirrorHmdExpect = U.DesktopMirror_HmdExpect
+				and U.DesktopMirror_HmdExpect(d) or nil
+		end
 		if isFollow then
 			if DC then
 				if DC.SyncFromDesktopView then

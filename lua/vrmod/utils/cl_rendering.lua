@@ -31,14 +31,24 @@ end
 
 --- Stereo RT UV crop for desktop blit.
 --- desktopView: 1=none 2=left 3=right 4=follow-cam (no stereo crop — use DesktopCam RT)
+--- Soft NaN/zero guards (offline + bad ScrW/H) without changing valid b1a5e9e math.
 function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
     desktopView = tonumber(desktopView) or 1
     -- G23: only left/right eye crop; follow-cam and none skip stereo half-blit
     if desktopView == 4 or desktopView == 1 then
-        -- Follow-cam uses its own RT; none draws nothing — crop unused
         return 0, 0
     end
-    local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
+    w = tonumber(w) or 0
+    h = tonumber(h) or 0
+    local sw = (ScrW and ScrW()) or 0
+    local sh = (ScrH and ScrH()) or 0
+    if w < 32 or h < 32 or not sw or sw < 1 or not sh or sh < 1 then
+        return 0.05, desktopView == 3 and 0.5 or 0
+    end
+    local vmargin = (1 - sh / sw * w / 2 / h) / 2
+    if vmargin ~= vmargin then vmargin = 0 end -- NaN
+    if vmargin < 0 then vmargin = 0 end
+    if vmargin > 0.45 then vmargin = 0.45 end
     local hoffset = desktopView == 3 and 0.5 or 0
     return vmargin, hoffset
 end
