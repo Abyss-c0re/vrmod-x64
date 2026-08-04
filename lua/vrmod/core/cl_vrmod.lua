@@ -1752,24 +1752,47 @@ if CLIENT then
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
 
-			local shouldRender = true
+			local openxrShouldRender = true
 			if isfunction(VRMOD_ShouldRender) then
 				local okSR, sr = pcall(VRMOD_ShouldRender)
-				if okSR then shouldRender = sr and true or false end
+				if okSR then openxrShouldRender = sr and true or false end
 			end
 
-			if shouldRender then
+			-- G05: stereo policy during load / early handoff (pure SoT — no dual under mq≥2)
+			local mq = g_VR._matQueueMode or WantedMatQueueMode()
+			local loading = false
+			if not IsInGame or not IsInGame() then
+				loading = true
+			else
+				local ply = LocalPlayer()
+				if not IsValid(ply) then loading = true end
+			end
+			local policy = (vrmod.utils and vrmod.utils.StereoLoadPolicy)
+					and vrmod.utils.StereoLoadPolicy({
+						mat_queue_mode = mq,
+						vr_active = true,
+						loading = loading,
+						openxr_should_render = openxrShouldRender,
+					})
+				or { dual_eye = (mq or 1) < 2, keep_submit = true, prefer_paint_while_load = false }
+			g_VR._stereoLoadPolicy = policy
+			local paint = openxrShouldRender
+			if vrmod.utils and vrmod.utils.ShouldPaintStereoThisFrame then
+				paint = vrmod.utils.ShouldPaintStereoThisFrame(policy, openxrShouldRender)
+			end
+
+			if paint then
 				PerformRenderViews()
 				-- Optional isolate into module staging (never required for submit).
 				-- Skip under mat_queue 2 — blit from live engine RT races workers.
-				local mq = g_VR._matQueueMode or WantedMatQueueMode()
-				if mq < 2 and isfunction(VRMOD_CollectEyes) then
+				if (mq or 1) < 2 and isfunction(VRMOD_CollectEyes) then
 					PushKnownSubmitSize()
 					pcall(VRMOD_CollectEyes)
 				end
 			end
 
-			if isfunction(VRMOD_SubmitSharedTexture) then
+			-- G05: keep Submit while active (policy.keep_submit) — avoids HMD void on load frames
+			if policy.keep_submit ~= false and isfunction(VRMOD_SubmitSharedTexture) then
 				VRMOD_SubmitSharedTexture()
 			end
 			hook.Call("VRMod_PostRender")
