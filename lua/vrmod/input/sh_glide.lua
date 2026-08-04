@@ -1,5 +1,7 @@
 -- Glide vehicle VR input bridge.
 -- Glide removed ply NWEntity "GlideVehicle" (2026-06); resolve via GlideGetVehicle().
+-- G14 / W3: stick is drive SoT; wheel grip is optional assist only.
+-- Pure SoT helpers: vrmod.utils.GlideSeatIsDriver / GlidePreferStickSteer (utils/sh_glide_sot.lua).
 g_VR = g_VR or {}
 
 local validVehicleTypes
@@ -39,8 +41,8 @@ local function ResolveGlideVehicle(ply)
 		seatIndex = ply:GlideGetSeatIndex() or 0
 	end
 
+	-- Server only applies drive inputs for seat 1 (driver).
 	if seatIndex < 1 then
-		-- Driver seat is always 1; only accept real seat indices from Glide.
 		return nil, 0
 	end
 

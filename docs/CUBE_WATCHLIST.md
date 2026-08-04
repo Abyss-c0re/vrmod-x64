@@ -46,13 +46,14 @@ Sources (live watch):
 - Remove remaining `viewmodel_fov` override (VR draws its own VM path).  
 - Only hard pin: `mat_queue_mode=1`. Soft-skip missing/failed SetString.
 
-### W3 — Glide dead input (P0) — *partial in tree*
+### W3 — Glide dead input (P0) — *partial in tree* (G14)
 **Cube way:** one vehicle input SoT — no “grab wheel” path that lies about throttle.  
 - Audit `sh_vehicles` / Glide hooks after July Glide update.  
 - Prefer **joystick/action-set driving** as default when Glide seat detected; wheel grab as visual/assist only.  
 - If Glide API moved: adapter layer in one file, no forks in tracking.  
 - Cube toast if Glide present but input not binding: “Glide seat — use thumbstick; wheel is optional.”  
-- **Landed:** stick preferred over wheel; seat recheck; enter/unbound toasts (`5c29986`). Workshop comment Sobik349 still needs smoke.
+- **Landed:** stick preferred over wheel (`GlidePreferStickSteer`); seat recheck; enter/unbound toasts; pure helpers offline-tested.  
+- **HMD smoke (manual — not offline):** enter Glide car in VR → toast once → stick steers/throttles → grip wheel only assists when stick idle → passenger seat (index ≠ 1) does not drive. Workshop Sobik349 still needs that walkthrough.
 
 ### W4 — Swapped eyes (P1) — *convar + Cube toggle*
 **Cube way:** single bool, no second pose stream.  

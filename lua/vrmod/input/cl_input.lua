@@ -90,8 +90,10 @@ local function ResolveGlideDriving(ply)
 		seat = ply:GlideGetSeatIndex() or 0
 	end
 	-- Driver seat is 1. Seat 0 = API not ready yet → treat as driver until recheck.
-	if seat == 1 or seat < 1 then return true end
-	return false
+	if vrmod.utils and vrmod.utils.GlideSeatIsDriver then
+		return vrmod.utils.GlideSeatIsDriver(seat)
+	end
+	return seat == 1 or seat < 1
 end
 
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
@@ -115,16 +117,16 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 				if not IsValid(ply) or not g_VR.vehicle.inside or not g_VR.vehicle.glide then return end
 				g_VR.vehicle.driving = ResolveGlideDriving(ply)
 			end)
-			-- Cube W3: honest toast — stick drives; wheel is optional assist
+			-- Cube W3 / G14: honest toast — stick drives; wheel is optional assist
 			if g_VR.vehicle.driving and vrmod.Toast then
-				vrmod.Toast("Glide: thumbstick throttle/steer · wheel grip is optional assist", 5, "hint")
+				vrmod.Toast("Glide seat — use thumbstick; wheel is optional", 5, "hint")
 				-- If driving actions never bound, warn once (was silent dead car)
 				timer.Create("vrmod_glide_bind_check", 1.5, 1, function()
 					if not g_VR.vehicle.inside or not g_VR.vehicle.glide or not g_VR.vehicle.driving then return end
 					local inp = g_VR.input
 					if not inp or inp.vector2_steer == nil then
 						vrmod.Toast(
-							"Glide inputs unbound — SteamVR bindings missing for VRMod /actions/driving. Reinstall module or rebind.",
+							"Glide inputs unbound — rebind /actions/driving or reinstall module",
 							7,
 							"error"
 						)
@@ -388,7 +390,7 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 
 	if Glide and g_VR.vehicle.glide then
 		-- === Steering / throttle / brake ===
-		-- Cube W3: joystick/action-set is SoT; wheel grip is assist only when stick idle.
+		-- Cube W3 / G14: joystick/action-set is SoT; wheel grip assist only when stick idle.
 		local inp = g_VR.input or {}
 		local throttle = inp.vector1_forward or 0
 		local brake = inp.vector1_reverse or 0
@@ -396,7 +398,9 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 		local stickY = (inp.vector2_steer and inp.vector2_steer.y) or 0
 		local wheelSteer = (g_VR.wheelGripped and g_VR.analog_input.steer) or 0
 		local steer = stickX
-		if math.abs(stickX) < 0.05 and math.abs(wheelSteer) > 0.02 then
+		if vrmod.utils and vrmod.utils.GlidePreferStickSteer then
+			steer = vrmod.utils.GlidePreferStickSteer(stickX, wheelSteer)
+		elseif math.abs(stickX) < 0.05 and math.abs(wheelSteer) > 0.02 then
 			steer = wheelSteer
 		end
 		if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
