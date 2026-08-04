@@ -255,7 +255,7 @@ local function noteStagePackOnce()
 		return
 	end
 	g_VR._cubeStagePack = pack
-	-- G03 apply gate: classify only (allow_apply stays false — no origin/scale mutation)
+	-- G03 apply gate + plan preview (allow_apply stays false — no origin/scale mutation)
 	local measuredY
 	pcall(function()
 		local hmd = g_VR.tracking and g_VR.tracking.hmd
@@ -269,11 +269,27 @@ local function noteStagePackOnce()
 		allow_apply = false, -- hard law until HMD-proven apply path
 	})
 	g_VR._cubeStagePackApply = decision
-	local hint = (vrmod.utils.StagePack_ApplyToast and vrmod.utils.StagePack_ApplyToast(decision))
+	local curSeat = 0
+	pcall(function()
+		local cv = GetConVar and GetConVar("vrmod_seatedoffset")
+		if cv then curSeat = cv:GetFloat() end
+	end)
+	local plan = (vrmod.utils.StagePack_ComputeApplyPlan and vrmod.utils.StagePack_ComputeApplyPlan(pack, decision, {
+		world_scale = (g_VR.scale and g_VR.scale > 1) and g_VR.scale or 40,
+		current_seatedoffset = curSeat,
+		allow_apply = false,
+	})) or nil
+	g_VR._cubeStagePackPlan = plan
+	-- Mutations only if do_apply — product plan always dry (empty list)
+	local muts = (plan and vrmod.utils.StagePack_MutationsFromPlan and vrmod.utils.StagePack_MutationsFromPlan(plan)) or {}
+	g_VR._cubeStagePackMutations = muts
+	local hint = (plan and vrmod.utils.StagePack_PlanToast and vrmod.utils.StagePack_PlanToast(plan))
+		or (vrmod.utils.StagePack_ApplyToast and vrmod.utils.StagePack_ApplyToast(decision))
 		or vrmod.utils.StagePack_ToastHint(pack)
-	log("stage pack ok space=%s head_ok=%s y=%s apply=%s reason=%s",
+	log("stage pack ok space=%s head_ok=%s y=%s apply=%s reason=%s plan=%s muts=%d",
 		tostring(pack.ref_space), tostring(pack.head_ok), tostring(pack.head_y),
-		tostring(decision and decision.action), tostring(decision and decision.reason))
+		tostring(decision and decision.action), tostring(decision and decision.reason),
+		tostring(plan and plan.method), #muts)
 	-- Toast is informational only — do not SetFloat scale / seatedoffset / origin here
 	if hint and vrmod.Toast then
 		vrmod.Toast(hint, 4, "hint")

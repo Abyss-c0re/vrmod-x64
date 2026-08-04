@@ -225,3 +225,119 @@ function vrmod.utils.StagePack_ApplyToast(decision)
 	end
 	return nil
 end
+
+--- G03 pure apply *plan* (preview numbers only — never mutates convars).
+--- Builds seated-offset continuity so live HMD Y can match Cube shell pack head_y.
+---
+--- pack: StagePack_Parse result
+--- decision: StagePack_ApplyDecision result
+--- opts:
+---   world_scale           number  g_VR.scale (Source units per meter), default 1
+---   current_seatedoffset  number  current vrmod_seatedoffset, default 0
+---   max_seated_abs        number  clamp |new offset| (default 40 Source units)
+---   allow_apply           bool    if true, plan.do_apply may become true
+---
+--- Returns plan table with preview + do_apply=false unless allow_apply and eligible.
+function vrmod.utils.StagePack_ComputeApplyPlan(pack, decision, opts)
+	opts = type(opts) == "table" and opts or {}
+	local plan = {
+		valid = false,
+		do_apply = false,
+		method = "none",
+		reason = "no_decision",
+		seated_delta_source = 0,
+		seated_new = 0,
+		viewscale = nil,
+		scalefactor = nil,
+		delta_y_m = nil,
+	}
+	if type(decision) ~= "table" then return plan end
+	plan.reason = tostring(decision.reason or "none")
+	plan.delta_y_m = tonumber(decision.delta_y)
+	plan.valid = true
+
+	local allow = opts.allow_apply and true or false
+	if decision.allow_apply ~= nil then
+		-- Prefer decision's allow flag when present
+		allow = decision.allow_apply and true or false
+	end
+
+	local scale = tonumber(opts.world_scale) or 1
+	if scale < 1 then scale = 1 end
+	local curSeat = tonumber(opts.current_seatedoffset) or 0
+	local maxAbs = tonumber(opts.max_seated_abs) or 40
+	if maxAbs < 5 then maxAbs = 40 end
+
+	-- Continuity scales from pack (informational; height uses seated)
+	if type(pack) == "table" then
+		plan.viewscale = tonumber(pack.viewscale)
+		plan.scalefactor = tonumber(pack.scalefactor)
+	end
+
+	local r = plan.reason
+	if r == "already_close" or r == "too_far" or r == "no_head" or r == "no_measured" or r == "unusable" then
+		plan.method = "none"
+		plan.do_apply = false
+		return plan
+	end
+
+	-- Eligible band: prefer seated offset (less dual-truth than rewriting world scale)
+	local dY = plan.delta_y_m
+	if not dY then
+		plan.method = "none"
+		plan.reason = "no_delta"
+		return plan
+	end
+
+	-- Live is above pack when delta>0; lift origin by (pack-measured) so head matches pack
+	local deltaSource = -dY * scale
+	-- Clamp single-step seated change
+	if deltaSource > maxAbs then deltaSource = maxAbs end
+	if deltaSource < -maxAbs then deltaSource = -maxAbs end
+	local newSeat = curSeat + deltaSource
+	if newSeat > maxAbs then newSeat = maxAbs end
+	if newSeat < -maxAbs then newSeat = -maxAbs end
+
+	plan.method = "seated_offset"
+	plan.seated_delta_source = deltaSource
+	plan.seated_new = newSeat
+	plan.do_apply = allow and (decision.safe and true or false) and true or false
+	if allow and plan.do_apply then
+		plan.reason = "eligible"
+	elseif decision.safe then
+		plan.reason = "eligible_deferred"
+		plan.do_apply = false
+	end
+	return plan
+end
+
+--- Toast for apply plan preview (pure).
+function vrmod.utils.StagePack_PlanToast(plan)
+	if type(plan) ~= "table" or not plan.valid then return nil end
+	if plan.method == "seated_offset" then
+		local d = tonumber(plan.seated_delta_source) or 0
+		if plan.do_apply then
+			return string.format("Cube pack · seated Δ %.1f · apply armed", d)
+		end
+		return string.format("Cube pack · seated Δ %.1f preview · apply deferred", d)
+	end
+	return vrmod.utils.StagePack_ApplyToast({
+		reason = plan.reason,
+		action = plan.do_apply and "apply_scale" or "hint_only",
+		delta_y = plan.delta_y_m,
+	})
+end
+
+--- Pure mutation list from plan. Empty unless plan.do_apply (executor stays separate).
+--- Returns array of { convar=, value= } — caller may apply; this module never sets them.
+function vrmod.utils.StagePack_MutationsFromPlan(plan)
+	local out = {}
+	if type(plan) ~= "table" or not plan.do_apply then return out end
+	if plan.method == "seated_offset" and tonumber(plan.seated_new) then
+		out[#out + 1] = {
+			convar = "vrmod_seatedoffset",
+			value = tonumber(plan.seated_new),
+		}
+	end
+	return out
+end
