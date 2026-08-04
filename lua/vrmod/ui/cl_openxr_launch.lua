@@ -233,11 +233,43 @@ local function openNativeLauncherUI()
 	return false
 end
 
+-- G03: read Cube shell STAGE pack (continuity data only — never auto-apply height/origin).
+local stagePackNotified = false
+local function noteStagePackOnce()
+	if stagePackNotified then return end
+	stagePackNotified = true
+	if not (vrmod.utils and vrmod.utils.StagePack_Parse) then return end
+	local raw
+	pcall(function()
+		if file and file.Exists and file.Exists("vrmod/cube_stage_pack.txt", "DATA") then
+			raw = file.Read("vrmod/cube_stage_pack.txt", "DATA")
+		end
+	end)
+	if not raw or raw == "" then
+		log("no cube_stage_pack.txt (cold start without Cube shell pack)")
+		return
+	end
+	local pack = vrmod.utils.StagePack_Parse(raw)
+	if not pack or not vrmod.utils.StagePack_IsUsable(pack) then
+		log("stage pack present but unusable")
+		return
+	end
+	g_VR._cubeStagePack = pack
+	local hint = vrmod.utils.StagePack_ToastHint(pack)
+	log("stage pack ok space=%s head_ok=%s y=%s (apply deferred)",
+		tostring(pack.ref_space), tostring(pack.head_ok), tostring(pack.head_y))
+	-- Toast is informational only — do not SetFloat scale / seatedoffset / origin here
+	if hint and vrmod.Toast then
+		vrmod.Toast(hint, 4, "hint")
+	end
+end
+
 local function afterVRLive()
 	log("VR active map=%s — opening native Cube launcher", tostring(game.GetMap and game.GetMap() or "?"))
 	consumeMarker()
 	pcall(function() RunConsoleCommand("vrmod_laserpointer", "1") end)
 	if vrmod.VRUnpauseWorld then pcall(vrmod.VRUnpauseWorld) end
+	noteStagePackOnce()
 
 	-- Immediate + retries (hand poses / menus load slightly after active)
 	openNativeLauncherUI()
