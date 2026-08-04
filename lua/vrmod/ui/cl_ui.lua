@@ -37,10 +37,17 @@ if CLIENT then
 
 	function vrmod.GetPrimaryHand()
 		local v = cv_primary_hand and cv_primary_hand:GetInt() or 0
+		-- G16 pure SoT (fallback if util not loaded yet)
+		if vrmod.utils and vrmod.utils.LaserLaw_PrimaryHandFromInt then
+			return vrmod.utils.LaserLaw_PrimaryHandFromInt(v)
+		end
 		return (v == 1) and "left" or "right"
 	end
 
 	function vrmod.GetSecondaryHand()
+		if vrmod.utils and vrmod.utils.LaserLaw_SecondaryHand then
+			return vrmod.utils.LaserLaw_SecondaryHand(vrmod.GetPrimaryHand())
+		end
 		return vrmod.GetPrimaryHand() == "left" and "right" or "left"
 	end
 
@@ -51,6 +58,9 @@ if CLIENT then
 	--- Quick menu mode: "left" | "right" | "float"
 	function vrmod.GetQuickMenuAttachMode()
 		local v = cv_qm_attach and cv_qm_attach:GetInt() or 0
+		if vrmod.utils and vrmod.utils.LaserLaw_QmAttachModeFromInt then
+			return vrmod.utils.LaserLaw_QmAttachModeFromInt(v)
+		end
 		if v == 1 then return "right" end
 		if v == 2 then return "float" end
 		return "left"
@@ -82,6 +92,9 @@ if CLIENT then
 
 	--- Primary-hand trigger → LMB (right fire or left fire depending on setting).
 	function vrmod.IsMenuPrimaryClick(action)
+		if vrmod.utils and vrmod.utils.LaserLaw_IsMenuPrimaryClick then
+			return vrmod.utils.LaserLaw_IsMenuPrimaryClick(action, vrmod.GetPrimaryHand())
+		end
 		if action == "boolean_car_mouse_left" then return true end
 		if vrmod.GetPrimaryHand() == "left" then
 			return action == "boolean_left_primaryfire"
@@ -91,12 +104,18 @@ if CLIENT then
 
 	--- Secondary / cancel / RMB (either hand secondary + car RMB).
 	function vrmod.IsMenuSecondaryClick(action)
+		if vrmod.utils and vrmod.utils.LaserLaw_IsMenuSecondaryClick then
+			return vrmod.utils.LaserLaw_IsMenuSecondaryClick(action)
+		end
 		return action == "boolean_secondaryfire"
 			or action == "boolean_left_secondaryfire"
 			or action == "boolean_car_mouse_right"
 	end
 
 	function vrmod.IsMenuCloseAction(action)
+		if vrmod.utils and vrmod.utils.LaserLaw_IsMenuCloseAction then
+			return vrmod.utils.LaserLaw_IsMenuCloseAction(action)
+		end
 		return vrmod.IsMenuSecondaryClick(action)
 			or action == "boolean_chat"
 	end
@@ -1304,10 +1323,21 @@ if CLIENT then
 		local eye = g_VR.stereoEye
 		-- First eye of the frame solves laser focus; second eye reuses (no double hit tests)
 		-- Always re-solve while resizing or if scale changed since freeze (close-btn desync)
-		local mustResolve = g_VR.menuResizeActive
-			or (focusSnap.frame ~= sf)
-			or (eye == "left")
-			or (eye == nil)
+		-- G16 pure first-eye focus solve (fallback to prior inline law)
+		local mustResolve
+		if vrmod.utils and vrmod.utils.LaserLaw_ShouldSolveFocus then
+			mustResolve = vrmod.utils.LaserLaw_ShouldSolveFocus({
+				stereo_eye = eye,
+				stereo_frame = sf,
+				focus_frame = focusSnap.frame,
+				resize_active = g_VR.menuResizeActive and true or false,
+			})
+		else
+			mustResolve = g_VR.menuResizeActive
+				or (focusSnap.frame ~= sf)
+				or (eye == "left")
+				or (eye == nil)
+		end
 		local solveFocus = mustResolve
 		if solveFocus then
 			g_VR.menuFocus = false
