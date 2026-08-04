@@ -1390,11 +1390,27 @@ if CLIENT then
 		render.SetToneMappingScaleLinear(g_VR.view.dopostprocess and Vector(0.50, 0.50, 0.50) or Vector(1, 1, 1))
 
 		-- Laser from primary hand only (never dual free-for-all)
+		-- G45: pure LaserLaw_Decide snapshot (primary-left steal / dual forbidden)
 		local primaryName = vrmod.GetPrimaryHand()
 		local laserHand = HandPoseLive(primaryName) or HandPose(primaryName)
 		local laserPos = laserHand and laserHand.pos
 		local laserAng = laserHand and laserHand.ang
 		g_VR.menuPointerHand = primaryName
+		local U = vrmod.utils
+		if U and U.LaserLaw_Decide then
+			local d = U.LaserLaw_Decide({
+				vr_active = true,
+				laser_on = true,
+				has_primary_pose = laserPos and true or false,
+				menu_focus = g_VR.menuFocus and true or false,
+				primary_hand = primaryName,
+				laser_hand = primaryName,
+				dual_laser = false,
+			})
+			g_VR._laserLaw = d
+			g_VR._laserLawLabel = U.LaserLaw_StatusLabel and U.LaserLaw_StatusLabel(d) or nil
+			g_VR._laserLawHmdExpect = U.LaserLaw_HmdExpect and U.LaserLaw_HmdExpect(d) or nil
+		end
 
 		for _, v in ipairs(menuOrder) do
 			local k = v.uid

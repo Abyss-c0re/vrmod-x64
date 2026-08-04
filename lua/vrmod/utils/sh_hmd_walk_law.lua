@@ -40,6 +40,7 @@ function vrmod.utils.HmdWalk_Catalog()
 		{ id = "G42", pri = "P1", section = "0.29", pure = "HandStuckLaw_HmdExpect", snap = "_handStuckLawHmdExpect", theme = "hands stuck unstick" },
 		{ id = "G43", pri = "P1", section = "0.30", pure = "NestedRtLaw_HmdExpect", snap = "_nestedRtLawHmdExpect", theme = "menu-open nested RT crash" },
 		{ id = "G44", pri = "P1", section = "0.31", pure = "GrabEndLaw_HmdExpect", snap = "_grabEndLawHmdExpect", theme = "grab_end / drop cooldown" },
+		{ id = "G45", pri = "P1", section = "0.32", pure = "LaserLaw_Decide", snap = "_laserLawHmdExpect", theme = "primary-hand left SoT" },
 	}
 end
 
