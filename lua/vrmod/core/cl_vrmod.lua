@@ -1633,35 +1633,62 @@ if CLIENT then
 	end
 
 	local function SetupActions()
-		RewriteActionManifestFiles()
-		local manPath = "vrmod/vrmod_action_manifest.txt"
-		local hasFile = file.Exists(manPath, "DATA")
-		local okMan, errMan = pcall(VRMOD_SetActionManifest, manPath)
-		if not okMan then
-			-- Retry after force rewrite (corrupt DATA / first-run race)
+		-- G31 / W6: force-rewrite self-heal (pure law); never abort VR; toast on fail
+		local U = vrmod.utils
+		local forceRewrite = not U or not U.BindingsLaw_ForceRewriteOnStart or U.BindingsLaw_ForceRewriteOnStart()
+		if forceRewrite then
 			RewriteActionManifestFiles()
-			okMan, errMan = pcall(VRMOD_SetActionManifest, manPath)
 		end
+		local manPath = (U and U.BindingsLaw_ManifestRelPath and U.BindingsLaw_ManifestRelPath())
+			or "vrmod/vrmod_action_manifest.txt"
+		local hasFile = file.Exists(manPath, "DATA")
+		local firstOk, errMan = pcall(VRMOD_SetActionManifest, manPath)
+		local retryOk = false
+		if not firstOk then
+			-- Retry after force rewrite (corrupt DATA / first-run race)
+			if not U or not U.BindingsLaw_ShouldRetryAfterFail or U.BindingsLaw_ShouldRetryAfterFail(1) then
+				RewriteActionManifestFiles()
+				retryOk, errMan = pcall(VRMOD_SetActionManifest, manPath)
+			end
+		end
+		local okMan = firstOk or retryOk
+		hasFile = file.Exists(manPath, "DATA")
+		local toastShown = false
 		if not okMan then
 			local detail = tostring(errMan or "unknown")
 			if vrmod.logger then
 				vrmod.logger.Err("SetActionManifest failed (VR continues without bindings): %s hasFile=%s", detail, tostring(hasFile))
 			end
+			local toastMsg = (U and U.BindingsLaw_ToastMessage and U.BindingsLaw_ToastMessage())
+				or "Controller bindings failed — reinstall VRMod module; ensure data/vrmod/vrmod_action_manifest.txt exists. Restart VR runtime if needed."
+			local toastSec = (U and U.BindingsLaw_ToastSeconds and U.BindingsLaw_ToastSeconds()) or 8
 			if vrmod.Toast then
-				vrmod.Toast(
-					"Controller bindings failed — reinstall VRMod module; ensure data/vrmod/vrmod_action_manifest.txt exists. Restart VR runtime if needed.",
-					8,
-					"error"
-				)
+				vrmod.Toast(toastMsg, toastSec, "error")
+				toastShown = true
 			end
-			g_VR.errorText = "Bindings failed — check console / reinstall module"
-			timer.Simple(12, function()
+			g_VR.errorText = (U and U.BindingsLaw_ErrorOverlayText and U.BindingsLaw_ErrorOverlayText())
+				or "Bindings failed — check console / reinstall module"
+			local clearSec = (U and U.BindingsLaw_OverlayClearSeconds and U.BindingsLaw_OverlayClearSeconds()) or 12
+			timer.Simple(clearSec, function()
 				if g_VR and g_VR.errorText and string.find(g_VR.errorText, "Bindings failed", 1, true) then
 					g_VR.errorText = ""
 				end
 			end)
+			-- Law: never abort VR start on bindings fail (BindingsLaw_AbortVrOnFail == false)
 		else
 			g_VR._actionManifestOk = true
+		end
+		if U and U.BindingsLaw_Decide then
+			local d = U.BindingsLaw_Decide({
+				force_rewrite = forceRewrite,
+				first_ok = firstOk,
+				retry_ok = retryOk,
+				has_file = hasFile,
+				toast_shown = not okMan and toastShown or nil,
+			})
+			g_VR._bindingsLaw = d
+			g_VR._bindingsLawLabel = U.BindingsLaw_StatusLabel and U.BindingsLaw_StatusLabel(d) or nil
+			g_VR._bindingsLawHmdExpect = U.BindingsLaw_HmdExpect and U.BindingsLaw_HmdExpect(d) or nil
 		end
 
 		-- Menu-first: LocalPlayer may be invalid before a map loads
