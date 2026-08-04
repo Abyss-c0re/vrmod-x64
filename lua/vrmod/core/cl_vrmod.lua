@@ -1795,8 +1795,15 @@ if CLIENT then
 				and vrmod.utils.StereoLoad_ShouldToast(policy, g_VR._stereoLoadToasted) then
 				g_VR._stereoLoadToasted = true
 				local hint = vrmod.utils.StereoLoadToastHint and vrmod.utils.StereoLoadToastHint(policy)
+				local expect = vrmod.utils.StereoLoad_HmdExpect and vrmod.utils.StereoLoad_HmdExpect(policy)
+				g_VR._stereoLoadHmdExpect = expect
 				if hint then
-					if vrmod.logger then vrmod.logger.Info("G05 %s", hint) end
+					if vrmod.logger then
+						vrmod.logger.Info("G05 %s", hint)
+						if expect and expect.checklist then
+							vrmod.logger.Info("G05 HMD %s", tostring(expect.checklist))
+						end
+					end
 					if vrmod.Toast then vrmod.Toast(hint, 3, "hint") end
 				end
 			end

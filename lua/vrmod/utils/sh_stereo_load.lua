@@ -119,3 +119,86 @@ function vrmod.utils.StereoLoad_ShouldToast(policy, alreadyToasted)
 	if type(policy) ~= "table" then return false end
 	return policy.prefer_paint_while_load and true or false
 end
+
+-- ── G05 HMD load-flash expect (pure observer contract) ───────────────────────
+-- Offline-tested checklist tokens for headset smoke. Never claims HMD passed.
+-- flash_risk:
+--   none              both eyes content expected (dual hold or dual idle)
+--   mono_void         no submit / inactive — void risk
+--   mq2_right_clear   single-pass law; right half intentional clear (not dual)
+--   no_submit         VR not keeping submit
+
+--- Pure HMD observer expectation from StereoLoadPolicy result.
+--- Returns:
+---   expect_both_eyes   bool  both eyes should show content (not flat mono void)
+---   flash_risk         string none|mono_void|mq2_right_clear|no_submit
+---   verdict            string expect_dual_hold|expect_dual|expect_mq2_single|expect_no_submit|idle
+---   pass_line          string what PASS looks like in HMD
+---   fail_line          string what FAIL looks like
+---   checklist          string one-line smoke sheet row
+function vrmod.utils.StereoLoad_HmdExpect(policy)
+	local e = {
+		expect_both_eyes = false,
+		flash_risk = "mono_void",
+		verdict = "idle",
+		pass_line = "N/A",
+		fail_line = "N/A",
+		checklist = "G05 · idle · no VR frame policy",
+	}
+	if type(policy) ~= "table" then return e end
+
+	if not policy.keep_submit then
+		e.flash_risk = "no_submit"
+		e.verdict = "expect_no_submit"
+		e.expect_both_eyes = false
+		e.pass_line = "No XR submit expected (VR inactive)"
+		e.fail_line = "Unexpected stereo submit while keep_submit=false"
+		e.checklist = "G05 · NO SUBMIT · skip load-flash check"
+		return e
+	end
+
+	if policy.single_pass then
+		e.flash_risk = "mq2_right_clear"
+		e.verdict = "expect_mq2_single"
+		e.expect_both_eyes = false
+		e.pass_line = "Single-pass: left content, right intentional clear (mat_queue 2 law)"
+		e.fail_line = "Forced dual under mq≥2 (forbidden) or black wall of Real"
+		e.checklist = "G05 · MQ2 SINGLE · right clear by law · never dual-paint"
+		return e
+	end
+
+	if policy.prefer_paint_while_load then
+		e.flash_risk = "none"
+		e.verdict = "expect_dual_hold"
+		e.expect_both_eyes = true
+		e.pass_line = "Both eyes stereo through load; may dim/black pair but not flat mono void"
+		e.fail_line = "Flat mono, one eye missing, or long virgin black flash"
+		e.checklist = "G05 · DUAL HOLD LOAD · both eyes content · toast ok once"
+		return e
+	end
+
+	if policy.dual_eye then
+		e.flash_risk = "none"
+		e.verdict = "expect_dual"
+		e.expect_both_eyes = true
+		e.pass_line = "Both eyes clear stereo (live play)"
+		e.fail_line = "Mono mirror only or eng-IN submit flash"
+		e.checklist = "G05 · DUAL · both eyes clear"
+		return e
+	end
+
+	e.flash_risk = "mono_void"
+	e.verdict = "idle"
+	e.expect_both_eyes = false
+	e.pass_line = "Hold path without dual policy"
+	e.fail_line = "Unexpected dual thrash"
+	e.checklist = "G05 · HOLD · observe only"
+	return e
+end
+
+--- True when HMD observer should treat current policy as load-flash risk (fail-prone).
+function vrmod.utils.StereoLoad_FlashRiskIsBad(expect)
+	if type(expect) ~= "table" then return true end
+	local r = expect.flash_risk
+	return r == "mono_void" or r == "no_submit"
+end
