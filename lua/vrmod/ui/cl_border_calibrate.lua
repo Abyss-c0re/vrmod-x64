@@ -1,7 +1,9 @@
 -- Tier C: user-in-loop border calibration (scale → V → H → save profile)
+-- G40 / W1: pure BorderLaw_* owns defaults, clamps, guided path; soft care on FOV archives.
 if SERVER then return end
 
 vrmod = vrmod or {}
+local U = vrmod.utils or {}
 local Cal = {
 	active = false,
 	step = 1,
@@ -16,27 +18,27 @@ local Cal = {
 			cvar = "vrmod_scalefactor",
 			title = "STEP 1 · SCALE",
 			hint = "Black borders? Trigger = tighter (-). Secondary = looser (+). Menu = next.",
-			step = 0.02,
-			min = 0.05,
-			max = 4.0,
+			step = (U.BorderLaw_ScaleStep and U.BorderLaw_ScaleStep()) or 0.02,
+			min = (U.BorderLaw_ScaleMin and U.BorderLaw_ScaleMin()) or 0.05,
+			max = (U.BorderLaw_ScaleMax and U.BorderLaw_ScaleMax()) or 4.0,
 		},
 		{
 			id = "vertical",
 			cvar = "vrmod_verticaloffset",
 			title = "STEP 2 · VERTICAL",
 			hint = "Top/bottom edges. Trigger = -, Secondary = +. Menu = next.",
-			step = 0.01,
-			min = -1.0,
-			max = 1.0,
+			step = (U.BorderLaw_OffsetStep and U.BorderLaw_OffsetStep()) or 0.01,
+			min = (U.BorderLaw_OffsetMin and U.BorderLaw_OffsetMin()) or -1.0,
+			max = (U.BorderLaw_OffsetMax and U.BorderLaw_OffsetMax()) or 1.0,
 		},
 		{
 			id = "horizontal",
 			cvar = "vrmod_horizontaloffset",
 			title = "STEP 3 · HORIZONTAL",
 			hint = "Left/right edges (both eyes). Trigger = -, Secondary = +. Menu = save.",
-			step = 0.01,
-			min = -1.0,
-			max = 1.0,
+			step = (U.BorderLaw_OffsetStep and U.BorderLaw_OffsetStep()) or 0.01,
+			min = (U.BorderLaw_OffsetMin and U.BorderLaw_OffsetMin()) or -1.0,
+			max = (U.BorderLaw_OffsetMax and U.BorderLaw_OffsetMax()) or 1.0,
 		},
 		{
 			id = "done",
@@ -48,8 +50,28 @@ local Cal = {
 	msgUntil = 0,
 }
 
-local PROFILE = "vrmod/border_profile.txt"
+local PROFILE = (U.BorderLaw_ProfilePath and U.BorderLaw_ProfilePath()) or "vrmod/border_profile.txt"
 local PROFILE_DIR = "vrmod"
+
+local function borderSnapshot(extra)
+	local u = vrmod.utils
+	if not u or not u.BorderLaw_Decide then return end
+	local opts = {
+		scalefactor = cvf("vrmod_scalefactor"),
+		verticaloffset = cvf("vrmod_verticaloffset"),
+		horizontaloffset = cvf("vrmod_horizontaloffset"),
+		guide_active = Cal.active and true or false,
+		profile_loaded = extra and extra.profile_loaded or false,
+	}
+	if extra then
+		for k, v in pairs(extra) do opts[k] = v end
+	end
+	local d = u.BorderLaw_Decide(opts)
+	g_VR = g_VR or {}
+	g_VR._borderLaw = d
+	g_VR._borderLawLabel = u.BorderLaw_StatusLabel and u.BorderLaw_StatusLabel(d) or nil
+	g_VR._borderLawHmdExpect = u.BorderLaw_HmdExpect and u.BorderLaw_HmdExpect(d) or nil
+end
 
 local function cvf(name)
 	local c = GetConVar(name)
@@ -80,6 +102,7 @@ function vrmod.BorderCal_SaveProfile()
 	}
 	file.Write(PROFILE, table.concat(lines, "\n"))
 	toast("Video calibration saved", 3)
+	borderSnapshot({ profile_loaded = true, guide_active = false })
 	return true
 end
 
@@ -94,22 +117,40 @@ function vrmod.BorderCal_LoadProfile()
 		fovscale_x = "vrmod_fovscale_x",
 		fovscale_y = "vrmod_fovscale_y",
 	}
+	local u = vrmod.utils
 	for line in string.gmatch(raw, "[^\r\n]+") do
 		local k, v = string.match(line, "^([%w_]+)=([%-%d%.]+)$")
 		if k and map[k] then
+			-- G40: clamp scale/offsets via pure law; leave FOV as-written (G30 soft care)
+			if u and k == "scalefactor" and u.BorderLaw_ClampScale then
+				v = string.format("%.4f", u.BorderLaw_ClampScale(tonumber(v)))
+			elseif u and (k == "verticaloffset" or k == "horizontaloffset") and u.BorderLaw_ClampOffset then
+				v = string.format("%.4f", u.BorderLaw_ClampOffset(tonumber(v)))
+			end
 			RunConsoleCommand(map[k], v)
 		end
 	end
 	toast("Video calibration loaded", 2)
+	borderSnapshot({ profile_loaded = true, guide_active = false })
 	return true
 end
 
 local function nudge(delta)
 	local st = Cal.steps[Cal.step]
 	if not st or not st.cvar then return end
-	local v = math.Clamp(cvf(st.cvar) + delta * st.step, st.min, st.max)
+	local raw = cvf(st.cvar) + delta * st.step
+	local u = vrmod.utils
+	local v
+	if st.id == "scale" and u and u.BorderLaw_ClampScale then
+		v = u.BorderLaw_ClampScale(raw)
+	elseif (st.id == "vertical" or st.id == "horizontal") and u and u.BorderLaw_ClampOffset then
+		v = u.BorderLaw_ClampOffset(raw)
+	else
+		v = math.Clamp(raw, st.min, st.max)
+	end
 	setf(st.cvar, v)
 	toast(string.format("%s = %.3f", st.id, v), 1.2)
+	borderSnapshot({ guide_active = true })
 end
 
 local function nextStep()
@@ -141,6 +182,7 @@ function vrmod.BorderCal_Stop(completed)
 	hook.Remove("PlayerButtonDown", "vrmod_border_cal_keys")
 	toast(completed and "Vision locked in" or "Video calibration ended", 2)
 	-- completed=true when user finished the path (saved profile); false on cancel
+	borderSnapshot({ guide_active = false, profile_loaded = completed and true or false })
 	hook.Run("VRMod_BorderCalEnded", completed and true or false)
 end
 
@@ -154,12 +196,15 @@ function vrmod.BorderCal_Start()
 	end
 	Cal.active = true
 	Cal.step = 1
-	-- clean baseline for guided path
-	RunConsoleCommand("vrmod_renderoffset", "1")
-	RunConsoleCommand("vrmod_scalefactor", "1.0")
-	RunConsoleCommand("vrmod_verticaloffset", "0")
-	RunConsoleCommand("vrmod_horizontaloffset", "0")
+	-- G40: clean baseline from pure BorderLaw (scale=1, offsets=0, renderoffset on)
+	local base = (vrmod.utils and vrmod.utils.BorderLaw_GuideBaseline and vrmod.utils.BorderLaw_GuideBaseline())
+		or { scalefactor = 1.0, verticaloffset = 0, horizontaloffset = 0, renderoffset = 1 }
+	RunConsoleCommand("vrmod_renderoffset", tostring(base.renderoffset or 1))
+	RunConsoleCommand("vrmod_scalefactor", string.format("%.4f", base.scalefactor or 1))
+	RunConsoleCommand("vrmod_verticaloffset", string.format("%.4f", base.verticaloffset or 0))
+	RunConsoleCommand("vrmod_horizontaloffset", string.format("%.4f", base.horizontaloffset or 0))
 	toast("Video calibration · look center · Trigger start", 4)
+	borderSnapshot({ guide_active = true })
 
 	hook.Add("VRMod_Input", "vrmod_border_cal", function(action, pressed)
 		if not pressed or not Cal.active then return end
