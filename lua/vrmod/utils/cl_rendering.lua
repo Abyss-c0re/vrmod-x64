@@ -29,16 +29,29 @@ function vrmod.utils.CalculateProjectionParams(projMatrix, worldScale)
     }
 end
 
---- Stereo RT UV crop for desktop blit.
+--- Stereo RT UV crop for desktop blit only (never feeds OpenXR submit).
 --- desktopView: 1=none 2=left 3=right 4=follow-cam (no stereo crop — use DesktopCam RT)
+--- Returns vmargin, hoffset in [0, 0.5] safe ranges (NaN/inverted UVs break GL state).
 function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
     desktopView = tonumber(desktopView) or 1
     -- G23: only left/right eye crop; follow-cam and none skip stereo half-blit
     if desktopView == 4 or desktopView == 1 then
-        -- Follow-cam uses its own RT; none draws nothing — crop unused
         return 0, 0
     end
-    local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
+    w = tonumber(w) or 0
+    h = tonumber(h) or 0
+    local sw = ScrW()
+    local sh = ScrH()
+    if w < 32 or h < 32 or not sw or sw < 1 or not sh or sh < 1 then
+        return 0.05, desktopView == 3 and 0.5 or 0
+    end
+    -- Letterbox margin so one eye half fits desktop aspect (clamped — never NaN/negative huge)
+    local eyeAspect = (w * 0.5) / h
+    local deskAspect = sh / sw
+    local vmargin = (1 - deskAspect * eyeAspect) * 0.5
+    if vmargin ~= vmargin then vmargin = 0 end -- NaN
+    if vmargin < 0 then vmargin = 0 end
+    if vmargin > 0.45 then vmargin = 0.45 end
     local hoffset = desktopView == 3 and 0.5 or 0
     return vmargin, hoffset
 end

@@ -372,7 +372,7 @@ function DC.CaptureFrame()
 	return true
 end
 
---- Blit follow-cam RT to the full desktop framebuffer (RenderScene end).
+--- Blit follow-cam RT to the full desktop framebuffer (after OpenXR submit).
 function DC.PresentDesktop()
 	if not session.active or not session.rt or not session.mat then return end
 	if not cvDrawLocal:GetBool() then return end
@@ -380,12 +380,19 @@ function DC.PresentDesktop()
 	local dv = g_VR and g_VR.desktopView
 	if not DC.IsFollowMode(dv) then return end
 
-	surface.SetDrawColor(255, 255, 255, 255)
-	surface.SetMaterial(session.mat)
-	-- Same NDC full-screen path as eye crop blit
-	render.CullMode(1)
-	surface.DrawTexturedRectUV(-1, -1, 2, 2, 0, 0, 1, 1)
-	render.CullMode(0)
+	pcall(function()
+		render.SetScissorRect(0, 0, 0, 0, false)
+		render.CullMode(0)
+		cam.Start2D()
+		surface.SetDrawColor(255, 255, 255, 255)
+		surface.SetMaterial(session.mat)
+		local w, h = ScrW(), ScrH()
+		if w and h and w > 0 and h > 0 then
+			surface.DrawTexturedRect(0, 0, w, h)
+		end
+		cam.End2D()
+		render.CullMode(0)
+	end)
 end
 
 --- Sync session to desktopview convar (call from VR frame loop).

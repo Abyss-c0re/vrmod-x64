@@ -1291,40 +1291,83 @@ if CLIENT then
 			pcall(render.PopRenderTarget)
 		end
 
-		-- Desktop mirror: eye crop (2/3) or invisible follow-cam (4). G23: never
-		-- fall through mode 4 into stereo crop (wrong half-eye when DesktopCam late).
+		-- Desktop mirror is NOT here: binding g_VR.rt as a material before
+		-- Collect/Submit has broken HMD stereo (left/right crop / none modes).
+		-- Capture follow-cam only (private RT); present after OpenXR submit.
 		local dv = g_VR.desktopView or 1
 		local DC = vrmod.DesktopCam
 		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv))
 			or (tonumber(dv) == 4)
-		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv))
-			or (tonumber(dv) == 2 or tonumber(dv) == 3)
-		if isFollow then
-			if DC then
-				if DC.SyncFromDesktopView then
-					pcall(DC.SyncFromDesktopView, dv)
-				end
-				-- Capture after stereo RT is popped (never nest under g_VR.rt)
-				if DC.CaptureFrame then
-					pcall(DC.CaptureFrame)
-				end
-				if DC.PresentDesktop then
-					pcall(DC.PresentDesktop)
-				end
+		if isFollow and DC then
+			if DC.SyncFromDesktopView then
+				pcall(DC.SyncFromDesktopView, dv)
 			end
-			-- No stereo RT blit for follow mode even if module missing
-		elseif isEyeCrop and g_VR.rtMaterial then
-			render.CullMode(1)
-			surface.SetDrawColor(255, 255, 255, 255)
-			surface.SetMaterial(g_VR.rtMaterial)
-			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
-			render.CullMode(0)
-			if DC and DC.SyncFromDesktopView then
-				pcall(DC.SyncFromDesktopView, dv) -- ensure follow session stopped
+			if DC.CaptureFrame then
+				pcall(DC.CaptureFrame)
 			end
 		elseif DC and DC.SyncFromDesktopView then
+			-- left/right/none: stop follow session if it was running
 			pcall(DC.SyncFromDesktopView, dv)
 		end
+	end
+
+	-- Desktop present AFTER OpenXR submit so HMD path never shares GL state with
+	-- stereo RT material binds. Modes: 1=none 2=left crop 3=right crop 4=follow.
+	local function PresentDesktopMirror()
+		if not g_VR or not g_VR.active then return end
+		local dv = tonumber(g_VR.desktopView) or 1
+		local DC = vrmod.DesktopCam
+		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv)) or (dv == 4)
+		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv)) or (dv == 2 or dv == 3)
+
+		-- Restore safe 2D/GL state before any desktop blit
+		pcall(function()
+			render.SetScissorRect(0, 0, 0, 0, false)
+			render.CullMode(0)
+			render.OverrideDepthEnable(false, true)
+			render.OverrideAlphaWriteEnable(false, true)
+			render.SetLightingMode(0)
+		end)
+
+		if isFollow then
+			if DC and DC.PresentDesktop then
+				pcall(DC.PresentDesktop)
+			end
+			return
+		end
+
+		if not isEyeCrop or not g_VR.rtMaterial then
+			return
+		end
+
+		-- Refresh crop from live RT size (ScrW/H may change)
+		local rtW = tonumber(g_VR.rtWidth) or 0
+		local rtH = tonumber(g_VR.rtHeight) or 0
+		if vrmod.utils and vrmod.utils.ComputeDesktopCrop then
+			cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(dv, rtW, rtH)
+		end
+		local vm = tonumber(cropVerticalMargin) or 0
+		local ho = tonumber(cropHorizontalOffset) or 0
+		if vm < 0 then vm = 0 end
+		if vm > 0.45 then vm = 0.45 end
+		if ho ~= 0 and ho ~= 0.5 then ho = (dv == 3) and 0.5 or 0 end
+		-- u0,u1 select left (0..0.5) or right (0.5..1) half; v flipped for GL RT
+		local u0, u1 = ho, 0.5 + ho
+		local v0, v1 = 1 - vm, vm
+		if u1 <= u0 then u0, u1 = 0, 0.5 end
+
+		pcall(function()
+			cam.Start2D()
+			surface.SetDrawColor(255, 255, 255, 255)
+			surface.SetMaterial(g_VR.rtMaterial)
+			-- Draw into desktop framebuffer only (stereo already submitted)
+			local w, h = ScrW(), ScrH()
+			if w and h and w > 0 and h > 0 then
+				surface.DrawTexturedRectUV(0, 0, w, h, u0, v0, u1, v1)
+			end
+			cam.End2D()
+			render.CullMode(0)
+		end)
 	end
 
 	-- 1) Startup checks & init
@@ -2229,6 +2272,9 @@ if CLIENT then
 			if policy.keep_submit ~= false and isfunction(VRMOD_SubmitSharedTexture) then
 				VRMOD_SubmitSharedTexture()
 			end
+			-- Desktop mirror AFTER submit — left/right eye crop must not bind g_VR.rt
+			-- before Collect/Submit (was breaking HMD when desktopview 1/2/3).
+			pcall(PresentDesktopMirror)
 			hook.Call("VRMod_PostRender")
 			return true
 		end, HOOK_HIGH or 1)

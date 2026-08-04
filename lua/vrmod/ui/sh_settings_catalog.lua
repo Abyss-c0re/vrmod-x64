@@ -89,7 +89,7 @@ vrmod.SettingsCatalog = {
 				{ text = "right eye", value = 3 },
 				{ text = "follow camera", value = 4 },
 			}},
-			{ kind = "help", label = "Follow camera: invisible cam tracks you → GMod window (+ optional broadcast module)." },
+			{ kind = "help", label = "Desktop only (after HMD submit). Left/right = stereo RT half; follow = 3rd-person cam. None = black GMod window — does not disable VR." },
 			{ kind = "combo", label = "Follow-cam target", cvar = "vrmod_desktop_cam_mode", choices = {
 				{ text = "behind HMD", value = 0 },
 				{ text = "behind player", value = 1 },
