@@ -1346,75 +1346,36 @@ if CLIENT then
 			pcall(render.PopRenderTarget)
 		end
 
-		-- Desktop mirror is NOT here: binding g_VR.rt as a material before
-		-- Collect/Submit has broken HMD stereo (left/right crop / none modes).
-		-- Capture follow-cam only (private RT); present after OpenXR submit.
+		-- Desktop mirror (b1a5e9e-era): after PopRenderTarget, CullMode(1)+NDC UV.
 		local dv = g_VR.desktopView or 1
 		local DC = vrmod.DesktopCam
 		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv))
 			or (tonumber(dv) == 4)
-		if isFollow and DC then
-			if DC.SyncFromDesktopView then
+		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv))
+			or (tonumber(dv) == 2 or tonumber(dv) == 3)
+		if isFollow then
+			if DC then
+				if DC.SyncFromDesktopView then
+					pcall(DC.SyncFromDesktopView, dv)
+				end
+				if DC.CaptureFrame then
+					pcall(DC.CaptureFrame)
+				end
+				if DC.PresentDesktop then
+					pcall(DC.PresentDesktop)
+				end
+			end
+		elseif isEyeCrop and g_VR.rtMaterial then
+			render.CullMode(1)
+			surface.SetDrawColor(255, 255, 255, 255)
+			surface.SetMaterial(g_VR.rtMaterial)
+			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
+			render.CullMode(0)
+			if DC and DC.SyncFromDesktopView then
 				pcall(DC.SyncFromDesktopView, dv)
 			end
-			if DC.CaptureFrame then
-				pcall(DC.CaptureFrame)
-			end
 		elseif DC and DC.SyncFromDesktopView then
-			-- left/right/none: stop follow session if it was running
 			pcall(DC.SyncFromDesktopView, dv)
-		end
-	end
-
-	-- Desktop present AFTER OpenXR submit so HMD path never shares GL state with
-	-- stereo RT material binds. Modes: 1=none 2=left crop 3=right crop 4=follow.
-	-- Post-submit MUST use cam.Start2D + pixel rect (NDC -1..1 only worked mid-frame).
-	-- Start2D is top-left: ordered V (vm → 1-vm) is upright. Inverted V was upside-down.
-	local function PresentDesktopMirror()
-		if not g_VR or not g_VR.active then return end
-		local dv = tonumber(g_VR.desktopView) or 1
-		local DC = vrmod.DesktopCam
-		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv)) or (dv == 4)
-		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv)) or (dv == 2 or dv == 3)
-
-		pcall(function()
-			render.SetScissorRect(0, 0, 0, 0, false)
-			render.CullMode(0)
-			render.OverrideDepthEnable(false, true)
-			render.OverrideAlphaWriteEnable(false, true)
-			render.SetLightingMode(0)
-		end)
-
-		if isFollow then
-			if DC and DC.PresentDesktop then
-				pcall(DC.PresentDesktop)
-			end
-			return
-		end
-
-		-- G46: pure DesktopMirror_* — never sample live stereo RT after submit
-		-- (Quest autotest nonblack≈0.10 when eye-crop bound g_VR.rtMaterial).
-		local U = vrmod.utils
-		local allow = false
-		if U and U.DesktopMirror_AllowPresent then
-			local d = U.DesktopMirror_Decide({
-				desktop_view = dv,
-				vr_active = true,
-				after_submit = true,
-				sample_stereo_rt = isEyeCrop and true or false,
-				attempt_present = isEyeCrop or isFollow,
-			})
-			g_VR._desktopMirrorLaw = d
-			g_VR._desktopMirrorLawLabel = U.DesktopMirror_StatusLabel
-				and U.DesktopMirror_StatusLabel(d) or nil
-			g_VR._desktopMirrorHmdExpect = U.DesktopMirror_HmdExpect
-				and U.DesktopMirror_HmdExpect(d) or nil
-			allow = d.allow_present and true or false
-		elseif isEyeCrop then
-			allow = false
-		end
-		if isEyeCrop or not allow then
-			return
 		end
 	end
 
@@ -1558,23 +1519,22 @@ if CLIENT then
 		end
 	end
 
-	-- Apply UV submit bounds. C++ now forces full SBS halves; still push known size + flip.
+	-- Apply UV submit bounds + C++ crop policy (b1a5e9e-era; ComputeSubmitBounds)
 	local function ApplySubmitBounds()
 		if not g_VR.active and not leftCalc then return end
+		if type(leftCalc) ~= "table" or type(rightCalc) ~= "table" then return end
 		if not VRMOD_SetSubmitTextureBounds then return end
-		-- Full SBS halves (Linux inverted V). Do NOT use ComputeSubmitBounds crop —
-		-- it was emitting u0≈-0.09 and HMD showed ~1/8 strip + black.
-		local ins = 0.003
-		local bounds
-		if system.IsWindows() then
-			bounds = {ins, ins, 0.5, 1 - ins, 0.5, ins, 1 - ins, 1 - ins}
-		else
-			bounds = {ins, 1 - ins, 0.5, ins, 0.5, 1 - ins, 1 - ins, ins}
-		end
+		local hOffset = convars.vrmod_horizontaloffset:GetFloat()
+		local vOffset = convars.vrmod_verticaloffset:GetFloat()
+		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
+		local renderOffset = convars.vrmod_renderoffset:GetBool()
+		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
+		-- mq2 single-pass: mirror left UV to both eyes if helpers exist
 		local mqLive = g_VR._matQueueMode or WantedMatQueueMode()
 		local monoBoth = g_VR._mq2SinglePass or g_VR._mq2MonoLeftForBoth or (mqLive >= 2)
-		if monoBoth then
-			-- mq2: both eyes sample left half
+		if monoBoth and vrmod.utils and vrmod.utils.SubmitBounds_MirrorLeftToBoth then
+			bounds = {vrmod.utils.SubmitBounds_MirrorLeftToBoth(bounds)}
+		elseif monoBoth and #bounds >= 8 then
 			bounds[5], bounds[6], bounds[7], bounds[8] = bounds[1], bounds[2], bounds[3], bounds[4]
 		end
 		g_VR._submitMonoBothEyes = monoBoth and true or false
@@ -1583,11 +1543,13 @@ if CLIENT then
 			VRMOD_SetRTTextureFlip(not system.IsWindows())
 		end
 		if isfunction(VRMOD_SetSubmitCropMode) then
-			VRMOD_SetSubmitCropMode(0) -- SAFE only
-			g_VR._submitCropMode = 0
+			local crop = (convars.vrmod_submit_crop and convars.vrmod_submit_crop:GetInt()) or 0
+			if crop < 0 then crop = 0 end
+			if crop > 2 then crop = 2 end
+			if monoBoth and crop == 2 then crop = 0 end
+			VRMOD_SetSubmitCropMode(crop)
+			g_VR._submitCropMode = crop
 		end
-		-- Always push SBS pixel size so blit does not sample 1/8 of RT
-		PushKnownSubmitSize()
 	end
 
 	-- Live update: UV bounds + crop mode (offsets/scale/eye dials)
@@ -2291,9 +2253,16 @@ if CLIENT then
 			local collected = false
 			if paint then
 				PerformRenderViews()
-				-- Every frame: full SBS halves + known size (fixes 1/8-strip HMD)
-				pcall(ApplySubmitBounds)
-				-- Collect disabled: staged dual path was feeding false PER-EYE / black eye.
+				-- b1a5e9e-era: optional Collect into staging (mq < 2 only)
+				local collectOk = (mq or 1) < 2
+				if vrmod.utils and vrmod.utils.SubmitLaw_AllowCollect then
+					collectOk = vrmod.utils.SubmitLaw_AllowCollect({ mat_queue_mode = mq })
+				end
+				if collectOk and isfunction(VRMOD_CollectEyes) then
+					PushKnownSubmitSize()
+					local okC = pcall(VRMOD_CollectEyes)
+					collected = okC and true or false
+				end
 			end
 
 			-- G19: pure submit decision snapshot (dual OUT only; never eng IN / virgin).
@@ -2314,13 +2283,9 @@ if CLIENT then
 			end
 
 			-- G05: keep Submit while active (policy.keep_submit) — avoids HMD void on load frames
-			-- Module path submits dual OUT (never eng IN texture id).
 			if policy.keep_submit ~= false and isfunction(VRMOD_SubmitSharedTexture) then
 				VRMOD_SubmitSharedTexture()
 			end
-			-- Desktop mirror AFTER submit — left/right eye crop must not bind g_VR.rt
-			-- before Collect/Submit (was breaking HMD when desktopview 1/2/3).
-			pcall(PresentDesktopMirror)
 			hook.Call("VRMod_PostRender")
 			return true
 		end, HOOK_HIGH or 1)

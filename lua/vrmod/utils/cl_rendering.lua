@@ -29,29 +29,16 @@ function vrmod.utils.CalculateProjectionParams(projMatrix, worldScale)
     }
 end
 
---- Stereo RT UV crop for desktop blit only (never feeds OpenXR submit).
+--- Stereo RT UV crop for desktop blit.
 --- desktopView: 1=none 2=left 3=right 4=follow-cam (no stereo crop — use DesktopCam RT)
---- Returns vmargin, hoffset in [0, 0.5] safe ranges (NaN/inverted UVs break GL state).
 function vrmod.utils.ComputeDesktopCrop(desktopView, w, h)
     desktopView = tonumber(desktopView) or 1
     -- G23: only left/right eye crop; follow-cam and none skip stereo half-blit
     if desktopView == 4 or desktopView == 1 then
+        -- Follow-cam uses its own RT; none draws nothing — crop unused
         return 0, 0
     end
-    w = tonumber(w) or 0
-    h = tonumber(h) or 0
-    local sw = ScrW()
-    local sh = ScrH()
-    if w < 32 or h < 32 or not sw or sw < 1 or not sh or sh < 1 then
-        return 0.05, desktopView == 3 and 0.5 or 0
-    end
-    -- Letterbox margin so one eye half fits desktop aspect (clamped — never NaN/negative huge)
-    local eyeAspect = (w * 0.5) / h
-    local deskAspect = sh / sw
-    local vmargin = (1 - deskAspect * eyeAspect) * 0.5
-    if vmargin ~= vmargin then vmargin = 0 end -- NaN
-    if vmargin < 0 then vmargin = 0 end
-    if vmargin > 0.45 then vmargin = 0.45 end
+    local vmargin = (1 - ScrH() / ScrW() * w / 2 / h) / 2
     local hoffset = desktopView == 3 and 0.5 or 0
     return vmargin, hoffset
 end
@@ -102,46 +89,9 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
     local uMaxLeft = 0.5 + (lo + hOffset) * hFactor
     local uMinRight = 0.5 + (ro + hOffset) * hFactor
     local uMaxRight = 1.0 - TEXTURE_INSET + (ro + hOffset) * hFactor
-    -- Shift (preserve span) each eye UV into its SBS half — pin-only shrinks FOV.
-    local function clampHalf(u0, u1, halfLo, halfHi)
-        local span = u1 - u0
-        if not span or span ~= span or span <= 0.01 or span > 0.5 then
-            return halfLo + TEXTURE_INSET, halfHi
-        end
-        if u0 < halfLo + TEXTURE_INSET then
-            u0 = halfLo + TEXTURE_INSET
-            u1 = u0 + span
-        end
-        if u1 > halfHi then
-            u1 = halfHi
-            u0 = u1 - span
-        end
-        if u0 < halfLo + TEXTURE_INSET then u0 = halfLo + TEXTURE_INSET end
-        if u1 <= u0 + 0.01 then
-            u0 = halfLo + TEXTURE_INSET
-            u1 = halfHi
-        end
-        return u0, u1
-    end
-    uMinLeft, uMaxLeft = clampHalf(uMinLeft, uMaxLeft, 0.0, 0.5)
-    uMinRight, uMaxRight = clampHalf(uMinRight, uMaxRight, 0.5, 1.0)
     local vMinLeft, vMaxLeft = calcVMinMax(lv)
     local vMinRight, vMaxRight = calcVMinMax(rv)
     return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
-end
-
---- mat_queue 2 single-pass: right SBS half is blank. Mirror left UV to both eyes
---- so WiVRn/OpenXR gets texture in L and R (mono stereo) instead of one black eye.
---- bounds: array or 8 numbers — returns 8 values for unpack / SetSubmitTextureBounds.
-function vrmod.utils.SubmitBounds_MirrorLeftToBoth(bounds)
-	local b = bounds
-	if type(b) ~= "table" then return bounds end
-	local u0 = tonumber(b[1]) or 0
-	local v0 = tonumber(b[2]) or 0
-	local u1 = tonumber(b[3]) or 0.5
-	local v1 = tonumber(b[4]) or 1
-	-- Keep left as-is; right samples the same half
-	return u0, v0, u1, v1, u0, v0, u1, v1
 end
 
 function vrmod.utils.AdjustFOV(proj, fovScaleX, fovScaleY)
@@ -170,4 +120,13 @@ function vrmod.utils.DrawDeathAnimation(rtWidth, rtHeight)
     surface.SetDrawColor(120, 0, 0, fadeAlpha)
     surface.DrawRect(0, 0, rtWidth, rtHeight)
     cam.End2D()
+end
+function vrmod.utils.SubmitBounds_MirrorLeftToBoth(bounds)
+	local b = bounds
+	if type(b) ~= "table" then return bounds end
+	local u0 = tonumber(b[1]) or 0
+	local v0 = tonumber(b[2]) or 0
+	local u1 = tonumber(b[3]) or 0.5
+	local v1 = tonumber(b[4]) or 1
+	return u0, v0, u1, v1, u0, v0, u1, v1
 end
