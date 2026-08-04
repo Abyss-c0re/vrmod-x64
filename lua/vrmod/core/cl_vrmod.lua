@@ -134,7 +134,15 @@ if CLIENT then
 	end
 
 	local function setConvarValue(name, value)
-		if NEVER_WRITE_CONVARS[name] then
+		-- G27: never write engine-blocked or lifecycle convars (W2 / pain #3).
+		if vrmod.utils and vrmod.utils.EngineBlacklist_AllowWrite then
+			if not vrmod.utils.EngineBlacklist_AllowWrite(name) then
+				if vrmod.logger then
+					vrmod.logger.Debug("refused write %s (engine blacklist / lifecycle)", tostring(name))
+				end
+				return false
+			end
+		elseif NEVER_WRITE_CONVARS[name] then
 			if vrmod.logger then
 				vrmod.logger.Debug("refused write %s (thread-lifecycle cvar)", tostring(name))
 			end
@@ -166,7 +174,11 @@ if CLIENT then
 	end
 
 	local function overrideConvar(name, value)
-		if NEVER_WRITE_CONVARS[name] then return end
+		if vrmod.utils and vrmod.utils.EngineBlacklist_AllowWrite then
+			if not vrmod.utils.EngineBlacklist_AllowWrite(name) then return end
+		elseif NEVER_WRITE_CONVARS[name] then
+			return
+		end
 		local cv = GetConVar(name)
 		if not cv then return end
 		local previous = cv:GetString()
@@ -221,6 +233,19 @@ if CLIENT then
 					setConvarValue(name, want)
 				end
 			end
+		end
+		-- G27: snapshot performance map cleanliness (never claim HMD from this alone).
+		if vrmod.utils and vrmod.utils.EngineBlacklist_Decide then
+			local d = vrmod.utils.EngineBlacklist_Decide({
+				vr_active = true,
+				performance_map = PERFORMANCE_CONVARS,
+				attempted = {},
+			})
+			g_VR._engineBlacklistLaw = d
+			g_VR._engineBlacklistLabel = vrmod.utils.EngineBlacklist_StatusLabel
+				and vrmod.utils.EngineBlacklist_StatusLabel(d) or nil
+			g_VR._engineBlacklistHmdExpect = vrmod.utils.EngineBlacklist_HmdExpect
+				and vrmod.utils.EngineBlacklist_HmdExpect(d) or nil
 		end
 	end
 
