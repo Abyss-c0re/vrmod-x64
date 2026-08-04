@@ -418,6 +418,12 @@ local function noteWarmAttachOnce()
 			tostring(execRes and execRes.applied), tostring(execRes and execRes.ok),
 			tostring(execRes and execRes.map), tostring(allowChg))
 	end
+	local expect = (vrmod.utils.WarmAttach_HmdExpect
+		and vrmod.utils.WarmAttach_HmdExpect(decision, plan, execRes, nil)) or nil
+	g_VR._cubeWarmHmdExpect = expect
+	if expect and expect.checklist then
+		log("G04 HMD %s", tostring(expect.checklist))
+	end
 	log("warm attach action=%s reason=%s want=%s cur=%s allow_chg=%s plan=%s",
 		tostring(decision.action), tostring(decision.reason),
 		tostring(decision.request_map), tostring(decision.current_map),

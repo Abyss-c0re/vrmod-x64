@@ -279,3 +279,90 @@ function vrmod.utils.WarmAttach_ExecuteToast(execRes, plan)
 	end
 	return nil
 end
+
+-- ── G04 HMD warm attach / changelevel expect (pure observer contract) ────────
+-- Offline tokens for warm reuse smoke. Never claims HMD/Steam skip proven.
+
+--- Pure HMD observer expectation from WarmAttach decision + optional plan/exec.
+--- decision: WarmAttach_Decide
+--- plan: WarmAttach_ChangelevelPlan or nil
+--- execRes: WarmAttach_ExecuteChangelevel result or nil
+--- reuse_skip_spawn: bool|nil  Cube warm reuse skipped Steam this Start
+function vrmod.utils.WarmAttach_HmdExpect(decision, plan, execRes, reuse_skip_spawn)
+	local e = {
+		verdict = "idle",
+		expect_no_changelevel = true,
+		expect_cold_ok = true,
+		checklist = "G04 · IDLE · no warm request",
+		pass_line = "N/A",
+		fail_line = "N/A",
+	}
+	if type(decision) ~= "table" or not decision.valid then return e end
+
+	if execRes and type(execRes) == "table" and execRes.applied and execRes.ok then
+		e.verdict = "expect_changelevel"
+		e.expect_no_changelevel = false
+		e.checklist = string.format("G04 · CHANGELEVEL · → %s · opt-in",
+			tostring(execRes.map or (plan and plan.map) or "?"))
+		e.pass_line = "Map switches once; stereo returns after load; XR session kept"
+		e.fail_line = "Map thrash loop, XR death, or changelevel without opt-in"
+		return e
+	end
+
+	local act = tostring(decision.action or "idle")
+	if act == "idle" then
+		e.verdict = "idle"
+		e.checklist = reuse_skip_spawn and "G04 · WARM SKIP · no attach marker"
+			or "G04 · COLD · no warm request"
+		e.pass_line = reuse_skip_spawn and "Process reused; no accidental map flip"
+			or "Cold Steam spawn still valid default"
+		e.fail_line = "Silent map flip without cube_warm"
+		return e
+	end
+
+	if act == "same_map" then
+		e.verdict = "expect_same_map"
+		e.expect_no_changelevel = true
+		e.checklist = string.format("G04 · SAME MAP · %s · no changelevel",
+			tostring(decision.request_map or "?"))
+		e.pass_line = "Already on target map; handoff continues without map load"
+		e.fail_line = "Forced changelevel on same map"
+		return e
+	end
+
+	if act == "reject" then
+		e.verdict = "expect_reject"
+		e.expect_no_changelevel = true
+		e.checklist = "G04 · REJECT · " .. tostring(decision.reason or "bad")
+		e.pass_line = "Bad token/action ignored; stay put"
+		e.fail_line = "Injected changelevel from bad map token"
+		return e
+	end
+
+	if act == "changelevel" or (plan and plan.do_changelevel) then
+		e.verdict = "expect_changelevel"
+		e.expect_no_changelevel = false
+		e.checklist = string.format("G04 · ARMED · changelevel → %s",
+			tostring(decision.request_map or (plan and plan.map) or "?"))
+		e.pass_line = "Opt-in changelevel once; dual-hold through load (G05)"
+		e.fail_line = "Map thrash / XR drop / mono load flash"
+		return e
+	end
+
+	if act == "deferred" then
+		e.verdict = "expect_deferred"
+		e.expect_no_changelevel = true
+		e.checklist = string.format("G04 · DEFERRED · want %s · on %s · default no RCC",
+			tostring(decision.request_map or "?"),
+			tostring(decision.current_map ~= "" and decision.current_map or "menu"))
+		e.pass_line = "Toast deferred only; no auto changelevel"
+		e.fail_line = "Silent RunConsoleCommand changelevel without opt-in"
+		return e
+	end
+
+	e.verdict = "idle"
+	e.checklist = "G04 · HOLD · action=" .. act
+	e.pass_line = "Observe only"
+	e.fail_line = "Unexpected map thrash"
+	return e
+end
