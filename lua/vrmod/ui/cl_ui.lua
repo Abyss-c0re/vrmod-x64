@@ -193,9 +193,13 @@ if CLIENT then
 
 	local function UpdateBeamColor(colorString)
 		if not colorString or colorString == "" then return end
-		-- G20: shared ParseColor SoT (settings + laser + beam)
+		-- G20: TryParseColor SoT — skip RT update on bad string
 		local r, g, b, a
-		if vrmod.utils and vrmod.utils.ParseColor then
+		if vrmod.utils and vrmod.utils.TryParseColor then
+			local col = vrmod.utils.TryParseColor(colorString)
+			if not col then return end
+			r, g, b, a = col.r, col.g, col.b, col.a or 255
+		elseif vrmod.utils and vrmod.utils.ParseColor then
 			local col = vrmod.utils.ParseColor(colorString, Color(255, 0, 0, 255))
 			r, g, b, a = col.r, col.g, col.b, col.a or 255
 		else

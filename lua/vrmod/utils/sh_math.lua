@@ -90,21 +90,26 @@ function vrmod.utils.IsFloorOrCeilingNormal(n, threshold)
     return math.abs(z) > threshold
 end
 
---- RGBA convar string → Color. Shared SoT (settings + laser/beam).
-function vrmod.utils.ParseColor(str, fallback)
-    fallback = fallback or Color(255, 0, 0, 255)
-    if not str or str == "" then
-        return Color(fallback.r, fallback.g, fallback.b, fallback.a or 255)
-    end
+--- Parse "r,g,b" / "r,g,b,a" → Color, or nil if invalid. Pure SoT for G20 rewires.
+function vrmod.utils.TryParseColor(str)
+    if not str or str == "" then return nil end
     local r, g, b, a = string.match(tostring(str), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
     if not r then
         r, g, b = string.match(tostring(str), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
         a = 255
     end
-    if not r then
+    if not r then return nil end
+    return Color(tonumber(r) or 255, tonumber(g) or 0, tonumber(b) or 0, tonumber(a) or 255)
+end
+
+--- RGBA convar string → Color (never nil). Shared SoT (settings + laser/beam/theme).
+function vrmod.utils.ParseColor(str, fallback)
+    fallback = fallback or Color(255, 0, 0, 255)
+    local c = vrmod.utils.TryParseColor(str)
+    if not c then
         return Color(fallback.r, fallback.g, fallback.b, fallback.a or 255)
     end
-    return Color(tonumber(r) or 255, tonumber(g) or 0, tonumber(b) or 0, tonumber(a) or 255)
+    return c
 end
 
 function vrmod.utils.FormatColor(col)

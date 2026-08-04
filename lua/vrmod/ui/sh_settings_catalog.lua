@@ -425,8 +425,15 @@ end
 -- Color helpers — "r,g,b,a" strings (vrmod_beam_color / vrmod_laser_color)
 ------------------------------------------------------------------------
 function vrmod.SettingsParseColor(str, fallback)
+	-- G20: always prefer pure utils ParseColor / TryParseColor
 	if vrmod.utils and vrmod.utils.ParseColor then
 		return vrmod.utils.ParseColor(str, fallback)
+	end
+	fallback = fallback or Color(255, 0, 0, 255)
+	if vrmod.utils and vrmod.utils.TryParseColor then
+		local c = vrmod.utils.TryParseColor(str)
+		if c then return c end
+		return Color(fallback.r, fallback.g, fallback.b, fallback.a or 255)
 	end
 	fallback = fallback or Color(255, 0, 0, 255)
 	if not str or str == "" then return Color(fallback.r, fallback.g, fallback.b, fallback.a) end

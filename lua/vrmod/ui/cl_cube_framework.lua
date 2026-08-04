@@ -143,9 +143,17 @@ end
 
 local function ParseAccent(str)
 	if not str or str == "" then return nil end
-	local r, g, b = string.match(str, "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
-	r, g, b = tonumber(r), tonumber(g), tonumber(b)
-	if not (r and g and b) then return nil end
+	-- G20: shared color parse SoT (TryParseColor — nil on bad, no red fallback spam)
+	local col
+	if vrmod.utils and vrmod.utils.TryParseColor then
+		col = vrmod.utils.TryParseColor(str)
+	else
+		local r, g, b = string.match(tostring(str), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+		r, g, b = tonumber(r), tonumber(g), tonumber(b)
+		if r and g and b then col = Color(r, g, b, 255) end
+	end
+	if not col then return nil end
+	local r, g, b = col.r, col.g, col.b
 	return {
 		crimson = { r, g, b, 255 },
 		crimsonHot = { math.min(255, r + 50), math.min(255, g + 40), math.min(255, b + 40), 255 },
