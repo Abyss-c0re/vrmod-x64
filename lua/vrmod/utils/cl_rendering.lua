@@ -107,6 +107,20 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
     return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
 end
 
+--- mat_queue 2 single-pass: right SBS half is blank. Mirror left UV to both eyes
+--- so WiVRn/OpenXR gets texture in L and R (mono stereo) instead of one black eye.
+--- bounds: array or 8 numbers — returns 8 values for unpack / SetSubmitTextureBounds.
+function vrmod.utils.SubmitBounds_MirrorLeftToBoth(bounds)
+	local b = bounds
+	if type(b) ~= "table" then return bounds end
+	local u0 = tonumber(b[1]) or 0
+	local v0 = tonumber(b[2]) or 0
+	local u1 = tonumber(b[3]) or 0.5
+	local v1 = tonumber(b[4]) or 1
+	-- Keep left as-is; right samples the same half
+	return u0, v0, u1, v1, u0, v0, u1, v1
+end
+
 function vrmod.utils.AdjustFOV(proj, fovScaleX, fovScaleY)
     local clone = {}
     for i = 1, 4 do

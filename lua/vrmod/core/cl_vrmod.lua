@@ -1281,13 +1281,16 @@ if CLIENT then
 			SafeRenderView(viewLeft)
 
 			if singlePass then
-				-- mat_queue_mode 2: NO second RenderView and NO RT self-copy (both race workers).
-				-- Right half stays clear/black; left eye still drives HMD (better than crash).
+				-- mat_queue_mode 2: NO second RenderView (CThread crash on Linux).
+				-- Right half of SBS RT stays unpainted — submit maps BOTH eyes to the
+				-- LEFT half (mono stereo) so HMD never has one black eye.
+				g_VR._mq2MonoLeftForBoth = true
 				render.SetScissorRect(0, 0, 0, 0, false)
 				ResetStereoEyeState()
 				g_VR.stereoEye = "right"
 				hook.Call("VRMod_PreRender", nil, "right")
 			else
+				g_VR._mq2MonoLeftForBoth = false
 				-- Depth only — never Clear colour (would wipe left-eye world + decals).
 				ResetStereoEyeState()
 				render.ClearDepth(true)
@@ -1553,9 +1556,9 @@ if CLIENT then
 				g_VR._mq2Hint = true
 				vrmod.Toast(
 					mcoreOn
-						and "mat_queue 2: single-pass stereo; set gmod_mcore_test 0 if it still dies"
-						or "mat_queue 2: single-pass stereo (no second RenderView)",
-					6,
+						and "mat_queue 2: mono both eyes (left); set mat_queue_mode 1 for true dual · mcore 0 if crash"
+						or "mat_queue 2: mono both eyes from left · set mat_queue_mode 1 for true stereo dual",
+					7,
 					"hint"
 				)
 			end
@@ -1572,6 +1575,16 @@ if CLIENT then
 		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
 		local renderOffset = convars.vrmod_renderoffset:GetBool()
 		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
+		-- mat_queue 2 single-pass: right SBS half is never painted. Feed LEFT half
+		-- to BOTH eyes so HMD is mono-stereo (both eyes lit) instead of one black.
+		local mqLive = g_VR._matQueueMode or WantedMatQueueMode()
+		local monoBoth = g_VR._mq2SinglePass or g_VR._mq2MonoLeftForBoth or (mqLive >= 2)
+		if monoBoth and vrmod.utils and vrmod.utils.SubmitBounds_MirrorLeftToBoth then
+			bounds = {vrmod.utils.SubmitBounds_MirrorLeftToBoth(bounds)}
+		elseif monoBoth and #bounds >= 8 then
+			bounds[5], bounds[6], bounds[7], bounds[8] = bounds[1], bounds[2], bounds[3], bounds[4]
+		end
+		g_VR._submitMonoBothEyes = monoBoth and true or false
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
 		-- OpenXR OpenGL: flip GL RT V into compositor (Linux). Windows D3D path usually false.
 		if isfunction(VRMOD_SetRTTextureFlip) then
@@ -1582,6 +1595,8 @@ if CLIENT then
 			local crop = (convars.vrmod_submit_crop and convars.vrmod_submit_crop:GetInt()) or 0
 			if crop < 0 then crop = 0 end
 			if crop > 2 then crop = 2 end
+			-- SAFE crop only under mono — FOV_CROP on SBS left-half would mis-sample
+			if monoBoth and crop == 2 then crop = 0 end
 			VRMOD_SetSubmitCropMode(crop)
 			g_VR._submitCropMode = crop
 		end
@@ -2288,6 +2303,11 @@ if CLIENT then
 			local collected = false
 			if paint then
 				PerformRenderViews()
+				-- Re-push UV bounds every painted frame under mq2 mono so right eye
+				-- always samples left half (ApplySubmitBounds is otherwise cvar-only).
+				if g_VR._mq2SinglePass or g_VR._mq2MonoLeftForBoth or (mq or 1) >= 2 then
+					pcall(ApplySubmitBounds)
+				end
 				-- Optional isolate into module staging (never required for submit).
 				-- G19 / pain point #6: never submit eng IN; collect blits toward dual OUT.
 				-- Skip under mat_queue 2 — blit from live engine RT races workers.

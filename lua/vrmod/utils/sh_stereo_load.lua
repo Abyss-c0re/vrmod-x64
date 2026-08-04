@@ -102,7 +102,7 @@ end
 function vrmod.utils.StereoLoadToastHint(policy)
 	if type(policy) ~= "table" then return nil end
 	if policy.single_pass then
-		return "Stereo load · single-pass (mat_queue 2) · right eye clear by law"
+		return "Stereo load · single-pass (mat_queue 2) · both eyes from left (mono)"
 	end
 	if policy.prefer_paint_while_load then
 		return "Stereo load · dual-eye hold through load"
@@ -125,13 +125,13 @@ end
 -- flash_risk:
 --   none              both eyes content expected (dual hold or dual idle)
 --   mono_void         no submit / inactive — void risk
---   mq2_right_clear   single-pass law; right half intentional clear (not dual)
+--   mq2_mono_both     single-pass law; both HMD eyes sample left half (not dual)
 --   no_submit         VR not keeping submit
 
 --- Pure HMD observer expectation from StereoLoadPolicy result.
 --- Returns:
 ---   expect_both_eyes   bool  both eyes should show content (not flat mono void)
----   flash_risk         string none|mono_void|mq2_right_clear|no_submit
+---   flash_risk         string none|mono_void|mq2_mono_both|no_submit
 ---   verdict            string expect_dual_hold|expect_dual|expect_mq2_single|expect_no_submit|idle
 ---   pass_line          string what PASS looks like in HMD
 ---   fail_line          string what FAIL looks like
@@ -158,12 +158,13 @@ function vrmod.utils.StereoLoad_HmdExpect(policy)
 	end
 
 	if policy.single_pass then
-		e.flash_risk = "mq2_right_clear"
+		-- Both eyes should show left content (submit UV mirror) — not one black eye
+		e.flash_risk = "mq2_mono_both"
 		e.verdict = "expect_mq2_single"
-		e.expect_both_eyes = false
-		e.pass_line = "Single-pass: left content, right intentional clear (mat_queue 2 law)"
-		e.fail_line = "Forced dual under mq≥2 (forbidden) or black wall of Real"
-		e.checklist = "G05 · MQ2 SINGLE · right clear by law · never dual-paint"
+		e.expect_both_eyes = true
+		e.pass_line = "Single-pass: both HMD eyes from left half (mat_queue 2 mono)"
+		e.fail_line = "One eye black, or dual-paint under mq≥2 (forbidden crash path)"
+		e.checklist = "G05 · MQ2 MONO BOTH · left UV for L+R · never second RenderView"
 		return e
 	end
 
