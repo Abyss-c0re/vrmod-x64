@@ -1768,6 +1768,26 @@ if CLIENT then
 
 			UpdateTracking()
 			ApplyPoseModifiers()
+			-- G25: one pose energy path snapshot (pain #4 — no dual-truth forks).
+			if vrmod.utils and vrmod.utils.PoseSoT_Decide then
+				local tr = g_VR.tracking
+				local raw = g_VR.rawTracking
+				local pdec = vrmod.utils.PoseSoT_Decide({
+					vr_active = true,
+					has_raw = istable(raw) and raw.hmd ~= nil,
+					has_tracking = istable(tr) and tr.hmd ~= nil,
+					gun_reads = "tracking",
+					head_vel_from = "raw",
+					second_angvel_sot = false,
+					dual_public = false,
+					modifiers_in_place = true,
+				})
+				g_VR._poseSoTDecision = pdec
+				g_VR._poseSoTLabel = vrmod.utils.PoseSoT_StatusLabel
+					and vrmod.utils.PoseSoT_StatusLabel(pdec) or nil
+				g_VR._poseSoTHmdExpect = vrmod.utils.PoseSoT_HmdExpect
+					and vrmod.utils.PoseSoT_HmdExpect(pdec) or nil
+			end
 			HandleInput()
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
