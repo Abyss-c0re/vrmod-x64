@@ -1044,12 +1044,19 @@ if CLIENT then
 			dopost = false
 		end
 
-		-- Prefer OpenXR locateViews eye positions (correct IPD under pitch/yaw/roll).
-		-- Fallback: synthetic separation along head Right() (must use full basis, not yaw-only).
+		-- Eye placement (vrmod_stereo_eye_mode): dial for head-tilt / roll warp.
+		--   0 auto      = XR locateViews if valid, else synthetic
+		--   1 xr        = force OpenXR eye positions (shared HMD ang always)
+		--   2 synthetic = force head-Right() IPD (gold for roll; golden test path)
+		local eyeMode = (convars.vrmod_stereo_eye_mode and convars.vrmod_stereo_eye_mode:GetInt()) or 0
+		if eyeMode < 0 then eyeMode = 0 end
+		if eyeMode > 2 then eyeMode = 2 end
 		local eL = (g_VR.tracking and g_VR.tracking.eye_left) or (g_VR.rawTracking and g_VR.rawTracking.eye_left)
 		local eR = (g_VR.tracking and g_VR.tracking.eye_right) or (g_VR.rawTracking and g_VR.rawTracking.eye_right)
 		local usedXrEyes = false
-		if eL and eR and eL.pos and eR.pos then
+		local wantXr = (eyeMode == 0 or eyeMode == 1)
+		local wantSynth = (eyeMode == 2) or (eyeMode == 0)
+		if wantXr and eL and eR and eL.pos and eR.pos then
 			local d = eL.pos:DistToSqr(eR.pos)
 			-- Sanity: IPD in Source units roughly (scale * meters)^2 — reject collapsed poses
 			if d > 0.01 and d < (scale * 0.2) * (scale * 0.2) then
@@ -1058,12 +1065,18 @@ if CLIENT then
 				usedXrEyes = true
 			end
 		end
-		if not usedXrEyes then
+		if not usedXrEyes and wantSynth then
 			-- Synthetic: pure translation along head right (tilts with roll) + small Z along forward.
 			-- No fixed world-up bias (old up*-2.1 warped under roll).
 			g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale)
 			g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale)
+		elseif not usedXrEyes then
+			-- Force XR requested but invalid — still synth so we never leave nil eyes
+			g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale)
+			g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale)
 		end
+		g_VR._stereoEyeMode = eyeMode
+		g_VR._stereoUsedXrEyes = usedXrEyes
 
 		-- Per-eye FOV/aspect from OpenXR overrender (symmetric FOV enclosing asymmetric frustum)
 		local fovL = hfovLeft
@@ -1376,7 +1389,7 @@ if CLIENT then
 		end
 	end
 
-	-- Apply UV submit bounds from border convars (safe to call live while VR active)
+	-- Apply UV submit bounds + C++ crop policy (safe to call live while VR active)
 	local function ApplySubmitBounds()
 		if not g_VR.active and not leftCalc then return end
 		if type(leftCalc) ~= "table" or type(rightCalc) ~= "table" then return end
@@ -1391,15 +1404,24 @@ if CLIENT then
 		if isfunction(VRMOD_SetRTTextureFlip) then
 			VRMOD_SetRTTextureFlip(not system.IsWindows())
 		end
+		-- Push crop mode to C++ backend (0 safe / 1 full / 2 fov_crop experimental)
+		if isfunction(VRMOD_SetSubmitCropMode) then
+			local crop = (convars.vrmod_submit_crop and convars.vrmod_submit_crop:GetInt()) or 0
+			if crop < 0 then crop = 0 end
+			if crop > 2 then crop = 2 end
+			VRMOD_SetSubmitCropMode(crop)
+			g_VR._submitCropMode = crop
+		end
 	end
 
-	-- Live update: UV bounds only (offsets/scale factor)
+	-- Live update: UV bounds + crop mode (offsets/scale/eye dials)
 	local function BindBorderConvarCallbacks()
 		local names = {
 			"vrmod_horizontaloffset",
 			"vrmod_verticaloffset",
 			"vrmod_scalefactor",
 			"vrmod_renderoffset",
+			"vrmod_submit_crop",
 		}
 		for _, name in ipairs(names) do
 			cvars.RemoveChangeCallback(name, "vrmod_submit_bounds")
@@ -1750,11 +1772,25 @@ if CLIENT then
 			g_VR._bindingsLawHmdExpect = U.BindingsLaw_HmdExpect and U.BindingsLaw_HmdExpect(d) or nil
 		end
 
-		-- Menu-first: LocalPlayer may be invalid before a map loads
+		-- G34 / W12: action set before first input (pure FlyAwayLaw)
 		local ply = LocalPlayer()
 		local inVeh = IsValid(ply) and ply.InVehicle and ply:InVehicle()
-		local set = inVeh and "/actions/driving" or "/actions/main"
-		pcall(VRMOD_SetActiveActionSets, "/actions/base", set)
+		local FA = vrmod.utils
+		local set = (FA and FA.FlyAwayLaw_ResolveActionSet and FA.FlyAwayLaw_ResolveActionSet(inVeh))
+			or (inVeh and "/actions/driving" or "/actions/main")
+		local baseSet = (FA and FA.FlyAwayLaw_ActionSetBase and FA.FlyAwayLaw_ActionSetBase()) or "/actions/base"
+		pcall(VRMOD_SetActiveActionSets, baseSet, set)
+		if FA and FA.FlyAwayLaw_Decide then
+			local d = FA.FlyAwayLaw_Decide({
+				in_vehicle = inVeh,
+				action_set = set,
+				expect_action_set = true,
+				origin_set_to_feet = nil, -- origin setup follows
+			})
+			g_VR._flyAwayLaw = d
+			g_VR._flyAwayLawLabel = FA.FlyAwayLaw_StatusLabel and FA.FlyAwayLaw_StatusLabel(d) or nil
+			g_VR._flyAwayLawHmdExpect = FA.FlyAwayLaw_HmdExpect and FA.FlyAwayLaw_HmdExpect(d) or nil
+		end
 		-- Customs already loaded in RewriteActionManifestFiles
 		if isfunction(VRUtilLoadCustomActions) then pcall(VRUtilLoadCustomActions) end
 		if isfunction(VRMOD_GetActions) then
@@ -1775,6 +1811,73 @@ if CLIENT then
 		-- Feet of the gmod player = tracking floor. Keep Z in sync so standing height matches.
 		g_VR.origin = IsValid(ply) and ply:GetPos() or Vector(0, 0, 0)
 		g_VR.originAngle = g_VR.originAngle or Angle(0, 0, 0)
+		g_VR._flyAwayOriginFeet = IsValid(ply) and true or false
+		g_VR._flyAwayStartTime = CurTime()
+		g_VR._flyAwaySnapped = false
+		if vrmod.utils and vrmod.utils.FlyAwayLaw_Decide then
+			local d = vrmod.utils.FlyAwayLaw_Decide({
+				in_vehicle = IsValid(ply) and ply.InVehicle and ply:InVehicle(),
+				action_set = g_VR._flyAwayLaw and g_VR._flyAwayLaw.want_action_set or nil,
+				origin_set_to_feet = g_VR._flyAwayOriginFeet,
+				expect_action_set = true,
+			})
+			g_VR._flyAwayLaw = d
+			g_VR._flyAwayLawLabel = vrmod.utils.FlyAwayLaw_StatusLabel
+				and vrmod.utils.FlyAwayLaw_StatusLabel(d) or nil
+			g_VR._flyAwayLawHmdExpect = vrmod.utils.FlyAwayLaw_HmdExpect
+				and vrmod.utils.FlyAwayLaw_HmdExpect(d) or nil
+		end
+		-- G34 / W12: one-shot fly-away snap if head vel insane in start window
+		timer.Create("vrmod_flyaway_origin_snap", 0.5, 6, function()
+			if not g_VR or not g_VR.active or g_VR._flyAwaySnapped then return end
+			local FA = vrmod.utils
+			if not FA or not FA.FlyAwayLaw_ShouldSnapOrigin then return end
+			local ply2 = LocalPlayer()
+			local hasPos = IsValid(ply2)
+			local vel = (vrmod.cachedHeadPose and vrmod.cachedHeadPose.vel) or (g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.vel)
+			local vx, vy, vz = 0, 0, 0
+			if vel then
+				vx = vel.x or 0
+				vy = vel.y or 0
+				vz = vel.z or 0
+			end
+			local elapsed = CurTime() - (g_VR._flyAwayStartTime or CurTime())
+			if FA.FlyAwayLaw_ShouldSnapOrigin({
+				elapsed_sec = elapsed,
+				already_snapped = g_VR._flyAwaySnapped,
+				vel_z = vz,
+				vel_x = vx,
+				vel_y = vy,
+				has_player_pos = hasPos,
+			}) then
+				g_VR.origin = ply2:GetPos()
+				g_VR._flyAwaySnapped = true
+				if vrmod.logger then
+					vrmod.logger.Warn("G34 fly-away snap: insane head vel → origin to feet (velz=%.0f)", vz)
+				end
+				if FA.FlyAwayLaw_Decide then
+					local d = FA.FlyAwayLaw_Decide({
+						in_vehicle = ply2.InVehicle and ply2:InVehicle(),
+						origin_set_to_feet = true,
+						already_snapped = true,
+						vel_z = vz,
+						has_player_pos = true,
+						expect_action_set = true,
+						action_set = FA.FlyAwayLaw_ResolveActionSet
+							and FA.FlyAwayLaw_ResolveActionSet(ply2.InVehicle and ply2:InVehicle()),
+					})
+					-- after snap path is recovered
+					d.path_ok = true
+					d.risk = "none"
+					d.reason = "snapped_to_feet"
+					d.should_snap = false
+					g_VR._flyAwayLaw = d
+					g_VR._flyAwayLawLabel = "FLY · SNAPPED"
+					g_VR._flyAwayLawHmdExpect = FA.FlyAwayLaw_HmdExpect and FA.FlyAwayLaw_HmdExpect(d) or nil
+				end
+				timer.Remove("vrmod_flyaway_origin_snap")
+			end
+		end)
 	end
 
 	-- 6) Controller offsets & scale
