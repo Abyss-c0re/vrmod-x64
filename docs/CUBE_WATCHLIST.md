@@ -108,7 +108,7 @@ Sources (live watch):
 
 1. **Done / doing:** blocked cvars, swap eyes, SS+4096 crisp, panel2vr + Crimson Cube, border Experience, primary hand SoT (`vrmod_primary_hand`)  
 2. **Partial:** Glide stick-primary + unbound toast (W3); action-manifest rewrite + toast (W6); ShareTexture/HMD self-test toast (W7)  
-3. **Ship bar:** in-headset smoke of menu-open crash, HUD ghost (#349), hands stuck (**G42 pure** `HandStuckLaw_*` + identity/raw heal; HMD walk §0.29 open), primary-hand left — then workshop  
+3. **Ship bar:** menu-open crash (**G43 pure** `NestedRtLaw_*`; HMD §0.30 open), HUD ghost (#349 fixed), hands stuck (**G42**; §0.29 open), primary-hand left (G16 LaserLaw; §0.8 open) — then workshop  
 4. **Then:** hand bullet filter polish; worldmodel single path (W9/W10)  
 5. **Maintenance (research):** quarantine demoted AlgoCube / multi-face cubeui demo / web2vr aliases; strip twin dead IK after avatar smoke — **do not** merge FBT↔charik or force hands onto lerpedFrame without contract rewrite  
 6. **Track:** OpenXR migration (author intent) as long-horizon module law  

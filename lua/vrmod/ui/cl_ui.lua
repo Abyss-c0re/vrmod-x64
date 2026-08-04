@@ -275,12 +275,34 @@ if CLIENT then
 	------------------------------------------------------------------------
 
 	--- True if this menu should repaint now. Call before VRUtilMenuRenderStart / full paint.
+	--- G43: pure NestedRtLaw forbids menu RT under stereo (malloc crash ship bar).
 	function vrmod.MenuShouldRepaint(uid, force)
 		local menu = menus[uid]
 		if not menu or not menu.rt then return false end
-		if g_VR.stereoRtActive then
+		local stereoActive = g_VR.stereoRtActive and true or false
+		local allowPaint = true
+		local U = vrmod.utils
+		if U and U.NestedRtLaw_AllowMenuRtPaint then
+			allowPaint = U.NestedRtLaw_AllowMenuRtPaint({
+				stereo_rt_active = stereoActive,
+				stereo_eye = g_VR.stereoEye,
+			})
+		elseif stereoActive then
+			allowPaint = false
+		end
+		if not allowPaint then
 			-- Defer to next PreStereoCapture / PreRender window
 			menu.dirty = true
+			if U and U.NestedRtLaw_Decide then
+				local d = U.NestedRtLaw_Decide({
+					stereo_rt_active = stereoActive,
+					stereo_eye = g_VR.stereoEye,
+					menu_open = true,
+				})
+				g_VR._nestedRtLaw = d
+				g_VR._nestedRtLawLabel = U.NestedRtLaw_StatusLabel and U.NestedRtLaw_StatusLabel(d) or nil
+				g_VR._nestedRtLawHmdExpect = U.NestedRtLaw_HmdExpect and U.NestedRtLaw_HmdExpect(d) or nil
+			end
 			return false
 		end
 		if force or menu.dirty then return true end
@@ -334,7 +356,18 @@ if CLIENT then
 			menu._paintCursorY = menu.lastCursorY
 		end
 
-		if g_VR.stereoRtActive then
+		-- G43: never nest menu RT under stereo (pure NestedRtLaw)
+		local U = vrmod.utils
+		local allow = true
+		if U and U.NestedRtLaw_AllowMenuRtPaint then
+			allow = U.NestedRtLaw_AllowMenuRtPaint({
+				stereo_rt_active = g_VR.stereoRtActive and true or false,
+				stereo_eye = g_VR.stereoEye,
+			})
+		elseif g_VR.stereoRtActive then
+			allow = false
+		end
+		if not allow then
 			menu.dirty = true
 			return
 		end
