@@ -1760,12 +1760,24 @@ if CLIENT then
 
 			-- G05: stereo policy during load / early handoff (pure SoT — no dual under mq≥2)
 			local mq = g_VR._matQueueMode or WantedMatQueueMode()
-			local loading = false
-			if not IsInGame or not IsInGame() then
-				loading = true
+			local inGame = true
+			if isfunction(IsInGame) then inGame = IsInGame() and true or false end
+			local ply = LocalPlayer and LocalPlayer() or nil
+			local plyOk = IsValid(ply)
+			local mapName = ""
+			pcall(function()
+				if game and game.GetMap then mapName = tostring(game.GetMap() or "") end
+			end)
+			local loading = true
+			if vrmod.utils and vrmod.utils.StereoLoad_IsLoading then
+				loading = vrmod.utils.StereoLoad_IsLoading({
+					is_in_game = inGame,
+					local_player_valid = plyOk,
+					map_name = mapName,
+					map_changing = g_VR._mapChanging and true or false,
+				})
 			else
-				local ply = LocalPlayer()
-				if not IsValid(ply) then loading = true end
+				loading = (not inGame) or (not plyOk)
 			end
 			local policy = (vrmod.utils and vrmod.utils.StereoLoadPolicy)
 					and vrmod.utils.StereoLoadPolicy({
@@ -1776,6 +1788,18 @@ if CLIENT then
 					})
 				or { dual_eye = (mq or 1) < 2, keep_submit = true, prefer_paint_while_load = false }
 			g_VR._stereoLoadPolicy = policy
+			g_VR._stereoLoadLabel = (vrmod.utils and vrmod.utils.StereoLoad_StatusLabel
+				and vrmod.utils.StereoLoad_StatusLabel(policy)) or nil
+			-- One-shot toast when dual-hold engages (not every load frame)
+			if vrmod.utils and vrmod.utils.StereoLoad_ShouldToast
+				and vrmod.utils.StereoLoad_ShouldToast(policy, g_VR._stereoLoadToasted) then
+				g_VR._stereoLoadToasted = true
+				local hint = vrmod.utils.StereoLoadToastHint and vrmod.utils.StereoLoadToastHint(policy)
+				if hint then
+					if vrmod.logger then vrmod.logger.Info("G05 %s", hint) end
+					if vrmod.Toast then vrmod.Toast(hint, 3, "hint") end
+				end
+			end
 			local paint = openxrShouldRender
 			if vrmod.utils and vrmod.utils.ShouldPaintStereoThisFrame then
 				paint = vrmod.utils.ShouldPaintStereoThisFrame(policy, openxrShouldRender)
@@ -1885,6 +1909,9 @@ if CLIENT then
 			timer.Remove("vrmod_display_params_catchup")
 			displayParamsLive = false
 			g_VR._stereoSelfTestDone = true
+			g_VR._stereoLoadToasted = nil
+			g_VR._stereoLoadPolicy = nil
+			g_VR._stereoLoadLabel = nil
 			matQueueAppliedForSession = false
 
 			-- G13: return-to-Cube marker (protocol only — Cube does not auto-reclaim yet)

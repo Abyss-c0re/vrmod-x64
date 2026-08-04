@@ -5,6 +5,28 @@ g_VR = g_VR or {}
 vrmod = vrmod or {}
 vrmod.utils = vrmod.utils or {}
 
+--- Pure loading detector from discrete engine-ish flags (no engine I/O).
+--- opts:
+---   is_in_game           bool|nil  IsInGame()
+---   local_player_valid   bool|nil  IsValid(LocalPlayer())
+---   map_name             string|nil game.GetMap()
+---   map_changing         bool|nil  changelevel / mid-join
+---   force_loading        bool|nil
+--- Returns true when frame path should treat session as "loading".
+function vrmod.utils.StereoLoad_IsLoading(opts)
+	opts = type(opts) == "table" and opts or {}
+	if opts.force_loading then return true end
+	if opts.map_changing then return true end
+	if opts.is_in_game == false then return true end
+	if opts.local_player_valid == false then return true end
+	local map = opts.map_name
+	if type(map) == "string" then
+		map = map:gsub("^%s+", ""):gsub("%s+$", "")
+		if map == "" or map == "nil" then return true end
+	end
+	return false
+end
+
 --- Pure stereo-load policy from discrete flags (no engine I/O).
 --- opts:
 ---   mat_queue_mode  (number, default 1)
@@ -18,6 +40,7 @@ vrmod.utils = vrmod.utils or {}
 ---   keep_submit              — EndFrame/Submit while VR active
 ---   prefer_paint_while_load  — keep dual paint during load even if compositor skips
 ---   fill_black_stereo_pair   — prefer black stereo pair over mono void
+---   loading                  — echoed loading flag used
 function vrmod.utils.StereoLoadPolicy(opts)
 	opts = type(opts) == "table" and opts or {}
 	local mq = tonumber(opts.mat_queue_mode)
@@ -43,6 +66,7 @@ function vrmod.utils.StereoLoadPolicy(opts)
 		prefer_paint_while_load = preferPaint,
 		fill_black_stereo_pair = fillBlack,
 		mat_queue_mode = mq,
+		loading = loading,
 	}
 end
 
@@ -54,6 +78,24 @@ function vrmod.utils.ShouldPaintStereoThisFrame(policy, openxrShouldRender)
 	if openxrShouldRender then return true end
 	-- Compositor said no-render: still paint if load/handoff policy wants dual hold
 	return policy.prefer_paint_while_load and true or false
+end
+
+--- Compact panel/log token (pure).
+function vrmod.utils.StereoLoad_StatusLabel(policy)
+	if type(policy) ~= "table" then return "STEREO · IDLE" end
+	if policy.single_pass then
+		return "STEREO · MQ2 SINGLE"
+	end
+	if policy.prefer_paint_while_load then
+		return "STEREO · DUAL HOLD LOAD"
+	end
+	if policy.dual_eye and policy.keep_submit then
+		return "STEREO · DUAL"
+	end
+	if not policy.keep_submit then
+		return "STEREO · NO SUBMIT"
+	end
+	return "STEREO · HOLD"
 end
 
 --- Short toast/log line for G05 awareness (no mutation).
@@ -69,4 +111,11 @@ function vrmod.utils.StereoLoadToastHint(policy)
 		return "Stereo load · dual-eye"
 	end
 	return nil
+end
+
+--- Pure one-shot toast gate: true only on rising edge of prefer_paint_while_load.
+function vrmod.utils.StereoLoad_ShouldToast(policy, alreadyToasted)
+	if alreadyToasted then return false end
+	if type(policy) ~= "table" then return false end
+	return policy.prefer_paint_while_load and true or false
 end
