@@ -338,7 +338,7 @@ local function noteStagePackOnce()
 	end
 end
 
--- G04: read cube_warm.txt map-attach intent (never auto changelevel).
+-- G04: read cube_warm.txt map-attach intent; careful changelevel opt-in only.
 local warmAttachNotified = false
 local function noteWarmAttachOnce()
 	if warmAttachNotified then return end
@@ -363,17 +363,62 @@ local function noteWarmAttachOnce()
 	pcall(function()
 		if game and game.GetMap then curMap = tostring(game.GetMap() or "") end
 	end)
+	-- Opt-in only: vrmod_warm_changelevel 1 or DATA/vrmod/warm_changelevel_enable.txt
+	local allowChg = false
+	if vrmod.utils.WarmAttach_AllowChangelevelFromFlags then
+		local conOn, fileOn = false, false
+		pcall(function()
+			if not GetConVar("vrmod_warm_changelevel") then
+				CreateClientConVar("vrmod_warm_changelevel", "0", true, FCVAR_ARCHIVE,
+					"G04 careful warm-map changelevel (0=off)")
+			end
+			local c = GetConVar("vrmod_warm_changelevel")
+			if c then conOn = c:GetBool() end
+		end)
+		pcall(function()
+			if file and file.Exists and file.Exists("vrmod/warm_changelevel_enable.txt", "DATA") then
+				fileOn = true
+			end
+		end)
+		allowChg = vrmod.utils.WarmAttach_AllowChangelevelFromFlags({
+			convar_on = conOn,
+			file_enable = fileOn,
+		})
+	end
 	local decision = vrmod.utils.WarmAttach_Decide(req, {
 		current_map = curMap,
-		allow_changelevel = false, -- hard law until HMD-proven warm attach
+		allow_changelevel = allowChg, -- default false; opt-in above
 	})
 	g_VR._cubeWarmRequest = req
 	g_VR._cubeWarmAttach = decision
-	log("warm attach action=%s reason=%s want=%s cur=%s",
+	local plan = (vrmod.utils.WarmAttach_ChangelevelPlan
+		and vrmod.utils.WarmAttach_ChangelevelPlan(decision)) or nil
+	g_VR._cubeWarmChangelevelPlan = plan
+	-- Careful executor: only when plan armed + allow (never default path)
+	local execRes
+	if plan
+		and vrmod.utils.WarmAttach_ShouldExecuteChangelevel
+		and vrmod.utils.WarmAttach_ShouldExecuteChangelevel(plan, allowChg)
+		and vrmod.utils.WarmAttach_ExecuteChangelevel then
+		execRes = vrmod.utils.WarmAttach_ExecuteChangelevel(plan, function(map)
+			local ok = pcall(function()
+				RunConsoleCommand("changelevel", tostring(map))
+			end)
+			if not ok then return false, "rcc_fail" end
+			return true
+		end)
+		g_VR._cubeWarmChangelevelExec = execRes
+		log("warm changelevel applied=%s ok=%s map=%s allow=%s",
+			tostring(execRes and execRes.applied), tostring(execRes and execRes.ok),
+			tostring(execRes and execRes.map), tostring(allowChg))
+	end
+	log("warm attach action=%s reason=%s want=%s cur=%s allow_chg=%s plan=%s",
 		tostring(decision.action), tostring(decision.reason),
-		tostring(decision.request_map), tostring(decision.current_map))
-	-- Informational only — never RunConsoleCommand("changelevel") here
-	local hint = vrmod.utils.WarmAttach_Toast and vrmod.utils.WarmAttach_Toast(decision)
+		tostring(decision.request_map), tostring(decision.current_map),
+		tostring(allowChg), tostring(plan and plan.method))
+	local hint = (execRes and vrmod.utils.WarmAttach_ExecuteToast
+			and vrmod.utils.WarmAttach_ExecuteToast(execRes, plan))
+		or (vrmod.utils.WarmAttach_Toast and vrmod.utils.WarmAttach_Toast(decision))
 	if hint and vrmod.Toast then
 		vrmod.Toast(hint, 4, "hint")
 	end

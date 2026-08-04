@@ -143,3 +143,139 @@ function vrmod.utils.WarmAttach_Toast(decision)
 	end
 	return nil
 end
+
+-- ── G04 careful changelevel plan executor (default OFF) ─────────────────────
+-- Product never auto-changelevels unless opt-in flag is set. Pure helpers only;
+-- openxr_launch supplies RunConsoleCommand wrapper when armed.
+
+--- Map token safe for console changelevel: [a-z0-9_]+ after normalize, len 1..64.
+function vrmod.utils.WarmAttach_MapTokenOk(raw)
+	local s = vrmod.utils.WarmAttach_NormalizeMap(raw)
+	if s == "" or #s > 64 then return false end
+	return s:match("^[a-z0-9_]+$") ~= nil
+end
+
+--- G04 careful allow gate (pure). Product default OFF.
+--- flags:
+---   convar_on     bool  vrmod_warm_changelevel GetBool
+---   file_enable   bool  DATA vrmod/warm_changelevel_enable.txt exists
+---   env_on        bool  GVRMOD_WARM_CHANGELEVEL truthy (launcher mirror)
+---   force         bool  test override
+function vrmod.utils.WarmAttach_AllowChangelevelFromFlags(flags)
+	flags = type(flags) == "table" and flags or {}
+	if flags.force then return true end
+	if flags.convar_on then return true end
+	if flags.file_enable then return true end
+	if flags.env_on then return true end
+	return false
+end
+
+--- Pure changelevel plan from WarmAttach_Decide result.
+--- plan.do_changelevel only when decision.action == "changelevel" and map token ok.
+function vrmod.utils.WarmAttach_ChangelevelPlan(decision)
+	local p = {
+		valid = true,
+		do_changelevel = false,
+		map = "",
+		from_map = "",
+		method = "none", -- none | changelevel
+		reason = "none",
+		cmd = "",
+	}
+	if type(decision) ~= "table" or not decision.valid then
+		p.valid = false
+		p.reason = "invalid_decision"
+		return p
+	end
+	p.map = vrmod.utils.WarmAttach_NormalizeMap(decision.request_map)
+	p.from_map = vrmod.utils.WarmAttach_NormalizeMap(decision.current_map)
+	if decision.action == "same_map" then
+		p.reason = "already_on_map"
+		return p
+	end
+	if decision.action == "idle" or decision.action == "reject" then
+		p.reason = tostring(decision.reason or decision.action)
+		return p
+	end
+	if decision.action == "deferred" then
+		p.reason = "eligible_deferred"
+		return p
+	end
+	if decision.action ~= "changelevel" or not decision.would_changelevel then
+		p.reason = "not_armed"
+		return p
+	end
+	if not vrmod.utils.WarmAttach_MapTokenOk(p.map) then
+		p.reason = "bad_map_token"
+		return p
+	end
+	p.do_changelevel = true
+	p.method = "changelevel"
+	p.reason = tostring(decision.reason or "eligible")
+	p.cmd = "changelevel " .. p.map
+	return p
+end
+
+--- Console cmd string or nil when plan not armed.
+function vrmod.utils.WarmAttach_ChangelevelCmd(plan)
+	if type(plan) ~= "table" or not plan.valid or not plan.do_changelevel then return nil end
+	if type(plan.cmd) == "string" and plan.cmd ~= "" then return plan.cmd end
+	if plan.map and plan.map ~= "" and vrmod.utils.WarmAttach_MapTokenOk(plan.map) then
+		return "changelevel " .. plan.map
+	end
+	return nil
+end
+
+--- True when executor may run changelevel (plan armed + allow).
+function vrmod.utils.WarmAttach_ShouldExecuteChangelevel(plan, allowChangelevel)
+	if not allowChangelevel then return false end
+	if type(plan) ~= "table" or not plan.valid then return false end
+	if not plan.do_changelevel then return false end
+	if plan.method ~= "changelevel" then return false end
+	if not vrmod.utils.WarmAttach_MapTokenOk(plan.map) then return false end
+	return true
+end
+
+--- Pure executor: run changelevel via injectable runner(map) → ok,err.
+--- Never calls engine itself — openxr_launch supplies RunConsoleCommand wrapper.
+--- Returns { applied=bool, map=string, ok=bool, error=string|nil }
+function vrmod.utils.WarmAttach_ExecuteChangelevel(plan, runner)
+	local res = { applied = false, map = "", ok = true, error = nil }
+	if type(plan) ~= "table" or not plan.valid or not plan.do_changelevel then
+		res.ok = false
+		res.error = "plan_not_armed"
+		return res
+	end
+	res.map = tostring(plan.map or "")
+	if not vrmod.utils.WarmAttach_MapTokenOk(res.map) then
+		res.ok = false
+		res.error = "bad_map_token"
+		return res
+	end
+	if type(runner) ~= "function" then
+		res.ok = false
+		res.error = "no_runner"
+		return res
+	end
+	local ok, err = runner(res.map)
+	if ok then
+		res.applied = true
+		res.ok = true
+	else
+		res.ok = false
+		res.error = tostring(err or "runner_fail")
+	end
+	return res
+end
+
+--- Toast after execute attempt (pure).
+function vrmod.utils.WarmAttach_ExecuteToast(execRes, plan)
+	if type(execRes) ~= "table" then return nil end
+	if execRes.applied and execRes.ok then
+		return string.format("Warm attach · changelevel → %s", tostring(execRes.map or (plan and plan.map) or "?"))
+	end
+	if execRes.error then
+		return "Warm attach · changelevel failed · " .. tostring(execRes.error)
+	end
+	return nil
+end
