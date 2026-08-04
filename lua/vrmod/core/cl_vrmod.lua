@@ -1832,17 +1832,42 @@ if CLIENT then
 				paint = vrmod.utils.ShouldPaintStereoThisFrame(policy, openxrShouldRender)
 			end
 
+			local collected = false
 			if paint then
 				PerformRenderViews()
 				-- Optional isolate into module staging (never required for submit).
+				-- G19 / pain point #6: never submit eng IN; collect blits toward dual OUT.
 				-- Skip under mat_queue 2 — blit from live engine RT races workers.
-				if (mq or 1) < 2 and isfunction(VRMOD_CollectEyes) then
+				local collectOk = (mq or 1) < 2
+				if vrmod.utils and vrmod.utils.SubmitLaw_AllowCollect then
+					collectOk = vrmod.utils.SubmitLaw_AllowCollect({ mat_queue_mode = mq })
+				end
+				if collectOk and isfunction(VRMOD_CollectEyes) then
 					PushKnownSubmitSize()
-					pcall(VRMOD_CollectEyes)
+					local okC = pcall(VRMOD_CollectEyes)
+					collected = okC and true or false
 				end
 			end
 
+			-- G19: pure submit decision snapshot (dual OUT only; never eng IN / virgin).
+			if vrmod.utils and vrmod.utils.SubmitLaw_Decide then
+				local sdec = vrmod.utils.SubmitLaw_Decide({
+					mat_queue_mode = mq,
+					vr_active = true,
+					painted = paint and true or false,
+					collected = collected,
+					keep_submit = policy.keep_submit ~= false,
+					submit_texture = "dual_out_rgba8",
+				})
+				g_VR._submitLawDecision = sdec
+				g_VR._submitLawLabel = vrmod.utils.SubmitLaw_StatusLabel
+					and vrmod.utils.SubmitLaw_StatusLabel(sdec) or nil
+				g_VR._submitLawHmdExpect = vrmod.utils.SubmitLaw_HmdExpect
+					and vrmod.utils.SubmitLaw_HmdExpect(sdec) or nil
+			end
+
 			-- G05: keep Submit while active (policy.keep_submit) — avoids HMD void on load frames
+			-- Module path submits dual OUT (never eng IN texture id).
 			if policy.keep_submit ~= false and isfunction(VRMOD_SubmitSharedTexture) then
 				VRMOD_SubmitSharedTexture()
 			end
