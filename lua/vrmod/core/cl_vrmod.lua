@@ -274,7 +274,10 @@ if CLIENT then
 	end
 
 	local function ComputeDisplayParams()
-		local viewscale = convars.vrmod_viewscale:GetFloat()
+		-- G35 / W8: clamp viewscale (fisheye band); prefer HMD projection
+		local rawVs = convars.vrmod_viewscale:GetFloat()
+		local viewscale = (vrmod.utils and vrmod.utils.ViewScaleLaw_Clamp
+			and vrmod.utils.ViewScaleLaw_Clamp(rawVs)) or rawVs
 		local fovX, fovY = convars.vrmod_fovscale_x:GetFloat(), convars.vrmod_fovscale_y:GetFloat()
 		if not isfunction(VRMOD_GetDisplayInfo) then
 			return nil
@@ -338,6 +341,21 @@ if CLIENT then
 		local rightProj = vrmod.utils.AdjustFOV(rawRight, fovX, fovY)
 		local leftCalc = vrmod.utils.CalculateProjectionParams(leftProj, viewscale)
 		local rightCalc = vrmod.utils.CalculateProjectionParams(rightProj, viewscale)
+
+		if vrmod.utils and vrmod.utils.ViewScaleLaw_Decide then
+			local vd = vrmod.utils.ViewScaleLaw_Decide({
+				viewscale = rawVs,
+				proj_live = projLive,
+				fovscale_x = fovX,
+				fovscale_y = fovY,
+				require_proj_live = false, -- soft until session RUNNING
+			})
+			g_VR._viewScaleLaw = vd
+			g_VR._viewScaleLawLabel = vrmod.utils.ViewScaleLaw_StatusLabel
+				and vrmod.utils.ViewScaleLaw_StatusLabel(vd) or nil
+			g_VR._viewScaleLawHmdExpect = vrmod.utils.ViewScaleLaw_HmdExpect
+				and vrmod.utils.ViewScaleLaw_HmdExpect(vd) or nil
+		end
 
 		if vrmod.logger then
 			vrmod.logger.Info(
