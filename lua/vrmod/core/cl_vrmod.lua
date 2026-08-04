@@ -2185,10 +2185,43 @@ if CLIENT then
 		hook.Add("CalcViewModelView", "vrutil_hook_calcviewmodelview", function(_, vm, _, _, _, _) return g_VR.viewModelPos, g_VR.viewModelAng end)
 		local blockViewModelDraw = true
 		g_VR.allowPlayerDraw = false
-		local hideplayer = convars.vrmod_floatinghands:GetBool()
+		-- G38 / W10: single presentation path (floating hands OR worldmodel, not dual ghost)
+		local floating = convars.vrmod_floatinghands:GetBool()
+		local useWmGlobal = convars.vrmod_useworldmodels and convars.vrmod_useworldmodels:GetBool()
+		local classWm = g_VR.currentvmi and g_VR.currentvmi.useWorldModel
+		local useWm = useWmGlobal or classWm
+		local hideplayer = floating
+		if vrmod.utils and vrmod.utils.WorldModelLaw_Decide then
+			local d = vrmod.utils.WorldModelLaw_Decide({
+				floating_hands = floating,
+				use_worldmodels = useWm,
+				draw_viewmodel = not useWm,
+				draw_worldmodel_vm = useWm and true or false,
+				draw_player_body = not floating,
+			})
+			g_VR._worldModelLaw = d
+			g_VR._worldModelLawLabel = vrmod.utils.WorldModelLaw_StatusLabel
+				and vrmod.utils.WorldModelLaw_StatusLabel(d) or nil
+			g_VR._worldModelLawHmdExpect = vrmod.utils.WorldModelLaw_HmdExpect
+				and vrmod.utils.WorldModelLaw_HmdExpect(d) or nil
+			-- Enforce single body path: floating hands always hides local player body
+			if d.floating_hands then hideplayer = true end
+			if d.draw_player_body == false then hideplayer = true end
+		end
 		hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel", function(bSky, _)
 			if bSky or not LocalPlayer():Alive() then return end
-			if IsValid(g_VR.viewModel) then
+			-- Worldmodel-only path: skip HL2 viewModel draw when worldModelVM owns the gun
+			local drawVm = true
+			if vrmod.utils and vrmod.utils.WorldModelLaw_FromBool then
+				local wm = g_VR.currentvmi and g_VR.currentvmi.useWorldModel
+				local gwm = convars.vrmod_useworldmodels and convars.vrmod_useworldmodels:GetBool()
+				if wm or gwm then
+					drawVm = false
+				end
+			elseif g_VR.currentvmi and g_VR.currentvmi.useWorldModel then
+				drawVm = false
+			end
+			if drawVm and IsValid(g_VR.viewModel) then
 				blockViewModelDraw = false
 				-- Stamp frozen gun matrix both eyes (same pose — no live re-pose here)
 				local sf = g_VR.stereoFrame or 0
