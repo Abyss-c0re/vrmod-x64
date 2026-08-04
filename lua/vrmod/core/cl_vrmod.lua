@@ -1565,41 +1565,36 @@ if CLIENT then
 		end
 	end
 
-	-- Apply UV submit bounds + C++ crop policy (safe to call live while VR active)
+	-- Apply UV submit bounds. C++ now forces full SBS halves; still push known size + flip.
 	local function ApplySubmitBounds()
 		if not g_VR.active and not leftCalc then return end
-		if type(leftCalc) ~= "table" or type(rightCalc) ~= "table" then return end
 		if not VRMOD_SetSubmitTextureBounds then return end
-		local hOffset = convars.vrmod_horizontaloffset:GetFloat()
-		local vOffset = convars.vrmod_verticaloffset:GetFloat()
-		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
-		local renderOffset = convars.vrmod_renderoffset:GetBool()
-		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
-		-- mat_queue 2 single-pass: right SBS half is never painted. Feed LEFT half
-		-- to BOTH eyes so HMD is mono-stereo (both eyes lit) instead of one black.
+		-- Full SBS halves (Linux inverted V). Do NOT use ComputeSubmitBounds crop —
+		-- it was emitting u0≈-0.09 and HMD showed ~1/8 strip + black.
+		local ins = 0.003
+		local bounds
+		if system.IsWindows() then
+			bounds = {ins, ins, 0.5, 1 - ins, 0.5, ins, 1 - ins, 1 - ins}
+		else
+			bounds = {ins, 1 - ins, 0.5, ins, 0.5, 1 - ins, 1 - ins, ins}
+		end
 		local mqLive = g_VR._matQueueMode or WantedMatQueueMode()
 		local monoBoth = g_VR._mq2SinglePass or g_VR._mq2MonoLeftForBoth or (mqLive >= 2)
-		if monoBoth and vrmod.utils and vrmod.utils.SubmitBounds_MirrorLeftToBoth then
-			bounds = {vrmod.utils.SubmitBounds_MirrorLeftToBoth(bounds)}
-		elseif monoBoth and #bounds >= 8 then
+		if monoBoth then
+			-- mq2: both eyes sample left half
 			bounds[5], bounds[6], bounds[7], bounds[8] = bounds[1], bounds[2], bounds[3], bounds[4]
 		end
 		g_VR._submitMonoBothEyes = monoBoth and true or false
 		VRMOD_SetSubmitTextureBounds(unpack(bounds))
-		-- OpenXR OpenGL: flip GL RT V into compositor (Linux). Windows D3D path usually false.
 		if isfunction(VRMOD_SetRTTextureFlip) then
 			VRMOD_SetRTTextureFlip(not system.IsWindows())
 		end
-		-- Push crop mode to C++ backend (0 safe / 1 full / 2 fov_crop experimental)
 		if isfunction(VRMOD_SetSubmitCropMode) then
-			local crop = (convars.vrmod_submit_crop and convars.vrmod_submit_crop:GetInt()) or 0
-			if crop < 0 then crop = 0 end
-			if crop > 2 then crop = 2 end
-			-- SAFE crop only under mono — FOV_CROP on SBS left-half would mis-sample
-			if monoBoth and crop == 2 then crop = 0 end
-			VRMOD_SetSubmitCropMode(crop)
-			g_VR._submitCropMode = crop
+			VRMOD_SetSubmitCropMode(0) -- SAFE only
+			g_VR._submitCropMode = 0
 		end
+		-- Always push SBS pixel size so blit does not sample 1/8 of RT
+		PushKnownSubmitSize()
 	end
 
 	-- Live update: UV bounds + crop mode (offsets/scale/eye dials)
@@ -2303,23 +2298,9 @@ if CLIENT then
 			local collected = false
 			if paint then
 				PerformRenderViews()
-				-- Re-push UV bounds every painted frame under mq2 mono so right eye
-				-- always samples left half (ApplySubmitBounds is otherwise cvar-only).
-				if g_VR._mq2SinglePass or g_VR._mq2MonoLeftForBoth or (mq or 1) >= 2 then
-					pcall(ApplySubmitBounds)
-				end
-				-- Optional isolate into module staging (never required for submit).
-				-- G19 / pain point #6: never submit eng IN; collect blits toward dual OUT.
-				-- Skip under mat_queue 2 — blit from live engine RT races workers.
-				local collectOk = (mq or 1) < 2
-				if vrmod.utils and vrmod.utils.SubmitLaw_AllowCollect then
-					collectOk = vrmod.utils.SubmitLaw_AllowCollect({ mat_queue_mode = mq })
-				end
-				if collectOk and isfunction(VRMOD_CollectEyes) then
-					PushKnownSubmitSize()
-					local okC = pcall(VRMOD_CollectEyes)
-					collected = okC and true or false
-				end
+				-- Every frame: full SBS halves + known size (fixes 1/8-strip HMD)
+				pcall(ApplySubmitBounds)
+				-- Collect disabled: staged dual path was feeding false PER-EYE / black eye.
 			end
 
 			-- G19: pure submit decision snapshot (dual OUT only; never eng IN / virgin).
