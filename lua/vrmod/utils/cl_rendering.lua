@@ -102,10 +102,21 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
     local uMaxLeft = 0.5 + (lo + hOffset) * hFactor
     local uMinRight = 0.5 + (ro + hOffset) * hFactor
     local uMaxRight = 1.0 - TEXTURE_INSET + (ro + hOffset) * hFactor
-    -- Keep each eye inside its SBS half (logs showed u0≈-0.09 under extreme offset×scale)
+    -- Shift (preserve span) each eye UV into its SBS half — pin-only shrinks FOV.
     local function clampHalf(u0, u1, halfLo, halfHi)
+        local span = u1 - u0
+        if not span or span ~= span or span <= 0.01 or span > 0.5 then
+            return halfLo + TEXTURE_INSET, halfHi
+        end
+        if u0 < halfLo + TEXTURE_INSET then
+            u0 = halfLo + TEXTURE_INSET
+            u1 = u0 + span
+        end
+        if u1 > halfHi then
+            u1 = halfHi
+            u0 = u1 - span
+        end
         if u0 < halfLo + TEXTURE_INSET then u0 = halfLo + TEXTURE_INSET end
-        if u1 > halfHi then u1 = halfHi end
         if u1 <= u0 + 0.01 then
             u0 = halfLo + TEXTURE_INSET
             u1 = halfHi
