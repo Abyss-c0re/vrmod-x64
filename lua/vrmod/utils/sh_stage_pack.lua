@@ -409,3 +409,106 @@ function vrmod.utils.StagePack_ExecuteToast(execRes, plan)
 	end
 	return nil
 end
+
+-- ── G03 HMD stage-apply expect (pure observer contract) ──────────────────────
+-- Offline tokens for headset height continuity smoke. Never claims HMD passed.
+-- Does not mutate seated offset.
+
+--- Pure HMD observer expectation from ApplyDecision + optional plan/exec.
+--- decision: StagePack_ApplyDecision
+--- plan: StagePack_ComputeApplyPlan or nil
+--- execRes: StagePack_ExecuteMutations result or nil
+--- Returns:
+---   verdict     expect_deferred | expect_applied | expect_close | expect_blocked | idle
+---   height_risk none | jump | blocked | unknown
+---   expect_no_jump bool  true when product should not have changed height
+---   checklist / pass_line / fail_line
+function vrmod.utils.StagePack_HmdExpect(decision, plan, execRes)
+	local e = {
+		verdict = "idle",
+		height_risk = "unknown",
+		expect_no_jump = true,
+		checklist = "G03 · IDLE · no stage pack decision",
+		pass_line = "N/A",
+		fail_line = "N/A",
+	}
+	if type(decision) ~= "table" then return e end
+	local r = tostring(decision.reason or "")
+
+	if execRes and type(execRes) == "table" and execRes.applied and execRes.applied > 0 and execRes.ok then
+		local d = plan and tonumber(plan.seated_delta_source)
+		e.verdict = "expect_applied"
+		e.height_risk = "none"
+		e.expect_no_jump = false -- intentional small seated step
+		e.checklist = string.format("G03 · APPLIED · seated Δ %s · opt-in only",
+			d and string.format("%.1f", d) or "?")
+		e.pass_line = "Head height continuous with Cube pack; no multi-meter pop"
+		e.fail_line = "Sudden floor jump / ceiling crush / dual height truth"
+		return e
+	end
+
+	if r == "already_close" then
+		e.verdict = "expect_close"
+		e.height_risk = "none"
+		e.expect_no_jump = true
+		e.checklist = "G03 · CLOSE · no apply needed"
+		e.pass_line = "Standing height matches pack; no seated thrash"
+		e.fail_line = "Unnecessary seated rewrite"
+		return e
+	end
+
+	if r == "too_far" or r == "unusable" or r == "no_head" then
+		e.verdict = "expect_blocked"
+		e.height_risk = "blocked"
+		e.expect_no_jump = true
+		e.checklist = "G03 · BLOCKED · " .. r
+		e.pass_line = "No auto height apply outside safe band"
+		e.fail_line = "Forced apply despite too_far/unusable"
+		return e
+	end
+
+	if r == "no_measured" then
+		e.verdict = "expect_deferred"
+		e.height_risk = "unknown"
+		e.expect_no_jump = true
+		e.checklist = "G03 · WAIT HMD · no measured pose yet"
+		e.pass_line = "Toast waits for HMD; no blind apply"
+		e.fail_line = "Apply before tracking valid"
+		return e
+	end
+
+	if plan and type(plan) == "table" and plan.do_apply then
+		e.verdict = "expect_applied"
+		e.height_risk = "none"
+		e.expect_no_jump = false
+		e.checklist = "G03 · ARMED · seated apply (opt-in)"
+		e.pass_line = "Opt-in apply lands soft continuity step"
+		e.fail_line = "Ear-pop height jump or wrong sign seated"
+		return e
+	end
+
+	if r == "eligible_deferred" or r == "eligible" then
+		e.verdict = "expect_deferred"
+		e.height_risk = "none"
+		e.expect_no_jump = true
+		local d = tonumber(decision.delta_y)
+		e.checklist = string.format("G03 · DEFERRED · ΔY %s · default no auto",
+			d and string.format("%.2fm", d) or "?")
+		e.pass_line = "Preview toast only; height unchanged without opt-in"
+		e.fail_line = "Silent auto seatedoffset without vrmod_stage_apply"
+		return e
+	end
+
+	e.verdict = "idle"
+	e.height_risk = "unknown"
+	e.checklist = "G03 · HOLD · reason=" .. r
+	e.pass_line = "Observe only"
+	e.fail_line = "Unexpected height thrash"
+	return e
+end
+
+--- True when HMD observer should treat path as dangerous height jump risk.
+function vrmod.utils.StagePack_HeightJumpRiskIsBad(expect)
+	if type(expect) ~= "table" then return true end
+	return expect.height_risk == "jump"
+end

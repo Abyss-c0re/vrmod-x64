@@ -329,6 +329,12 @@ local function noteStagePackOnce()
 		or (plan and vrmod.utils.StagePack_PlanToast and vrmod.utils.StagePack_PlanToast(plan))
 		or (vrmod.utils.StagePack_ApplyToast and vrmod.utils.StagePack_ApplyToast(decision))
 		or vrmod.utils.StagePack_ToastHint(pack)
+	local expect = (vrmod.utils.StagePack_HmdExpect
+		and vrmod.utils.StagePack_HmdExpect(decision, plan, execRes)) or nil
+	g_VR._cubeStagePackHmdExpect = expect
+	if expect and expect.checklist then
+		log("G03 HMD %s", tostring(expect.checklist))
+	end
 	log("stage pack ok space=%s head_ok=%s y=%s apply=%s reason=%s plan=%s muts=%d allow=%s",
 		tostring(pack.ref_space), tostring(pack.head_ok), tostring(pack.head_y),
 		tostring(decision and decision.action), tostring(decision and decision.reason),
