@@ -255,9 +255,25 @@ local function noteStagePackOnce()
 		return
 	end
 	g_VR._cubeStagePack = pack
-	local hint = vrmod.utils.StagePack_ToastHint(pack)
-	log("stage pack ok space=%s head_ok=%s y=%s (apply deferred)",
-		tostring(pack.ref_space), tostring(pack.head_ok), tostring(pack.head_y))
+	-- G03 apply gate: classify only (allow_apply stays false — no origin/scale mutation)
+	local measuredY
+	pcall(function()
+		local hmd = g_VR.tracking and g_VR.tracking.hmd
+		-- tracking poses are Source units; pack is meters — skip measured if we can't convert safely
+		if hmd and hmd.pos and g_VR.scale and g_VR.scale > 1 then
+			measuredY = hmd.pos.z / g_VR.scale
+		end
+	end)
+	local decision = vrmod.utils.StagePack_ApplyDecision(pack, {
+		measured_head_y_m = measuredY,
+		allow_apply = false, -- hard law until HMD-proven apply path
+	})
+	g_VR._cubeStagePackApply = decision
+	local hint = (vrmod.utils.StagePack_ApplyToast and vrmod.utils.StagePack_ApplyToast(decision))
+		or vrmod.utils.StagePack_ToastHint(pack)
+	log("stage pack ok space=%s head_ok=%s y=%s apply=%s reason=%s",
+		tostring(pack.ref_space), tostring(pack.head_ok), tostring(pack.head_y),
+		tostring(decision and decision.action), tostring(decision and decision.reason))
 	-- Toast is informational only — do not SetFloat scale / seatedoffset / origin here
 	if hint and vrmod.Toast then
 		vrmod.Toast(hint, 4, "hint")

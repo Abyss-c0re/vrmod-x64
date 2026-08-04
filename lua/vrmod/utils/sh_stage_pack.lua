@@ -110,3 +110,118 @@ function vrmod.utils.StagePack_ToastHint(pack)
 	end
 	return string.format("Cube pack · %s · height apply deferred", sp)
 end
+
+--- G03 apply gate (pure) — decide if height/origin from pack could ever be applied.
+--- Law: default allow_apply=false so product never auto-jumps; this only classifies.
+---
+--- pack: StagePack_Parse result
+--- opts:
+---   measured_head_y_m  number|nil  live HMD Y in tracking meters (OpenXR Y-up)
+---   allow_apply        bool        master switch (default false)
+---   close_m            number      already-close band (default 0.05)
+---   max_delta_m        number      reject jumps larger than this (default 0.35)
+---
+--- Returns decision table:
+---   action  "none" | "hint_only" | "apply_scale" | "apply_seated"
+---   reason  stable code string
+---   safe    bool — within band for a future careful apply
+---   delta_y number|nil
+function vrmod.utils.StagePack_ApplyDecision(pack, opts)
+	opts = type(opts) == "table" and opts or {}
+	local allow = opts.allow_apply and true or false
+	local closeM = tonumber(opts.close_m) or 0.05
+	local maxD = tonumber(opts.max_delta_m) or 0.35
+	if closeM < 0.01 then closeM = 0.05 end
+	if maxD < closeM then maxD = 0.35 end
+
+	local dec = {
+		action = "none",
+		reason = "unusable",
+		safe = false,
+		delta_y = nil,
+		allow_apply = allow,
+	}
+
+	if not vrmod.utils.StagePack_IsUsable(pack) then
+		return dec
+	end
+	if not pack.head_ok then
+		dec.reason = "no_head"
+		return dec
+	end
+
+	local packY = tonumber(pack.head_y)
+	if not packY then
+		dec.reason = "no_head"
+		return dec
+	end
+
+	local measured = tonumber(opts.measured_head_y_m)
+	if not measured then
+		-- Space pack known; height needs live HMD before any apply
+		dec.action = "hint_only"
+		dec.reason = "no_measured"
+		dec.safe = false
+		return dec
+	end
+
+	local delta = measured - packY
+	dec.delta_y = delta
+	local ad = math.abs(delta)
+	if ad <= closeM then
+		dec.action = "none"
+		dec.reason = "already_close"
+		dec.safe = true
+		return dec
+	end
+	if ad > maxD then
+		dec.action = "none"
+		dec.reason = "too_far"
+		dec.safe = false
+		return dec
+	end
+
+	-- Eligible band: only apply when master switch on (product keeps it off)
+	dec.safe = true
+	if allow then
+		-- Prefer scale path over seated origin rewrite (less dual-truth risk)
+		dec.action = "apply_scale"
+		dec.reason = "eligible"
+	else
+		dec.action = "hint_only"
+		dec.reason = "eligible_deferred"
+	end
+	return dec
+end
+
+--- Toast line from ApplyDecision (pure). Nil if nothing useful to say.
+function vrmod.utils.StagePack_ApplyToast(decision)
+	if type(decision) ~= "table" then return nil end
+	local r = tostring(decision.reason or "")
+	if r == "already_close" then
+		return "Cube pack · height already close · no apply"
+	end
+	if r == "too_far" then
+		return "Cube pack · height delta too large · no auto-apply"
+	end
+	if r == "no_head" then
+		return "Cube pack · space only · no head sample"
+	end
+	if r == "no_measured" then
+		return "Cube pack · wait for HMD pose before height apply"
+	end
+	if r == "eligible_deferred" then
+		local d = tonumber(decision.delta_y)
+		if d then
+			return string.format("Cube pack · ΔY %.2fm · apply deferred (safe band)", d)
+		end
+		return "Cube pack · apply deferred (safe band)"
+	end
+	if r == "eligible" and decision.action == "apply_scale" then
+		return "Cube pack · scale apply allowed"
+	end
+	if r == "unusable" then
+		return nil
+	end
+	return nil
+end
