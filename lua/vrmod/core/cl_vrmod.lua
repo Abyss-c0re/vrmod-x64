@@ -1339,11 +1339,35 @@ if CLIENT then
 			if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end -- full teardown (cb59aeb)
 		end)
 
+		-- G39 / W11: human init errors (codes 108/215 + module zip), never silent
+		local IL = vrmod.utils
 		local err = vrmod.GetStartupError()
 		if err then
 			vrmod.logger.Err("Failed to start: " .. err)
+			local human = IL and IL.InitLaw_Humanize and IL.InitLaw_Humanize({
+				err = err,
+				module_version = g_VR.moduleVersion or 0,
+				backend = (vrmod.GetBackendPolicy and (vrmod.GetBackendPolicy() or {}).backend) or "openxr",
+			}) or nil
+			local toastShown = false
 			if vrmod.Toast then
-				vrmod.Toast("VR start blocked: " .. tostring(err), 8, "error")
+				vrmod.Toast((human and human.toast) or ("VR start blocked: " .. tostring(err)),
+					(IL and IL.InitLaw_ToastSeconds and IL.InitLaw_ToastSeconds()) or 10, "error")
+				toastShown = true
+			end
+			if human and human.overlay then
+				g_VR.errorText = human.overlay
+			end
+			if IL and IL.InitLaw_Decide then
+				local d = IL.InitLaw_Decide({
+					ok = false,
+					err = err,
+					module_version = g_VR.moduleVersion or 0,
+					toast_shown = toastShown,
+				})
+				g_VR._initLaw = d
+				g_VR._initLawLabel = IL.InitLaw_StatusLabel and IL.InitLaw_StatusLabel(d) or nil
+				g_VR._initLawHmdExpect = IL.InitLaw_HmdExpect and IL.InitLaw_HmdExpect(d) or nil
 			end
 			return false
 		end
@@ -1355,10 +1379,41 @@ if CLIENT then
 		end)
 		if not okInit then
 			vrmod.logger.Err("Init failed: %s", tostring(initErr))
+			local human = IL and IL.InitLaw_Humanize and IL.InitLaw_Humanize({
+				err = initErr,
+				module_version = g_VR.moduleVersion or 0,
+				backend = (vrmod.GetBackendPolicy and (vrmod.GetBackendPolicy() or {}).backend) or "openxr",
+			}) or nil
+			local toastShown = false
 			if vrmod.Toast then
-				vrmod.Toast("VR_Init failed — OpenXR/OpenVR runtime running?", 8, "error")
+				vrmod.Toast((human and human.toast) or "VR_Init failed — OpenXR/OpenVR runtime running?",
+					(IL and IL.InitLaw_ToastSeconds and IL.InitLaw_ToastSeconds()) or 10, "error")
+				toastShown = true
+			end
+			if human and human.overlay then
+				g_VR.errorText = human.overlay
+			end
+			if IL and IL.InitLaw_Decide then
+				local d = IL.InitLaw_Decide({
+					ok = false,
+					err = initErr,
+					module_version = g_VR.moduleVersion or 0,
+					toast_shown = toastShown,
+				})
+				g_VR._initLaw = d
+				g_VR._initLawLabel = IL.InitLaw_StatusLabel and IL.InitLaw_StatusLabel(d) or nil
+				g_VR._initLawHmdExpect = IL.InitLaw_HmdExpect and IL.InitLaw_HmdExpect(d) or nil
 			end
 			return false
+		end
+		if IL and IL.InitLaw_Decide then
+			local d = IL.InitLaw_Decide({
+				ok = true,
+				module_version = g_VR.moduleVersion or 0,
+			})
+			g_VR._initLaw = d
+			g_VR._initLawLabel = IL.InitLaw_StatusLabel and IL.InitLaw_StatusLabel(d) or nil
+			g_VR._initLawHmdExpect = IL.InitLaw_HmdExpect and IL.InitLaw_HmdExpect(d) or nil
 		end
 		return true
 	end
