@@ -167,6 +167,30 @@ if CLIENT then
         hook.Call("VRMod_Reset")
     end)
 
+    -- G41: dump HMD walk inventory + live HmdExpect snapshots (manual smoke aid)
+    concommand.Add("vrmod_hmd_expect_dump", function()
+        local U = vrmod.utils
+        if not U or not U.HmdWalk_FormatReport then
+            print("[gVRMod] HmdWalk inventory unavailable")
+            return
+        end
+        print(U.HmdWalk_FormatReport())
+        local live = U.HmdWalk_CollectLive and U.HmdWalk_CollectLive(g_VR or {}) or {}
+        if U.HmdWalk_FormatLive then
+            print(U.HmdWalk_FormatLive(live))
+        end
+        if U.HmdWalk_Decide then
+            local d = U.HmdWalk_Decide({ g = g_VR or {} })
+            g_VR = g_VR or {}
+            g_VR._hmdWalkLaw = d
+            g_VR._hmdWalkLawLabel = U.HmdWalk_StatusLabel and U.HmdWalk_StatusLabel(d) or nil
+            g_VR._hmdWalkLawHmdExpect = U.HmdWalk_HmdExpect and U.HmdWalk_HmdExpect(d) or nil
+            if g_VR._hmdWalkLawLabel then
+                print("[gVRMod] " .. tostring(g_VR._hmdWalkLawLabel))
+            end
+        end
+    end)
+
     concommand.Add("vrmod_info", function()
         -- simple banner and key–value printer
         local function banner()
