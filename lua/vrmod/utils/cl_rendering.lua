@@ -102,6 +102,18 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
     local uMaxLeft = 0.5 + (lo + hOffset) * hFactor
     local uMinRight = 0.5 + (ro + hOffset) * hFactor
     local uMaxRight = 1.0 - TEXTURE_INSET + (ro + hOffset) * hFactor
+    -- Keep each eye inside its SBS half (logs showed u0≈-0.09 under extreme offset×scale)
+    local function clampHalf(u0, u1, halfLo, halfHi)
+        if u0 < halfLo + TEXTURE_INSET then u0 = halfLo + TEXTURE_INSET end
+        if u1 > halfHi then u1 = halfHi end
+        if u1 <= u0 + 0.01 then
+            u0 = halfLo + TEXTURE_INSET
+            u1 = halfHi
+        end
+        return u0, u1
+    end
+    uMinLeft, uMaxLeft = clampHalf(uMinLeft, uMaxLeft, 0.0, 0.5)
+    uMinRight, uMaxRight = clampHalf(uMinRight, uMaxRight, 0.5, 1.0)
     local vMinLeft, vMaxLeft = calcVMinMax(lv)
     local vMinRight, vMaxRight = calcVMinMax(rv)
     return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight

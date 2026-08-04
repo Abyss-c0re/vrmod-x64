@@ -1368,6 +1368,8 @@ if CLIENT then
 
 	-- Desktop present AFTER OpenXR submit so HMD path never shares GL state with
 	-- stereo RT material binds. Modes: 1=none 2=left crop 3=right crop 4=follow.
+	-- Eye-crop UV MUST match the proven path: CullMode(1) + NDC rect (-1,-1,2,2)
+	-- with inverted V. cam.Start2D + pixel rect + CullMode(0) drew upside-down.
 	local function PresentDesktopMirror()
 		if not g_VR or not g_VR.active then return end
 		local dv = tonumber(g_VR.desktopView) or 1
@@ -1375,10 +1377,8 @@ if CLIENT then
 		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv)) or (dv == 4)
 		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv)) or (dv == 2 or dv == 3)
 
-		-- Restore safe 2D/GL state before any desktop blit
 		pcall(function()
 			render.SetScissorRect(0, 0, 0, 0, false)
-			render.CullMode(0)
 			render.OverrideDepthEnable(false, true)
 			render.OverrideAlphaWriteEnable(false, true)
 			render.SetLightingMode(0)
@@ -1406,21 +1406,13 @@ if CLIENT then
 		if vm < 0 then vm = 0 end
 		if vm > 0.45 then vm = 0.45 end
 		if ho ~= 0 and ho ~= 0.5 then ho = (dv == 3) and 0.5 or 0 end
-		-- u0,u1 select left (0..0.5) or right (0.5..1) half; v flipped for GL RT
-		local u0, u1 = ho, 0.5 + ho
-		local v0, v1 = 1 - vm, vm
-		if u1 <= u0 then u0, u1 = 0, 0.5 end
 
 		pcall(function()
-			cam.Start2D()
+			-- Proven upright desktop mirror (pre-648d5e9 draw coords; post-submit timing kept)
+			render.CullMode(1)
 			surface.SetDrawColor(255, 255, 255, 255)
 			surface.SetMaterial(g_VR.rtMaterial)
-			-- Draw into desktop framebuffer only (stereo already submitted)
-			local w, h = ScrW(), ScrH()
-			if w and h and w > 0 and h > 0 then
-				surface.DrawTexturedRectUV(0, 0, w, h, u0, v0, u1, v1)
-			end
-			cam.End2D()
+			surface.DrawTexturedRectUV(-1, -1, 2, 2, ho, 1 - vm, 0.5 + ho, vm)
 			render.CullMode(0)
 		end)
 	end
