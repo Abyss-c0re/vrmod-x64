@@ -1543,21 +1543,30 @@ if CLIENT then
 		eyez = dp.eyez or 0
 		cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
 		-- v23+: pass eye size so OUT matches supersampled RT. Ancient: no args (module owns size).
+		-- G32 / W7: ShareTexture fail toasts via pure StereoSelfTest law
+		local ST = vrmod.utils
 		local okBegin, errBegin = SafeShareTextureBegin(
 			(dp.passEyeArgs and eyeW) or nil,
 			(dp.passEyeArgs and eyeH) or nil
 		)
-		if not okBegin then
+		local toastBegin = false
+		local wantBeginToast = (ST and ST.StereoSelfTest_ShouldToastShareBegin
+			and ST.StereoSelfTest_ShouldToastShareBegin(okBegin)) or (not okBegin)
+		if wantBeginToast and not okBegin then
 			if vrmod.logger then
 				vrmod.logger.Err("ShareTextureBegin failed: %s (eye %sx%s rt %sx%s)",
 					tostring(errBegin), tostring(eyeW), tostring(eyeH),
 					tostring(g_VR.rtWidth), tostring(g_VR.rtHeight))
 			end
 			if vrmod.Toast then
-				vrmod.Toast(string.format(
-					"ShareTexture begin failed (%sx%s) — HMD may stay black. Lower supersample / check module.",
-					tostring(g_VR.rtWidth), tostring(g_VR.rtHeight)
-				), 8, "error")
+				local msg = (ST and ST.StereoSelfTest_ShareBeginToast and ST.StereoSelfTest_ShareBeginToast(g_VR.rtWidth, g_VR.rtHeight))
+					or string.format(
+						"ShareTexture begin failed (%sx%s) — HMD may stay black. Lower supersample / check module.",
+						tostring(g_VR.rtWidth), tostring(g_VR.rtHeight)
+					)
+				local sec = (ST and ST.StereoSelfTest_ToastSeconds and ST.StereoSelfTest_ToastSeconds()) or 8
+				vrmod.Toast(msg, sec, "error")
+				toastBegin = true
 			end
 		end
 		local rtName = "vrmod_rt_" .. tostring(SysTime())
@@ -1572,7 +1581,24 @@ if CLIENT then
 		})
 
 		local okFin, errFin = SafeShareTextureFinish()
-		if not okFin then
+		local toastFin = false
+		if ST and ST.StereoSelfTest_ShouldToastShareFinish and ST.StereoSelfTest_ShouldToastShareFinish(okFin) then
+			if vrmod.logger then
+				vrmod.logger.Err("ShareTextureFinish failed: %s (rt %sx%s)",
+					tostring(errFin), tostring(g_VR.rtWidth), tostring(g_VR.rtHeight))
+			end
+			if vrmod.Toast then
+				local msg = (ST.StereoSelfTest_ShareFinishToast and ST.StereoSelfTest_ShareFinishToast(g_VR.rtWidth, g_VR.rtHeight))
+					or string.format(
+						"ShareTexture finish failed (rt %sx%s) — desktop OK / HMD black often means this. Restart SteamVR + GMod.",
+						tostring(g_VR.rtWidth), tostring(g_VR.rtHeight)
+					)
+				local sec = (ST.StereoSelfTest_ToastSeconds and ST.StereoSelfTest_ToastSeconds()) or 8
+				vrmod.Toast(msg, sec, "error")
+				toastFin = true
+			end
+		elseif not okFin then
+			-- Fallback if pure helpers missing
 			if vrmod.logger then
 				vrmod.logger.Err("ShareTextureFinish failed: %s (rt %sx%s)",
 					tostring(errFin), tostring(g_VR.rtWidth), tostring(g_VR.rtHeight))
@@ -1582,9 +1608,26 @@ if CLIENT then
 					"ShareTexture finish failed (rt %sx%s) — desktop OK / HMD black often means this. Restart SteamVR + GMod.",
 					tostring(g_VR.rtWidth), tostring(g_VR.rtHeight)
 				), 8, "error")
+				toastFin = true
 			end
 		end
-		g_VR._shareTextureOk = okBegin and okFin and true or false
+		if ST and ST.StereoSelfTest_ShareOk then
+			g_VR._shareTextureOk = ST.StereoSelfTest_ShareOk(okBegin, okFin)
+		else
+			g_VR._shareTextureOk = okBegin and okFin and true or false
+		end
+		if ST and ST.StereoSelfTest_Decide then
+			local d = ST.StereoSelfTest_Decide({
+				ok_begin = okBegin,
+				ok_finish = okFin,
+				share_ok = g_VR._shareTextureOk,
+				toast_share_begin = (not okBegin) and toastBegin or nil,
+				toast_share_finish = (not okFin) and toastFin or nil,
+			})
+			g_VR._stereoSelfTestLaw = d
+			g_VR._stereoSelfTestLabel = ST.StereoSelfTest_StatusLabel and ST.StereoSelfTest_StatusLabel(d) or nil
+			g_VR._stereoSelfTestHmdExpect = ST.StereoSelfTest_HmdExpect and ST.StereoSelfTest_HmdExpect(d) or nil
+		end
 		-- Authoritative SBS size for OpenXR submit (mat_queue 2 cannot glGetTexLevel)
 		PushKnownSubmitSize()
 		-- Share may have created the session — re-pull FOV if now live (else catchup).
@@ -2190,31 +2233,65 @@ if CLIENT then
 				if g_VR.active and vrmod.RefreshHUD then vrmod.RefreshHUD() end
 			end)
 		end
-		-- Cube W7: early stereo / tracking self-check (toast once if HMD silent)
+		-- Cube W7 / G32: early stereo / tracking self-check (toast once if HMD silent)
 		g_VR._stereoSelfTestDone = false
-		timer.Create("vrmod_stereo_selftest", 2.5, 1, function()
+		local delay = (vrmod.utils and vrmod.utils.StereoSelfTest_DelaySeconds
+			and vrmod.utils.StereoSelfTest_DelaySeconds()) or 2.5
+		timer.Create("vrmod_stereo_selftest", delay, 1, function()
 			if not g_VR or not g_VR.active or g_VR._stereoSelfTestDone then return end
 			g_VR._stereoSelfTestDone = true
 			local hmd = g_VR.tracking and g_VR.tracking.hmd
 			local hasHmd = hmd and hmd.pos and true or false
-			if not hasHmd then
+			local ST = vrmod.utils
+			local toastNo = false
+			local toastUn = false
+			if ST and ST.StereoSelfTest_ShouldToastNoHmd and ST.StereoSelfTest_ShouldToastNoHmd(hasHmd, false) then
+				if vrmod.Toast then
+					local msg = (ST.StereoSelfTest_NoHmdToast and ST.StereoSelfTest_NoHmdToast())
+						or "No HMD pose after start — PC may show game while headset stays black/loading. Restart SteamVR; check cable/HMD."
+					local sec = (ST.StereoSelfTest_ToastSeconds and ST.StereoSelfTest_ToastSeconds()) or 8
+					vrmod.Toast(msg, sec, "error")
+					toastNo = true
+				end
+				if vrmod.logger then
+					vrmod.logger.Err("Stereo self-test: no HMD tracking rt=%sx%s shareOk=%s",
+						tostring(g_VR.rtWidth), tostring(g_VR.rtHeight), tostring(g_VR._shareTextureOk))
+				end
+			elseif ST and ST.StereoSelfTest_ShouldToastUnhealthyShare
+				and ST.StereoSelfTest_ShouldToastUnhealthyShare(hasHmd, g_VR._shareTextureOk, false) then
+				if vrmod.Toast then
+					local msg = (ST.StereoSelfTest_UnhealthyShareToast and ST.StereoSelfTest_UnhealthyShareToast())
+						or "Stereo share was unhealthy at start — if HMD is black, restart SteamVR + lower supersample."
+					local sec = (ST.StereoSelfTest_ShareHintSeconds and ST.StereoSelfTest_ShareHintSeconds()) or 6
+					vrmod.Toast(msg, sec, "hint")
+					toastUn = true
+				end
+			elseif not hasHmd then
+				-- Fallback if pure helpers missing
 				if vrmod.Toast then
 					vrmod.Toast(
 						"No HMD pose after start — PC may show game while headset stays black/loading. Restart SteamVR; check cable/HMD.",
 						8,
 						"error"
 					)
+					toastNo = true
 				end
-				if vrmod.logger then
-					vrmod.logger.Err("Stereo self-test: no HMD tracking rt=%sx%s shareOk=%s",
-						tostring(g_VR.rtWidth), tostring(g_VR.rtHeight), tostring(g_VR._shareTextureOk))
-				end
-			elseif g_VR._shareTextureOk == false and vrmod.Toast then
-				vrmod.Toast(
-					"Stereo share was unhealthy at start — if HMD is black, restart SteamVR + lower supersample.",
-					6,
-					"hint"
-				)
+			end
+			if ST and ST.StereoSelfTest_Decide then
+				local d = ST.StereoSelfTest_Decide({
+					ok_begin = g_VR._shareTextureOk ~= false,
+					ok_finish = g_VR._shareTextureOk ~= false,
+					share_ok = g_VR._shareTextureOk,
+					has_hmd = hasHmd,
+					selftest_done = false, -- evaluate as if just-before done so should_* fire
+					toast_no_hmd = toastNo or nil,
+					toast_unhealthy = toastUn or nil,
+				})
+				-- mark done for status after snapshot
+				d.selftest_done = true
+				g_VR._stereoSelfTestLaw = d
+				g_VR._stereoSelfTestLabel = ST.StereoSelfTest_StatusLabel and ST.StereoSelfTest_StatusLabel(d) or nil
+				g_VR._stereoSelfTestHmdExpect = ST.StereoSelfTest_HmdExpect and ST.StereoSelfTest_HmdExpect(d) or nil
 			end
 		end)
 		vrmod.logger.Info("Started VR session (nested RenderView lock active) rt=%sx%s", g_VR.rtWidth, g_VR.rtHeight)
