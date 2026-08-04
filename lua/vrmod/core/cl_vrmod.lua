@@ -1392,37 +1392,30 @@ if CLIENT then
 			return
 		end
 
-		if not isEyeCrop or not g_VR.rtMaterial then
+		-- G46: pure DesktopMirror_* — never sample live stereo RT after submit
+		-- (Quest autotest nonblack≈0.10 when eye-crop bound g_VR.rtMaterial).
+		local U = vrmod.utils
+		local allow = false
+		if U and U.DesktopMirror_AllowPresent then
+			local d = U.DesktopMirror_Decide({
+				desktop_view = dv,
+				vr_active = true,
+				after_submit = true,
+				sample_stereo_rt = isEyeCrop and true or false,
+				attempt_present = isEyeCrop or isFollow,
+			})
+			g_VR._desktopMirrorLaw = d
+			g_VR._desktopMirrorLawLabel = U.DesktopMirror_StatusLabel
+				and U.DesktopMirror_StatusLabel(d) or nil
+			g_VR._desktopMirrorHmdExpect = U.DesktopMirror_HmdExpect
+				and U.DesktopMirror_HmdExpect(d) or nil
+			allow = d.allow_present and true or false
+		elseif isEyeCrop then
+			allow = false
+		end
+		if isEyeCrop or not allow then
 			return
 		end
-
-		-- Refresh crop from live RT size (ScrW/H may change)
-		local rtW = tonumber(g_VR.rtWidth) or 0
-		local rtH = tonumber(g_VR.rtHeight) or 0
-		if vrmod.utils and vrmod.utils.ComputeDesktopCrop then
-			cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(dv, rtW, rtH)
-		end
-		local vm = tonumber(cropVerticalMargin) or 0
-		local ho = tonumber(cropHorizontalOffset) or 0
-		if vm < 0 then vm = 0 end
-		if vm > 0.45 then vm = 0.45 end
-		if ho ~= 0 and ho ~= 0.5 then ho = (dv == 3) and 0.5 or 0 end
-		local u0, u1 = ho, 0.5 + ho
-		if u1 <= u0 then u0, u1 = 0, 0.5 end
-		-- Ordered V for Start2D (top-left). Do NOT invert — that was the upside-down bug.
-		local v0, v1 = vm, 1 - vm
-
-		pcall(function()
-			cam.Start2D()
-			surface.SetDrawColor(255, 255, 255, 255)
-			surface.SetMaterial(g_VR.rtMaterial)
-			local w, h = ScrW(), ScrH()
-			if w and h and w > 0 and h > 0 then
-				surface.DrawTexturedRectUV(0, 0, w, h, u0, v0, u1, v1)
-			end
-			cam.End2D()
-			render.CullMode(0)
-		end)
 	end
 
 	-- 1) Startup checks & init
