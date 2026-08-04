@@ -304,7 +304,11 @@ hook.Add("InitPostEntity", "vrmod_openxr_launch_map", function()
 	local want = vrmod.IsOpenXRLaunchSession()
 		or (GetConVar("vrmod_autostart") and GetConVar("vrmod_autostart"):GetBool())
 	if not want then return end
-	log("InitPostEntity map=%s — force VR", tostring(game.GetMap and game.GetMap() or "?"))
+	-- G01: status-file phase for Cube seamless panel (map loaded before take_xr)
+	local mapName = tostring(game.GetMap and game.GetMap() or "?")
+	writeHandoff("map_ready")
+	writeStatus("map_ready_" .. mapName)
+	log("InitPostEntity map=%s — force VR", mapName)
 	timer.Simple(0.5, function()
 		if not (g_VR and g_VR.active) then forceStartVR() end
 	end)
