@@ -255,7 +255,7 @@ local function noteStagePackOnce()
 		return
 	end
 	g_VR._cubeStagePack = pack
-	-- G03 apply gate + plan preview (allow_apply stays false — no origin/scale mutation)
+	-- G03 apply gate + plan + careful executor (default OFF; opt-in convar/file)
 	local measuredY
 	pcall(function()
 		local hmd = g_VR.tracking and g_VR.tracking.hmd
@@ -264,9 +264,31 @@ local function noteStagePackOnce()
 			measuredY = hmd.pos.z / g_VR.scale
 		end
 	end)
+	-- Opt-in only: vrmod_stage_apply 1 or DATA/vrmod/stage_apply_enable.txt
+	local allowApply = false
+	if vrmod.utils.StagePack_AllowApplyFromFlags then
+		local conOn, fileOn = false, false
+		pcall(function()
+			if not GetConVar("vrmod_stage_apply") then
+				CreateClientConVar("vrmod_stage_apply", "0", true, FCVAR_ARCHIVE,
+					"G03 careful Cube stage height apply (0=off)")
+			end
+			local c = GetConVar("vrmod_stage_apply")
+			if c then conOn = c:GetBool() end
+		end)
+		pcall(function()
+			if file and file.Exists and file.Exists("vrmod/stage_apply_enable.txt", "DATA") then
+				fileOn = true
+			end
+		end)
+		allowApply = vrmod.utils.StagePack_AllowApplyFromFlags({
+			convar_on = conOn,
+			file_enable = fileOn,
+		})
+	end
 	local decision = vrmod.utils.StagePack_ApplyDecision(pack, {
 		measured_head_y_m = measuredY,
-		allow_apply = false, -- hard law until HMD-proven apply path
+		allow_apply = allowApply,
 	})
 	g_VR._cubeStagePackApply = decision
 	local curSeat = 0
@@ -277,20 +299,40 @@ local function noteStagePackOnce()
 	local plan = (vrmod.utils.StagePack_ComputeApplyPlan and vrmod.utils.StagePack_ComputeApplyPlan(pack, decision, {
 		world_scale = (g_VR.scale and g_VR.scale > 1) and g_VR.scale or 40,
 		current_seatedoffset = curSeat,
-		allow_apply = false,
+		allow_apply = allowApply,
 	})) or nil
 	g_VR._cubeStagePackPlan = plan
-	-- Mutations only if do_apply — product plan always dry (empty list)
 	local muts = (plan and vrmod.utils.StagePack_MutationsFromPlan and vrmod.utils.StagePack_MutationsFromPlan(plan)) or {}
 	g_VR._cubeStagePackMutations = muts
-	local hint = (plan and vrmod.utils.StagePack_PlanToast and vrmod.utils.StagePack_PlanToast(plan))
+	-- Careful executor: only when plan armed + allow (mutations non-empty)
+	local execRes
+	if vrmod.utils.StagePack_ShouldExecutePlan
+		and vrmod.utils.StagePack_ShouldExecutePlan(plan, allowApply)
+		and #muts > 0
+		and vrmod.utils.StagePack_ExecuteMutations then
+		execRes = vrmod.utils.StagePack_ExecuteMutations(muts, function(name, val)
+			local cv = GetConVar(name)
+			if not cv then return false, "missing_" .. tostring(name) end
+			local ok = pcall(function() cv:SetFloat(tonumber(val) or 0) end)
+			if not ok then return false, "set_fail_" .. tostring(name) end
+			-- Keep seated hook in sync if present
+			if name == "vrmod_seatedoffset" and vrmod.UpdateSeatedOffset then
+				pcall(vrmod.UpdateSeatedOffset)
+			end
+			return true
+		end)
+		g_VR._cubeStagePackExec = execRes
+		log("stage pack execute applied=%s ok=%s allow=%s",
+			tostring(execRes and execRes.applied), tostring(execRes and execRes.ok), tostring(allowApply))
+	end
+	local hint = (execRes and vrmod.utils.StagePack_ExecuteToast and vrmod.utils.StagePack_ExecuteToast(execRes, plan))
+		or (plan and vrmod.utils.StagePack_PlanToast and vrmod.utils.StagePack_PlanToast(plan))
 		or (vrmod.utils.StagePack_ApplyToast and vrmod.utils.StagePack_ApplyToast(decision))
 		or vrmod.utils.StagePack_ToastHint(pack)
-	log("stage pack ok space=%s head_ok=%s y=%s apply=%s reason=%s plan=%s muts=%d",
+	log("stage pack ok space=%s head_ok=%s y=%s apply=%s reason=%s plan=%s muts=%d allow=%s",
 		tostring(pack.ref_space), tostring(pack.head_ok), tostring(pack.head_y),
 		tostring(decision and decision.action), tostring(decision and decision.reason),
-		tostring(plan and plan.method), #muts)
-	-- Toast is informational only — do not SetFloat scale / seatedoffset / origin here
+		tostring(plan and plan.method), #muts, tostring(allowApply))
 	if hint and vrmod.Toast then
 		vrmod.Toast(hint, 4, "hint")
 	end

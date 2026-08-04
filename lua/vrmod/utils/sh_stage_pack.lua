@@ -341,3 +341,71 @@ function vrmod.utils.StagePack_MutationsFromPlan(plan)
 	end
 	return out
 end
+
+--- G03 careful apply allow gate (pure). Product default OFF.
+--- flags:
+---   convar_on     bool  vrmod_stage_apply GetBool
+---   file_enable   bool  DATA vrmod/stage_apply_enable.txt exists
+---   force         bool  test override
+function vrmod.utils.StagePack_AllowApplyFromFlags(flags)
+	flags = type(flags) == "table" and flags or {}
+	if flags.force then return true end
+	if flags.convar_on then return true end
+	if flags.file_enable then return true end
+	return false
+end
+
+--- True when executor may run mutations (plan armed + allow).
+function vrmod.utils.StagePack_ShouldExecutePlan(plan, allowApply)
+	if not allowApply then return false end
+	if type(plan) ~= "table" or not plan.valid then return false end
+	if not plan.do_apply then return false end
+	if plan.method == "none" or plan.method == nil then return false end
+	return true
+end
+
+--- Pure executor: apply mutation list via injectable applier(convar, value) → ok,err.
+--- Never calls engine itself — openxr_launch supplies SetFloat wrapper.
+--- Returns { applied=n, skipped=n, errors={...}, ok=bool }
+function vrmod.utils.StagePack_ExecuteMutations(mutations, applier)
+	local res = { applied = 0, skipped = 0, errors = {}, ok = true }
+	if type(mutations) ~= "table" or #mutations == 0 then
+		res.skipped = 0
+		return res
+	end
+	if type(applier) ~= "function" then
+		res.ok = false
+		res.errors[#res.errors + 1] = "no_applier"
+		return res
+	end
+	for _, m in ipairs(mutations) do
+		if type(m) == "table" and m.convar and m.value ~= nil then
+			local ok, err = applier(tostring(m.convar), tonumber(m.value) or m.value)
+			if ok then
+				res.applied = res.applied + 1
+			else
+				res.ok = false
+				res.errors[#res.errors + 1] = tostring(err or m.convar)
+			end
+		else
+			res.skipped = res.skipped + 1
+		end
+	end
+	return res
+end
+
+--- Toast after execute attempt (pure).
+function vrmod.utils.StagePack_ExecuteToast(execRes, plan)
+	if type(execRes) ~= "table" then return nil end
+	if execRes.applied and execRes.applied > 0 and execRes.ok then
+		local d = plan and tonumber(plan.seated_delta_source)
+		if d then
+			return string.format("Cube pack · applied seated Δ %.1f", d)
+		end
+		return "Cube pack · height apply done"
+	end
+	if execRes.errors and #execRes.errors > 0 then
+		return "Cube pack · apply failed · " .. tostring(execRes.errors[1])
+	end
+	return nil
+end
