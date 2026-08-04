@@ -37,9 +37,29 @@ if CLIENT then
 	local function WantedMatQueueMode()
 		local cv = GetConVar and GetConVar("mat_queue_mode")
 		local n = cv and (cv.GetInt and cv:GetInt() or tonumber(cv:GetString())) or 1
-		n = math.floor(tonumber(n) or 1)
-		if n < 0 then n = 0 end
-		if n > 2 then n = 2 end
+		-- G17 pure clamp (observation only — never write mat_queue_mode)
+		if vrmod.utils and vrmod.utils.MatQueueLaw_ClampRead then
+			n = vrmod.utils.MatQueueLaw_ClampRead(n)
+		else
+			n = math.floor(tonumber(n) or 1)
+			if n < 0 then n = 0 end
+			if n > 2 then n = 2 end
+		end
+		if vrmod.utils and vrmod.utils.MatQueueLaw_Decide then
+			local prefer = 1
+			pcall(function()
+				local p = GetConVar and GetConVar("vrmod_prefer_mat_queue")
+				if p then prefer = p:GetInt() end
+			end)
+			local dec = vrmod.utils.MatQueueLaw_Decide({
+				live_mode = n,
+				prefer = prefer,
+				context = "vr_session",
+			})
+			g_VR._matQueueLaw = dec
+			g_VR._matQueueLabel = vrmod.utils.MatQueueLaw_StatusLabel
+				and vrmod.utils.MatQueueLaw_StatusLabel(dec) or nil
+		end
 		return n
 	end
 
