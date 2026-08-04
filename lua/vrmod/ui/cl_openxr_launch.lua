@@ -280,12 +280,54 @@ local function noteStagePackOnce()
 	end
 end
 
+-- G04: read cube_warm.txt map-attach intent (never auto changelevel).
+local warmAttachNotified = false
+local function noteWarmAttachOnce()
+	if warmAttachNotified then return end
+	warmAttachNotified = true
+	if not (vrmod.utils and vrmod.utils.WarmAttach_Parse) then return end
+	local raw
+	pcall(function()
+		if file and file.Exists and file.Exists("vrmod/cube_warm.txt", "DATA") then
+			raw = file.Read("vrmod/cube_warm.txt", "DATA")
+		end
+	end)
+	if not raw or raw == "" then
+		log("no cube_warm.txt (cold-only Start or cleared)")
+		return
+	end
+	local req = vrmod.utils.WarmAttach_Parse(raw)
+	if not req then
+		log("cube_warm present but unusable")
+		return
+	end
+	local curMap = ""
+	pcall(function()
+		if game and game.GetMap then curMap = tostring(game.GetMap() or "") end
+	end)
+	local decision = vrmod.utils.WarmAttach_Decide(req, {
+		current_map = curMap,
+		allow_changelevel = false, -- hard law until HMD-proven warm attach
+	})
+	g_VR._cubeWarmRequest = req
+	g_VR._cubeWarmAttach = decision
+	log("warm attach action=%s reason=%s want=%s cur=%s",
+		tostring(decision.action), tostring(decision.reason),
+		tostring(decision.request_map), tostring(decision.current_map))
+	-- Informational only — never RunConsoleCommand("changelevel") here
+	local hint = vrmod.utils.WarmAttach_Toast and vrmod.utils.WarmAttach_Toast(decision)
+	if hint and vrmod.Toast then
+		vrmod.Toast(hint, 4, "hint")
+	end
+end
+
 local function afterVRLive()
 	log("VR active map=%s — opening native Cube launcher", tostring(game.GetMap and game.GetMap() or "?"))
 	consumeMarker()
 	pcall(function() RunConsoleCommand("vrmod_laserpointer", "1") end)
 	if vrmod.VRUnpauseWorld then pcall(vrmod.VRUnpauseWorld) end
 	noteStagePackOnce()
+	noteWarmAttachOnce()
 
 	-- Immediate + retries (hand poses / menus load slightly after active)
 	openNativeLauncherUI()
