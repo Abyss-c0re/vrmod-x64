@@ -384,6 +384,7 @@ hook.Add("VRMod_Drop", "VRProxy_AVRMagDrop", function(ply, ent)
 end)
 
 -- ==================== Damage redirect (ONLY bullet damage triggers VR logic) ====================
+-- G37 / W9: pure HandBulletLaw — hands Real for grabs; bullets filtered/redirected
 hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
     if not IsValid(ent) then return end
     local data = proxyOwners[ent]
@@ -395,12 +396,32 @@ hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
     local damage = dmginfo:GetDamage()
     if damage <= 0 then return end
     local isSelfDamage = IsValid(attacker) and attacker == ply
-    local isBulletDamage = bit.band(dmgType, DMG_BULLET) ~= 0 or bit.band(dmgType, DMG_BUCKSHOT) ~= 0
-    -- Self-punch prevention stays (non-bullet only)
-    if isSelfDamage and not isBulletDamage and (part == "left" or part == "right") then
+    local U = vrmod.utils
+    local isBulletDamage = (U and U.HandBulletLaw_IsBulletDamageType and U.HandBulletLaw_IsBulletDamageType(dmgType))
+        or (bit.band(dmgType, DMG_BULLET) ~= 0 or bit.band(dmgType, DMG_BUCKSHOT) ~= 0)
+    local law = U and U.HandBulletLaw_Decide and U.HandBulletLaw_Decide({
+        part = part,
+        is_bullet = isBulletDamage,
+        is_self = isSelfDamage,
+        damage = damage,
+        solid_to_world = false,
+        blocks_bullets_as_world = false,
+    }) or nil
+    if law then
+        ent._handBulletLaw = law
+    end
+    -- Self-punch / non-bullet absorb via pure law
+    local absorb = law and law.absorb
+    if absorb == nil then
+        absorb = (isSelfDamage and not isBulletDamage and (part == "left" or part == "right"))
+            or (not isBulletDamage)
+    end
+    if absorb and not isBulletDamage then
         dmginfo:SetDamage(0)
         dmginfo:ScaleDamage(0)
-        Log("Self-punch prevented on %s proxy of %s", part, ply:Nick())
+        if isSelfDamage and (part == "left" or part == "right") then
+            Log("Self-punch prevented on %s proxy of %s", part, ply:Nick())
+        end
         return true
     end
 
@@ -411,49 +432,39 @@ hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
         return true
     end
 
-    if part == "head" then
-        local finalDamage = damage * 10
-        Log("HEAD BULLET HIT - multiplied %.2f → %.2f (instakill)", damage, finalDamage)
-        if ply:Alive() then
-            local newDmg = DamageInfo()
-            newDmg:SetDamage(finalDamage)
-            newDmg:SetAttacker(attacker or game.GetWorld())
-            newDmg:SetInflictor(dmginfo:GetInflictor() or ent)
-            newDmg:SetDamageType(dmgType)
-            newDmg:SetDamagePosition(dmginfo:GetDamagePosition())
-            newDmg:SetDamageForce(dmginfo:GetDamageForce())
-            ply:TakeDamageInfo(newDmg)
+    local scale = (U and U.HandBulletLaw_RedirectScale and U.HandBulletLaw_RedirectScale(part))
+        or ((part == "head") and 10 or 0.45)
+    local finalDamage = damage * scale
+    if ply:Alive() and finalDamage > 0 then
+        local newDmg = DamageInfo()
+        newDmg:SetDamage(finalDamage)
+        newDmg:SetAttacker(attacker or game.GetWorld())
+        newDmg:SetInflictor(dmginfo:GetInflictor() or ent)
+        newDmg:SetDamageType(dmgType)
+        newDmg:SetDamagePosition(dmginfo:GetDamagePosition())
+        newDmg:SetDamageForce(dmginfo:GetDamageForce() * (part == "head" and 1 or scale))
+        ply:TakeDamageInfo(newDmg)
+        if part == "head" then
+            Log("HEAD BULLET HIT - multiplied %.2f → %.2f (instakill)", damage, finalDamage)
             Log("VR head proxy damaged → applied %.2f to %s (head)", finalDamage, ply:Nick())
+        else
+            Log("VR hand proxy damaged → applied %.2f (%.0f%% of %.2f) to %s (%s)", finalDamage, scale * 100, damage, ply:Nick(), part)
         end
-
-        dmginfo:SetDamage(0)
-        dmginfo:ScaleDamage(0)
-        return true
-    else
-        -- hands: 45% damage + drop weapon (bullets only)
-        local playerDamage = damage * 0.45
-        if ply:Alive() then
-            local newDmg = DamageInfo()
-            newDmg:SetDamage(playerDamage)
-            newDmg:SetAttacker(attacker or game.GetWorld())
-            newDmg:SetInflictor(dmginfo:GetInflictor() or ent)
-            newDmg:SetDamageType(dmgType)
-            newDmg:SetDamagePosition(dmginfo:GetDamagePosition())
-            newDmg:SetDamageForce(dmginfo:GetDamageForce() * 0.45)
-            ply:TakeDamageInfo(newDmg)
-            Log("VR hand proxy damaged → applied %.2f (45%% of %.2f) to %s (%s)", playerDamage, damage, ply:Nick(), part)
-        end
-
-        if vrmod and type(vrmod.Drop) == "function" then
-            local steamid = ply:SteamID()
-            vrmod.Drop(steamid, part == "left")
-            Log("Called vrmod.Drop because %s proxy was hit", part)
-        end
-
-        dmginfo:SetDamage(0)
-        dmginfo:ScaleDamage(0)
-        return true
     end
+
+    local drop = law and law.drop_weapon
+    if drop == nil then
+        drop = (part == "left" or part == "right")
+    end
+    if drop and vrmod and type(vrmod.Drop) == "function" then
+        local steamid = ply:SteamID()
+        vrmod.Drop(steamid, part == "left")
+        Log("Called vrmod.Drop because %s proxy was hit", part)
+    end
+
+    dmginfo:SetDamage(0)
+    dmginfo:ScaleDamage(0)
+    return true
 end)
 
 hook.Add("EntityFireBullets", "VRProxy_HeadshotBackup", function(ent, data)
