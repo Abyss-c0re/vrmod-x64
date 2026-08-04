@@ -32,12 +32,14 @@ Sources (live watch):
 
 ## How the Cube implements each
 
-### W1 — Borders / bleed (P0)
+### W1 — Borders / bleed (P0) — *partial in tree* (G40)
 **Not** more anonymous sliders.  
 **Cube way:** Vision phase of Cube Experience owns this — scale → V → H → save profile.  
 - First-run always; Reset restarts guide.  
 - Crimson Cube → *Border calibrate* one trigger.  
 - Defaults: `scalefactor=1`, offsets 0; supersample 1.5 then **one** 4096 clamp (no potato pre-crush).  
+- **Landed:** pure `BorderLaw_*` (defaults/clamps/bleed risk/HmdExpect) + `cl_border_calibrate` guide baseline/clamp/snapshot. Soft care: no FOV archive thrash.  
+- **HMD smoke (manual):** filled HMD both eyes after guide; profile reload keeps fill (TESTING_FRAMEWORK §0.27).  
 - Future: sample HMD FOV vs render FOV and **auto-seed** UV bounds once, then user refines in guide only.
 
 ### W2 — Blocked convars (P0) — *done in tree*

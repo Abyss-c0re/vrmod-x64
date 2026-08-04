@@ -53,6 +53,21 @@ local Cal = {
 local PROFILE = (U.BorderLaw_ProfilePath and U.BorderLaw_ProfilePath()) or "vrmod/border_profile.txt"
 local PROFILE_DIR = "vrmod"
 
+local function cvf(name)
+	local c = GetConVar(name)
+	return c and c:GetFloat() or 0
+end
+
+local function setf(name, v)
+	RunConsoleCommand(name, string.format("%.4f", v))
+end
+
+local function toast(s, t)
+	Cal.msg = s
+	Cal.msgUntil = CurTime() + (t or 2.5)
+	notification.AddLegacy("[VRMod] " .. s, NOTIFY_GENERIC, t or 2)
+end
+
 local function borderSnapshot(extra)
 	local u = vrmod.utils
 	if not u or not u.BorderLaw_Decide then return end
@@ -71,21 +86,6 @@ local function borderSnapshot(extra)
 	g_VR._borderLaw = d
 	g_VR._borderLawLabel = u.BorderLaw_StatusLabel and u.BorderLaw_StatusLabel(d) or nil
 	g_VR._borderLawHmdExpect = u.BorderLaw_HmdExpect and u.BorderLaw_HmdExpect(d) or nil
-end
-
-local function cvf(name)
-	local c = GetConVar(name)
-	return c and c:GetFloat() or 0
-end
-
-local function setf(name, v)
-	RunConsoleCommand(name, string.format("%.4f", v))
-end
-
-local function toast(s, t)
-	Cal.msg = s
-	Cal.msgUntil = CurTime() + (t or 2.5)
-	notification.AddLegacy("[VRMod] " .. s, NOTIFY_GENERIC, t or 2)
 end
 
 function vrmod.BorderCal_SaveProfile()
