@@ -1887,6 +1887,28 @@ if CLIENT then
 			g_VR._stereoSelfTestDone = true
 			matQueueAppliedForSession = false
 
+			-- G13: return-to-Cube marker (protocol only — Cube does not auto-reclaim yet)
+			pcall(function()
+				local isCube = (vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession())
+					or (g_VR._openxrLaunch and g_VR._openxrLaunch.native_wrapper)
+				if vrmod.utils and vrmod.utils.CubeReturn_ShouldNotifyCube
+					and vrmod.utils.CubeReturn_ShouldNotifyCube(isCube, true) then
+					local map = tostring(game.GetMap and game.GetMap() or "")
+					local body = vrmod.utils.CubeReturn_Format("vr_exit", {
+						map = map,
+						source = "vrmod_exit",
+						ts = os.time and os.time() or 0,
+					})
+					file.CreateDir("vrmod")
+					file.Write("vrmod/cube_return.txt", body)
+					-- Second phase once OpenXR teardown completes (same write upgrade)
+					g_VR._cubeReturnPendingRelease = true
+					if vrmod.logger then
+						vrmod.logger.Info("G13 cube_return phase=vr_exit map=%s (reclaim not auto)", map)
+					end
+				end
+			end)
+
 			-- === Exit order (mat_queue 2 safe) ===
 			-- 1) Stop owning the frame: no more RenderScene / stereo / WaitFrame / Submit.
 			g_VR.active = false
@@ -1932,6 +1954,22 @@ if CLIENT then
 			--    Async defer raced Init "already running" with submit still disabled.
 			pcall(function()
 				if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end
+			end)
+
+			-- G13: mark XR released after shutdown (Cube shell may poll later)
+			pcall(function()
+				if g_VR._cubeReturnPendingRelease and vrmod.utils and vrmod.utils.CubeReturn_Format then
+					g_VR._cubeReturnPendingRelease = false
+					local map = tostring(game.GetMap and game.GetMap() or "")
+					file.Write("vrmod/cube_return.txt", vrmod.utils.CubeReturn_Format("xr_released", {
+						map = map,
+						source = "vrmod_exit",
+						ts = os.time and os.time() or 0,
+					}))
+					if vrmod.Toast then
+						vrmod.Toast("OpenXR released · relaunch Cube shell to reclaim panel", 5, "hint")
+					end
+				end
 			end)
 
 			-- 4) Restore soft pins only — never thrash mat_queue under OpenXR.
