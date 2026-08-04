@@ -83,11 +83,13 @@ if CLIENT then
 						boneinfo[rightHand].overridePos = rpos
 						boneinfo[rightHand].overrideAng = rang + Angle(0, 0, 180)
 					end
-					-- fingers from input / netFrame
+					-- fingers from input / netFrame (G20: FingerDigitIndex + LerpFingerAngle)
 					local curls = g_VR.input and g_VR.input.skeleton_lefthand and g_VR.input.skeleton_lefthand.fingerCurls
+					local digitIdx = vrmod.utils and vrmod.utils.FingerDigitIndex
+					local lerpFinger = vrmod.utils and vrmod.utils.LerpFingerAngle
 					for k, v in pairs(fingerboneids) do
 						if not boneinfo[v] then continue end
-						local fi = math.floor((k - 1) / 3 + 1)
+						local fi = digitIdx and digitIdx(k) or (math.floor((k - 1) / 3) + 1)
 						local curl = 0
 						if curls and k <= 15 then
 							curl = curls[fi] or 0
@@ -97,15 +99,27 @@ if CLIENT then
 						if k > 15 and g_VR.input and g_VR.input.skeleton_righthand and g_VR.input.skeleton_righthand.fingerCurls then
 							curl = g_VR.input.skeleton_righthand.fingerCurls[fi] or curl
 						end
-						boneinfo[v].offsetAng = LerpAngle(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+						if lerpFinger then
+							boneinfo[v].offsetAng = lerpFinger(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+						else
+							boneinfo[v].offsetAng = LerpAngle(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+						end
 					end
 					hands:SetPos(LocalPlayer():GetPos())
 				elseif netFrame then
 					boneinfo[leftHand].overridePos, boneinfo[leftHand].overrideAng = netFrame.lefthandPos, netFrame.lefthandAng
 					boneinfo[rightHand].overridePos, boneinfo[rightHand].overrideAng = netFrame.righthandPos, netFrame.righthandAng + Angle(0, 0, 180)
+					local digitIdx = vrmod.utils and vrmod.utils.FingerDigitIndex
+					local lerpFinger = vrmod.utils and vrmod.utils.LerpFingerAngle
 					for k, v in pairs(fingerboneids) do
 						if not boneinfo[v] then continue end
-						boneinfo[v].offsetAng = LerpAngle(netFrame["finger" .. math.floor((k - 1) / 3 + 1)], g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+						local fi = digitIdx and digitIdx(k) or (math.floor((k - 1) / 3) + 1)
+						local curl = netFrame["finger" .. fi] or 0
+						if lerpFinger then
+							boneinfo[v].offsetAng = lerpFinger(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+						else
+							boneinfo[v].offsetAng = LerpAngle(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+						end
 					end
 
 					hands:SetPos(LocalPlayer():GetPos()) --for lighting

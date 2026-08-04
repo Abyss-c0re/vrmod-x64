@@ -193,9 +193,16 @@ if CLIENT then
 
 	local function UpdateBeamColor(colorString)
 		if not colorString or colorString == "" then return end
-		local r, g, b, a = string.match(tostring(colorString), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
-		r, g, b, a = tonumber(r), tonumber(g), tonumber(b), tonumber(a)
-		if not (r and g and b and a) then return end
+		-- G20: shared ParseColor SoT (settings + laser + beam)
+		local r, g, b, a
+		if vrmod.utils and vrmod.utils.ParseColor then
+			local col = vrmod.utils.ParseColor(colorString, Color(255, 0, 0, 255))
+			r, g, b, a = col.r, col.g, col.b, col.a or 255
+		else
+			r, g, b, a = string.match(tostring(colorString), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+			r, g, b, a = tonumber(r), tonumber(g), tonumber(b), tonumber(a)
+			if not (r and g and b and a) then return end
+		end
 		mat_beam:SetVector("$color", Vector(r / 255, g / 255, b / 255))
 		mat_beam:SetFloat("$alpha", a / 255)
 		render.PushRenderTarget(rt_beam)

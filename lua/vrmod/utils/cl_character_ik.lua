@@ -511,14 +511,21 @@ function C.Update(ent, state, frame, opts)
 		state.R_HandTargetPos = state.R_armStretchScale ~= 1 and rightArm.targetPos or nil
 	end
 
-	-- Fingers (same open/closed tables as cl_character)
+	-- Fingers (same open/closed tables as cl_character) — G20 FingerDigitIndex + LerpFingerAngle
 	local openA = g_VR.openHandAngles or g_VR.defaultOpenHandAngles
 	local closedA = g_VR.closedHandAngles or g_VR.defaultClosedHandAngles
 	if openA and closedA then
+		local digitIdx = vrmod.utils and vrmod.utils.FingerDigitIndex
+		local lerpFinger = vrmod.utils and vrmod.utils.LerpFingerAngle
 		for k, v in pairs(bones.fingers) do
 			if v and v >= 0 and boneinfo[v] then
-				local curl = frame["finger" .. math.floor((k - 1) / 3 + 1)] or 0
-				boneinfo[v].offsetAng = LerpAngle(curl, openA[k] or Angle(), closedA[k] or Angle())
+				local fi = digitIdx and digitIdx(k) or (math.floor((k - 1) / 3) + 1)
+				local curl = frame["finger" .. fi] or 0
+				if lerpFinger then
+					boneinfo[v].offsetAng = lerpFinger(curl, openA[k] or Angle(), closedA[k] or Angle())
+				else
+					boneinfo[v].offsetAng = LerpAngle(curl, openA[k] or Angle(), closedA[k] or Angle())
+				end
 			end
 		end
 	end

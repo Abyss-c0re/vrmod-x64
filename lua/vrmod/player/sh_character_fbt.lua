@@ -373,9 +373,18 @@ function vrmod_fbt.CalculateBonePositions(ply)
 	boneinfo[boneids.rightHand].overrideAng = rightHandTargetAng + Angle(0, 0, 180)
 	-- Override head angles
 	_, boneinfo[boneids.head].overrideAng = LocalToWorld(vrmod_fbt.zeroVec, Angle(-80, 0, 90), vrmod_fbt.zeroVec, headTargetAng)
-	-- Finger offsets
+	-- Finger offsets (G20: FingerDigitIndex + LerpFingerAngle SoT)
 	for k, v in ipairs(fingerboneids) do
-		if boneinfo[v] then boneinfo[v].offsetAng = LerpAngle(frame["finger" .. math.floor((k - 1) / 3 + 1)], g_VR.openHandAngles[k], g_VR.closedHandAngles[k]) end
+		if boneinfo[v] then
+			local fi = (vrmod.utils and vrmod.utils.FingerDigitIndex and vrmod.utils.FingerDigitIndex(k))
+				or (math.floor((k - 1) / 3) + 1)
+			local curl = frame["finger" .. fi] or 0
+			if vrmod.utils and vrmod.utils.LerpFingerAngle then
+				boneinfo[v].offsetAng = vrmod.utils.LerpFingerAngle(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+			else
+				boneinfo[v].offsetAng = LerpAngle(curl, g_VR.openHandAngles[k], g_VR.closedHandAngles[k])
+			end
+		end
 	end
 
 	local upperBodyAng

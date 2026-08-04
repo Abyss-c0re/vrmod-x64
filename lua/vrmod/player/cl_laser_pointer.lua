@@ -27,6 +27,11 @@ local GlowSprite = Material("sprites/glow04_noz")
 
 local function UpdateLaserColor(colorString)
 	if not colorString or colorString == "" then return end
+	-- G20: shared ParseColor SoT (settings + beam + laser)
+	if vrmod.utils and vrmod.utils.ParseColor then
+		laserColor = vrmod.utils.ParseColor(colorString, laserColor)
+		return
+	end
 	local r, g, b, a = string.match(tostring(colorString), "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
 	if not (r and g and b and a) then return end
 	laserColor = Color(tonumber(r), tonumber(g), tonumber(b), tonumber(a))
