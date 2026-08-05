@@ -177,31 +177,49 @@ end
 
 -- ─── Session / RT ─────────────────────────────────────────────────────────
 
+-- GetRenderTarget returns an ITexture — not all GMod builds expose :IsValid() as a method.
+local function rtAlive(rt)
+	if rt == nil then return false end
+	if isfunction(rt.IsValid) then
+		local ok, v = pcall(function() return rt:IsValid() end)
+		return ok and v and true or false
+	end
+	if isfunction(IsValid) then
+		local ok, v = pcall(IsValid, rt)
+		if ok then return v and true or false end
+	end
+	-- Have a handle: treat as usable (GetRenderTarget caches by name)
+	return true
+end
+
 local function ensureRT(w, h)
-	w = math.max(320, math.floor(w or ScrW()))
-	h = math.max(180, math.floor(h or ScrH()))
+	w = math.max(320, math.floor(tonumber(w) or (ScrW and ScrW()) or 1280))
+	h = math.max(180, math.floor(tonumber(h) or (ScrH and ScrH()) or 720))
 	-- Cap cost for stream + desktop
 	if w > 1920 then
 		h = math.floor(h * (1920 / w))
 		w = 1920
 	end
-	if session.rt and session.rtW == w and session.rtH == h and session.rt:IsValid() then
+	if session.rt and session.rtW == w and session.rtH == h and rtAlive(session.rt) then
 		return session.rt
 	end
-	if session.rt and session.rt:IsValid() then
-		-- GetRenderTarget reuses name; size change needs new name
-	end
 	local name = string.format("vrmod_desktop_cam_%dx%d", w, h)
-	session.rt = GetRenderTarget(name, w, h, false)
+	local rt = GetRenderTarget(name, w, h, false)
+	if not rt then
+		if vrmod.logger then vrmod.logger.Warn("[DesktopCam] GetRenderTarget failed %s", name) end
+		return nil
+	end
+	session.rt = rt
 	session.rtW, session.rtH = w, h
-	session.mat = CreateMaterial("vrmod_desktop_cam_mat_" .. w .. "x" .. h, "UnlitGeneric", {
-		["$basetexture"] = session.rt:GetName(),
+	local matName = "vrmod_desktop_cam_mat_" .. w .. "x" .. h
+	session.mat = CreateMaterial(matName, "UnlitGeneric", {
+		["$basetexture"] = isfunction(rt.GetName) and rt:GetName() or name,
 		["$translucent"] = 0,
 		["$nolod"] = 1,
 		["$ignorez"] = 1,
 	})
-	if session.mat and not session.mat:IsError() then
-		session.mat:SetTexture("$basetexture", session.rt)
+	if session.mat and not session.mat:IsError() and isfunction(session.mat.SetTexture) then
+		pcall(function() session.mat:SetTexture("$basetexture", rt) end)
 	end
 	return session.rt
 end
