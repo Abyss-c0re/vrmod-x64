@@ -55,13 +55,26 @@ end
 
 --- UV submit bounds for the shared stereo RT (Cube: crop from *live* projection).
 --- Never use Q2-era fixed 0.25/0.5 — those mis-crop asymmetric FOV HMDs.
---- renderOffset=true  → apply OpenVR per-eye Horizontal/VerticalOffset
---- renderOffset=false → manual H/V sliders only; factors still from projection Width/Height
-function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)
+---
+--- scaleFactor: zoom crop around each eye half center (>1 = tighter = fill black bars)
+--- hOffset/vOffset: manual pan in UV (fixed gain — always visible in calibration)
+--- renderOffset: fold OpenXR per-eye Horizontal/VerticalOffset into pan
+--- lensBend: pull rect toward eye-half center (lens map)
+---
+--- Platform: Windows V increases down (0→1); Linux/OpenGL V often inverted (1→0).
+--- C++ collector + submit MUST honor these U and V (not U-only).
+function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset, lensBend)
     local isWindows = system.IsWindows()
     leftCalc = leftCalc or {}
     rightCalc = rightCalc or {}
-    scaleFactor = scaleFactor or 1
+    scaleFactor = tonumber(scaleFactor) or 1
+    if scaleFactor < 0.05 then scaleFactor = 0.05 end
+    if scaleFactor > 4.0 then scaleFactor = 4.0 end
+    lensBend = tonumber(lensBend) or 0
+    if lensBend < -0.5 then lensBend = -0.5 end
+    if lensBend > 0.5 then lensBend = 0.5 end
+    hOffset = tonumber(hOffset) or 0
+    vOffset = tonumber(vOffset) or 0
 
     local wL = tonumber(leftCalc.Width) or 1
     local wR = tonumber(rightCalc.Width) or 1
@@ -69,38 +82,81 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
     local hR = tonumber(rightCalc.Height) or 1
     local wAvg = math.max(0.05, (wL + wR) * 0.5)
     local hAvg = math.max(0.05, (hL + hR) * 0.5)
+    -- Auto FOV asymmetry → small UV nudge (projection space)
+    local hFactor = 0.5 / wAvg
+    local vFactor = 1.0 / hAvg
 
-    -- Always derive UV scale from live projection extent (not fixed Q2 constants)
-    local hFactor = (0.5 / wAvg) * scaleFactor
-    local vFactor = (1.0 / hAvg) * scaleFactor
-
-    -- Auto-offset: fold asymmetric FOV into crop. Manual: only creator H/V sliders.
     local useAuto = renderOffset and true or false
     local lo = useAuto and (tonumber(leftCalc.HorizontalOffset) or 0) or 0
     local ro = useAuto and (tonumber(rightCalc.HorizontalOffset) or 0) or 0
     local lv = useAuto and (tonumber(leftCalc.VerticalOffset) or 0) or 0
     local rv = useAuto and (tonumber(rightCalc.VerticalOffset) or 0) or 0
-    hOffset = tonumber(hOffset) or 0
-    vOffset = tonumber(vOffset) or 0
+
+    -- Fixed manual pan gains (±1 slider always moves image)
+    local MANUAL_U_GAIN = 0.22
+    local MANUAL_V_GAIN = 0.45
+    local panU = hOffset * MANUAL_U_GAIN
+    local panV = vOffset * MANUAL_V_GAIN
 
     local TEXTURE_INSET = 0.003
-    local vMin, vMax = isWindows and 0 or 1, isWindows and 1 or 0
-    local function calcVMinMax(eyeVOffset)
-        local adj = (eyeVOffset + vOffset) * vFactor
-        if isWindows then
-            return (vMin + TEXTURE_INSET) - adj, (vMax - TEXTURE_INSET) - adj
-        else
-            return (vMin - TEXTURE_INSET) - adj, (vMax + TEXTURE_INSET) - adj
+    -- Zoom: half-span of each eye half at scale=1 is full half; larger scale → smaller span
+    local halfU = math.max(0.02, 0.25 / scaleFactor)
+    local halfV = math.max(0.02, 0.5 / scaleFactor)
+
+    -- Work in top-left UV (y=0 top), then convert to platform V.
+    -- Independent edge clamp (no re-expand): when pan pushes past 0/1 the
+    -- window shrinks on that side — that is the visible offset at scale=1.
+    local function eyeRect(cx, autoH, autoV)
+        local adjU = autoH * hFactor + panU
+        local adjV = autoV * vFactor + panV
+        local u0 = cx - halfU + adjU
+        local u1 = cx + halfU + adjU
+        local y0 = 0.5 - halfV - adjV -- top
+        local y1 = 0.5 + halfV - adjV -- bottom
+        if u0 < 0 then u0 = 0 end
+        if u1 > 1 then u1 = 1 end
+        if y0 < 0 then y0 = 0 end
+        if y1 > 1 then y1 = 1 end
+        if u1 < u0 + 0.04 then
+            local m = (u0 + u1) * 0.5
+            if m < 0.02 then m = 0.02 end
+            if m > 0.98 then m = 0.98 end
+            u0, u1 = m - 0.02, m + 0.02
         end
+        if y1 < y0 + 0.04 then
+            local m = (y0 + y1) * 0.5
+            if m < 0.02 then m = 0.02 end
+            if m > 0.98 then m = 0.98 end
+            y0, y1 = m - 0.02, m + 0.02
+        end
+        -- Lens bend: pull toward half center
+        if math.abs(lensBend) > 1e-6 then
+            local cu, cv = (u0 + u1) * 0.5, (y0 + y1) * 0.5
+            u0 = u0 + (cu - u0) * lensBend
+            u1 = u1 + (cu - u1) * lensBend
+            y0 = y0 + (cv - y0) * lensBend
+            y1 = y1 + (cv - y1) * lensBend
+        end
+        -- Inset
+        u0 = u0 + TEXTURE_INSET
+        u1 = u1 - TEXTURE_INSET
+        y0 = y0 + TEXTURE_INSET
+        y1 = y1 - TEXTURE_INSET
+        -- Platform V
+        if isWindows then
+            return u0, y0, u1, y1
+        end
+        -- Linux/OpenGL: invert V (engine top → GL bottom-left convention)
+        return u0, 1.0 - y0, u1, 1.0 - y1
     end
 
-    -- U: outer only (inner seam at 0.5 untouched)
-    local uMinLeft = 0.0 + TEXTURE_INSET + (lo + hOffset) * hFactor
-    local uMaxLeft = 0.5 + (lo + hOffset) * hFactor
-    local uMinRight = 0.5 + (ro + hOffset) * hFactor
-    local uMaxRight = 1.0 - TEXTURE_INSET + (ro + hOffset) * hFactor
-    local vMinLeft, vMaxLeft = calcVMinMax(lv)
-    local vMinRight, vMaxRight = calcVMinMax(rv)
+    local uMinLeft, vMinLeft, uMaxLeft, vMaxLeft = eyeRect(0.25, lo, lv)
+    local uMinRight, vMinRight, uMaxRight, vMaxRight = eyeRect(0.75, ro, rv)
+
+    -- Keep halves from crossing the SBS seam too far (soft)
+    if uMaxLeft > 0.55 then uMaxLeft = 0.55 end
+    if uMinRight < 0.45 then uMinRight = 0.45 end
+
     return uMinLeft, vMinLeft, uMaxLeft, vMaxLeft, uMinRight, vMinRight, uMaxRight, vMaxRight
 end
 

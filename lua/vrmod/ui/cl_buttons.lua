@@ -160,8 +160,8 @@ local function InitializeMenuItems()
 			LocalPlayer():ConCommand("vrmod_vgui_reset")
 		end
 	end, true, "full clear layouts + reopen QM", "ui_reset")
-	-- Video Calibration (was Border Cal) — front-page slot via layout id video_cal
-	add("Video Calibration", 3, 3, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, "scale · V · H · save", "video_cal")
+	-- Video Calibration — pause/Cube UI entry as soon as player is in VR
+	add("Video Calibration", 3, 3, function() LocalPlayer():ConCommand("vrmod_border_calibrate") end, true, "scale · V · H · eye · FOV · lens", "video_cal")
 	add("Toggle blacklist weapon", 4, 3, function() LocalPlayer():ConCommand("vrmod_toggle_blacklist") end, true, nil, "blacklist")
 	-- Map Browser aliases New Game (stock-style modes/settings)
 	add("Map Browser", 5, 3, function()
@@ -175,9 +175,17 @@ local function InitializeMenuItems()
 	end, true, "New Game · maps · modes", "map")
 	add("RESPAWN", 0, 4, function() LocalPlayer():ConCommand("kill") end, true, nil, "respawn")
 	add("VR EXIT", 1, 4, function() LocalPlayer():ConCommand("vrmod_exit") end, true, nil, "vr_exit")
-	add("DISCONNECT", 2, 4, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
+	-- Temporary return to Cube shell (GMod stays on map; START / QUICK PLAY resumes VR)
+	add("Cube Launcher", 2, 4, function()
+		if vrmod.ReturnToCubeLauncher then
+			vrmod.ReturnToCubeLauncher({ intent = "temp_return", source = "quick_menu" })
+		else
+			LocalPlayer():ConCommand("vrmod_return_to_launcher")
+		end
+	end, true, "temp return · shell back · map kept", "cube_launcher")
+	add("DISCONNECT", 3, 4, function() LocalPlayer():ConCommand("disconnect") end, true, nil, "disconnect")
 	-- Quit GMod entirely (System page)
-	add("Exit Game", 3, 4, function()
+	add("Exit Game", 4, 4, function()
 		timer.Simple(0, function()
 			pcall(function() RunConsoleCommand("gamemenucommand", "quit") end)
 			pcall(function() RunConsoleCommand("quit") end)

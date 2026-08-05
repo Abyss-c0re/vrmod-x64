@@ -78,6 +78,7 @@ local BORDER = {
 	vrmod_scalefactor = true,
 	vrmod_renderoffset = true,
 	vrmod_submit_crop = true,
+	vrmod_lens_bend = true,
 }
 
 local FOV_PROFILE = {
@@ -87,6 +88,7 @@ local FOV_PROFILE = {
 	-- vrmod_desktopview is NOT FOV — changing it must not SoftRefreshDisplayParams
 	-- (that re-pulled submit bounds / FOV and could black HMD when switching to none).
 	vrmod_eyescale = true,
+	-- swap_eyes deprecated / content-only; still soft-refresh if someone has old binds
 	vrmod_swap_eyes = true,
 }
 

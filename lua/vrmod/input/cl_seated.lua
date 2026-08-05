@@ -1,27 +1,39 @@
 if SERVER then return end
+-- =============================================================================
+-- Seated / crouch origin Z — single SoT: vrmod_seated + vrmod_seatedoffset
+-- All UIs (Cube settings, Avatar, stage pack) must write via vrmod.SettingsSet*
+-- or vrmod.AutoSeatedOffset so cache + hooks stay coherent.
+-- =============================================================================
 local _, convarValues = vrmod.GetConvars()
 local seatedOffset, crouchOffset = Vector(), Vector()
--- Exposed so locomotion can force IN_DUCK while button-crouched (see issue #10)
+-- Exposed so locomotion can force IN_DUCK while button-crouched
 g_VR = g_VR or {}
 g_VR.crouchOffsetZ = 0
 
-local function SeatedEnabled()
-	-- convarValues.vrmod_seated is bool via tobool — never treat the ConVar object as truthy
-	local v = convarValues and convarValues.vrmod_seated
+local function LiveBool(name)
+	local cv = GetConVar(name)
+	if cv then return cv:GetBool() end
+	local v = convarValues and convarValues[name]
 	if v == true or v == 1 then return true end
-	if isbool(v) then return v end
-	local cv = GetConVar("vrmod_seated")
-	return cv and cv:GetBool() or false
+	if v == false or v == 0 then return false end
+	return false
+end
+
+local function LiveFloat(name, default)
+	local cv = GetConVar(name)
+	if cv then return cv:GetFloat() end
+	local o = convarValues and convarValues[name]
+	if o ~= nil then return tonumber(o) or default or 0 end
+	return default or 0
+end
+
+local function SeatedEnabled()
+	return LiveBool("vrmod_seated")
 end
 
 local function SeatedOffsetZ()
 	if not SeatedEnabled() then return 0 end
-	local o = convarValues and convarValues.vrmod_seatedoffset
-	if o == nil then
-		local cv = GetConVar("vrmod_seatedoffset")
-		o = cv and cv:GetFloat() or 0
-	end
-	return tonumber(o) or 0
+	return LiveFloat("vrmod_seatedoffset", 0)
 end
 
 --- Apply Z offset to every tracked pose (HMD, hands, feet, OpenXR eyes).
@@ -46,7 +58,7 @@ local function updateOffsetHook()
 	end
 
 	hook.Add("VRMod_Tracking", "seatedmode", function()
-		-- Re-read live so settings/toggles apply without restart
+		-- Re-read live SoT every frame (settings/avatar toggles apply without restart)
 		local z = SeatedOffsetZ() + crouchOffset.z
 		g_VR.crouchOffsetZ = crouchOffset.z
 		if z ~= 0 then
@@ -55,13 +67,86 @@ local function updateOffsetHook()
 	end)
 end
 
-vrmod.AddCallbackedConvar("vrmod_seatedoffset", nil, "0", nil, nil, nil, nil, tonumber, function(val) updateOffsetHook() end)
-vrmod.AddCallbackedConvar("vrmod_seated", nil, "0", nil, nil, nil, nil, tobool, function(val) updateOffsetHook() end)
+-- Public: stage pack / UI force rebind after external SetFloat
+function vrmod.UpdateSeatedOffset()
+	updateOffsetHook()
+end
+
+vrmod.AddCallbackedConvar("vrmod_seatedoffset", nil, "0", FCVAR_ARCHIVE,
+	"Seated origin Z offset (Source units). Shared by Settings + Avatar.", -80, 80, tonumber,
+	function() updateOffsetHook() end)
+vrmod.AddCallbackedConvar("vrmod_seated", nil, "0", FCVAR_ARCHIVE,
+	"Enable seated origin offset", nil, nil, tobool,
+	function() updateOffsetHook() end)
+
+-- Belt: any SettingChanged for seated cvars rebinds (covers cache-only Notify paths)
+hook.Add("VRMod_SettingChanged", "vrmod_seated_sot", function(name)
+	if name == "vrmod_seated" or name == "vrmod_seatedoffset" then
+		updateOffsetHook()
+	end
+end)
 
 hook.Add("VRMod_Start", "seatedmode", function(ply)
 	if ply ~= LocalPlayer() then return end
 	updateOffsetHook()
 end)
+
+hook.Add("VRMod_Exit", "seatedmode", function(ply)
+	if ply ~= LocalPlayer() then return end
+	hook.Remove("VRMod_Tracking", "seatedmode")
+	crouchOffset.z = 0
+	g_VR.crouchOffsetZ = 0
+end)
+
+--- Measure raw HMD height (never post-seated tracking — that double-counts).
+function vrmod.MeasureRawEyeHeight()
+	if not g_VR or not g_VR.origin then return nil end
+	local hmd = (g_VR.rawTracking and g_VR.rawTracking.hmd)
+		or nil
+	-- Fall back only if raw missing (early frames); subtract current seated so we don't nest
+	if not hmd or not hmd.pos then
+		hmd = g_VR.tracking and g_VR.tracking.hmd
+		if not hmd or not hmd.pos then return nil end
+		local z = hmd.pos.z - g_VR.origin.z
+		-- tracking already has seated applied — peel it back for measurement
+		z = z - SeatedOffsetZ()
+		return z
+	end
+	return hmd.pos.z - g_VR.origin.z
+end
+
+--- Single AutoSeatedOffset SoT used by Avatar, Settings action, heightadjust.
+function vrmod.AutoSeatedOffset()
+	local measured = vrmod.MeasureRawEyeHeight()
+	if not measured then return false end
+	local ref = 66.8
+	local cvh = GetConVar("vrmod_charactereyeheight")
+	if cvh then ref = cvh:GetFloat() end
+	local offset
+	if vrmod.utils and vrmod.utils.AutoSeatedOffset then
+		offset = vrmod.utils.AutoSeatedOffset(measured, ref)
+	else
+		offset = ref - measured
+	end
+	offset = math.Clamp(tonumber(offset) or 0, -80, 80)
+	if vrmod.SettingsSetFloat then
+		vrmod.SettingsSetFloat("vrmod_seatedoffset", offset)
+	else
+		local cv = GetConVar("vrmod_seatedoffset")
+		if cv then cv:SetFloat(offset) end
+	end
+	if vrmod.SettingsSetBool then
+		vrmod.SettingsSetBool("vrmod_seated", true)
+	else
+		local cv = GetConVar("vrmod_seated")
+		if cv then cv:SetBool(true) end
+	end
+	updateOffsetHook()
+	if vrmod.Toast then
+		vrmod.Toast(string.format("Seated offset → %.1f", offset), 3, "hint")
+	end
+	return true, offset
+end
 
 local crouchTarget = 0
 hook.Add("VRMod_Input", "crouching", function(action, pressed)

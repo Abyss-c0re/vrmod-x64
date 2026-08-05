@@ -54,8 +54,13 @@ vrmod.SettingsCatalog = {
 			{ kind = "bool", label = "Floating hands", cvar = "vrmod_floatinghands" },
 			{ kind = "bool", label = "Laser pointer on tools/weapons", cvar = "vrmod_laserpointer" },
 			{ kind = "bool", label = "Show height/avatar menu on start", cvar = "vrmod_heightmenu" },
-			{ kind = "bool", label = "Seated offset", cvar = "vrmod_seated" },
-			{ kind = "help", label = "Adjust seated offset from Avatar menu" },
+			{ kind = "header", label = "Seated / height (shared SoT)" },
+			{ kind = "bool", label = "Seated mode", cvar = "vrmod_seated" },
+			{ kind = "slider", label = "Seated height offset", cvar = "vrmod_seatedoffset", min = -40, max = 40, decimals = 1 },
+			{ kind = "help", label = "Same cvars as Avatar → Height. One write path — settings and Avatar stay in lockstep." },
+			{ kind = "action", label = "Auto seated offset (from HMD)", action_id = "auto_seated" },
+			{ kind = "slider", label = "World scale", cvar = "vrmod_scale", min = 1, max = 80, decimals = 1 },
+			{ kind = "help", label = "Same as Avatar ± world scale. Prefer Auto height in Avatar when unsure." },
 			{ kind = "bool", label = "Autostart VR after map load", cvar = "vrmod_autostart" },
 			{ kind = "bool", label = "Menu-first VR (freefloat MainMenu)", cvar = "vrmod_menu_vr" },
 			{ kind = "bool", label = "Climbing mechanics", cvar = "vrmod_climbing" },
@@ -103,23 +108,21 @@ vrmod.SettingsCatalog = {
 			{ kind = "help", label = "Off = capture for broadcast module only (no local blit). Module: vrmod.DesktopBroadcast.Register." },
 			{ kind = "header", label = "Stereo / head tilt (rigid world)" },
 			{ kind = "bool", label = "Rigid stereo under roll", cvar = "vrmod_stereo_rigid" },
-			{ kind = "help", label = "ON (default): world stays rigid when you tilt head — shared FOV both eyes + IPD along head Right(). OFF = legacy (can shear/bend lines on shoulder tilt). Source cannot do true off-axis XR frustums." },
+			{ kind = "help", label = "ON: shared FOV both eyes + IPD along head Right() (can help shoulder tilt). OFF (default): legacy per-eye. Prefer Video calibration for image fill first." },
 			{ kind = "combo", label = "Stereo eye placement", cvar = "vrmod_stereo_eye_mode", choices = {
 				{ text = "0 — auto", value = 0 },
 				{ text = "1 — OpenXR eye positions (legacy)", value = 1 },
 				{ text = "2 — synthetic head-Right IPD", value = 2 },
 			}},
 			{ kind = "help", label = "With Rigid ON, placement is always synthetic (mode ignored for positions). Both eyes share HMD orientation." },
-			{ kind = "slider", label = "IPD scale", cvar = "vrmod_eyescale", min = 0.0, max = 1.0, decimals = 2 },
-			{ kind = "help", label = "1.0 = full headset IPD (best). Rigid mode treats legacy default 0.5 as 1.0. Lower = flatter stereo." },
+			{ kind = "slider", label = "Eye distance (IPD scale)", cvar = "vrmod_eyescale", min = 0.0, max = 1.0, decimals = 2 },
+			{ kind = "help", label = "1.0 = full headset IPD. Also dialed in Video calibration. Lower = flatter stereo." },
 			{ kind = "combo", label = "Submit UV crop (backend)", cvar = "vrmod_submit_crop", choices = {
 				{ text = "0 — safe (default)", value = 0 },
 				{ text = "1 — full eye (debug)", value = 1 },
 				{ text = "2 — FOV crop EXPERIMENTAL", value = 2 },
 			}},
 			{ kind = "help", label = "Keep 0. Mode 2 FOV crop can cross/stretch stereo — do not leave on." },
-			{ kind = "bool", label = "Swap eyes", cvar = "vrmod_swap_eyes" },
-			{ kind = "help", label = "Only if L/R content is inverted. Does not fix tilt stretch." },
 			{ kind = "header", label = "Projection / scale" },
 			{ kind = "slider", label = "View scale", cvar = "vrmod_viewscale", min = 0.1, max = 2.0, decimals = 2 },
 			{ kind = "help", label = "World size vs HMD. Comfort ~0.75–1.25. Extreme values look fisheye." },
@@ -127,19 +130,22 @@ vrmod.SettingsCatalog = {
 			{ kind = "help", label = "1.0 native · 1.5 crisp · restart VR after change" },
 			{ kind = "slider", label = "FOV scale X", cvar = "vrmod_fovscale_x", min = 0.1, max = 2.0, decimals = 2 },
 			{ kind = "slider", label = "FOV scale Y", cvar = "vrmod_fovscale_y", min = 0.1, max = 2.0, decimals = 2 },
-			{ kind = "help", label = "Vision calibration may set X≠Y. Prefer Video calibration over hand-tuning." },
+			{ kind = "help", label = "Prefer Video calibration over hand-tuning FOV X/Y." },
 			{ kind = "slider", label = "ZNear", cvar = "vrmod_znear", min = -3.0, max = 3.0, decimals = 2 },
-			{ kind = "slider", label = "Scale factor", cvar = "vrmod_scalefactor", min = 0.05, max = 4.0, decimals = 2 },
-			{ kind = "help", label = "Submit UV border crop. Small ±0.05 if edges warp without changing eyes." },
+			{ kind = "slider", label = "Scale factor (bounds)", cvar = "vrmod_scalefactor", min = 0.05, max = 4.0, decimals = 2 },
+			{ kind = "help", label = "Submit UV border crop. Small ±0.05 if edges warp." },
 			{ kind = "slider", label = "Vertical offset", cvar = "vrmod_verticaloffset", min = -1.0, max = 1.0, decimals = 2 },
 			{ kind = "slider", label = "Horizontal offset", cvar = "vrmod_horizontaloffset", min = -1.0, max = 1.0, decimals = 2 },
+			{ kind = "help", label = "Manual UV pan (±1 = strong). Fixed UV gain so V/H always respond in calibration." },
+			{ kind = "slider", label = "Lens bend", cvar = "vrmod_lens_bend", min = -0.5, max = 0.5, decimals = 2 },
+			{ kind = "help", label = "Pull each eye UV toward half-center (lens map). 0 = off. Dial in Video calibration." },
 			{ kind = "bool", label = "Auto render offset", cvar = "vrmod_renderoffset" },
-			{ kind = "help", label = "SBS UV auto-offset from projection. Off = manual H/V only." },
+			{ kind = "help", label = "SBS UV auto-offset from projection. Off = manual H/V only for auto part." },
 			{ kind = "header", label = "Calibration" },
 			{ kind = "action", label = "Video calibration", cmd = "vrmod_border_calibrate" },
 			{ kind = "action", label = "Load border profile", cmd = "vrmod_border_profile_load" },
 			{ kind = "action", label = "Reset vision defaults", action_id = "reset_vision" },
-			{ kind = "help", label = "Use Video calibration for FOV/borders first. If shoulder-tilt still stretches: stereo eye mode 1, submit crop 0, swap eyes off." },
+			{ kind = "help", label = "Pause menu → Video Calibration: scale, V/H offsets, eye distance, FOV, lens. Live settings kept until Use." },
 			{ kind = "header", label = "Other rendering" },
 			{ kind = "bool", label = "3D Skybox", cvar = "vrmod_skybox" },
 			{ kind = "help", label = "Disable for more FPS" },
@@ -519,18 +525,29 @@ function vrmod.SettingsSetColor(cvar, col)
 	end
 end
 
---- Bool/float/int write — Set* only when convar is client-owned; else RunConsoleCommand.
+--- Bool/float/int write — single write path (no Set* + RunConsoleCommand race).
+--- Updates SoT cache immediately so seated/avatar/settings never desync a frame.
+local function NotifySetting(cvar, converted)
+	if vrmod.SettingsCacheSet then
+		vrmod.SettingsCacheSet(cvar, converted)
+	end
+	if CLIENT then
+		hook.Run("VRMod_SettingChanged", cvar, converted)
+	end
+end
+
 function vrmod.SettingsSetBool(cvar, v)
 	if not cvar then return end
 	local on = v and true or false
 	local str = on and "1" or "0"
 	local cv = GetConVar(cvar)
-	if not SafeClientSet(cv, function(c) c:SetInt(on and 1 or 0) end) then
-		RunConsoleCommand(cvar, str)
-	else
-		-- Ensure change callbacks that only listen to console still fire
+	-- Prefer one Set*; only fall back to console (avoids double-fire race)
+	if not SafeClientSet(cv, function(c)
+		if c.SetBool then c:SetBool(on) else c:SetInt(on and 1 or 0) end
+	end) then
 		RunConsoleCommand(cvar, str)
 	end
+	NotifySetting(cvar, on)
 	if CLIENT and cvar == "vrmod_hud" then
 		if vrmod.RefreshHUD then vrmod.RefreshHUD() end
 		timer.Simple(0, function()
@@ -544,10 +561,9 @@ function vrmod.SettingsSetFloat(cvar, v)
 	local n = tonumber(v) or 0
 	local cv = GetConVar(cvar)
 	if not SafeClientSet(cv, function(c) c:SetFloat(n) end) then
-		RunConsoleCommand(cvar, tostring(n))
-	else
-		RunConsoleCommand(cvar, tostring(n))
+		RunConsoleCommand(cvar, string.format("%.6g", n))
 	end
+	NotifySetting(cvar, n)
 end
 
 function vrmod.SettingsSetInt(cvar, v)
@@ -585,9 +601,8 @@ function vrmod.SettingsSetInt(cvar, v)
 	local cv = GetConVar(cvar)
 	if not SafeClientSet(cv, function(c) c:SetInt(n) end) then
 		RunConsoleCommand(cvar, tostring(n))
-	else
-		RunConsoleCommand(cvar, tostring(n))
 	end
+	NotifySetting(cvar, n)
 end
 
 --- Shared action handlers (VR + desktop). Host may wrap close.
@@ -658,10 +673,12 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_fovscale_x", "1.0")
 		RunConsoleCommand("vrmod_fovscale_y", "1.0")
 		RunConsoleCommand("vrmod_znear", "1.0")
-		RunConsoleCommand("vrmod_eyescale", "0.5")
+		RunConsoleCommand("vrmod_eyescale", "1.0")
 		RunConsoleCommand("vrmod_scalefactor", "1.0")
 		RunConsoleCommand("vrmod_verticaloffset", "0")
 		RunConsoleCommand("vrmod_horizontaloffset", "0")
+		RunConsoleCommand("vrmod_lens_bend", "0")
+		RunConsoleCommand("vrmod_swap_eyes", "0")
 		if vrmod.Experience_Reset then
 			vrmod.Experience_Reset()
 		else

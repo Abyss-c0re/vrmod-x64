@@ -79,20 +79,23 @@ if CLIENT then
     --   2 synthetic = force pure translation along head Right() (best roll test)
     vrmod.AddCallbackedConvar("vrmod_stereo_eye_mode", nil, "0", FCVAR_ARCHIVE,
         "Stereo eyes: 0=auto 1=OpenXR poses 2=synthetic head-Right IPD", 0, 2, tonumber)
-    -- Rigid under head roll (default on): shared FOV + synthetic IPD on head Right().
-    -- Off = legacy per-eye FOV / XR absolute eyes (can shear when tilting head).
-    vrmod.AddCallbackedConvar("vrmod_stereo_rigid", nil, "1", FCVAR_ARCHIVE,
-        "1=rigid stereo under head roll (recommended) 0=legacy per-eye", 0, 1, tonumber)
+    -- Rigid under head roll: shared FOV + synthetic IPD on head Right().
+    -- Default off (legacy) — opt-in if shoulder-tilt shear bothers you; not a silver bullet.
+    vrmod.AddCallbackedConvar("vrmod_stereo_rigid", nil, "0", FCVAR_ARCHIVE,
+        "1=rigid stereo under head roll 0=legacy per-eye (default)", 0, 1, tonumber)
     -- Per-eye submit UV (C++ XR_SetSubmitCropMode). NEVER leave FOV_CROP on by default.
     --   0 safe     = full per-eye rect; SBS uses Lua bounds (default, stable)
     --   1 full     = force full-eye UV (debug borders)
     --   2 fov_crop = experimental asymmetric FOV crop (can cross stereo — opt-in only)
     vrmod.AddCallbackedConvar("vrmod_submit_crop", nil, "0", FCVAR_ARCHIVE,
         "Submit UV: 0=safe 1=full 2=fov_crop experimental", 0, 2, tonumber)
-    -- Workshop: inverted stereo / "seeing double" (PSVR2 etc.) — swap SBS halves without dual pose truth
-    vrmod.AddCallbackedConvar("vrmod_swap_eyes", nil, "0", FCVAR_ARCHIVE, "Swap left/right eye submit halves", nil, nil, tobool)
-    vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV vertical offset", -1.0, 1.0, tonumber)
-    vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset", -1.0, 1.0, tonumber)
+    -- Legacy: inverted stereo content swap (hidden from UI; keep cvar for old configs). Prefer re-calibrate.
+    vrmod.AddCallbackedConvar("vrmod_swap_eyes", nil, "0", FCVAR_ARCHIVE, "DEPRECATED: swap L/R content halves", nil, nil, tobool)
+    vrmod.AddCallbackedConvar("vrmod_verticaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV vertical offset (−1..1, fixed UV gain)", -1.0, 1.0, tonumber)
+    vrmod.AddCallbackedConvar("vrmod_horizontaloffset", nil, "0", FCVAR_ARCHIVE, "Submit UV horizontal offset (−1..1, fixed UV gain)", -1.0, 1.0, tonumber)
+    -- Lens bend: pull each eye UV rect toward half-center (maps image to lens). 0=none.
+    vrmod.AddCallbackedConvar("vrmod_lens_bend", nil, "0", FCVAR_ARCHIVE,
+        "Lens map: UV pull toward eye center (−0.5..0.5, 0=off)", -0.5, 0.5, tonumber)
     vrmod.AddCallbackedConvar("vrmod_oldcharacteryaw", nil, "0")
     vrmod.AddCallbackedConvar("vrmod_postprocess", nil, "0", nil, nil, nil, nil, tobool, function(val) if g_VR.view then g_VR.view.dopostprocess = val end end)
     -- Binaries may coexist in lua/bin: XR (WiVRn), OpenVR, optional quest (gVRLink).

@@ -204,8 +204,18 @@ end
 
 local function applyStanding()
 	ensureConvars()
-	convars.vrmod_seated:SetBool(false)
-	convars.vrmod_seatedoffset:SetFloat(0)
+	-- Single SoT write path (Settings cache + seated hook)
+	if vrmod.SettingsSetBool then
+		vrmod.SettingsSetBool("vrmod_seated", false)
+	elseif convars.vrmod_seated then
+		convars.vrmod_seated:SetBool(false)
+	end
+	if vrmod.SettingsSetFloat then
+		vrmod.SettingsSetFloat("vrmod_seatedoffset", 0)
+	elseif convars.vrmod_seatedoffset then
+		convars.vrmod_seatedoffset:SetFloat(0)
+	end
+	if vrmod.UpdateSeatedOffset then pcall(vrmod.UpdateSeatedOffset) end
 	if vrmod.AutoScaleHeight then
 		local ok, scale = vrmod.AutoScaleHeight()
 		if ok then
@@ -223,11 +233,19 @@ local function applySeated()
 		if ok then
 			toast(string.format("Seated · auto offset %.1f", offset), 3)
 		else
-			convars.vrmod_seated:SetBool(true)
+			if vrmod.SettingsSetBool then
+				vrmod.SettingsSetBool("vrmod_seated", true)
+			elseif convars.vrmod_seated then
+				convars.vrmod_seated:SetBool(true)
+			end
 			toast("Seated · enable only (offset pending)", 2)
 		end
 	else
-		convars.vrmod_seated:SetBool(true)
+		if vrmod.SettingsSetBool then
+			vrmod.SettingsSetBool("vrmod_seated", true)
+		elseif convars.vrmod_seated then
+			convars.vrmod_seated:SetBool(true)
+		end
 	end
 end
 

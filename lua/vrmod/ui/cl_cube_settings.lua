@@ -660,6 +660,7 @@ function vrmod.CubeSettings_Close()
 	hook.Remove("VRMod_Input", "cube_settings_input")
 	hook.Remove("VRMod_Exit", "cube_settings_exit")
 	hook.Remove("VRMod_OpenQuickMenu", "cube_settings_qm")
+	hook.Remove("VRMod_SettingChanged", "cube_settings_sot")
 	if g_VR and g_VR.menus and g_VR.menus[UID] then
 		g_VR.menus[UID].closeFunc = nil
 	end
@@ -709,6 +710,7 @@ function vrmod.CubeSettings_Open()
 		hook.Remove("PreRender", "cube_settings_paint")
 		hook.Remove("VRMod_Input", "cube_settings_input")
 		hook.Remove("VRMod_OpenQuickMenu", "cube_settings_qm")
+		hook.Remove("VRMod_SettingChanged", "cube_settings_sot")
 	end)
 
 	if not (g_VR.menus and g_VR.menus[UID]) then
@@ -726,6 +728,14 @@ function vrmod.CubeSettings_Open()
 		sm.attachment = true
 		sm.attachHand = WristHand()
 	end
+
+	-- Avatar / stage pack / console wrote a catalog cvar — repaint from live GetConVar
+	hook.Add("VRMod_SettingChanged", "cube_settings_sot", function(_name)
+		if not open then return end
+		if g_VR.menus and g_VR.menus[UID] then
+			g_VR.menus[UID].dirty = true
+		end
+	end)
 
 	paint()
 

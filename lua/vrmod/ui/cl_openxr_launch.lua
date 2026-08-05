@@ -311,13 +311,20 @@ local function noteStagePackOnce()
 		and #muts > 0
 		and vrmod.utils.StagePack_ExecuteMutations then
 		execRes = vrmod.utils.StagePack_ExecuteMutations(muts, function(name, val)
-			local cv = GetConVar(name)
-			if not cv then return false, "missing_" .. tostring(name) end
-			local ok = pcall(function() cv:SetFloat(tonumber(val) or 0) end)
-			if not ok then return false, "set_fail_" .. tostring(name) end
-			-- Keep seated hook in sync if present
-			if name == "vrmod_seatedoffset" and vrmod.UpdateSeatedOffset then
-				pcall(vrmod.UpdateSeatedOffset)
+			local n = tonumber(val) or 0
+			-- Single SoT write (cache + VRMod_SettingChanged + seated hook)
+			if vrmod.SettingsSetFloat then
+				local ok = pcall(vrmod.SettingsSetFloat, name, n)
+				if not ok then return false, "set_fail_" .. tostring(name) end
+			else
+				local cv = GetConVar(name)
+				if not cv then return false, "missing_" .. tostring(name) end
+				local ok = pcall(function() cv:SetFloat(n) end)
+				if not ok then return false, "set_fail_" .. tostring(name) end
+			end
+			if name == "vrmod_seatedoffset" then
+				if vrmod.SettingsSetBool then pcall(vrmod.SettingsSetBool, "vrmod_seated", true) end
+				if vrmod.UpdateSeatedOffset then pcall(vrmod.UpdateSeatedOffset) end
 			end
 			return true
 		end)

@@ -56,12 +56,51 @@ function vrmod.utils.BorderLaw_ScaleStep()
 end
 
 function vrmod.utils.BorderLaw_OffsetStep()
-	return 0.01
+	return 0.02
 end
 
---- Guided Vision step order (W1): not a slider maze.
+function vrmod.utils.BorderLaw_EyeStep()
+	return 0.05
+end
+
+function vrmod.utils.BorderLaw_FovStep()
+	return 0.02
+end
+
+function vrmod.utils.BorderLaw_LensStep()
+	return 0.02
+end
+
+function vrmod.utils.BorderLaw_LensMin()
+	return -0.5
+end
+
+function vrmod.utils.BorderLaw_LensMax()
+	return 0.5
+end
+
+function vrmod.utils.BorderLaw_ClampLens(v)
+	v = tonumber(v)
+	if v == nil then return 0.0 end
+	local lo, hi = vrmod.utils.BorderLaw_LensMin(), vrmod.utils.BorderLaw_LensMax()
+	if v < lo then return lo end
+	if v > hi then return hi end
+	return v
+end
+
+--- Guided Vision step order: intro keeps live settings until Use; then dials.
 function vrmod.utils.BorderLaw_StepIds()
-	return { "reset", "scale", "vertical", "horizontal", "done" }
+	return {
+		"reset", -- intro: preserve live cvars; Use = start; Secondary = factory defaults
+		"scale",
+		"vertical",
+		"horizontal",
+		"eye", -- IPD / eye distance (vrmod_eyescale)
+		"fov_x",
+		"fov_y",
+		"lens", -- lens bend coefficient
+		"done",
+	}
 end
 
 function vrmod.utils.BorderLaw_IsGuidedPathOnly()
@@ -73,7 +112,12 @@ function vrmod.utils.BorderLaw_PreferGuideOverZSpam()
 end
 
 function vrmod.utils.BorderLaw_RequireRenderOffsetOnGuide()
-	return true -- auto UV offset on during cal baseline
+	return true -- prefer auto UV offset on during cal
+end
+
+--- Start of guide must NOT wipe live settings (only Secondary on intro applies baseline).
+function vrmod.utils.BorderLaw_ResetOnStart()
+	return false
 end
 
 function vrmod.utils.BorderLaw_ClampScale(v)
@@ -107,13 +151,17 @@ function vrmod.utils.BorderLaw_IsBleedRisk(opts)
 	return false
 end
 
---- Baseline for guided start: clean center, scale 1, offsets 0.
+--- Factory baseline (Secondary on intro only — not applied on Start).
 function vrmod.utils.BorderLaw_GuideBaseline()
 	return {
 		scalefactor = vrmod.utils.BorderLaw_DefaultScale(),
 		verticaloffset = vrmod.utils.BorderLaw_DefaultVertical(),
 		horizontaloffset = vrmod.utils.BorderLaw_DefaultHorizontal(),
 		renderoffset = vrmod.utils.BorderLaw_RequireRenderOffsetOnGuide() and 1 or 0,
+		eyescale = 1.0, -- full IPD when resetting
+		fovscale_x = 1.0,
+		fovscale_y = 1.0,
+		lens_bend = 0.0,
 	}
 end
 
@@ -123,17 +171,21 @@ function vrmod.utils.BorderLaw_Sanitize(opts)
 	local rawS = tonumber(opts.scalefactor)
 	local rawV = tonumber(opts.verticaloffset)
 	local rawH = tonumber(opts.horizontaloffset)
+	local rawL = tonumber(opts.lens_bend)
 	local s = vrmod.utils.BorderLaw_ClampScale(rawS)
 	local vo = vrmod.utils.BorderLaw_ClampOffset(rawV)
 	local ho = vrmod.utils.BorderLaw_ClampOffset(rawH)
+	local lb = vrmod.utils.BorderLaw_ClampLens(rawL)
 	local clamped = false
 	if rawS ~= nil and math.abs(s - rawS) > 1e-6 then clamped = true end
 	if rawV ~= nil and math.abs(vo - rawV) > 1e-6 then clamped = true end
 	if rawH ~= nil and math.abs(ho - rawH) > 1e-6 then clamped = true end
+	if rawL ~= nil and math.abs(lb - rawL) > 1e-6 then clamped = true end
 	return {
 		scalefactor = s,
 		verticaloffset = vo,
 		horizontaloffset = ho,
+		lens_bend = lb,
 		clamped = clamped,
 		bleed_risk = vrmod.utils.BorderLaw_IsBleedRisk({
 			scalefactor = s,
@@ -144,7 +196,7 @@ function vrmod.utils.BorderLaw_Sanitize(opts)
 end
 
 --- Pure decision.
---- opts: scalefactor, verticaloffset, horizontaloffset,
+--- opts: scalefactor, verticaloffset, horizontaloffset, lens_bend,
 ---       guide_active, profile_loaded, fill_ok (optional HMD observation)
 function vrmod.utils.BorderLaw_Decide(opts)
 	opts = type(opts) == "table" and opts or {}
@@ -154,6 +206,7 @@ function vrmod.utils.BorderLaw_Decide(opts)
 		scalefactor = san.scalefactor,
 		verticaloffset = san.verticaloffset,
 		horizontaloffset = san.horizontaloffset,
+		lens_bend = san.lens_bend,
 		clamped = san.clamped,
 		bleed_risk = san.bleed_risk,
 		guide_active = opts.guide_active and true or false,
@@ -212,14 +265,14 @@ function vrmod.utils.BorderLaw_HmdExpect(decision)
 		e.verdict = "expect_bars"
 		e.expect_fill = false
 		e.checklist = "G40 · BARS · black bars / edge bleed in HMD"
-		e.pass_line = "Run vrmod_border_calibrate (scale→V→H→save); reload profile later"
+		e.pass_line = "Run Video calibration (scale→V→H→eye→FOV→lens→save)"
 		e.fail_line = "FOV not filling HMD; permanent black bars"
 		return e
 	end
 	if decision.risk == "guide" then
 		e.verdict = "expect_guide"
 		e.checklist = "G40 · GUIDE · Vision border path active"
-		e.pass_line = "Complete scale → vertical → horizontal → save profile"
+		e.pass_line = "Complete scale → V → H → eye → FOV → lens → save"
 		e.fail_line = "Cancel mid-path without profile; bars remain"
 		return e
 	end

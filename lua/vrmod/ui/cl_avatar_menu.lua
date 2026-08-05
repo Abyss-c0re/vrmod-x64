@@ -61,32 +61,45 @@ local function WristPose()
 	return Vector(2.5, 3, 4), Angle(0, -90, 55), 0.025
 end
 
-local function AutoScale()
-	if not g_VR.tracking or not g_VR.tracking.hmd then return end
-	local eyeH = g_VR.tracking.hmd.pos.z - g_VR.origin.z
-	if eyeH < 8 then eyeH = 66.8 end
-	g_VR.scale = 66.8 / (eyeH / math.max(g_VR.scale, 0.01))
-	if convars and convars.vrmod_scale then
-		convars.vrmod_scale:SetFloat(g_VR.scale)
+local function writeScale(s)
+	g_VR.scale = s
+	if vrmod.SettingsSetFloat then
+		vrmod.SettingsSetFloat("vrmod_scale", s)
+	elseif convars and convars.vrmod_scale then
+		convars.vrmod_scale:SetFloat(s)
 	end
 end
 
+local function AutoScale()
+	-- Measure raw eye height (never post-seated tracking — double-count bug)
+	local eyeH = vrmod.MeasureRawEyeHeight and vrmod.MeasureRawEyeHeight()
+	if not eyeH then
+		if not g_VR.tracking or not g_VR.tracking.hmd then return end
+		eyeH = g_VR.tracking.hmd.pos.z - g_VR.origin.z
+	end
+	if eyeH < 8 then eyeH = 66.8 end
+	local newScale = 66.8 / (eyeH / math.max(g_VR.scale or 32.7, 0.01))
+	writeScale(newScale)
+end
+
 function vrmod.AutoScaleHeight()
-	if not g_VR or not g_VR.tracking or not g_VR.tracking.hmd then return false end
+	if not g_VR or not g_VR.origin then return false end
 	AutoScale()
 	return true, g_VR.scale
 end
 
-function vrmod.AutoSeatedOffset()
-	if not g_VR or not g_VR.origin then return false end
-	local hmd = (g_VR.rawTracking and g_VR.rawTracking.hmd) or (g_VR.tracking and g_VR.tracking.hmd)
-	if not hmd or not hmd.pos then return false end
-	local offset = 66.8 - (hmd.pos.z - g_VR.origin.z)
-	if convars then
-		if convars.vrmod_seatedoffset then convars.vrmod_seatedoffset:SetFloat(offset) end
-		if convars.vrmod_seated then convars.vrmod_seated:SetBool(true) end
-	end
-	return true, offset
+-- vrmod.AutoSeatedOffset lives in cl_seated.lua (single SoT)
+
+local function seatedOn()
+	local cv = GetConVar("vrmod_seated")
+	if cv then return cv:GetBool() end
+	return convars and convars.vrmod_seated and convars.vrmod_seated:GetBool()
+end
+
+local function seatedOffsetLive()
+	local cv = GetConVar("vrmod_seatedoffset")
+	if cv then return cv:GetFloat() end
+	return 0
 end
 
 local function StopTwin()
@@ -109,10 +122,6 @@ end
 
 local function sess()
 	return avatarSession or (vrmod.avatar and vrmod.avatar.Get("avatar"))
-end
-
-local function seated()
-	return convars and convars.vrmod_seated and convars.vrmod_seated:GetBool()
 end
 
 local function rebuildButtons()
@@ -252,8 +261,11 @@ local function paint()
 			drawBtn(PAD, y0 + 50, bw, 48, "+", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD + bw + 8, y0 + 50, bw, 48, "AUTO", focused and my >= y0 + 50 and my <= y0 + 98, false)
 			drawBtn(PAD + (bw + 8) * 2, y0 + 50, bw, 48, "-", focused and my >= y0 + 50 and my <= y0 + 98, false)
-			drawBtn(PAD, y0 + 110, (W - PAD * 2 - 8) / 2, 48, seated() and "SEATED ON" or "SEATED OFF", false, seated())
-			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 110, (W - PAD * 2 - 8) / 2, 48, "OFFSET", false, false)
+			local son = seatedOn()
+			local offz = seatedOffsetLive()
+			drawBtn(PAD, y0 + 110, (W - PAD * 2 - 8) / 2, 48, son and "SEATED ON" or "SEATED OFF", false, son)
+			drawBtn(PAD + (W - PAD * 2 - 8) / 2 + 8, y0 + 110, (W - PAD * 2 - 8) / 2, 48,
+				string.format("OFFS %.1f", offz), false, math.abs(offz) > 0.05)
 			local dist = s and s.distance or 40
 			local yaw = s and (s.freeYaw or (s.standAng and s.standAng.yaw)) or 180
 			drawBtn(PAD, y0 + 170, W - PAD * 2, 40, "RESET PLACE (face me)", false, false)
@@ -385,19 +397,20 @@ local function activate(mx, my)
 			tab = btn.index
 			return
 		elseif k == "h_plus" then
-			g_VR.scale = (g_VR.scale or 32) + 0.5
-			if convars and convars.vrmod_scale then convars.vrmod_scale:SetFloat(g_VR.scale) end
+			writeScale((g_VR.scale or 32) + 0.5)
 		elseif k == "h_minus" then
-			g_VR.scale = math.max(1, (g_VR.scale or 32) - 0.5)
-			if convars and convars.vrmod_scale then convars.vrmod_scale:SetFloat(g_VR.scale) end
+			writeScale(math.max(1, (g_VR.scale or 32) - 0.5))
 		elseif k == "h_auto" then
 			AutoScale()
 		elseif k == "h_seated" then
-			if convars and convars.vrmod_seated then
-				convars.vrmod_seated:SetBool(not seated())
+			local nextOn = not seatedOn()
+			if vrmod.SettingsSetBool then
+				vrmod.SettingsSetBool("vrmod_seated", nextOn)
+			elseif convars and convars.vrmod_seated then
+				convars.vrmod_seated:SetBool(nextOn)
 			end
 		elseif k == "h_offset" then
-			vrmod.AutoSeatedOffset()
+			if vrmod.AutoSeatedOffset then vrmod.AutoSeatedOffset() end
 		elseif k == "reset_place" then
 			local s = sess()
 			if s then
@@ -521,6 +534,7 @@ function vrmod.AvatarMenu_Close()
 	hook.Remove("VRMod_Input", "avatar_menu_input")
 	hook.Remove("VRMod_Exit", "avatar_menu_exit")
 	hook.Remove("VRMod_OpenQuickMenu", "avatar_menu_qm")
+	hook.Remove("VRMod_SettingChanged", "avatar_menu_sot")
 	hook.Remove("VRMod_Input", "vrmodheightmenuinput")
 	hook.Remove("PreRender", "vrmodheightmenuplace")
 	if g_VR and g_VR.menus then
@@ -583,6 +597,21 @@ function vrmod.AvatarMenu_Open()
 		hook.Remove("PreRender", "avatar_menu_paint")
 		hook.Remove("VRMod_Input", "avatar_menu_input")
 		hook.Remove("VRMod_OpenQuickMenu", "avatar_menu_qm")
+		hook.Remove("VRMod_SettingChanged", "avatar_menu_sot")
+	end)
+
+	-- Settings / stage pack wrote seated or scale — repaint same live values
+	hook.Add("VRMod_SettingChanged", "avatar_menu_sot", function(name)
+		if not open then return end
+		if name == "vrmod_seated" or name == "vrmod_seatedoffset" or name == "vrmod_scale" then
+			if name == "vrmod_scale" then
+				local cv = GetConVar("vrmod_scale")
+				if cv then g_VR.scale = cv:GetFloat() end
+			end
+			if g_VR.menus and g_VR.menus[UID] then
+				g_VR.menus[UID].dirty = true
+			end
+		end
 	end)
 
 	if not (g_VR.menus and g_VR.menus[UID] and g_VR.menus[UID].rt) then

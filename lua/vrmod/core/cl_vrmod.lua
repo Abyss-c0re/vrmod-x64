@@ -1187,14 +1187,18 @@ if CLIENT then
 		if wantXr and eL and eR and eL.pos and eR.pos then
 			local d = eL.pos:DistToSqr(eR.pos)
 			if d > 0.01 and d < (scale * 0.2) * (scale * 0.2) then
-				g_VR.eyePosLeft = eL.pos
-				g_VR.eyePosRight = eR.pos
+				-- Apply vrmod_eyescale even on XR eyes: 1 = full headset IPD, 0 = cyclopean.
+				-- (Previously XR path ignored eyescale entirely — IPD cal step did nothing.)
+				local es = math.Clamp(eyeScale, 0, 1)
+				local mid = (eL.pos + eR.pos) * 0.5
+				g_VR.eyePosLeft = mid + (eL.pos - mid) * es
+				g_VR.eyePosRight = mid + (eR.pos - mid) * es
 				usedXrEyes = true
 			end
 		end
 		if not usedXrEyes then
 			-- half_ipd = distance from cyclopean to each eye along head Right()
-			local half = (sdec and tonumber(sdec.half_ipd)) or (eyeOffset * 0.5 * eyeScaleRigid)
+			local half = (sdec and tonumber(sdec.half_ipd)) or (eyeOffset * 0.5 * eyeScale)
 			g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-half)
 			g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (half)
 		end
@@ -1623,7 +1627,8 @@ if CLIENT then
 		local vOffset = convars.vrmod_verticaloffset:GetFloat()
 		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
 		local renderOffset = convars.vrmod_renderoffset:GetBool()
-		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset)}
+		local lensBend = (convars.vrmod_lens_bend and convars.vrmod_lens_bend:GetFloat()) or 0
+		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset, lensBend)}
 		-- mq2 single-pass: mirror left UV to both eyes if helpers exist
 		local mqLive = g_VR._matQueueMode or WantedMatQueueMode()
 		local monoBoth = g_VR._mq2SinglePass or g_VR._mq2MonoLeftForBoth or (mqLive >= 2)
@@ -1647,6 +1652,11 @@ if CLIENT then
 		end
 	end
 
+	-- Public force-apply for calibration / live UI (immediate, not deferred cmd)
+	function vrmod.ForceApplySubmitBounds()
+		ApplySubmitBounds()
+	end
+
 	-- Live update: UV bounds + crop mode (offsets/scale/eye dials)
 	-- G36 / W5: border cvars → submit_bounds only (never mid-frame FOV fight)
 	local function BindBorderConvarCallbacks()
@@ -1656,6 +1666,7 @@ if CLIENT then
 			"vrmod_scalefactor",
 			"vrmod_renderoffset",
 			"vrmod_submit_crop",
+			"vrmod_lens_bend",
 		}
 		for _, name in ipairs(names) do
 			cvars.RemoveChangeCallback(name, "vrmod_submit_bounds")
@@ -1731,6 +1742,11 @@ if CLIENT then
 			end
 		end
 		return live
+	end
+
+	-- Public for Video calibration FOV / viewscale dials
+	function vrmod.SoftRefreshDisplayParams()
+		return SoftRefreshDisplayParams()
 	end
 
 	-- Re-read session convars into g_VR (offsets, scale, view, pins).
@@ -2527,24 +2543,26 @@ if CLIENT then
 			g_VR._stereoLoadLabel = nil
 			matQueueAppliedForSession = false
 
-			-- G13: return-to-Cube marker (protocol only — Cube does not auto-reclaim yet)
+			-- G13: return-to-Cube marker + bridge will relaunch CubeUI after XR free
 			pcall(function()
 				local isCube = (vrmod.IsOpenXRLaunchSession and vrmod.IsOpenXRLaunchSession())
 					or (g_VR._openxrLaunch and g_VR._openxrLaunch.native_wrapper)
 				if vrmod.utils and vrmod.utils.CubeReturn_ShouldNotifyCube
 					and vrmod.utils.CubeReturn_ShouldNotifyCube(isCube, true) then
 					local map = tostring(game.GetMap and game.GetMap() or "")
+					local intent = g_VR._cubeReturnIntent or "vr_exit"
 					local body = vrmod.utils.CubeReturn_Format("vr_exit", {
 						map = map,
 						source = "vrmod_exit",
+						intent = intent,
 						ts = os.time and os.time() or 0,
 					})
 					file.CreateDir("vrmod")
 					file.Write("vrmod/cube_return.txt", body)
-					-- Second phase once OpenXR teardown completes (same write upgrade)
 					g_VR._cubeReturnPendingRelease = true
+					g_VR._cubeReturnRelaunch = true
 					if vrmod.logger then
-						vrmod.logger.Info("G13 cube_return phase=vr_exit map=%s (reclaim not auto)", map)
+						vrmod.logger.Info("G13 cube_return phase=vr_exit intent=%s map=%s", intent, map)
 					end
 				end
 			end)
@@ -2596,24 +2614,44 @@ if CLIENT then
 				if isfunction(VRMOD_Shutdown) then VRMOD_Shutdown() end
 			end)
 
-			-- G13: mark XR released after shutdown (Cube shell may poll later)
+			-- G13: mark XR released; cl_cube_bridge spawns CubeUI after short delay
 			pcall(function()
 				if g_VR._cubeReturnPendingRelease and vrmod.utils and vrmod.utils.CubeReturn_Format then
 					g_VR._cubeReturnPendingRelease = false
 					local map = tostring(game.GetMap and game.GetMap() or "")
+					local intent = g_VR._cubeReturnIntent or "vr_exit"
 					file.Write("vrmod/cube_return.txt", vrmod.utils.CubeReturn_Format("xr_released", {
 						map = map,
 						source = "vrmod_exit",
+						intent = intent,
 						ts = os.time and os.time() or 0,
 					}))
 					if vrmod.Toast then
-						vrmod.Toast("OpenXR released · relaunch Cube shell to reclaim panel", 5, "hint")
+						vrmod.Toast(
+							intent == "temp_return"
+								and "OpenXR free · opening Cube launcher (GMod kept)"
+								or "OpenXR free · opening Cube launcher…",
+							4,
+							"hint"
+						)
 					end
 				end
 			end)
 
 			-- 4) Restore soft pins only — never thrash mat_queue under OpenXR.
 			ScheduleConvarRestore(0.2)
+
+			-- 5) G13: spawn CubeUI after XR free (bridge — do not wait for net VRMod_Exit)
+			if g_VR._cubeReturnRelaunch and vrmod.CubeBridge_SpawnLauncher then
+				local intent = g_VR._cubeReturnIntent or "vr_exit"
+				g_VR._cubeReturnRelaunch = nil
+				g_VR._cubeReturnIntent = nil
+				g_VR._cubeBridgeSpawned = true
+				timer.Simple(0.75, function()
+					g_VR._cubeBridgeSpawned = nil
+					vrmod.CubeBridge_SpawnLauncher(intent)
+				end)
+			end
 
 			vrmod.logger.Info("Ended VR session (full teardown; cold restart OK)")
 		end

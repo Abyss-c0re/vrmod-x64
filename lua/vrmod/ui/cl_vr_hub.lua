@@ -15,7 +15,8 @@ local open = false
 local buttons = {}
 local statusMsg, statusUntil = "", 0
 
-local W, H = 560, 680
+-- Extra row for Video Calibration on the free-floating / wrist hub
+local W, H = 560, 740
 local livePos, liveAng, liveScale = Vector(4, 5, 6), Angle(0, -90, 55), 0.028
 local HEADER, PAD, ROW_H = 80, 18, 54
 
@@ -74,11 +75,13 @@ end
 
 local function MenuItems()
 	local map = game.GetMap and game.GetMap() or "?"
-	-- Cube pause fallback (when stock GameUI projection fails)
+	-- Cube pause / startup hub (when stock GameUI projection fails)
+	-- Order: play (resume · new game) → config (settings · video cal · bindings) → leave.
 	return {
 		{ id = "resume", label = "RESUME", hint = "Close menu · stay in VR · " .. map },
 		{ id = "newgame", label = "NEW GAME", hint = "Maps · gamemode · multiplayer" },
 		{ id = "settings", label = "VR SETTINGS", hint = "Comfort · render · locomotion · UI" },
+		{ id = "video_cal", label = "VIDEO CALIBRATION", hint = "Scale · V/H · IPD · FOV · lens" },
 		{ id = "bindings", label = "BINDINGS", hint = "OpenXR rebind · chords" },
 		{ id = "disconnect", label = "DISCONNECT", hint = "Leave map / server" },
 		{ id = "quit", label = "QUIT", hint = "Exit Garry's Mod" },
@@ -125,6 +128,19 @@ local function openSettings()
 	end)
 end
 
+local function openVideoCal()
+	-- Close hub so cal 3D overlay + input own the session immediately
+	vrmod.VRHub_Close()
+	timer.Simple(0.05, function()
+		if vrmod.VRUnpauseWorld then vrmod.VRUnpauseWorld() end
+		if vrmod.BorderCal_Start then
+			vrmod.BorderCal_Start()
+		else
+			RunConsoleCommand("vrmod_border_calibrate")
+		end
+	end)
+end
+
 local function paintInner()
 	local T = Theme()
 	local focused = g_VR.menuFocus == UID
@@ -151,7 +167,7 @@ local function paintInner()
 	for _, btn in ipairs(buttons) do
 		if btn.kind == "item" then
 			local isHot = focused and mx >= btn.x and mx <= btn.x + btn.w and my >= btn.y and my <= btn.y + btn.h
-			local primary = (btn.id == "newgame" or btn.id == "settings")
+			local primary = (btn.id == "newgame" or btn.id == "settings" or btn.id == "video_cal")
 			if vrmod.cube and vrmod.cube.DrawSlot then
 				vrmod.cube.DrawSlot(btn.x, btn.y, btn.w, btn.h, nil, isHot, primary, true)
 			else
@@ -216,6 +232,9 @@ local function activateAt(mx, my)
 				local id = btn.id
 				if id == "resume" then
 					vrmod.VRHub_Close()
+				elseif id == "video_cal" then
+					openVideoCal()
+					SetStatus("Video calibration…", 2)
 				elseif id == "newgame" then
 					openNewGame()
 					SetStatus("New Game…", 2)
