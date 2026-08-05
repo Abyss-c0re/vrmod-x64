@@ -110,7 +110,7 @@ function vrmod.IsOpenXRLaunchSession()
 	return applied or (g_VR and g_VR._openxrLaunch ~= nil)
 end
 
---- True when Start came from cube_webui / gvrmod_launcher (marker native_wrapper=1).
+--- True when Start came from CubeUI / gvrmod_launcher (marker native_wrapper=1).
 function vrmod.IsNativeWrapperLaunch()
 	if g_VR and g_VR._openxrLaunch and g_VR._openxrLaunch.native_wrapper then
 		return true
@@ -135,7 +135,7 @@ local function writeStatus(line)
 	end)
 end
 
---- Signal native cube_webui_launcher to release OpenXR (seamless handoff, no black gap).
+--- Signal native CubeUI to release OpenXR (seamless handoff, no black gap).
 local function writeHandoff(phase)
 	pcall(function()
 		file.Write("vrmod/cube_handoff.txt",
@@ -169,7 +169,7 @@ local function forceStartVR()
 		handoffDelayUntil = CurTime() + 2.5
 		writeHandoff("take_xr")
 		writeStatus("take_xr_signaled")
-		log("signaled cube_webui take_xr — waiting for native to release session (2.5s)")
+		log("signaled CubeUI take_xr — waiting for native to release session (2.5s)")
 		return false
 	end
 	if CurTime() < handoffDelayUntil then

@@ -26,7 +26,7 @@ function vrmod.utils.WarmAttach_Parse(body)
 		action = "warm_request",
 		reason = "",
 		map = "",
-		source = "cube_webui",
+		source = "CubeUI",
 		ts = 0,
 		valid = false,
 	}
@@ -49,7 +49,7 @@ function vrmod.utils.WarmAttach_Parse(body)
 					out.map = v
 					got = true
 				elseif k == "source" then
-					out.source = (v ~= "" and v) or "cube_webui"
+					out.source = (v ~= "" and v) or "CubeUI"
 				elseif k == "ts" then
 					out.ts = tonumber(v) or 0
 				end

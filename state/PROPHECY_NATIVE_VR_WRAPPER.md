@@ -8,10 +8,10 @@ payload after **Start Game**.
 
 | Entry | Role |
 |-------|------|
-| `scripts/cube_webui_launcher.sh` | **Product** — OpenXR native shell |
-| `install/native/cube_webui_launcher` | C++ binary |
+| `scripts/CubeUI.sh` | **Product** — OpenXR native shell |
+| `install/native/CubeUI` | C++ binary |
 | `scripts/gvrmod_launcher.sh` | GMod spawn helper only |
-| Desktop **gVRMod Cube** | → `cube_webui_launcher.sh` |
+| Desktop **gVRMod Cube** | → `CubeUI.sh` |
 
 ## Flow
 
@@ -19,7 +19,7 @@ payload after **Start Game**.
 Headset on
     │
     ▼
-cube_webui_launcher  (OpenGL + OpenXR, tiny GLX window only for context)
+CubeUI  (OpenGL + OpenXR, tiny GLX window only for context)
     │  reversed WebUI: categories · maps · maxplayers · LAN · START GAME
     │
     ├─ quit  → exit
@@ -42,13 +42,13 @@ Stock: `garrysmod/html/template/newgame.html` + `js/menu/control.NewGame.js`
 ## Host controls (bring-up)
 
 ```bash
-echo up    >/tmp/cube_webui_cmd
-echo down  >/tmp/cube_webui_cmd
-echo left  >/tmp/cube_webui_cmd
-echo right >/tmp/cube_webui_cmd
-echo click >/tmp/cube_webui_cmd   # toggle setting / select
-echo start >/tmp/cube_webui_cmd   # Start Game
-echo quit  >/tmp/cube_webui_cmd
+echo up    >/tmp/CubeUI_cmd
+echo down  >/tmp/CubeUI_cmd
+echo left  >/tmp/CubeUI_cmd
+echo right >/tmp/CubeUI_cmd
+echo click >/tmp/CubeUI_cmd   # toggle setting / select
+echo start >/tmp/CubeUI_cmd   # Start Game
+echo quit  >/tmp/CubeUI_cmd
 ```
 
 ## Build
@@ -56,5 +56,5 @@ echo quit  >/tmp/cube_webui_cmd
 ```bash
 cmake -S native_launcher -B native_launcher/build
 cmake --build native_launcher/build -j
-# → install/native/cube_webui_launcher
+# → install/native/CubeUI
 ```

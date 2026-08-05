@@ -14,7 +14,7 @@ Split **UI generation** from **stereo presentation**:
 
 | Item | Manifest |
 |------|----------|
-| Dirty gate | `WebUI_MarkDirty` / `WebUI_ShouldRepaint` / `WebUI_DidRepaint` |
+| Dirty gate | `CubeUI_MarkDirty` / `CubeUI_ShouldRepaint` / `CubeUI_DidRepaint` |
 | Idle heartbeat | page-dependent (Addons 6–24f while meta pending; Settings/Bindings 30f) |
 | Handoff anim | full-rate repaint while `handoff` |
 | FillRect | row-wise memcpy (no nested PutPx clear) |
@@ -30,4 +30,4 @@ Split **UI generation** from **stereo presentation**:
 
 ## Entry
 
-`install/native/cube_webui_launcher` · `scripts/cube_webui_launcher.sh`
+`install/native/CubeUI` · `scripts/CubeUI.sh`

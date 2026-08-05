@@ -33,5 +33,5 @@ Dirty/heartbeat paint · row FillRect · laser reticle · monoscopic panel blit
 Smoke of full Ideal VR in-headset is still required for ship of Vision/chrome. This extract purges **code heresy** on the native launcher + Experience skip path — not a claim that workshop Ideal VR is fully proven.
 
 ## Entry
-`scripts/cube_webui_launcher.sh` → `install/native/cube_webui_launcher`  
+`scripts/CubeUI.sh` → `install/native/CubeUI`  
 Desktop **gVRMod Cube**

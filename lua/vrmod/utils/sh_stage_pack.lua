@@ -41,7 +41,7 @@ function vrmod.utils.StagePack_Parse(body)
 		scalefactor = 1,
 		supersample = 1,
 		map = "",
-		source = "cube_webui",
+		source = "CubeUI",
 		ts = 0,
 		valid = false,
 	}
@@ -75,7 +75,7 @@ function vrmod.utils.StagePack_Parse(body)
 				elseif k == "map" then
 					out.map = v
 				elseif k == "source" then
-					out.source = (v ~= "" and v) or "cube_webui"
+					out.source = (v ~= "" and v) or "CubeUI"
 				elseif k == "ts" then
 					out.ts = tonumber(v) or 0
 				end
