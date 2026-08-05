@@ -84,9 +84,15 @@ local FOV_PROFILE = {
 	vrmod_fovscale_x = true,
 	vrmod_fovscale_y = true,
 	vrmod_viewscale = true,
-	vrmod_desktopview = true,
+	-- vrmod_desktopview is NOT FOV — changing it must not SoftRefreshDisplayParams
+	-- (that re-pulled submit bounds / FOV and could black HMD when switching to none).
 	vrmod_eyescale = true,
 	vrmod_swap_eyes = true,
+}
+
+--- Desktop mirror mode only (1=none 2=left 3=right 4=follow). No FOV/submit rewrite.
+local DESKTOP_VIEW = {
+	vrmod_desktopview = true,
 }
 
 local SESSION = {
@@ -108,11 +114,12 @@ function vrmod.utils.FovZLaw_NormalizeCvar(name)
 end
 
 --- Pure refresh kind for a convar change while VR active.
---- soft_display | submit_bounds | session | none
+--- soft_display | submit_bounds | session | desktop_view | none
 function vrmod.utils.FovZLaw_RefreshKind(cvarName)
 	local n = vrmod.utils.FovZLaw_NormalizeCvar(cvarName)
 	if n == "" then return "none" end
 	if BORDER[n] then return "submit_bounds" end
+	if DESKTOP_VIEW[n] then return "desktop_view" end
 	if FOV_PROFILE[n] then return "soft_display" end
 	if SESSION[n] then return "session" end
 	return "none"

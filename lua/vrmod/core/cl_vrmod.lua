@@ -1346,14 +1346,32 @@ if CLIENT then
 			pcall(render.PopRenderTarget)
 		end
 
-		-- Desktop mirror (b1a5e9e-era mid-frame): CullMode(1)+NDC UV after PopRT.
-		-- G46: pure DesktopMirror_* snapshots risk; mid-frame live RT allowed (legacy).
-		local dv = g_VR.desktopView or 1
+		-- Desktop mirror after PopRT (never nested under stereo RT).
+		-- Modes: 1=none (black desktop, HMD untouched) 2=left 3=right 4=follow.
+		-- Always re-read convar here — do not wait on SoftRefresh (desktopview is not FOV).
+		local dv = (convars.vrmod_desktopview and convars.vrmod_desktopview:GetInt()) or g_VR.desktopView or 1
+		if vrmod.DesktopCam and vrmod.DesktopCam.ClampDesktopView then
+			dv = vrmod.DesktopCam.ClampDesktopView(dv)
+		else
+			dv = math.floor(tonumber(dv) or 1)
+			if dv < 1 then dv = 1 end
+			if dv > 4 then dv = 4 end
+		end
+		g_VR.desktopView = dv
+		if g_VR.rtWidth and g_VR.rtHeight and vrmod.utils and vrmod.utils.ComputeDesktopCrop then
+			cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(dv, g_VR.rtWidth, g_VR.rtHeight)
+		end
+
+		-- Restore safe GL state every frame (eye-crop CullMode must not leak into next stereo).
+		pcall(function()
+			render.SetScissorRect(0, 0, 0, 0, false)
+			render.CullMode(0)
+		end)
+
 		local DC = vrmod.DesktopCam
-		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv))
-			or (tonumber(dv) == 4)
-		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv))
-			or (tonumber(dv) == 2 or tonumber(dv) == 3)
+		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv)) or (dv == 4)
+		local isEyeCrop = (DC and DC.IsEyeCropMode and DC.IsEyeCropMode(dv)) or (dv == 2 or dv == 3)
+		local isNone = (not isFollow and not isEyeCrop) -- mode 1
 		local U = vrmod.utils
 		if U and U.DesktopMirror_Decide then
 			local d = U.DesktopMirror_Decide({
@@ -1370,24 +1388,41 @@ if CLIENT then
 			g_VR._desktopMirrorHmdExpect = U.DesktopMirror_HmdExpect
 				and U.DesktopMirror_HmdExpect(d) or nil
 		end
-		if isFollow then
-			if DC then
-				if DC.SyncFromDesktopView then
-					pcall(DC.SyncFromDesktopView, dv)
-				end
-				if DC.CaptureFrame then
-					pcall(DC.CaptureFrame)
-				end
-				if DC.PresentDesktop then
-					pcall(DC.PresentDesktop)
-				end
+
+		if isNone then
+			-- None: stop follow-cam; do NOT sample stereo RT; do NOT SoftRefresh FOV.
+			-- Clear desktop to black so the GMod window is intentionally empty (HMD keeps stereo).
+			if DC and DC.SyncFromDesktopView then
+				pcall(DC.SyncFromDesktopView, dv)
 			end
+			pcall(function()
+				local w, h = ScrW(), ScrH()
+				if w and h and w > 0 and h > 0 then
+					cam.Start2D()
+					surface.SetDrawColor(0, 0, 0, 255)
+					surface.DrawRect(0, 0, w, h)
+					cam.End2D()
+				end
+				render.CullMode(0)
+			end)
+		elseif isFollow then
+			if DC then
+				if DC.SyncFromDesktopView then pcall(DC.SyncFromDesktopView, dv) end
+				if DC.CaptureFrame then pcall(DC.CaptureFrame) end
+				if DC.PresentDesktop then pcall(DC.PresentDesktop) end
+			end
+			pcall(function() render.CullMode(0) end)
 		elseif isEyeCrop and g_VR.rtMaterial then
-			render.CullMode(1)
-			surface.SetDrawColor(255, 255, 255, 255)
-			surface.SetMaterial(g_VR.rtMaterial)
-			surface.DrawTexturedRectUV(-1, -1, 2, 2, cropHorizontalOffset, 1 - cropVerticalMargin, 0.5 + cropHorizontalOffset, cropVerticalMargin)
-			render.CullMode(0)
+			-- Legacy mid-frame eye crop (samples stereo RT material — after PopRT only).
+			pcall(function()
+				render.CullMode(1)
+				surface.SetDrawColor(255, 255, 255, 255)
+				surface.SetMaterial(g_VR.rtMaterial)
+				local ho = tonumber(cropHorizontalOffset) or 0
+				local vm = tonumber(cropVerticalMargin) or 0
+				surface.DrawTexturedRectUV(-1, -1, 2, 2, ho, 1 - vm, 0.5 + ho, vm)
+				render.CullMode(0)
+			end)
 			if DC and DC.SyncFromDesktopView then
 				pcall(DC.SyncFromDesktopView, dv)
 			end
@@ -1611,8 +1646,26 @@ if CLIENT then
 	local displayParamsLive = false
 
 	-- Soft-reload projection/FOV/viewscale (also after cold restart when session goes RUNNING).
+	--- Desktop view only (no FOV / GetDisplayInfo). Safe to call when switching to none.
+	local function ApplyDesktopViewFromConvar()
+		if not convars or not convars.vrmod_desktopview then return end
+		local dv = convars.vrmod_desktopview:GetInt()
+		if vrmod.DesktopCam and vrmod.DesktopCam.ClampDesktopView then
+			dv = vrmod.DesktopCam.ClampDesktopView(dv)
+		end
+		g_VR.desktopView = dv
+		if g_VR.rtWidth and g_VR.rtHeight and vrmod.utils and vrmod.utils.ComputeDesktopCrop then
+			cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(dv, g_VR.rtWidth, g_VR.rtHeight)
+		end
+		if vrmod.DesktopCam and vrmod.DesktopCam.SyncFromDesktopView then
+			pcall(vrmod.DesktopCam.SyncFromDesktopView, dv)
+		end
+	end
+
 	local function SoftRefreshDisplayParams()
 		if not g_VR.active and not g_VR.rt then return false end
+		-- Always apply desktop view first (even if GetDisplayInfo fails).
+		ApplyDesktopViewFromConvar()
 		local dp = ComputeDisplayParams()
 		if not dp then return false end
 		local live = dp.projLive and true or false
@@ -1624,10 +1677,6 @@ if CLIENT then
 		aspectRight = dp.aspR or aspectRight
 		ipd = dp.ipd or ipd
 		eyez = dp.eyez or eyez
-		g_VR.desktopView = convars.vrmod_desktopview:GetInt()
-		if g_VR.rtWidth and g_VR.rtHeight then
-			cropVerticalMargin, cropHorizontalOffset = vrmod.utils.ComputeDesktopCrop(g_VR.desktopView, g_VR.rtWidth, g_VR.rtHeight)
-		end
 		ApplySubmitBounds()
 		if live then
 			displayParamsLive = true
@@ -1716,7 +1765,11 @@ if CLIENT then
 					kind = (name == "vrmod_znear" or name == "vrmod_postprocess") and "session" or "soft_display"
 				end
 				local softOk = false
-				if kind == "session" then
+				if kind == "desktop_view" then
+					-- Mirror mode only — never rewrite FOV/submit (none was blacking HMD).
+					ApplyDesktopViewFromConvar()
+					softOk = true
+				elseif kind == "session" then
 					ApplySessionSettingsFromConvars()
 					softOk = true -- session path includes SoftRefresh
 				else
