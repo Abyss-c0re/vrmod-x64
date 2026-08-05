@@ -63,8 +63,10 @@ function vrmod.OpenPauseMenuVR()
 		return false
 	end
 
-	-- Shared pipeline with launcher (module virtual monitor + hub present)
-	if vrmod.VirtualDisplay and vrmod.VirtualDisplay.PresentPause then
+	-- One surface only (OpenSoleHub closes QM / stacked shells first)
+	if vrmod.OpenSoleHub then
+		vrmod.OpenSoleHub()
+	elseif vrmod.VirtualDisplay and vrmod.VirtualDisplay.PresentPause then
 		vrmod.VirtualDisplay.PresentPause({
 			onClose = forceUnpause,
 		})

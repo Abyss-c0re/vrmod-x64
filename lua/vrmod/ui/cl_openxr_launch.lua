@@ -444,30 +444,52 @@ local function noteWarmAttachOnce()
 end
 
 local function afterVRLive()
-	log("VR active map=%s — opening native Cube launcher", tostring(game.GetMap and game.GetMap() or "?"))
+	log("VR active map=%s — sole Cube hub (one pause surface)", tostring(game.GetMap and game.GetMap() or "?"))
+	-- Never let a host CubeUI relaunch fight GMod for OpenXR after Start/Resume
+	if vrmod.CubeBridge_CancelRelaunch then
+		pcall(vrmod.CubeBridge_CancelRelaunch, "after_vr_live")
+	end
 	consumeMarker()
 	pcall(function() RunConsoleCommand("vrmod_laserpointer", "1") end)
 	if vrmod.VRUnpauseWorld then pcall(vrmod.VRUnpauseWorld) end
 	noteStagePackOnce()
 	noteWarmAttachOnce()
 
-	-- Immediate + retries (hand poses / menus load slightly after active)
-	openNativeLauncherUI()
-	timer.Simple(0.3, openNativeLauncherUI)
-	timer.Simple(0.8, openNativeLauncherUI)
-	timer.Simple(1.5, function()
-		if not openNativeLauncherUI() then
-			-- Last resort: New Game float surface
-			if vrmod.VRNewGame_Open then
-				pcall(vrmod.VRNewGame_Open)
-				log("fallback VRNewGame_Open")
-			end
+	-- One product surface only — not hub + pause + QM spam
+	local function openOnce()
+		if vrmod.OpenSoleHub then
+			return vrmod.OpenSoleHub()
 		end
+		return openNativeLauncherUI()
+	end
+	timer.Remove("vrmod_openxr_hub_retry")
+	if openOnce() then
+		launchedUI = true
 		if vrmod.Toast then
-			vrmod.Toast("Cube VR Launcher — New Game · Settings · look at wrist / float panel", 6, "hint")
+			vrmod.Toast("Cube hub — Resume · New Game · Settings", 4, "hint")
+		end
+		return
+	end
+	-- Single short retry window if hands/menus not ready yet
+	local tries = 0
+	timer.Create("vrmod_openxr_hub_retry", 0.4, 8, function()
+		tries = tries + 1
+		if not (g_VR and g_VR.active) then
+			timer.Remove("vrmod_openxr_hub_retry")
+			return
+		end
+		if vrmod.VRHub_IsOpen and vrmod.VRHub_IsOpen() then
+			launchedUI = true
+			timer.Remove("vrmod_openxr_hub_retry")
+			return
+		end
+		if openOnce() then
+			launchedUI = true
+			timer.Remove("vrmod_openxr_hub_retry")
+		elseif tries >= 8 then
+			log("hub open gave up after retries")
 		end
 	end)
-	timer.Simple(3.0, openNativeLauncherUI)
 end
 
 local function bootFromLaunch()

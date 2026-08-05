@@ -2641,16 +2641,22 @@ if CLIENT then
 			-- 4) Restore soft pins only — never thrash mat_queue under OpenXR.
 			ScheduleConvarRestore(0.2)
 
-			-- 5) G13: spawn CubeUI after XR free (bridge — do not wait for net VRMod_Exit)
-			if g_VR._cubeReturnRelaunch and vrmod.CubeBridge_SpawnLauncher then
-				local intent = g_VR._cubeReturnIntent or "vr_exit"
-				g_VR._cubeReturnRelaunch = nil
-				g_VR._cubeReturnIntent = nil
-				g_VR._cubeBridgeSpawned = true
-				timer.Simple(0.75, function()
-					g_VR._cubeBridgeSpawned = nil
-					vrmod.CubeBridge_SpawnLauncher(intent)
-				end)
+			-- 5) G13: only when ReturnToCubeLauncher set relaunch (not every Cube-session exit)
+			if g_VR._cubeReturnRelaunch then
+				local intent = g_VR._cubeReturnIntent or "temp_return"
+				-- Leave flags for VRMod_Exit hook / schedule once
+				if not g_VR._cubeBridgeSpawned and not timer.Exists("vrmod_cube_bridge_spawn") then
+					g_VR._cubeBridgeSpawned = true
+					timer.Create("vrmod_cube_bridge_spawn", 2.5, 1, function()
+						g_VR._cubeBridgeSpawned = false
+						g_VR._cubeReturnRelaunch = nil
+						g_VR._cubeReturnIntent = nil
+						if g_VR and g_VR.active then return end
+						if vrmod.CubeBridge_SpawnLauncher then
+							vrmod.CubeBridge_SpawnLauncher(intent)
+						end
+					end)
+				end
 			end
 
 			vrmod.logger.Info("Ended VR session (full teardown; cold restart OK)")

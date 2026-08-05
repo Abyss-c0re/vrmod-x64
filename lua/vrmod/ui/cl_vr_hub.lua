@@ -306,14 +306,24 @@ function vrmod.VRHub_Open()
 		return
 	end
 
+	-- Sole hub: close QM / other shells so we never stack two "pause" UIs
 	if g_VR.menus then
-		for _, uid in ipairs({ "miscmenu", "heightmenu" }) do
+		for _, uid in ipairs({
+			"miscmenu", "heightmenu", "cube_settings", "avatar_menu",
+			"cubeui_main", "bindings_panel", "weapon_settings",
+		}) do
 			if g_VR.menus[uid] and isfunction(VRUtilMenuClose) then
 				g_VR.menus[uid].closeFunc = nil
-				VRUtilMenuClose(uid)
+				pcall(VRUtilMenuClose, uid)
 			end
 		end
 	end
+	pcall(function()
+		if vrmod.VirtualDisplay and vrmod.VirtualDisplay.Close then
+			vrmod.VirtualDisplay.Close("pause")
+			vrmod.VirtualDisplay.Close("launcher")
+		end
+	end)
 
 	open = true
 	livePos, liveAng, liveScale = WristPose()
