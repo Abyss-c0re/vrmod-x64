@@ -79,6 +79,10 @@ if CLIENT then
     --   2 synthetic = force pure translation along head Right() (best roll test)
     vrmod.AddCallbackedConvar("vrmod_stereo_eye_mode", nil, "0", FCVAR_ARCHIVE,
         "Stereo eyes: 0=auto 1=OpenXR poses 2=synthetic head-Right IPD", 0, 2, tonumber)
+    -- Rigid under head roll (default on): shared FOV + synthetic IPD on head Right().
+    -- Off = legacy per-eye FOV / XR absolute eyes (can shear when tilting head).
+    vrmod.AddCallbackedConvar("vrmod_stereo_rigid", nil, "1", FCVAR_ARCHIVE,
+        "1=rigid stereo under head roll (recommended) 0=legacy per-eye", 0, 1, tonumber)
     -- Per-eye submit UV (C++ XR_SetSubmitCropMode). NEVER leave FOV_CROP on by default.
     --   0 safe     = full per-eye rect; SBS uses Lua bounds (default, stable)
     --   1 full     = force full-eye UV (debug borders)

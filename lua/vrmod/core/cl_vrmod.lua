@@ -1119,41 +1119,20 @@ if CLIENT then
 			dopost = false
 		end
 
-		-- Eye placement (vrmod_stereo_eye_mode): dial for head-tilt / roll warp.
-		--   0 auto      = XR locateViews if valid, else synthetic
-		--   1 xr        = force OpenXR eye positions (shared HMD ang always)
-		--   2 synthetic = force head-Right() IPD (gold for roll; golden test path)
+		-- Eye placement + projection (rigid roll law).
+		-- Source RenderView is symmetric FOV only — different L/R FOV or XR absolute
+		-- eye poses + euler HMD angles shear the world when rolling (building "bends").
+		-- Rigid policy: shared orientation, shared FOV/aspect, synthetic IPD on head Right().
 		local eyeMode = (convars.vrmod_stereo_eye_mode and convars.vrmod_stereo_eye_mode:GetInt()) or 0
 		if eyeMode < 0 then eyeMode = 0 end
 		if eyeMode > 2 then eyeMode = 2 end
+		local rigidCv = convars.vrmod_stereo_rigid
+		local rigid = true
+		if rigidCv then rigid = rigidCv:GetBool() end
+
 		local eL = (g_VR.tracking and g_VR.tracking.eye_left) or (g_VR.rawTracking and g_VR.rawTracking.eye_left)
 		local eR = (g_VR.tracking and g_VR.tracking.eye_right) or (g_VR.rawTracking and g_VR.rawTracking.eye_right)
-		local usedXrEyes = false
-		local wantXr = (eyeMode == 0 or eyeMode == 1)
-		local wantSynth = (eyeMode == 2) or (eyeMode == 0)
-		if wantXr and eL and eR and eL.pos and eR.pos then
-			local d = eL.pos:DistToSqr(eR.pos)
-			-- Sanity: IPD in Source units roughly (scale * meters)^2 — reject collapsed poses
-			if d > 0.01 and d < (scale * 0.2) * (scale * 0.2) then
-				g_VR.eyePosLeft = eL.pos
-				g_VR.eyePosRight = eR.pos
-				usedXrEyes = true
-			end
-		end
-		if not usedXrEyes and wantSynth then
-			-- Synthetic: pure translation along head right (tilts with roll) + small Z along forward.
-			-- No fixed world-up bias (old up*-2.1 warped under roll).
-			g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale)
-			g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale)
-		elseif not usedXrEyes then
-			-- Force XR requested but invalid — still synth so we never leave nil eyes
-			g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-eyeOffset * eyeScale)
-			g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (eyeOffset * eyeScale)
-		end
-		g_VR._stereoEyeMode = eyeMode
-		g_VR._stereoUsedXrEyes = usedXrEyes
 
-		-- Per-eye FOV/aspect from OpenXR overrender (symmetric FOV enclosing asymmetric frustum)
 		local fovL = hfovLeft
 		local fovR = hfovRight
 		local aspL = aspectLeft
@@ -1165,6 +1144,70 @@ if CLIENT then
 		if eR and tonumber(eR.fov) and tonumber(eR.aspectratio) then
 			fovR = tonumber(eR.fov)
 			aspR = tonumber(eR.aspectratio)
+		end
+
+		local xrIpdSrc = nil
+		if eL and eR and eL.pos and eR.pos then
+			local dist = eL.pos:Distance(eR.pos)
+			if dist > 0.5 and dist < (scale * 0.2) then xrIpdSrc = dist end
+		end
+
+		-- Rigid path promotes legacy default half-IPD (0.5) to full IPD — half IPD flattens
+		-- and worsens roll shear perception. Explicit user values other than 0.5 are kept.
+		local eyeScaleRigid = eyeScale
+		if rigid and math.abs(eyeScale - 0.5) < 0.001 then
+			eyeScaleRigid = 1.0
+		end
+
+		local sdec = nil
+		if vrmod.utils and vrmod.utils.StereoRigid_Decide then
+			sdec = vrmod.utils.StereoRigid_Decide({
+				rigid = rigid,
+				eye_mode = eyeMode,
+				has_xr_eyes = xrIpdSrc ~= nil,
+				xr_ipd_source = xrIpdSrc,
+				ipd_m = ipdUse,
+				scale = scale,
+				eye_scale = eyeScaleRigid,
+				fov_l = fovL,
+				fov_r = fovR,
+				asp_l = aspL,
+				asp_r = aspR,
+			})
+			g_VR._stereoRigidLaw = sdec
+			g_VR._stereoRigidLabel = vrmod.utils.StereoRigid_StatusLabel
+				and vrmod.utils.StereoRigid_StatusLabel(sdec) or nil
+			g_VR._stereoRigidHmdExpect = vrmod.utils.StereoRigid_HmdExpect
+				and vrmod.utils.StereoRigid_HmdExpect(sdec) or nil
+		end
+
+		local usedXrEyes = false
+		-- Rigid: never use absolute XR eye positions (they fight euler HMD angles under roll).
+		local wantXr = (not rigid) and (eyeMode == 0 or eyeMode == 1)
+		if wantXr and eL and eR and eL.pos and eR.pos then
+			local d = eL.pos:DistToSqr(eR.pos)
+			if d > 0.01 and d < (scale * 0.2) * (scale * 0.2) then
+				g_VR.eyePosLeft = eL.pos
+				g_VR.eyePosRight = eR.pos
+				usedXrEyes = true
+			end
+		end
+		if not usedXrEyes then
+			-- half_ipd = distance from cyclopean to each eye along head Right()
+			local half = (sdec and tonumber(sdec.half_ipd)) or (eyeOffset * 0.5 * eyeScaleRigid)
+			g_VR.eyePosLeft = cyclopeanOrigin + forwardOffset + right * (-half)
+			g_VR.eyePosRight = cyclopeanOrigin + forwardOffset + right * (half)
+		end
+		g_VR._stereoEyeMode = eyeMode
+		g_VR._stereoUsedXrEyes = usedXrEyes
+		g_VR._stereoRigid = rigid and true or false
+
+		-- Projection: rigid → identical FOV/aspect both eyes (no L≠R Source frustum mismatch)
+		if sdec and sdec.rigid then
+			fovL = sdec.fov_l or sdec.fov or fovL
+			fovR = sdec.fov_r or sdec.fov or fovR
+			aspL = sdec.asp_l or sdec.aspect or aspL
+			aspR = sdec.asp_r or sdec.aspect or aspR
 		end
 
 		-- G33 / W4: optional eye swap — SBS content only; IPD/FOV/pose single path
