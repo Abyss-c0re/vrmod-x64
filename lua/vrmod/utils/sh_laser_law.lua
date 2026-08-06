@@ -19,10 +19,12 @@ function vrmod.utils.LaserLaw_SecondaryHand(primary)
 	return (primary == "left") and "right" or "left"
 end
 
---- Pure primary-click action match (menu LMB).
+--- Pure primary-click action match (menu LMB) for *boolean* VRMod_Input actions.
+-- Universal law: primary fire booleans. In vehicle, throttle is remapped to these
+-- booleans via vrmod.DispatchUIClick when laser is on any UI (all menus share this).
 function vrmod.utils.LaserLaw_IsMenuPrimaryClick(action, primaryHand)
 	action = tostring(action or "")
-	if action == "boolean_car_mouse_left" then return true end
+	if action == "boolean_car_mouse_left" then return true end -- legacy SteamVR alias
 	primaryHand = tostring(primaryHand or "right")
 	if primaryHand == "left" then
 		return action == "boolean_left_primaryfire"
@@ -30,12 +32,13 @@ function vrmod.utils.LaserLaw_IsMenuPrimaryClick(action, primaryHand)
 	return action == "boolean_primaryfire"
 end
 
---- Pure secondary / cancel / RMB.
+--- Pure secondary / cancel / RMB (boolean actions).
+-- Universal law: secondary fire. Vehicle reverse → same via DispatchUIClick.
 function vrmod.utils.LaserLaw_IsMenuSecondaryClick(action)
 	action = tostring(action or "")
 	return action == "boolean_secondaryfire"
 		or action == "boolean_left_secondaryfire"
-		or action == "boolean_car_mouse_right"
+		or action == "boolean_car_mouse_right" -- legacy SteamVR alias
 end
 
 function vrmod.utils.LaserLaw_IsMenuCloseAction(action)
@@ -78,12 +81,10 @@ end
 function vrmod.utils.LaserLaw_IsWrongHandPrimaryClick(action, primaryHand)
 	action = tostring(action or "")
 	primaryHand = tostring(primaryHand or "right")
-	if action == "boolean_car_mouse_left" then return false end -- neutral path
+	if action == "boolean_car_mouse_left" then return false end
 	if primaryHand == "left" then
-		-- Right fire must not steal left-primary LMB
 		return action == "boolean_primaryfire"
 	end
-	-- primary right: left fire is wrong-hand
 	return action == "boolean_left_primaryfire"
 end
 

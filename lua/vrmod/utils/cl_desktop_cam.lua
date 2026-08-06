@@ -47,6 +47,15 @@ local cvOrbitSpin = CreateClientConVar("vrmod_desktop_cam_orbit_spin", "12", tru
 	"Auto orbit spin rate (deg/sec) when orbit_auto is on", 1, 90)
 local cvOrbitPitch = CreateClientConVar("vrmod_desktop_cam_orbit_pitch", "0", true, FCVAR_ARCHIVE,
 	"Follow-cam pitch bias (degrees, positive = look slightly down from high)", -45, 45)
+-- Wall block: pull camera in (zoom) so 3rd-person is never stuck inside brushes
+local cvCollide = CreateClientConVar("vrmod_desktop_cam_collide", "1", true, FCVAR_ARCHIVE,
+	"Pull follow-cam in when a wall blocks the view (auto zoom)", 0, 1)
+local cvMinDist = CreateClientConVar("vrmod_desktop_cam_min_dist", "18", true, FCVAR_ARCHIVE,
+	"Minimum follow-cam distance when zoomed in by walls (units)", 8, 80)
+local cvCollidePad = CreateClientConVar("vrmod_desktop_cam_collide_pad", "4", true, FCVAR_ARCHIVE,
+	"Clearance past wall surface for follow-cam (units)", 1, 16)
+local cvCollideHull = CreateClientConVar("vrmod_desktop_cam_collide_hull", "6", true, FCVAR_ARCHIVE,
+	"Follow-cam collision hull radius (units)", 2, 16)
 
 -- Registered external modules (id → mod table)
 local modules = {}
@@ -90,6 +99,98 @@ function DC.ComputeFollowPose(targetPos, targetAng, dist, height, yawOffset, pit
 	return pos, look
 end
 
+--- Pull camera toward target if world/brush blocks the line of sight (auto zoom-in).
+-- Pure-ish with util.TraceHull — keeps aim-at look after pull.
+-- @return pos, ang, hit (bool), distUsed
+function DC.ResolveCameraCollision(targetPos, desiredPos, height, filter, minDist, pad, hullR)
+	if not targetPos or not desiredPos then
+		return desiredPos or Vector(), Angle(), false, 0
+	end
+	height = tonumber(height) or 28
+	minDist = math.max(8, tonumber(minDist) or 18)
+	pad = math.max(0.5, tonumber(pad) or 4)
+	hullR = math.max(2, tonumber(hullR) or 6)
+	local aimAt = targetPos + Vector(0, 0, height * 0.35)
+	-- Start slightly off the body so hull never starts solid inside the player
+	local start = aimAt
+	local toCam = desiredPos - start
+	local fullDist = toCam:Length()
+	if fullDist < 1 then
+		local look = (aimAt - desiredPos):Angle()
+		look.r = 0
+		return desiredPos, look, false, 0
+	end
+	local dir = toCam / fullDist
+	local mins = Vector(-hullR, -hullR, -hullR)
+	local maxs = Vector(hullR, hullR, hullR)
+	local tr = util.TraceHull({
+		start = start,
+		endpos = desiredPos,
+		mins = mins,
+		maxs = maxs,
+		mask = MASK_SOLID,
+		filter = filter,
+	})
+
+	local pos = desiredPos
+	local hit = false
+	if tr.StartSolid or tr.AllSolid then
+		-- Camera buried: walk out toward free space along -dir (toward target)
+		hit = true
+		pos = start + dir * minDist
+		local tr2 = util.TraceHull({
+			start = start,
+			endpos = pos,
+			mins = mins,
+			maxs = maxs,
+			mask = MASK_SOLID,
+			filter = filter,
+		})
+		if tr2.Hit and not tr2.StartSolid then
+			pos = tr2.HitPos + tr2.HitNormal * pad
+		end
+	elseif tr.Hit then
+		hit = true
+		pos = tr.HitPos + tr.HitNormal * pad
+		-- Never closer than minDist along the orbit ray
+		local along = (pos - start):Dot(dir)
+		if along < minDist then
+			pos = start + dir * minDist
+		end
+	end
+
+	-- If still solid at pulled pos, binary pull toward target
+	local function isFree(p)
+		local t = util.TraceHull({
+			start = p, endpos = p, mins = mins, maxs = maxs,
+			mask = MASK_SOLID, filter = filter,
+		})
+		return not (t.StartSolid or t.AllSolid)
+	end
+	if not isFree(pos) then
+		hit = true
+		local lo, hi = minDist, fullDist
+		for _ = 1, 8 do
+			local mid = (lo + hi) * 0.5
+			local p = start + dir * mid
+			if isFree(p) then
+				lo = mid
+				pos = p
+			else
+				hi = mid
+			end
+		end
+		if not isFree(pos) then
+			pos = start + dir * minDist
+		end
+	end
+
+	local look = (aimAt - pos):Angle()
+	look.r = 0
+	local used = start:Distance(pos)
+	return pos, look, hit, used
+end
+
 function DC.IsFollowMode(desktopView)
 	return tonumber(desktopView) == DC.VIEW_FOLLOW_CAM
 end
@@ -106,10 +207,15 @@ function DC.ResetFollowCamera()
 	RunConsoleCommand("vrmod_desktop_cam_orbit_auto", "0")
 	RunConsoleCommand("vrmod_desktop_cam_orbit_spin", "12")
 	RunConsoleCommand("vrmod_desktop_cam_orbit_pitch", "0")
+	RunConsoleCommand("vrmod_desktop_cam_collide", "1")
+	RunConsoleCommand("vrmod_desktop_cam_min_dist", "18")
+	RunConsoleCommand("vrmod_desktop_cam_collide_pad", "4")
+	RunConsoleCommand("vrmod_desktop_cam_collide_hull", "6")
 	session.pos = nil
 	session.ang = nil
+	session._collideZoom = nil
 	if vrmod.Toast then
-		vrmod.Toast("Follow camera reset · behind HMD, orbit off", 3, "hint")
+		vrmod.Toast("Follow camera reset · behind HMD, orbit off, wall zoom on", 3, "hint")
 	end
 	log("Follow-cam reset to defaults")
 	return true
@@ -360,11 +466,40 @@ function DC.ResolveCamera()
 	end
 
 	local pos, ang = DC.ComputeFollowPose(targetPos, targetAng, dist, height, orbitYaw, orbitPitch)
+
+	-- Wall-aware auto zoom: pull in along the orbit ray so cam is never inside brushes
+	if cvCollide:GetBool() then
+		local ply = LocalPlayer()
+		local filter = IsValid(ply) and ply or nil
+		local minD = cvMinDist:GetFloat()
+		local pad = cvCollidePad:GetFloat()
+		local hull = cvCollideHull:GetFloat()
+		local cpos, cang, hit, used = DC.ResolveCameraCollision(
+			targetPos, pos, height, filter, minD, pad, hull
+		)
+		if cpos then pos = cpos end
+		if cang then ang = cang end
+		-- Remember pull-in distance for smooth zoom restore when free again
+		if hit then
+			session._collideZoom = used
+		else
+			session._collideZoom = nil
+		end
+		session._collideHit = hit and true or false
+	else
+		session._collideHit = false
+		session._collideZoom = nil
+	end
+
 	return pos, ang, fov
 end
 
 local function smoothPose(pos, ang)
 	local s = math.Clamp(cvSmooth:GetFloat(), 0, 1)
+	-- When wall-zoomed, snap a bit faster so we don't lag into geometry
+	if session._collideHit then
+		s = math.min(s, 0.08)
+	end
 	if s <= 0 or not session.pos then
 		session.pos = Vector(pos)
 		session.ang = Angle(ang)

@@ -24,7 +24,9 @@ local NAME_TO_ID = {
 	["Settings"] = "settings",
 	["Flashlight"] = "flashlight",
 	["Laser pointer"] = "laser",
-	["Weapon VR"] = "weapon_vr",
+	["Weapon Tuning"] = "weapon_vr",
+	["Weapon VR"] = "weapon_vr", -- legacy label
+	["Select Weapon"] = "select_weapon",
 	["Toggle Noclip"] = "noclip",
 	["Undo"] = "undo",
 	["Cleanup"] = "cleanup",
@@ -55,7 +57,7 @@ local NAME_TO_ID = {
 -- Default multi-page layout (cols 0-5, rows 0+)
 local function DefaultLayout()
 	return {
-		version = 4,
+		version = 5,
 		pages = {
 			{
 				name = "Main",
@@ -65,7 +67,7 @@ local function DefaultLayout()
 					{ id = "chat", col = 2, row = 0 },
 					{ id = "numpad", col = 3, row = 0 },
 					{ id = "avatar", col = 4, row = 0 },
-					{ id = "admin_cleanup", col = 5, row = 0 },
+					{ id = "select_weapon", col = 5, row = 0 },
 					{ id = "flashlight", col = 0, row = 1 },
 					{ id = "laser", col = 1, row = 1 },
 					{ id = "noclip", col = 2, row = 1 },
@@ -75,7 +77,7 @@ local function DefaultLayout()
 				},
 			},
 			{
-				-- Settings / pause / maps / cal / binds / weapon VR / exit game
+				-- Settings / pause / maps / cal / binds / weapon tuning / exit game
 				name = "System",
 				items = {
 					{ id = "settings", col = 0, row = 0 },
@@ -87,6 +89,7 @@ local function DefaultLayout()
 					{ id = "vehicle_view", col = 0, row = 1 },
 					{ id = "ui_reset", col = 1, row = 1 },
 					{ id = "blacklist", col = 2, row = 1 },
+					{ id = "admin_cleanup", col = 3, row = 1 },
 					{ id = "respawn", col = 0, row = 2 },
 					{ id = "vr_exit", col = 1, row = 2 },
 					{ id = "cube_launcher", col = 2, row = 2 },
@@ -175,11 +178,11 @@ function QM.ValidateLayout(L)
 		end
 	end
 	local ver = tonumber(L.version) or 1
-	if ver < 4 then
-		-- v4: System page includes Exit Game; Main keeps admin_cleanup
+	if ver < 5 then
+		-- v5: Main page gets Select Weapon (inventory fan); admin_cleanup on System
 		local def = DefaultLayout()
 		L.pages = def.pages
-		ver = 4
+		ver = 5
 	end
 	L.version = ver
 	return L
@@ -192,7 +195,7 @@ function QM.Load()
 		if ok and type(decoded) == "table" then
 			local oldVer = tonumber(decoded.version) or 1
 			layout = QM.ValidateLayout(decoded)
-			if oldVer < 4 then
+			if oldVer < 5 then
 				QM.Save()
 			end
 			return layout

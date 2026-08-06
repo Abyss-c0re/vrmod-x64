@@ -133,15 +133,15 @@ end
 
 local function SaveChordSources(sources)
 	if not listen or not sources or #sources < 2 then return end
-	local prev = vrmod.bindings.GetMap().actions[listen.action]
-	local set = prev and prev.set or nil
+	-- Active tab = action-set scope (Vehicle tab writes driving chord, On foot → main)
+	local set = (filter == "driving" or filter == "main") and filter or nil
 	local warnings = vrmod.bindings.SetActionBinding(listen.action, sources, "all", set)
 	vrmod.bindings.Save()
 	StopListen()
 	if warnings and warnings[1] then
 		SetStatus(warnings[1], 3)
 	else
-		SetStatus("Chord saved (" .. CHORD_HOLD_SEC .. "s hold)", 3)
+		SetStatus("Chord saved [" .. (set or "both") .. "] (" .. CHORD_HOLD_SEC .. "s hold)", 3)
 	end
 	if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
 end
@@ -314,7 +314,8 @@ local function paint()
 		draw.SimpleText(info.label or info.id, Font("CubeLabel"), PAD + 12, y + 14, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 
 		local rule = map.actions and map.actions[info.id]
-		local ruleTxt = vrmod.bindings.FormatRule and vrmod.bindings.FormatRule(rule, true) or "(unbound)"
+		-- Tab-aware dual-set display (Vehicle shows vehicle chord for Weapon Menu)
+		local ruleTxt = vrmod.bindings.FormatRule and vrmod.bindings.FormatRule(rule, true, filter) or "(unbound)"
 		if listening then
 			if listen.chord then
 				ruleTxt = listen.lastStatus or ("Hold 2+ buttons " .. CHORD_HOLD_SEC .. "s…")
@@ -488,12 +489,11 @@ local function pollListen()
 	end
 
 	for _, id in ipairs(news) do
-		local prev = vrmod.bindings.GetMap().actions[listen.action]
-		local set = prev and prev.set or nil
+		local set = (filter == "driving" or filter == "main") and filter or nil
 		vrmod.bindings.SetActionBinding(listen.action, { id }, "any", set)
 		vrmod.bindings.Save()
 		StopListen()
-		SetStatus("Bound → " .. SourceLabel(id), 3)
+		SetStatus("Bound [" .. (set or "both") .. "] → " .. SourceLabel(id), 3)
 		if g_VR.menus and g_VR.menus[UID] then g_VR.menus[UID].dirty = true end
 		return
 	end

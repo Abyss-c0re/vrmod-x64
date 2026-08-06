@@ -52,11 +52,14 @@ local lastInputState = {
 	roll = 0
 }
 
-local ANALOG_SEND_RATE = engine.TickInterval() or 0.015
-local ANALOG_EPSILON = 0.05
+-- Net rate: not every engine tick — high-frequency SendToServer stalls VR frames.
+local ANALOG_SEND_RATE = 1 / 30 -- 30 Hz is enough for drive feel
+local ANALOG_HEARTBEAT = 0.45 -- keep server timeout (1s) alive without spam
+local ANALOG_EPSILON = 0.04
 local MAX_WHEEL_GRAB_DIST = 15
 local MAX_ANGLE = 90
 local nextSendTime = 0
+local lastAnalogHeartbeat = 0
 local neutralOffsets = {}
 local sensCache = {}
 local nextUpdate = 0
@@ -66,6 +69,8 @@ local leftGrip, rightGrip = false, false
 --local leftHand, rightHand
 -- Shared cleanup function for exiting vehicle
 local function VRMod_CleanupVehicleExit()
+	-- Block DropWeapon BEFORE action-set switch (switch fires grip-release edges → gun becomes a prop)
+	g_VR.antiDrop = true
 	g_VR.vehicle.inside = false
 	g_VR.vehicle.current = nil
 	g_VR.vehicle.type = nil
@@ -77,10 +82,12 @@ local function VRMod_CleanupVehicleExit()
 	g_VR.wheelGrippedLeft = false
 	g_VR.wheelGrippedRight = false
 	VRMOD_SetActiveActionSets("/actions/base", "/actions/main")
-	timer.Simple(1, function() g_VR.antiDrop = false end)
 	timer.Remove("vrmod_vehicle_watchdog")
 	timer.Remove("vrmod_glide_seat_recheck")
 	timer.Remove("vrmod_glide_bind_check")
+	timer.Create("vrmod_antidrop_after_vehicle", 2, 1, function()
+		if g_VR then g_VR.antiDrop = false end
+	end)
 end
 
 local function ResolveGlideDriving(ply)
@@ -97,11 +104,15 @@ local function ResolveGlideDriving(ply)
 end
 
 hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
-	-- Cancel/restart a single timer tied to this hook
+	-- MUST block drops before action-set switch (driving set re-fires grip → DropWeapon → gun prop)
+	g_VR.antiDrop = true
+	timer.Remove("vrmod_antidrop_after_vehicle")
+
+	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
+
 	timer.Create("vrmod_enter_vehicle_timer", 0.1, 1, function()
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
-		g_VR.antiDrop = true
 		local vehicle, boneId, vType, glide, name = vrmod.utils.GetSteeringInfo(ply)
 		g_VR.vehicle.inside = true
 		g_VR.vehicle.current = vehicle
@@ -112,12 +123,10 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 		vrmod.logger.Info("Steer grip type selected: " .. tostring(vType))
 		if glide then
 			g_VR.vehicle.driving = ResolveGlideDriving(ply)
-			-- Seat index often 0 on first tick after enter — recheck once
 			timer.Create("vrmod_glide_seat_recheck", 0.6, 1, function()
 				if not IsValid(ply) or not g_VR.vehicle.inside or not g_VR.vehicle.glide then return end
 				g_VR.vehicle.driving = ResolveGlideDriving(ply)
 			end)
-			-- Cube W3 / G14: pure HmdExpect toast + checklist (stick SoT)
 			if g_VR.vehicle.driving then
 				local expect = (vrmod.utils and vrmod.utils.Glide_HmdExpect)
 						and vrmod.utils.Glide_HmdExpect({
@@ -125,7 +134,7 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 							is_glide = true,
 							is_driver = true,
 							steer_source = "stick",
-							has_steer_action = true, -- refined after bind check
+							has_steer_action = true,
 						})
 					or nil
 				g_VR._glideHmdExpect = expect
@@ -142,28 +151,11 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 				elseif vrmod.Toast then
 					vrmod.Toast("Glide seat — use thumbstick; wheel is optional", 5, "hint")
 				end
-				-- If driving actions never bound, warn once (was silent dead car)
 				timer.Create("vrmod_glide_bind_check", 1.5, 1, function()
 					if not g_VR.vehicle.inside or not g_VR.vehicle.glide or not g_VR.vehicle.driving then return end
 					local inp = g_VR.input
 					local bound = inp and inp.vector2_steer ~= nil
-					if vrmod.utils and vrmod.utils.Glide_HmdExpect then
-						local ex = vrmod.utils.Glide_HmdExpect({
-							in_vehicle = true,
-							is_glide = true,
-							is_driver = true,
-							steer_source = "stick",
-							has_steer_action = bound and true or false,
-						})
-						g_VR._glideHmdExpect = ex
-						if ex and ex.checklist and vrmod.logger then
-							vrmod.logger.Info("G14 HMD %s", tostring(ex.checklist))
-						end
-						if not bound and vrmod.Toast then
-							local t = vrmod.utils.Glide_EnterToast and vrmod.utils.Glide_EnterToast(ex)
-							vrmod.Toast(t or "Glide inputs unbound — rebind /actions/driving or reinstall module", 7, "error")
-						end
-					elseif not bound and vrmod.Toast then
+					if not bound and vrmod.Toast then
 						vrmod.Toast(
 							"Glide inputs unbound — rebind /actions/driving or reinstall module",
 							7,
@@ -175,11 +167,12 @@ hook.Add("VRMod_EnterVehicle", "vrmod_switchactionset", function()
 		else
 			g_VR.vehicle.driving = true
 		end
-		-- Safety watchdog: check every second if the vehicle is still valid and player still inside
-		timer.Create("vrmod_vehicle_watchdog", 1, 0, function() if not IsValid(ply) or not ply:InVehicle() or not IsValid(g_VR.vehicle.current) then VRMod_CleanupVehicleExit() end end)
+		timer.Create("vrmod_vehicle_watchdog", 1, 0, function()
+			if not IsValid(ply) or not ply:InVehicle() or not IsValid(g_VR.vehicle.current) then
+				VRMod_CleanupVehicleExit()
+			end
+		end)
 	end)
-
-	VRMOD_SetActiveActionSets("/actions/base", "/actions/driving")
 end)
 
 -- Reset vehicle data and switch action set when exiting vehicle
@@ -187,13 +180,18 @@ hook.Add("VRMod_ExitVehicle", "vrmod_switchactionset", function() VRMod_CleanupV
 hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 	if hook.Call("VRMod_AllowDefaultAction", nil, action) == false then return end
 	vrmod.logger.Debug("Input changed: %s = %s", action, pressed)
-	if (action == "boolean_primaryfire" or action == "boolean_turret") and not g_VR.menuFocus then
-		LocalPlayer():ConCommand(pressed and "+attack" or "-attack")
+	-- Never shoot when any VR UI is focused (DispatchUIClick / laser on menu)
+	local uiFocus = g_VR.menuFocus or (vrmod.IsUIFocused and vrmod.IsUIFocused())
+	if action == "boolean_primaryfire" or action == "boolean_turret" then
+		if not uiFocus then
+			LocalPlayer():ConCommand(pressed and "+attack" or "-attack")
+		end
 		return
 	end
-
-	if (action == "boolean_secondaryfire" or action == "boolean_alt_turret") and not g_VR.menuFocus then
-		LocalPlayer():ConCommand(pressed and "+attack2" or "-attack2")
+	if action == "boolean_secondaryfire" or action == "boolean_alt_turret" then
+		if not uiFocus then
+			LocalPlayer():ConCommand(pressed and "+attack2" or "-attack2")
+		end
 		return
 	end
 
@@ -235,6 +233,7 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 
 		-- Stock two-hand foregrip claims left grip before world prop pickup
 		if vrmod.TryForegripGrab and vrmod.TryForegripGrab(pressed) then
+			-- Still track grip pressed for aircraft/etc; transform frees hand when FG active
 			if g_VR.vehicle.wheel_bone then leftGrip = pressed end
 			return
 		end
@@ -245,7 +244,10 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		if g_VR.avatarSteerTwin then return end
 		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
 		if twin and twin.active and twin.mode == "free" and not g_VR.menuFocus then return end
-		if g_VR.vehicle.wheel_bone then leftGrip = pressed end
+		-- Steering: don't claim wheel while LH holds a mag (reload)
+		if g_VR.vehicle.wheel_bone then
+			leftGrip = pressed and not IsValid(g_VR.heldEntityLeft)
+		end
 		if cl_pickupdisable:GetBool() then return end
 		vrmod.Pickup(true, not pressed)
 		return
@@ -257,7 +259,9 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 		if g_VR.avatarSteerTwin then return end
 		local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
 		if twin and twin.active and twin.mode == "free" and not g_VR.menuFocus then return end
-		if g_VR.vehicle.wheel_bone or g_VR.vehicle.type == "aircraft" then rightGrip = pressed end
+		if g_VR.vehicle.wheel_bone or g_VR.vehicle.type == "aircraft" then
+			rightGrip = pressed and not IsValid(g_VR.heldEntityRight)
+		end
 		if cl_pickupdisable:GetBool() then return end
 		vrmod.Pickup(false, not pressed)
 		return
@@ -265,10 +269,16 @@ hook.Add("VRMod_Input", "vrutil_hook_defaultinput", function(action, pressed)
 
 	if action == "boolean_changeweapon" then
 		if pressed then
-			VRUtilWeaponMenuOpen()
+			-- Hold mode (bind). Sticky open from Quick Menu "Select Weapon" stays until click.
+			if isfunction(VRUtilWeaponMenuOpen) then
+				VRUtilWeaponMenuOpen({ sticky = false })
+			end
 			if cl_hudonlykey:GetBool() then LocalPlayer():ConCommand("vrmod_hud 1") end
 		else
-			VRUtilWeaponMenuClose()
+			-- Do not dismiss sticky inventory opened from Quick Menu
+			if not (isfunction(VRUtilWeaponMenuIsSticky) and VRUtilWeaponMenuIsSticky()) then
+				if isfunction(VRUtilWeaponMenuClose) then VRUtilWeaponMenuClose() end
+			end
 			if cl_hudonlykey:GetBool() then LocalPlayer():ConCommand("vrmod_hud 0") end
 		end
 		return
@@ -383,15 +393,12 @@ end)
 
 hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 	if not g_VR.active or not g_VR.tracking or not g_VR.vehicle.driving then return end
-	if CurTime() < nextSendTime then return end
 	local planeGrip = g_VR.vehicle.type == "aircraft" and rightGrip
-	-- === Aircraft pitch/yaw/roll relative control ===
+	-- === Aircraft pitch/yaw/roll — every tracking frame (smooth); net is rate-limited below
 	if planeGrip then
 		local ang = g_VR.tracking.pose_righthand.ang
 		if ang then
-			-- Initialize neutral orientation
 			if not aircraftNeutralAng then aircraftNeutralAng = Angle(ang.pitch, ang.yaw, ang.roll) end
-			-- Calculate delta from neutral
 			local delta = ang - aircraftNeutralAng
 			delta:Normalize()
 			if delta.yaw > 180 then
@@ -399,86 +406,93 @@ hook.Add("VRMod_Tracking", "glide_vr_tracking", function()
 			elseif delta.yaw < -180 then
 				delta.yaw = delta.yaw + 360
 			end
-
-			-- Fetch sensitivities from sensCache
-			local pitchSens = sensCache.pitch.value or 1
-			local yawSens = sensCache.yaw.value or 1
-			local rollSens = sensCache.roll.value or 1
+			local pitchSens = sensCache.pitch and sensCache.pitch.value or 1
+			local yawSens = sensCache.yaw and sensCache.yaw.value or 1
+			local rollSens = sensCache.roll and sensCache.roll.value or 1
 			local targetPitch = math.Clamp(delta.pitch / MAX_ANGLE * pitchSens, -1, 1)
 			local targetYaw = math.Clamp(delta.yaw / yawSens, -1, 1)
 			local targetRoll = math.Clamp(delta.roll / MAX_ANGLE * rollSens, -1, 1)
-			-- Smooth
-			local pitchSmooth = sensCache.pitch.smooth or 0.1
-			local yawSmooth = sensCache.yaw.smooth or 0.1
-			local rollSmooth = sensCache.roll.smooth or 0.1
-			g_VR.analog_input.pitch = Lerp(FrameTime() / pitchSmooth, g_VR.analog_input.pitch or 0, targetPitch)
-			g_VR.analog_input.yaw = -Lerp(FrameTime() / yawSmooth * 5, g_VR.analog_input.yaw or 0, targetYaw)
-			g_VR.analog_input.roll = Lerp(FrameTime() / rollSmooth, g_VR.analog_input.roll or 0, targetRoll)
+			local pitchSmooth = (sensCache.pitch and sensCache.pitch.smooth) or 0.1
+			local yawSmooth = (sensCache.yaw and sensCache.yaw.smooth) or 0.1
+			local rollSmooth = (sensCache.roll and sensCache.roll.smooth) or 0.1
+			local ft = FrameTime()
+			g_VR.analog_input.pitch = Lerp(ft / pitchSmooth, g_VR.analog_input.pitch or 0, targetPitch)
+			g_VR.analog_input.yaw = -Lerp(ft / yawSmooth * 5, g_VR.analog_input.yaw or 0, targetYaw)
+			g_VR.analog_input.roll = Lerp(ft / rollSmooth, g_VR.analog_input.roll or 0, targetRoll)
 		else
 			g_VR.analog_input.pitch = 0
 			g_VR.analog_input.yaw = 0
 			g_VR.analog_input.roll = 0
 		end
 	else
-		-- Reset neutral if not in aircraft
 		aircraftNeutralAng = nil
 		g_VR.analog_input.pitch = 0
 		g_VR.analog_input.yaw = 0
 		g_VR.analog_input.roll = 0
 	end
 
-	if Glide and g_VR.vehicle.glide then
-		-- === Steering / throttle / brake ===
-		-- Cube W3 / G14: joystick/action-set is SoT; wheel grip assist only when stick idle.
-		local inp = g_VR.input or {}
-		local throttle = inp.vector1_forward or 0
-		local brake = inp.vector1_reverse or 0
-		local stickX = (inp.vector2_steer and inp.vector2_steer.x) or 0
-		local stickY = (inp.vector2_steer and inp.vector2_steer.y) or 0
-		local wheelSteer = (g_VR.wheelGripped and g_VR.analog_input.steer) or 0
-		local steer = stickX
-		local steerSrc = "stick"
-		if vrmod.utils and vrmod.utils.GlidePreferStickSteer then
-			steer, steerSrc = vrmod.utils.GlidePreferStickSteer(stickX, wheelSteer)
-		elseif math.abs(stickX) < 0.05 and math.abs(wheelSteer) > 0.02 then
-			steer = wheelSteer
-			steerSrc = "wheel"
-		end
-		g_VR._glideSteerSource = steerSrc
-		if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
-		local pitch = (g_VR.analog_input.pitch or 0) + stickY
-		local yaw = (g_VR.analog_input.yaw or 0) + stickX
-		local roll = g_VR.analog_input.roll or 0
-		-- === Send to server if significant change ===
-		local changed = math.abs(throttle - lastInputState.throttle) > ANALOG_EPSILON or math.abs(brake - lastInputState.brake) > ANALOG_EPSILON or math.abs(steer - lastInputState.steer) > ANALOG_EPSILON or math.abs(pitch - lastInputState.pitch) > ANALOG_EPSILON or math.abs(yaw - lastInputState.yaw) > ANALOG_EPSILON or math.abs(roll - lastInputState.roll) > ANALOG_EPSILON
-		if changed or throttle ~= 0 or brake ~= 0 or steer ~= 0 or pitch ~= 0 or yaw ~= 0 or roll ~= 0 then
-			lastInputState.throttle = throttle
-			lastInputState.brake = brake
-			lastInputState.steer = steer
-			lastInputState.pitch = pitch
-			lastInputState.yaw = yaw
-			lastInputState.roll = roll
-			-- === Debug before sending ===
-			if g_VR.vehicle.type == "aircraft" then
-				vrmod.logger.Debug(string.format("Client sending - Throttle: %.2f, Brake: %.2f, Steer: %.2f, Pitch: %.2f, Yaw: %.2f, Roll: %.2f", throttle, brake, steer, pitch, yaw, roll))
-			else
-				vrmod.logger.Debug(string.format("Client sending - Throttle: %.2f, Brake: %.2f, Steer: %.2f", throttle, brake, steer))
-			end
+	if not (Glide and g_VR.vehicle.glide) then return end
+	if CurTime() < nextSendTime then return end
 
-			-- Always write 6 floats so the server net reader stays in sync
-			net.Start("glide_vr_input")
-			net.WriteString("analog")
-			net.WriteFloat(throttle)
-			net.WriteFloat(brake)
-			net.WriteFloat(steer)
-			net.WriteFloat(pitch)
-			net.WriteFloat(yaw)
-			net.WriteFloat(roll)
-			net.SendToServer()
-		end
-
-		nextSendTime = CurTime() + ANALOG_SEND_RATE
+	-- === Steering / throttle / brake ===
+	local inp = g_VR.input or {}
+	local throttle = inp.vector1_forward or 0
+	local brake = inp.vector1_reverse or 0
+	-- Laser on menu: triggers are UI click, not drive (cl_ui intercepts vector1_*)
+	if vrmod.MenuBlocksVehicleDrive and vrmod.MenuBlocksVehicleDrive() then
+		throttle, brake = 0, 0
 	end
+	local stickX = (inp.vector2_steer and inp.vector2_steer.x) or 0
+	local stickY = (inp.vector2_steer and inp.vector2_steer.y) or 0
+	local wheelSteer = (g_VR.wheelGripped and g_VR.analog_input.steer) or 0
+	local steer = stickX
+	local steerSrc = "stick"
+	if vrmod.utils and vrmod.utils.GlidePreferStickSteer then
+		steer, steerSrc = vrmod.utils.GlidePreferStickSteer(stickX, wheelSteer)
+	elseif math.abs(stickX) < 0.05 and math.abs(wheelSteer) > 0.02 then
+		steer = wheelSteer
+		steerSrc = "wheel"
+	end
+	g_VR._glideSteerSource = steerSrc
+	if g_VR.vehicle.type == "aircraft" then throttle = throttle - brake end
+	local pitch = (g_VR.analog_input.pitch or 0) + stickY
+	local yaw = (g_VR.analog_input.yaw or 0) + stickX
+	local roll = g_VR.analog_input.roll or 0
+
+	local changed = math.abs(throttle - lastInputState.throttle) > ANALOG_EPSILON
+		or math.abs(brake - lastInputState.brake) > ANALOG_EPSILON
+		or math.abs(steer - lastInputState.steer) > ANALOG_EPSILON
+		or math.abs(pitch - lastInputState.pitch) > ANALOG_EPSILON
+		or math.abs(yaw - lastInputState.yaw) > ANALOG_EPSILON
+		or math.abs(roll - lastInputState.roll) > ANALOG_EPSILON
+	local anyInput = throttle ~= 0 or brake ~= 0 or steer ~= 0 or pitch ~= 0 or yaw ~= 0 or roll ~= 0
+	local now = CurTime()
+	-- Only net on change, or heartbeat while holding inputs (server timeout 1s)
+	local needHeartbeat = anyInput and (now - lastAnalogHeartbeat) >= ANALOG_HEARTBEAT
+	if not changed and not needHeartbeat then
+		nextSendTime = now + ANALOG_SEND_RATE
+		return
+	end
+
+	lastInputState.throttle = throttle
+	lastInputState.brake = brake
+	lastInputState.steer = steer
+	lastInputState.pitch = pitch
+	lastInputState.yaw = yaw
+	lastInputState.roll = roll
+	lastAnalogHeartbeat = now
+
+	net.Start("glide_vr_input")
+	net.WriteString("analog")
+	net.WriteFloat(throttle)
+	net.WriteFloat(brake)
+	net.WriteFloat(steer)
+	net.WriteFloat(pitch)
+	net.WriteFloat(yaw)
+	net.WriteFloat(roll)
+	net.SendToServer()
+
+	nextSendTime = now + ANALOG_SEND_RATE
 end)
 
 -- Handle steering grip input
@@ -573,17 +587,40 @@ hook.Add("VRMod_Tracking", "SteeringGripInput", function()
 	if math.abs(g_VR.analog_input.steer - prevSteer) > 0.01 then vrmod.logger.Debug(string.format("Smoothed steer updated: %.3f -> %.3f (target=%.3f)", prevSteer, g_VR.analog_input.steer, steerInput)) end
 end)
 
-hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
+-- Left hand owns wheel unless it is *actually* doing weapon work.
+-- Do NOT free steer just because the gun is near the wheel hand (cabin is tight).
+local function LeftHandBusyWithWeapon(ply)
+	if IsValid(g_VR.heldEntityLeft) then return true end -- mag / prop in LH
+	local wep = IsValid(ply) and ply:GetActiveWeapon() or NULL
+	if IsValid(wep) and wep.ArcticVR then
+		if wep.ForegripGrabbed or wep.SlideGrabbed or wep.BeltGrabbed or wep.DustCoverGrabbed then
+			return true
+		end
+	end
+	if g_VR.foregripActive or (vrmod.IsForegripActive and vrmod.IsForegripActive()) then
+		return true
+	end
+	return false
+end
+
+-- Once per stereo frame (NOT per eye). Dual PreRender was 2× bone + 2× hand write
+-- on the VR render path and delayed OpenXR submit.
+local function SteeringGripTransformOnce()
 	local ply = LocalPlayer()
 	if not IsValid(ply) or not g_VR.active or not g_VR.vehicle.driving then return end
 	local vehicle = g_VR.vehicle
 	local veh, vtype = vehicle.current, vehicle.type
-	-- Tank special case
+	-- Tank: don't collapse a hand that holds a prop/mag
 	if vtype == "tank" then
+		if not IsValid(veh) then return end
 		local attachPos = veh:GetPos() + veh:GetUp() * -20
 		local attachAng = veh:GetAngles()
-		vrmod.SetLeftHandPose(attachPos, attachAng)
-		vrmod.SetRightHandPose(attachPos, attachAng)
+		if not IsValid(g_VR.heldEntityLeft) then
+			vrmod.SetLeftHandPose(attachPos, attachAng)
+		end
+		if not IsValid(g_VR.heldEntityRight) then
+			vrmod.SetRightHandPose(attachPos, attachAng)
+		end
 		g_VR.wheelGrippedLeft = false
 		g_VR.wheelGrippedRight = false
 		return
@@ -597,7 +634,6 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		return
 	end
 
-	-- Must update each frame to avoid jitter
 	local bonePos, boneAng = vrmod.utils.GetVehicleBonePosition(veh, vehicle.wheel_bone)
 	if not bonePos then
 		g_VR.wheelGripped = false
@@ -616,10 +652,12 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 		return
 	end
 
-	-- Held checks
-	local heldLeft = g_VR.heldEntityLeft
-	local heldRight = vrmod.utils.IsValidWep(ply:GetActiveWeapon())
-	-- Grip state
+	-- Right: gun out or held prop → never wheel-glue (gun stays on free RH)
+	local heldRight = IsValid(g_VR.heldEntityRight)
+		or (vrmod.utils.IsValidWep and vrmod.utils.IsValidWep(ply:GetActiveWeapon()))
+	-- Left: free only for real mag/FG/slide — not "gun nearby"
+	local heldLeft = LeftHandBusyWithWeapon(ply)
+
 	local steeringGrip = g_VR.steeringGrip or {}
 	g_VR.steeringGrip = steeringGrip
 	local anyGrip = false
@@ -627,36 +665,51 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 	g_VR.wheelGrippedRight = false
 	local WorldToLocal, LocalToWorld = WorldToLocal, LocalToWorld
 	local angle_zero = angle_zero
+
 	local function processHand(handName, handPose, gripPressed, isHeld)
-		if isHeld or not handPose then return end
+		if not handPose then return end
 		local gripData = steeringGrip[handName] or {}
 		steeringGrip[handName] = gripData
+
+		-- Mag/FG owns the hand — clear wheel attach
+		if isHeld then
+			gripData.offset, gripData.angOffset = nil, nil
+			gripData.prevPressed = gripPressed
+			neutralOffsets[handName] = nil
+			return
+		end
+
 		local prevPressed = gripData.prevPressed or false
 		gripData.prevPressed = gripPressed
-		-- Release instantly
+		-- Sticky: only unglue when grip is released (not when hand moves off the rim)
 		if not gripPressed then
 			gripData.offset, gripData.angOffset = nil, nil
 			neutralOffsets[handName] = nil
 			return
 		end
 
-		-- Rising edge: compute offsets once
+		-- Rising edge near wheel → lock offset; stay locked while grip held
 		if gripPressed and not prevPressed then
 			local maxDist = MAX_WHEEL_GRAB_DIST
 			if vehicle.bone_name == "Airboat.Steer" then maxDist = maxDist * 1.5 end
 			if vtype == "motorcycle" then
-				if veh.VehicleType ~= Glide.VEHICLE_TYPE.BOAT then
+				local isBoat = Glide and veh.VehicleType and Glide.VEHICLE_TYPE
+					and veh.VehicleType == Glide.VEHICLE_TYPE.BOAT
+				if not isBoat then
 					local gripPos = veh:GetPos() + veh:GetUp() * 1.35
-					if handPose.pos:DistToSqr(gripPos) <= 1200 then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
+					if handPose.pos:DistToSqr(gripPos) <= 1200 then
+						gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
+					end
 				else
 					gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
 				end
 			else
-				if handPose.pos:DistToSqr(bonePos) <= maxDist * maxDist then gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng) end
+				if handPose.pos:DistToSqr(bonePos) <= maxDist * maxDist then
+					gripData.offset, gripData.angOffset = WorldToLocal(handPose.pos, handPose.ang, bonePos, boneAng)
+				end
 			end
 		end
 
-		-- Apply if attached
 		if gripData.offset then
 			anyGrip = true
 			local attachedPos, attachedAng = LocalToWorld(gripData.offset, gripData.angOffset or angle_zero, bonePos, boneAng)
@@ -673,4 +726,16 @@ hook.Add("VRMod_PreRender", "SteeringGripTransform", function()
 	processHand("left", leftHand, leftGrip, heldLeft)
 	processHand("right", rightHand, rightGrip, heldRight)
 	g_VR.wheelGripped = anyGrip
+end
+
+hook.Add("VRMod_PreStereo", "SteeringGripTransform", function()
+	if g_VR then g_VR._steerGripFrame = g_VR.stereoFrame end
+	SteeringGripTransformOnce()
+end)
+-- Fallback if PreStereo did not run: left eye only (never both eyes)
+hook.Add("VRMod_PreRender", "SteeringGripTransform", function(eye)
+	if eye and eye ~= "left" then return end
+	if g_VR and g_VR._steerGripFrame == g_VR.stereoFrame then return end
+	if g_VR then g_VR._steerGripFrame = g_VR.stereoFrame end
+	SteeringGripTransformOnce()
 end)

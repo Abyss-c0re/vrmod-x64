@@ -90,7 +90,8 @@ if CLIENT then
 		return vrmod.GetSecondaryHand()
 	end
 
-	--- Primary-hand trigger → LMB (right fire or left fire depending on setting).
+	--- Primary trigger → LMB (on foot). Vehicle: throttle/reverse analogs → menu click
+	--- via Think intercept when laser is on a menu (not separate car_mouse binds).
 	function vrmod.IsMenuPrimaryClick(action)
 		if vrmod.utils and vrmod.utils.LaserLaw_IsMenuPrimaryClick then
 			return vrmod.utils.LaserLaw_IsMenuPrimaryClick(action, vrmod.GetPrimaryHand())
@@ -102,7 +103,7 @@ if CLIENT then
 		return action == "boolean_primaryfire"
 	end
 
-	--- Secondary / cancel / RMB (either hand secondary + car RMB).
+	--- Secondary / cancel / RMB.
 	function vrmod.IsMenuSecondaryClick(action)
 		if vrmod.utils and vrmod.utils.LaserLaw_IsMenuSecondaryClick then
 			return vrmod.utils.LaserLaw_IsMenuSecondaryClick(action)
@@ -2103,6 +2104,108 @@ if CLIENT then
 	hook.Add("Think", "VRUtil_SyncCursorWhileHeld", function()
 		if not g_VR or not g_VR.menuFocus then return end
 		SyncCursorToVR()
+	end)
+
+	------------------------------------------------------------------------
+	-- Universal UI click dispatch (ALL VR surfaces: Derma, native, weaponmenu).
+	-- Vehicle: throttle/reverse → same path as primary/secondary fire on foot.
+	------------------------------------------------------------------------
+	local VEH_TRIG_THRESH = 0.45
+	local vehTrigPrev = { fwd = false, rev = false }
+
+	--- Any interactive VR UI the laser is on (or hold-open wheel that owns focus).
+	function vrmod.IsUIFocused()
+		if not g_VR or not g_VR.active then return false end
+		if g_VR.menuFocus then return true end
+		-- Hold-open UIs (weapon wheel) stay interactive while open even if focus lags
+		if g_VR.menus then
+			for uid, m in pairs(g_VR.menus) do
+				if not m then continue end
+				if uid == "weaponmenu" then return true end
+				-- Laser hit this surface this stereo frame
+				if m.cursorEnabled ~= false and m._hitFrame and g_VR.stereoFrame
+					and m._hitFrame == g_VR.stereoFrame then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	--- True when vehicle drive analogs must be suppressed for UI.
+	function vrmod.MenuBlocksVehicleDrive()
+		return g_VR and g_VR.active
+			and g_VR.vehicle and g_VR.vehicle.driving
+			and vrmod.IsUIFocused()
+	end
+
+	--- Canonical UI click for every menu type.
+	-- primary=true → LMB / primary fire boolean; false → RMB / secondary.
+	-- Fires VRMod_Input (native menus) + gui mouse (Derma) so all UIs share one path.
+	function vrmod.DispatchUIClick(primary, pressed)
+		if not g_VR or not g_VR.active then return false end
+		if g_VR.menuResizeActive then return false end
+		if not vrmod.IsUIFocused() then return false end
+
+		pressed = pressed and true or false
+		SyncCursorToVR()
+
+		local action
+		if primary then
+			action = (vrmod.GetPrimaryHand and vrmod.GetPrimaryHand() == "left")
+				and "boolean_left_primaryfire" or "boolean_primaryfire"
+		else
+			action = "boolean_secondaryfire"
+		end
+		-- All menus that hook VRMod_Input + IsMenuPrimaryClick/Secondary
+		hook.Call("VRMod_Input", nil, action, pressed)
+
+		-- Derma / panel2vr (gui.InternalMouse*)
+		local btn = primary and MOUSE_LEFT or MOUSE_RIGHT
+		heldButtons[btn] = pressed
+		if gui.InternalCursorMoved then
+			pcall(gui.InternalCursorMoved, g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+		end
+		if pressed then
+			pcall(gui.InternalMousePressed, btn)
+		else
+			pcall(gui.InternalMouseReleased, btn)
+		end
+
+		if g_VR.menuFocus then
+			vrmod.MarkMenuDirty(g_VR.menuFocus)
+		elseif g_VR.menus then
+			for uid in pairs(g_VR.menus) do
+				vrmod.MarkMenuDirty(uid)
+			end
+		end
+		return true
+	end
+
+	hook.Add("Think", "VRUtil_UIClickVehicleTriggers", function()
+		if not g_VR or not g_VR.active then
+			vehTrigPrev.fwd, vehTrigPrev.rev = false, false
+			return
+		end
+		local driving = g_VR.vehicle and g_VR.vehicle.driving
+		local ui = vrmod.IsUIFocused()
+		if not driving or not ui or g_VR.menuResizeActive then
+			if vehTrigPrev.fwd then vrmod.DispatchUIClick(true, false) end
+			if vehTrigPrev.rev then vrmod.DispatchUIClick(false, false) end
+			vehTrigPrev.fwd, vehTrigPrev.rev = false, false
+			return
+		end
+		local inp = g_VR.input or {}
+		local fwd = (tonumber(inp.vector1_forward) or 0) >= VEH_TRIG_THRESH
+		local rev = (tonumber(inp.vector1_reverse) or 0) >= VEH_TRIG_THRESH
+		if fwd ~= vehTrigPrev.fwd then
+			vrmod.DispatchUIClick(true, fwd)
+			vehTrigPrev.fwd = fwd
+		end
+		if rev ~= vehTrigPrev.rev then
+			vrmod.DispatchUIClick(false, rev)
+			vehTrigPrev.rev = rev
+		end
 	end)
 
 	local lastMenuFocus = nil

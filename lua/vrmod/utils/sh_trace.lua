@@ -4,6 +4,7 @@ vrmod.utils = vrmod.utils or {}
 local magCache = {}
 local function IsMagazine(ent)
     if not IsValid(ent) then return false end
+    if ent.ArcticVRMagazine or ent.MagID then return true end
     local class = ent:GetClass()
     if not class then return false end
     if magCache[class] ~= nil then return magCache[class] end
@@ -20,17 +21,27 @@ function vrmod.utils.HitFilter(ent, ply, hand)
     if ent == ply then return false end
     if ent:GetNWBool("isVRProxy", false) then return false end
     if IsMagazine(ent) then return false end
+    -- Never hit active weapons (gun mesh vs hand hull)
+    if ent:IsWeapon() then return false end
     if IsValid(ply) and (hand == "left" or hand == "right") then
-        local held = vrmod.GetHeldEntity(ply, hand)
+        local held = vrmod.GetHeldEntity and vrmod.GetHeldEntity(ply, hand)
         if IsValid(held) and held == ent then return false end
-        -- Other hand's held prop (reload: mag left, gun right)
         local other = hand == "left" and "right" or "left"
-        local heldOther = vrmod.GetHeldEntity(ply, other)
+        local heldOther = vrmod.GetHeldEntity and vrmod.GetHeldEntity(ply, other)
         if IsValid(heldOther) and heldOther == ent then return false end
     end
     if CLIENT and g_VR then
         if ent == g_VR.heldEntityLeft or ent == g_VR.heldEntityRight then return false end
         if ent == g_VR.viewModel or ent == g_VR.worldModelVM then return false end
+        -- Cabin: ignore seat vehicle and its children
+        if g_VR.vehicle and (g_VR.vehicle.inside or g_VR.vehicle.driving) and IsValid(g_VR.vehicle.current) then
+            local veh = g_VR.vehicle.current
+            if ent == veh or ent:GetParent() == veh then return false end
+        end
+    end
+    if IsValid(ply) and ply.InVehicle and ply:InVehicle() then
+        local veh = ply:GetVehicle()
+        if IsValid(veh) and (ent == veh or ent:GetParent() == veh) then return false end
     end
     return true
 end
@@ -61,13 +72,32 @@ function vrmod.utils.WallCollisionFilter(ply)
         heldR = heldR or vrmod.GetHeldEntity(ply, "right")
     end
 
+    local veh = nil
+    if IsValid(ply) and ply.InVehicle and ply:InVehicle() then
+        veh = ply:GetVehicle()
+    end
+    if CLIENT and g_VR and g_VR.vehicle and IsValid(g_VR.vehicle.current) then
+        veh = veh or g_VR.vehicle.current
+    end
+    if not IsValid(veh) and IsValid(ply) and ply.GlideGetVehicle then
+        local ok, gveh = pcall(function() return ply:GlideGetVehicle() end)
+        if ok and IsValid(gveh) then veh = gveh end
+    end
+    local vehParent = IsValid(veh) and veh:GetParent() or nil
+
     local fn = function(ent)
         if not IsValid(ent) then return true end
         if ent == ply then return false end
         if ent == heldL or ent == heldR then return false end
         if ent == vm or ent == wvm then return false end
         if IsMagazine(ent) then return false end
+        if ent:IsWeapon() then return false end
         if ent:GetNWBool("isVRProxy", false) then return false end
+        if IsValid(veh) and (ent == veh or ent == vehParent) then return false end
+        if IsValid(veh) and ent:GetParent() == veh then return false end
+        -- Glide / seat parts often parented under a root other than GetVehicle()
+        local c = ent:GetClass() or ""
+        if c:find("prop_vehicle", 1, true) or c:find("glide", 1, true) then return false end
         return true
     end
 

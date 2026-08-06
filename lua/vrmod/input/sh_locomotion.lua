@@ -214,15 +214,19 @@ local function start()
 	hook.Add("CreateMove", "vrmod_locomotion", function(cmd)
 		if not g_VR.threePoints then return end
 		if ply:InVehicle() then
-			cmd:SetForwardMove((g_VR.input.vector1_forward - g_VR.input.vector1_reverse) * 400)
+			-- Menu laser: triggers are UI clicks — do not drive with them
+			local blockDrive = vrmod.MenuBlocksVehicleDrive and vrmod.MenuBlocksVehicleDrive()
+			local fwd = blockDrive and 0 or (g_VR.input.vector1_forward or 0)
+			local rev = blockDrive and 0 or (g_VR.input.vector1_reverse or 0)
+			cmd:SetForwardMove((fwd - rev) * 400)
 			local inputVector
 			if g_VR.wheelGripped then
 				inputVector = g_VR.analog_input.steer
 			else
-				inputVector = g_VR.input.vector2_steer.x
+				inputVector = g_VR.input.vector2_steer and g_VR.input.vector2_steer.x or 0
 			end
 
-			cmd:SetSideMove(inputVector * 400)
+			cmd:SetSideMove((inputVector or 0) * 400)
 			local _, ra = WorldToLocal(Vector(), g_VR.tracking.hmd.ang, Vector(), ply:GetVehicle():GetAngles())
 			cmd:SetViewAngles(ra)
 			cmd:SetButtons(bit.bor(cmd:GetButtons(), g_VR.input.boolean_turbo and IN_SPEED or 0, g_VR.input.boolean_handbrake and IN_JUMP or 0))

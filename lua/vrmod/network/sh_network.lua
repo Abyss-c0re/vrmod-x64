@@ -355,8 +355,8 @@ if CLIENT then
 		local isMag = string.StartWith(class, "avrmag_") -- Check if the entity is a magazine
 		-- Handle invalid weapon/magazine
 		if class == "" or vm == "" then
-			-- Race: server sometimes samples before viewmodel path is ready.
-			-- Do not wipe a good bind if we still hold a real weapon.
+			-- Race / vehicle holster: viewmodel path empty for one tick.
+			-- Never wipe a live gun (especially in vehicle → laser + pose die).
 			local weapon = LocalPlayer():GetActiveWeapon()
 			if IsValid(weapon) and vrmod.utils and vrmod.utils.IsValidWep and vrmod.utils.IsValidWep(weapon) then
 				local viewModel = LocalPlayer():GetViewModel()
@@ -364,6 +364,11 @@ if CLIENT then
 					viewModel:SetNoDraw(false)
 					g_VR.viewModel = viewModel
 				end
+				weapon:SetNoDraw(true)
+				return
+			end
+			-- Empty holster slot: keep last viewModel binding if still valid (vehicle flash)
+			if IsValid(g_VR.viewModel) then
 				if IsValid(weapon) then weapon:SetNoDraw(true) end
 				return
 			end
@@ -375,7 +380,6 @@ if CLIENT then
 			if IsValid(weapon) then weapon:SetNoDraw(true) end
 			local viewModel = LocalPlayer():GetViewModel()
 			if IsValid(viewModel) then viewModel:SetNoDraw(false) end
-			-- Remove leftover world model VM
 			if IsValid(g_VR.worldModelVM) then
 				g_VR.worldModelVM:Remove()
 				g_VR.worldModelVM = nil
@@ -385,6 +389,12 @@ if CLIENT then
 
 		local wep = LocalPlayer():GetActiveWeapon()
 		local viewModel = LocalPlayer():GetViewModel()
+		-- Magazines are never active weapons — ignore isMag for presentation
+		-- (old path could SetNoDraw(false) on SWEP world model = second gun).
+		if isMag then
+			if IsValid(wep) then wep:SetNoDraw(true) end
+			return
+		end
 		-- Default hide weapon world model
 		if IsValid(wep) then wep:SetNoDraw(true) end
 		if IsValid(viewModel) then
@@ -399,7 +409,7 @@ if CLIENT then
 
 		-- Load/create VMI
 		local vmi = g_VR.viewModelInfo[class] or {}
-		local model = isMag and vm or vmi.modelOverride or vm
+		local model = vmi.modelOverride or vm
 		-- Initialize offsets
 		if not vmi.offsetPos or not vmi.offsetAng then
 			vmi.offsetPos, vmi.offsetAng = Vector(0, 0, 0), Angle(0, 0, 0)
@@ -439,7 +449,7 @@ if CLIENT then
 			-- Normal viewmodel usage
 			if IsValid(wep) then wep:SetNoDraw(true) end
 			if IsValid(viewModel) then viewModel:SetNoDraw(false) end
-			-- Remove leftover world model
+			-- Remove leftover world model (orphan CSM = permanent second gun)
 			if IsValid(g_VR.worldModelVM) then
 				g_VR.worldModelVM:Remove()
 				g_VR.worldModelVM = nil
@@ -687,20 +697,62 @@ if SERVER then
 		end)
 	end)
 
-	hook.Add("PlayerEnteredVehicle", "vrutil_hook_playerenteredvehicle", function(ply, veh)
-		if g_VR[ply:SteamID()] ~= nil then
-			net.Start("vrutil_net_entervehicle", true)
-			net.Send(ply)
-			ply:SetAllowWeaponsInVehicle(1)
-			vrmod.SetVRHandsNoCollide(ply, true)
+	-- Remember gun across vehicle holster (Source often forces empty seat weapon)
+	local vehicleWepClass = {} -- steamid → class
+
+	local function SaveVehicleWeapon(ply)
+		if not IsValid(ply) then return end
+		local wep = ply:GetActiveWeapon()
+		if not IsValid(wep) then return end
+		local c = wep:GetClass()
+		if c and c ~= "" and c ~= "weapon_vrmod_empty" then
+			vehicleWepClass[ply:SteamID()] = c
 		end
+	end
+
+	local function RestoreVehicleWeapon(ply)
+		if not IsValid(ply) or not ply:Alive() then return end
+		local c = vehicleWepClass[ply:SteamID()]
+		if not c or not ply:HasWeapon(c) then return end
+		local cur = ply:GetActiveWeapon()
+		local curC = IsValid(cur) and cur:GetClass() or ""
+		-- Only reselect when holstered/empty — avoid ArcVR redeploy (clip wipe)
+		if curC == c then return end
+		if curC ~= "" and curC ~= "weapon_vrmod_empty" and curC ~= c then return end
+		ply:SelectWeapon(c)
+	end
+
+	hook.Add("PlayerEnteredVehicle", "vrutil_hook_playerenteredvehicle", function(ply, veh)
+		if g_VR[ply:SteamID()] == nil then return end
+		SaveVehicleWeapon(ply)
+		ply:SetAllowWeaponsInVehicle(true)
+		vrmod.SetVRHandsNoCollide(ply, true)
+		net.Start("vrutil_net_entervehicle", true)
+		net.Send(ply)
+		-- Seat often holsters after enter — restore once if empty
+		timer.Simple(0.15, function()
+			if IsValid(ply) and ply:InVehicle() then RestoreVehicleWeapon(ply) end
+		end)
+		timer.Simple(0.5, function()
+			if IsValid(ply) and ply:InVehicle() then RestoreVehicleWeapon(ply) end
+		end)
 	end)
 
 	hook.Add("PlayerLeaveVehicle", "vrutil_hook_playerleavevehicle", function(ply, veh)
-		if g_VR[ply:SteamID()] ~= nil then
-			net.Start("vrutil_net_exitvehicle", true)
-			net.Send(ply)
-			timer.Simple(1, function() if IsValid(ply) and vrmod.IsPlayerInVR(ply) and not ply:InVehicle() then vrmod.SetVRHandsNoCollide(ply, false) end end)
-		end
+		if g_VR[ply:SteamID()] == nil then return end
+		net.Start("vrutil_net_exitvehicle", true)
+		net.Send(ply)
+		-- Restore gun if seat left us on empty (do not reselect same gun)
+		timer.Simple(0.1, function()
+			if IsValid(ply) and not ply:InVehicle() then RestoreVehicleWeapon(ply) end
+		end)
+		timer.Simple(0.4, function()
+			if IsValid(ply) and not ply:InVehicle() then RestoreVehicleWeapon(ply) end
+		end)
+		timer.Simple(1, function()
+			if IsValid(ply) and vrmod.IsPlayerInVR(ply) and not ply:InVehicle() then
+				vrmod.SetVRHandsNoCollide(ply, false)
+			end
+		end)
 	end)
 end

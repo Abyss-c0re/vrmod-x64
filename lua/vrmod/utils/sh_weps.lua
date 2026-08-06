@@ -53,14 +53,15 @@ function vrmod.utils.CreateWorldModelVM(class, vmi)
         g_VR.worldModelVM = ClientsideModel(model)
         if not IsValid(g_VR.worldModelVM) then return end
         g_VR.worldModelVM:SetNoDraw(false)
-        local vm = LocalPlayer():GetViewModel()
-        if IsValid(vm) then
-            g_VR.worldModelVM:SetParent(vm) -- temporary parent
-        end
+        -- NEVER parent to engine viewmodel — child draws with parent and makes a 2nd gun
+        g_VR.worldModelVM:SetParent(NULL)
         g_VR.worldModelVM:DrawShadow(false)
     end
 
     g_VR.viewModel = g_VR.worldModelVM
+    -- Engine VM must stay hidden when worldModelVM owns the gun
+    local evm = LocalPlayer():GetViewModel()
+    if IsValid(evm) then evm:SetNoDraw(true) end
 end
 
 -- NOTE: IsValidWep / WepInfo must return the *viewmodel* path only.

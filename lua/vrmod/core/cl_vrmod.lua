@@ -2488,6 +2488,19 @@ if CLIENT then
 		end
 		hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel", function(bSky, _)
 			if bSky or not LocalPlayer():Alive() then return end
+			local ply = LocalPlayer()
+			local wep = IsValid(ply) and ply:GetActiveWeapon() or NULL
+			-- Single gun law: SWEP world model must never draw next to g_VR.viewModel
+			-- (vehicle + clip grab was unhiding this → second gun mesh).
+			if IsValid(wep) then wep:SetNoDraw(true) end
+			-- If worldModelVM path is active, engine VM must stay hidden and not be the draw target
+			if IsValid(g_VR.worldModelVM) then
+				local evm = IsValid(ply) and ply:GetViewModel() or NULL
+				if IsValid(evm) then evm:SetNoDraw(true) end
+				if g_VR.viewModel ~= g_VR.worldModelVM then
+					g_VR.viewModel = g_VR.worldModelVM
+				end
+			end
 			-- Pre-G38 path: always DrawModel g_VR.viewModel when valid.
 			-- (G38 drawVm=false on useWorldModel skipped drawing worldModelVM too — guns vanished.)
 			if IsValid(g_VR.viewModel) then
@@ -2518,13 +2531,14 @@ if CLIENT then
 				if not okDraw and vrmod.logger then
 					vrmod.logger.Debug("viewModel DrawModel error: %s", tostring(errDraw))
 				end
-				local wep = LocalPlayer():GetActiveWeapon()
 				if IsValid(wep) and isfunction(wep.PostDrawViewModel) then
 					local ok, err = pcall(wep.PostDrawViewModel, wep, vm, LocalPlayer(), wep)
 					if not ok and vrmod.logger then
 						vrmod.logger.Debug("PostDrawViewModel error: %s", tostring(err))
 					end
 				end
+				-- Re-assert after ArcVR PostDraw (must not leave SWEP world model visible)
+				if IsValid(wep) then wep:SetNoDraw(true) end
 				blockViewModelDraw = true
 			end
 

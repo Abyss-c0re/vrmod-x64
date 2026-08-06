@@ -22,11 +22,11 @@ local BIND_FILE = "vrmod/vrmod_openxr_bindings.json"
 local THRESHOLD = 0.55
 
 -- set: "main" = on foot only; "driving" = vehicle only; nil = both (SteamVR action-set scope).
--- Face buttons share hardware across sets — without set scoping, right stick click would
--- open the weapon menu *and* fire the turret while driving.
+-- sets: optional dual rules { main = {sources,mode}, driving = {sources,mode} } — our chord
+-- system uses this so vehicle Weapon Menu can be a chord without fighting turret stick-click.
 local function DefaultMap()
 	return {
-		version = 2,
+		version = 3,
 		preset = "quest3_touch",
 		-- mode "any" = OR of sources; "all" = AND (chord)
 		actions = {
@@ -39,7 +39,17 @@ local function DefaultMap()
 			boolean_use              = { sources = { "left_x" }, mode = "any", set = "main" },
 			boolean_flashlight       = { sources = { "left_menu" }, mode = "any", set = "main" },
 			boolean_sprint           = { sources = { "left_stick_click" }, mode = "any", set = "main" },
-			boolean_changeweapon     = { sources = { "right_stick_click" }, mode = "any", set = "main" },
+			-- Weapon menu: stick click on foot; single reliable button in vehicle
+			-- (no grip+Y chord — fights wheel grip / spawnmenu on left_y)
+			boolean_changeweapon     = {
+				sources = { "right_stick_click" },
+				mode = "any",
+				set = nil,
+				sets = {
+					main = { sources = { "right_stick_click" }, mode = "any" },
+					driving = { sources = { "left_menu" }, mode = "any" },
+				},
+			},
 			boolean_teleport         = { sources = { "left_stick_click", "right_thumbrest" }, mode = "all", set = "main" },
 			-- Both sets (manifest has main + driving duplicates)
 			boolean_spawnmenu        = { sources = { "left_y" }, mode = "any" },
@@ -75,8 +85,9 @@ local DRIVING_ACTION_IDS = {
 local MAIN_ONLY_ACTION_IDS = {
 	boolean_primaryfire = true, boolean_secondaryfire = true, boolean_left_primaryfire = true,
 	boolean_jump = true, boolean_crouch = true, boolean_use = true, boolean_flashlight = true,
-	boolean_sprint = true, boolean_changeweapon = true, boolean_teleport = true,
+	boolean_sprint = true, boolean_teleport = true,
 	boolean_undo = true, boolean_chat = true, boolean_menucontext = true, boolean_walkkey = true,
+	-- boolean_changeweapon is dual-set (foot + vehicle) — not main-only
 }
 
 local function NormalizeSet(action, set)
@@ -147,12 +158,60 @@ function vrmod.bindings.SourceLabel(id)
 	return id
 end
 
+local function CopyRuleLeaf(rule)
+	if type(rule) ~= "table" or type(rule.sources) ~= "table" then return nil end
+	local src = {}
+	for i, id in ipairs(rule.sources) do src[i] = id end
+	return {
+		sources = src,
+		mode = (rule.mode == "all") and "all" or "any",
+	}
+end
+
+--- Normalize a stored action rule (legacy single set and dual sets{}).
+local function NormalizeStoredRule(action, rule)
+	if type(rule) ~= "table" then return nil end
+	local out = {
+		sources = type(rule.sources) == "table" and rule.sources or {},
+		mode = (rule.mode == "all") and "all" or "any",
+		set = NormalizeSet(action, rule.set),
+	}
+	if type(rule.sets) == "table" then
+		local sets = {}
+		if rule.sets.main then sets.main = CopyRuleLeaf(rule.sets.main) end
+		if rule.sets.driving then sets.driving = CopyRuleLeaf(rule.sets.driving) end
+		if sets.main or sets.driving then
+			out.sets = sets
+			out.set = nil -- dual-set rules are live in both modes via sets{}
+			-- Prefer main leaf as flat fallback for old Format/UI
+			local pref = sets.main or sets.driving
+			if pref then
+				out.sources = pref.sources
+				out.mode = pref.mode
+			end
+		end
+	end
+	return out
+end
+
+--- Active leaf rule for current mode (dual sets or legacy single).
+local function ActiveRuleForMode(rule, driving)
+	if type(rule) ~= "table" then return nil, false end
+	if type(rule.sets) == "table" and (rule.sets.main or rule.sets.driving) then
+		local leaf = driving and rule.sets.driving or rule.sets.main
+		if leaf then return leaf, true end
+		return nil, true -- dual-set action has no rule for this mode → force false
+	end
+	return rule, false
+end
+
 --- Restore one action to Quest gold default (or clear if no default).
 function vrmod.bindings.RestoreActionDefault(action)
 	if not action or action == "" then return end
 	local def = DefaultMap().actions[action]
 	if def then
-		vrmod.bindings.SetActionBinding(action, def.sources, def.mode, def.set)
+		state.map.actions[action] = NormalizeStoredRule(action, def)
+		state.prev[action] = nil
 	else
 		vrmod.bindings.ClearActionBinding(action)
 	end
@@ -171,12 +230,25 @@ function vrmod.bindings.Load()
 	-- Merge user actions over defaults so new defaults appear after updates
 	local merged = DefaultMap()
 	for action, rule in pairs(data.actions) do
-		if type(rule) == "table" and type(rule.sources) == "table" then
-			merged.actions[action] = {
-				sources = rule.sources,
-				mode = (rule.mode == "all") and "all" or "any",
-				set = NormalizeSet(action, rule.set),
-			}
+		local norm = NormalizeStoredRule(action, rule)
+		if norm and (norm.sources[1] or (norm.sets and (norm.sets.main or norm.sets.driving))) then
+			-- changeweapon: ensure dual-set; upgrade flaky grip+Y vehicle chord → left_menu
+			if action == "boolean_changeweapon" then
+				local gold = DefaultMap().actions.boolean_changeweapon
+				norm.sets = norm.sets or {}
+				if not norm.sets.main and norm.sources[1] then
+					norm.sets.main = { sources = norm.sources, mode = norm.mode }
+				end
+				local d = norm.sets.driving
+				local flaky = d and d.sources and #d.sources >= 2
+					and (table.HasValue(d.sources, "right_squeeze") or table.HasValue(d.sources, "left_squeeze"))
+					and table.HasValue(d.sources, "left_y")
+				if not d or flaky then
+					norm.sets.driving = gold.sets and CopyRuleLeaf(gold.sets.driving) or { sources = { "left_menu" }, mode = "any" }
+				end
+				norm.set = nil
+			end
+			merged.actions[action] = norm
 		end
 	end
 	state.map = merged
@@ -247,16 +319,59 @@ function vrmod.bindings.SetActionBinding(action, sources, mode, set)
 	if not action or action == "" then return nil end
 	local prev = state.map.actions[action]
 	local src, m, warnings = vrmod.bindings.NormalizeRule(sources, mode)
-	state.map.actions[action] = {
-		sources = src,
-		mode = m,
-		set = NormalizeSet(action, set or (prev and prev.set) or nil),
-	}
+	set = NormalizeSet(action, set or (prev and prev.set) or nil)
+
+	-- Dual-set actions (Weapon Menu): bind writes into sets[main|driving] so foot + vehicle
+	-- can use different chords without wiping each other.
+	local dual = action == "boolean_changeweapon"
+		or (prev and type(prev.sets) == "table" and (prev.sets.main or prev.sets.driving))
+	if dual and (set == "main" or set == "driving") then
+		local sets = {}
+		if prev and type(prev.sets) == "table" then
+			if prev.sets.main then sets.main = CopyRuleLeaf(prev.sets.main) end
+			if prev.sets.driving then sets.driving = CopyRuleLeaf(prev.sets.driving) end
+		elseif prev and type(prev.sources) == "table" and prev.sources[1] then
+			-- Migrate flat rule into the previous set (or main)
+			local oldSet = prev.set == "driving" and "driving" or "main"
+			sets[oldSet] = { sources = prev.sources, mode = (prev.mode == "all") and "all" or "any" }
+		end
+		sets[set] = { sources = src, mode = m }
+		local pref = sets.main or sets.driving
+		state.map.actions[action] = {
+			sources = pref and pref.sources or src,
+			mode = pref and pref.mode or m,
+			set = nil,
+			sets = sets,
+		}
+	else
+		state.map.actions[action] = {
+			sources = src,
+			mode = m,
+			set = set,
+		}
+	end
 	state.prev[action] = nil
 	return warnings
 end
 
-function vrmod.bindings.ClearActionBinding(action)
+function vrmod.bindings.ClearActionBinding(action, set)
+	if not action then return end
+	-- Optional: clear only one set for dual actions
+	if set == "main" or set == "driving" then
+		local prev = state.map.actions[action]
+		if prev and type(prev.sets) == "table" then
+			prev.sets[set] = nil
+			if not prev.sets.main and not prev.sets.driving then
+				state.map.actions[action] = nil
+			else
+				local pref = prev.sets.main or prev.sets.driving
+				prev.sources = pref.sources
+				prev.mode = pref.mode
+			end
+			state.prev[action] = nil
+			return
+		end
+	end
 	state.map.actions[action] = nil
 	state.prev[action] = nil
 end
@@ -442,7 +557,8 @@ function vrmod.bindings.ListLogicalActions()
 		{ id = "boolean_crouch", label = "Crouch", group = "main" },
 		{ id = "boolean_use", label = "Use", group = "main" },
 		{ id = "boolean_spawnmenu", label = "Spawn Menu", group = "both" },
-		{ id = "boolean_changeweapon", label = "Weapon Menu", group = "main" },
+		-- On foot + Vehicle tabs (dual-set: stick on foot, chord in vehicle)
+		{ id = "boolean_changeweapon", label = "Weapon Menu", group = "both" },
 		{ id = "boolean_reload", label = "Reload", group = "both" },
 		{ id = "boolean_sprint", label = "Sprint", group = "main" },
 		{ id = "boolean_flashlight", label = "Flashlight", group = "main" },
@@ -504,9 +620,15 @@ end
 local function SourcePressed(sourcesTable, id)
 	local s = sourcesTable and sourcesTable[id]
 	if not s then return false end
-	if s.pressed ~= nil then return s.pressed end
-	if s.analog then return (s.value or 0) >= THRESHOLD end
-	return (s.value or 0) >= 0.5
+	-- Prefer raw value so a stale/false pressed (old modules gated on isActive)
+	-- cannot kill a chord. pressed is only a fast path when true.
+	local v = tonumber(s.value) or 0
+	if s.analog then
+		if v >= THRESHOLD then return true end
+		return s.pressed == true
+	end
+	if v >= 0.5 then return true end
+	return s.pressed == true
 end
 
 function vrmod.bindings.EvalRule(rule, sourcesTable)
@@ -527,15 +649,33 @@ function vrmod.bindings.EvalRule(rule, sourcesTable)
 	return false
 end
 
-function vrmod.bindings.FormatRule(rule, useLabels)
-	if not rule or not rule.sources or #rule.sources == 0 then return "(unbound)" end
+local function FormatLeaf(leaf, useLabels)
+	if not leaf or not leaf.sources or #leaf.sources == 0 then return "(unbound)" end
 	local parts = {}
-	for _, id in ipairs(rule.sources) do
+	for _, id in ipairs(leaf.sources) do
 		parts[#parts + 1] = (useLabels ~= false and vrmod.bindings.SourceLabel and vrmod.bindings.SourceLabel(id)) or id
 	end
-	local sep = (rule.mode == "all") and " + " or " | "
+	local sep = (leaf.mode == "all") and " + " or " | "
 	local txt = table.concat(parts, sep)
-	if rule.mode == "all" then txt = txt .. "  [chord]" end
+	if leaf.mode == "all" then txt = txt .. " [chord]" end
+	return txt
+end
+
+function vrmod.bindings.FormatRule(rule, useLabels, preferSet)
+	if not rule then return "(unbound)" end
+	-- Dual-set: show active tab's leaf, or both when no preference
+	if type(rule.sets) == "table" and (rule.sets.main or rule.sets.driving) then
+		if preferSet == "main" or preferSet == "driving" then
+			return FormatLeaf(rule.sets[preferSet], useLabels)
+		end
+		local bits = {}
+		if rule.sets.main then bits[#bits + 1] = "foot: " .. FormatLeaf(rule.sets.main, useLabels) end
+		if rule.sets.driving then bits[#bits + 1] = "veh: " .. FormatLeaf(rule.sets.driving, useLabels) end
+		if #bits == 0 then return "(unbound)" end
+		return table.concat(bits, " · ")
+	end
+	if not rule.sources or #rule.sources == 0 then return "(unbound)" end
+	local txt = FormatLeaf(rule, useLabels)
 	if rule.set == "main" then txt = txt .. "  [on foot]"
 	elseif rule.set == "driving" then txt = txt .. "  [vehicle]"
 	end
@@ -543,7 +683,14 @@ function vrmod.bindings.FormatRule(rule, useLabels)
 end
 
 local function IsDrivingNow()
-	return g_VR and g_VR.vehicle and g_VR.vehicle.driving
+	if not g_VR then return false end
+	if g_VR.vehicle and g_VR.vehicle.driving then return true end
+	-- Fallback: Glide / stock vehicle before vehicle.driving is set this frame
+	local ply = LocalPlayer and LocalPlayer()
+	if not IsValid(ply) then return false end
+	if ply.InVehicle and ply:InVehicle() then return true end
+	if g_VR.vehicle and (g_VR.vehicle.glide or g_VR.vehicle.inside) then return true end
+	return false
 end
 
 -- Apply Lua bindings over native GetActions result.
@@ -558,11 +705,14 @@ function vrmod.bindings.Apply(input, nativeChanged, sourcesTable)
 	end
 
 	-- If no source path is live yet (pre-attach / failed suggest), keep native booleans.
+	-- Live = active OR non-zero value (isActive alone is flaky on some runtimes).
 	local sourcesLive = false
 	for _, s in pairs(sourcesTable) do
-		if type(s) == "table" and s.active then
-			sourcesLive = true
-			break
+		if type(s) == "table" then
+			if s.active or (tonumber(s.value) or 0) > 0.05 then
+				sourcesLive = true
+				break
+			end
 		end
 	end
 	if not sourcesLive then
@@ -600,14 +750,21 @@ function vrmod.bindings.Apply(input, nativeChanged, sourcesTable)
 	end
 
 	for action, rule in pairs(state.map.actions) do
-		local rset = rule.set
-		local inScope = (rset == nil) or (rset == "driving" and driving) or (rset == "main" and not driving)
 		local pressed = false
-		if inScope then
-			pressed = vrmod.bindings.EvalRule(rule, sourcesTable)
+		local leaf, isDual = ActiveRuleForMode(rule, driving)
+		if isDual then
+			-- Dual-set: only the active mode's chord/bind (vehicle Weapon Menu ≠ foot stick)
+			if leaf then
+				pressed = vrmod.bindings.EvalRule(leaf, sourcesTable)
+			end
+		else
+			local rset = rule.set
+			local inScope = (rset == nil) or (rset == "driving" and driving) or (rset == "main" and not driving)
+			if inScope then
+				pressed = vrmod.bindings.EvalRule(rule, sourcesTable)
+			end
+			-- Out-of-scope remaps force false so shared hardware cannot dual-fire
 		end
-		-- Out-of-scope remaps force false so shared hardware cannot dual-fire
-		-- (e.g. stick click → weapon menu while driving).
 		input[action] = pressed
 		local prev = state.prev[action]
 		if prev == nil then prev = false end
@@ -637,10 +794,13 @@ end
 --- Treat as pressed even if isActive is flaky (value still updates on some runtimes).
 function vrmod.bindings.SourceIsPressed(s)
 	if type(s) ~= "table" then return false end
-	if s.pressed then return true end
 	local v = tonumber(s.value) or 0
-	if s.analog then return v >= THRESHOLD end
-	return v >= 0.5
+	if s.analog then
+		if v >= THRESHOLD then return true end
+		return s.pressed == true
+	end
+	if v >= 0.5 then return true end
+	return s.pressed == true
 end
 
 --- Snapshot of currently held source ids (for arming listen without eating the UI click).

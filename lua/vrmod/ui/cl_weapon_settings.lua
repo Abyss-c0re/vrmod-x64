@@ -351,7 +351,7 @@ local function paint()
 
 	-- Chrome
 	if vrmod.cube and vrmod.cube.DrawChrome then
-		vrmod.cube.DrawChrome(0, 0, W, H, "WEAPON VR", { close = false })
+		vrmod.cube.DrawChrome(0, 0, W, H, "WEAPON TUNING", { close = false })
 	else
 		surface.SetDrawColor(T.bg)
 		surface.DrawRect(0, 0, W, H)
@@ -359,7 +359,7 @@ local function paint()
 		surface.DrawRect(0, 0, W, HEADER)
 		surface.SetDrawColor(T.header)
 		surface.DrawRect(0, HEADER - 3, W, 3)
-		draw.SimpleText("WEAPON VR", Font("title"), PAD, 14, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		draw.SimpleText("WEAPON TUNING", Font("title"), PAD, 14, T.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 	end
 
 	draw.SimpleText(class, Font("label") or "DermaDefault", PAD, HEADER - 18, T.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)

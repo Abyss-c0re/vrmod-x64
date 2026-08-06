@@ -161,9 +161,16 @@ local function EnsureSnap()
 		start = startPos,
 		endpos = startPos + dir * 10000,
 		filter = function(ent)
+			if not IsValid(ent) then return true end
 			if ent == LocalPlayer() then return false end
 			if ent == g_VR.viewModel or ent == g_VR.worldModelVM then return false end
 			if ent == g_VR.heldEntityLeft or ent == g_VR.heldEntityRight then return false end
+			if vrmod.utils and vrmod.utils.IsMagazine and vrmod.utils.IsMagazine(ent) then return false end
+			if ent:IsWeapon() then return false end
+			if g_VR.vehicle and IsValid(g_VR.vehicle.current) then
+				local veh = g_VR.vehicle.current
+				if ent == veh or ent:GetParent() == veh then return false end
+			end
 			return true
 		end,
 		mask = MASK_SHOT,

@@ -128,7 +128,7 @@ local function RefreshList(scroll, scrollTo)
 		local bind = vgui.Create("DLabel", row)
 		bind:SetPos(160, 5)
 		bind:SetSize(290, 18)
-		local txt = vrmod.bindings.FormatRule(rule, true)
+		local txt = vrmod.bindings.FormatRule(rule, true, tabFilter)
 		if listen and listen.action == info.id then
 			if listen.chord then
 				txt = listen.lastStatus or ("Hold 2+ buttons " .. CHORD_HOLD_SEC .. "s…")
@@ -360,8 +360,7 @@ concommand.Add("vrmod_bindingeditor", function()
 					local status, saved = vrmod.bindings.TickChordHold(listen.chordState, CHORD_HOLD_SEC)
 					if status then listen.lastStatus = status end
 					if saved then
-						local prev = vrmod.bindings.GetMap().actions[listen.action]
-						local set = prev and prev.set or nil
+						local set = (tabFilter == "driving" or tabFilter == "main") and tabFilter or nil
 						vrmod.bindings.SetActionBinding(listen.action, saved, "all", set)
 						StopListen()
 						FullRefresh()
@@ -377,8 +376,7 @@ concommand.Add("vrmod_bindingeditor", function()
 						news = vrmod.bindings.PollListenPresses(listen.held)
 					end
 					for _, id in ipairs(news) do
-						local prev = vrmod.bindings.GetMap().actions[listen.action]
-						local set = prev and prev.set or nil
+						local set = (tabFilter == "driving" or tabFilter == "main") and tabFilter or nil
 						vrmod.bindings.SetActionBinding(listen.action, { id }, "any", set)
 						StopListen()
 						FullRefresh()

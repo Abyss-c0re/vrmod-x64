@@ -109,7 +109,19 @@ local function InitializeMenuItems()
 	-- Row 2 (shifted — launcher takes col 0–1)
 	add("Flashlight", 2, 1, function() LocalPlayer():ConCommand("impulse 100") end, true, nil, "flashlight")
 	add("Laser pointer", 3, 1, function() LocalPlayer():ConCommand("vrmod_togglelaserpointer") end, true, nil, "laser")
-	add("Weapon VR", 4, 1, function()
+	-- Inventory fan (same as boolean_changeweapon); sticky open from QM, click card to pick
+	add("Select Weapon", 4, 1, function()
+		-- Defer past QM close + vehicle input settle so pose/HMD is valid
+		timer.Simple(0.12, function()
+			if not g_VR or not g_VR.active then return end
+			if g_VR.menus and g_VR.menus.weaponmenu then
+				if isfunction(VRUtilWeaponMenuClose) then VRUtilWeaponMenuClose() end
+			elseif isfunction(VRUtilWeaponMenuOpen) then
+				VRUtilWeaponMenuOpen({ sticky = true })
+			end
+		end)
+	end, true, "inventory · pick weapon", "select_weapon")
+	add("Weapon Tuning", 5, 1, function()
 		timer.Simple(0, function()
 			if not g_VR or not g_VR.active then return end
 			if vrmod.WeaponSettings_Open then
@@ -118,14 +130,14 @@ local function InitializeMenuItems()
 				RunConsoleCommand("vrmod_weapon_settings")
 			end
 		end)
-	end, true, "hold pose / laser / muzzle", "weapon_vr")
-	add("Toggle Noclip", 5, 1, function() LocalPlayer():ConCommand("noclip") end, true, nil, "noclip")
-	add("Undo", 0, 2, function() LocalPlayer():ConCommand("gmod_undo") end, true, nil, "undo")
-	add("Cleanup", 1, 2, function() LocalPlayer():ConCommand("gmod_cleanup") end, true, nil, "cleanup")
-	add("Admin Cleanup", 2, 2, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
+	end, true, "offsets · hold pose / laser / muzzle", "weapon_vr")
+	add("Toggle Noclip", 0, 2, function() LocalPlayer():ConCommand("noclip") end, true, nil, "noclip")
+	add("Undo", 1, 2, function() LocalPlayer():ConCommand("gmod_undo") end, true, nil, "undo")
+	add("Cleanup", 2, 2, function() LocalPlayer():ConCommand("gmod_cleanup") end, true, nil, "cleanup")
+	add("Admin Cleanup", 3, 2, function() LocalPlayer():ConCommand("gmod_admin_cleanup") end, true, nil, "admin_cleanup")
 
 	-- Row 3 / system
-	add("Bindings", 3, 2, function()
+	add("Bindings", 4, 2, function()
 		timer.Simple(0, function()
 			if vrmod.BindingsPanel_Open then
 				vrmod.BindingsPanel_Open()
@@ -134,7 +146,7 @@ local function InitializeMenuItems()
 			end
 		end)
 	end, true, "On foot / Vehicle rebind", "bindings")
-	add("Reset Vehicle View", 4, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
+	add("Reset Vehicle View", 5, 2, function() VRUtilresetVehicleView() end, true, nil, "vehicle_view")
 	-- no "Close Windows" on quick menu (menu button release already closes QM)
 	add("Recover Menus", 0, 3, function()
 		if vrmod.RecoverLostMenus then

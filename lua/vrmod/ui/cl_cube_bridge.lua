@@ -23,8 +23,10 @@ local RELAUNCH_PID = "/tmp/CubeUI_relaunch.pid"
 -- After XR shutdown, wait for runtime drain before first CubeUI attempt.
 local SPAWN_DELAY_SEC = 3.5
 -- Only retry *boot* failures (process dies in first few seconds).
-local HOST_BOOT_RETRIES = 10
-local HOST_BOOT_FAIL_MAX_SEC = 8
+-- Host launcher sleeps ~3s then CubeUI; handoff take_xr is often ~9s → lived ~12s.
+-- OLD max_boot=8 treated normal handoff as crash → up to 10 relaunch loops.
+local HOST_BOOT_RETRIES = 2
+local HOST_BOOT_FAIL_MAX_SEC = 45
 
 local function log(fmt, ...)
 	local msg = string.format(fmt, ...)

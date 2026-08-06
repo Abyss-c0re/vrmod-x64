@@ -143,13 +143,16 @@ function vrmod.utils.PatchGlideLights()
 	-- PT once before either eye (not on left PreRender — that flashed left only)
 	hook.Add("VRMod_PreStereo", "vrmod_glide_lights_pt", function()
 		if not g_VR or not g_VR.active then return end
+		if not LocalGlideVehicle() then return end
 		UpdateProjectedHeadlightsOnce()
 	end)
 
 	-- Inject only on real stereo eyes. Never when stereoEye is nil (radar / HUD RT).
+	-- Skip entirely when not in a Glide vehicle (was paying dual-eye cost always).
 	hook.Add("VRMod_PreRender", "vrmod_glide_lights", function(eye)
 		if not g_VR or not g_VR.active then return end
 		if eye ~= "left" and eye ~= "right" then return end
+		if not LocalGlideVehicle() then return end
 		InjectSpritesForEye()
 	end)
 

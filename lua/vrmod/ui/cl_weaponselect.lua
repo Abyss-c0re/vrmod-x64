@@ -228,21 +228,77 @@ local function DrawWeaponCard(x, y, w, h, item, hovered, selected, ply, fonts, T
 end
 
 local open = false
+-- "hold" = changeweapon press/release; "sticky" = Quick Menu / toggle (release must not close)
+local openMode = nil
 
-function VRUtilWeaponMenuOpen()
-	if open and not (g_VR.menus and g_VR.menus.weaponmenu) then open = false end
-	if open then return end
-	if not g_VR or not g_VR.active or not isfunction(VRUtilMenuOpen) then return end
-	local ply = LocalPlayer()
-	if not IsValid(ply) then return end
+local function IsDrivingOrSeated()
+	if g_VR and g_VR.vehicle then
+		if g_VR.vehicle.driving or g_VR.vehicle.inside or g_VR.vehicle.glide then
+			return true
+		end
+	end
+	local ply = LocalPlayer and LocalPlayer()
+	return IsValid(ply) and ply.InVehicle and ply:InVehicle()
+end
+
+--- Origin-local pose for the inventory fan.
+--- In vehicle: front of HMD (hands are often glued to the wheel / bone).
+--- On foot: primary hand, Alyx-style; HMD fallback if hand pose missing.
+local function ComputeWeaponMenuPose()
 	local hmd = g_VR.tracking and g_VR.tracking.hmd
+	local origin = g_VR.origin or Vector()
+	local originAng = g_VR.originAngle or Angle()
+	local driving = IsDrivingOrSeated()
+
+	if driving and hmd and hmd.pos and hmd.ang then
+		local yawOnly = Angle(0, hmd.ang.yaw, 0)
+		local worldPos = hmd.pos + yawOnly:Forward() * 30 + Vector(0, 0, -8)
+		local worldAng = Angle(0, yawOnly.yaw - 90, 55)
+		return WorldToLocal(worldPos, worldAng, origin, originAng)
+	end
+
 	local primary = (vrmod.GetPrimaryHand and vrmod.GetPrimaryHand()) or "right"
 	local ph = g_VR.tracking and (
 		primary == "left" and g_VR.tracking.pose_lefthand or g_VR.tracking.pose_righthand
 	)
-	if not hmd or not hmd.ang or not ph or not ph.pos or not ph.ang then return end
+	if ph and ph.pos and ph.ang and hmd and hmd.ang then
+		local tmpAng = Angle(0, hmd.ang.yaw - 90, 55)
+		return WorldToLocal(
+			ph.pos + ph.ang:Forward() * 9 + tmpAng:Right() * -(MENU_W * MENU_SCALE * 0.35) + tmpAng:Forward() * -4,
+			tmpAng,
+			origin,
+			originAng
+		)
+	end
+
+	-- HMD fallback (tracking hiccup / no hand)
+	if hmd and hmd.pos and hmd.ang then
+		local yawOnly = Angle(0, hmd.ang.yaw, 0)
+		local worldPos = hmd.pos + yawOnly:Forward() * 24 + Vector(0, 0, -6)
+		local worldAng = Angle(0, yawOnly.yaw - 90, 55)
+		return WorldToLocal(worldPos, worldAng, origin, originAng)
+	end
+	return nil, nil
+end
+
+--- opts.sticky: stay open until click/close (Quick Menu). Default hold mode for bind.
+function VRUtilWeaponMenuOpen(opts)
+	opts = type(opts) == "table" and opts or {}
+	local sticky = opts.sticky == true
+	if open and not (g_VR.menus and g_VR.menus.weaponmenu) then
+		open = false
+		openMode = nil
+	end
+	if open then return end
+	if not g_VR or not g_VR.active or not isfunction(VRUtilMenuOpen) then return end
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return end
+
+	local pos, ang = ComputeWeaponMenuPose()
+	if not pos or not ang then return end
 
 	open = true
+	openMode = sticky and "sticky" or "hold"
 	local selectHolster = false
 	local flatItems = {}
 	for _, wep in ipairs(ply:GetWeapons()) do
@@ -306,18 +362,10 @@ function VRUtilWeaponMenuOpen()
 		end
 	end
 
-	-- World placement: Alyx-like in front of primary hand, slightly tilted
-	local tmpAng = Angle(0, hmd.ang.yaw - 90, 55)
-	local pos, ang = WorldToLocal(
-		ph.pos + ph.ang:Forward() * 9 + tmpAng:Right() * -(MENU_W * MENU_SCALE * 0.35) + tmpAng:Forward() * -4,
-		tmpAng,
-		g_VR.origin or Vector(),
-		g_VR.originAngle or Angle()
-	)
-
 	VRUtilMenuOpen("weaponmenu", MENU_W, MENU_H, nil, false, pos, ang, MENU_SCALE, true, function()
 		hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 		open = false
+		openMode = nil
 		local p = LocalPlayer()
 		if not IsValid(p) then return end
 
@@ -345,6 +393,7 @@ function VRUtilWeaponMenuOpen()
 
 	if not (g_VR.menus and g_VR.menus.weaponmenu) then
 		open = false
+		openMode = nil
 		return
 	end
 
@@ -352,6 +401,12 @@ function VRUtilWeaponMenuOpen()
 	m.cubeMenu = true
 	m.grabbable = true
 	m.scale = MENU_SCALE
+	-- ApplyMenuLayout may restore a free-float parked elsewhere (or wheel-local).
+	-- Always re-seat at computed pose so vehicle / Select Weapon actually appears in view.
+	m.pos, m.ang = pos, ang
+	m.freeFloat = true
+	m.attachment = false
+	m._weaponMenuSticky = sticky
 
 	-- Layout constants
 	local HEADER_H = 52
@@ -641,12 +696,14 @@ function VRUtilWeaponMenuOpen()
 		VRUtilMenuRenderEnd()
 	end
 
-	-- Click categories / page arrows while menu held open
+	-- Click categories / page arrows while open (same primary path as every other UI:
+	-- on foot = fire trigger; in vehicle = throttle via vrmod.DispatchUIClick).
 	hook.Add("VRMod_Input", "vrmod_weaponmenu_nav", function(action, pressed)
 		if not open then return end
 		if not pressed then return end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
-		if g_VR.menuFocus ~= "weaponmenu" then return end
+		-- Open weapon wheel counts as focused UI even if laser focus lags one frame
+		if g_VR.menuFocus and g_VR.menuFocus ~= "weaponmenu" then return end
 		if state.hoveredCat > 0 then
 			state.catIndex = state.hoveredCat
 			state.hoveredItem = -1
@@ -655,7 +712,6 @@ function VRUtilWeaponMenuOpen()
 			return
 		end
 		if state.hoveredPrev then
-			local pages = clampPage()
 			if state.page > 1 then
 				state.page = state.page - 1
 				state.pageByCat[state.catIndex] = state.page
@@ -672,8 +728,15 @@ function VRUtilWeaponMenuOpen()
 			end
 			return
 		end
+		-- Click weapon card or holster: select + close (sticky open from Quick Menu)
 		if state.hoveredHolster then
 			selectHolster = true
+			VRUtilWeaponMenuClose()
+			return
+		end
+		if state.hoveredItem and state.hoveredItem > 0 then
+			VRUtilWeaponMenuClose()
+			return
 		end
 	end)
 
@@ -696,6 +759,7 @@ end
 
 function VRUtilWeaponMenuClose()
 	open = false
+	openMode = nil
 	hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 	hook.Remove("VRMod_Input", "vrmod_weaponmenu_nav")
 	if isfunction(VRUtilMenuClose) then
@@ -703,8 +767,14 @@ function VRUtilWeaponMenuClose()
 	end
 end
 
+--- True while sticky (Quick Menu) inventory is up — bind release must not dismiss it.
+function VRUtilWeaponMenuIsSticky()
+	return open and openMode == "sticky"
+end
+
 hook.Add("VRMod_Exit", "vrmod_weaponmenu_exit", function()
 	open = false
+	openMode = nil
 	hook.Remove("PreRender", "vrutil_hook_renderweaponselect")
 	hook.Remove("VRMod_Input", "vrmod_weaponmenu_nav")
 end)

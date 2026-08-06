@@ -98,7 +98,8 @@ if SERVER then
 			local yaw = net.ReadFloat()
 			local roll = net.ReadFloat()
 
-			local lerpFactor = 0.2
+			-- Light lerp only (0.55) — old 0.2 made drive feel laggy; zero snaps for release
+			local lerpFactor = 0.55
 			local function LerpOrReset(current, new)
 				if new == 0 then return 0 end
 				return Lerp(lerpFactor, current, new)
@@ -132,11 +133,6 @@ if SERVER then
 			else
 				vehicle:SetInputFloat(seatIndex, "accelerate", newThrottle)
 			end
-
-			vrmod.logger.Debug(string.format(
-				"Server applied - Throttle: %.2f, Brake: %.2f, Steer: %.2f, Pitch: %.2f, Yaw: %.2f, Roll: %.2f",
-				newThrottle, newBrake, newSteer, newPitch, newYaw, newRoll
-			))
 			return
 		end
 

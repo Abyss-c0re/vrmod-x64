@@ -77,6 +77,9 @@ if CLIENT then
 		else
 			pickupTargetEntLeft = nil
 		end
+		-- Publish for vehicle wheel-grip vs mag-grab arbitration (cl_input)
+		g_VR.pickupTargetLeft = pickupTargetEntLeft
+		g_VR.pickupTargetRight = pickupTargetEntRight
 	end)
 
 	hook.Add("PostDrawOpaqueRenderables", "vrmod_draw_pickup_halo", function(depth, sky)

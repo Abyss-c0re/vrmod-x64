@@ -254,12 +254,24 @@ end
 
 function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
     if not IsValid(vehicle) or not boneId then return nil, nil end
-    if g_VR.vehicle.glide then return vehicle:GetBonePosition(boneId) end
-    if cachedFrame == FrameNumber() then return cachedBonePos, cachedBoneAng end
-    local m = vehicle:GetBoneMatrix(boneId)
-    if not m then return nil, nil end
-    cachedBonePos, cachedBoneAng = m:GetTranslation(), m:GetAngles()
-    cachedFrame = FrameNumber()
+    -- Cache once per render frame — Glide GetBonePosition was uncached and
+    -- SteeringGripTransform ran twice (left+right PreRender) → VR frame lag.
+    local frameKey = (g_VR and g_VR.stereoFrame) or FrameNumber()
+    if cachedFrame == frameKey and cachedBonePos then
+        return cachedBonePos, cachedBoneAng
+    end
+    local pos, ang
+    if g_VR.vehicle and g_VR.vehicle.glide then
+        pos, ang = vehicle:GetBonePosition(boneId)
+    else
+        local m = vehicle:GetBoneMatrix(boneId)
+        if m then
+            pos, ang = m:GetTranslation(), m:GetAngles()
+        end
+    end
+    if not pos then return nil, nil end
+    cachedBonePos, cachedBoneAng = pos, ang
+    cachedFrame = frameKey
     return cachedBonePos, cachedBoneAng
 end
 
@@ -277,7 +289,7 @@ function vrmod.utils.PatchGlideCamera()
         local vehicle = self.vehicle
         if not IsValid(vehicle) then return end
         local user = self.user
-        -- VR guard: ensure vrmod and g_VR.view exist
+        -- VR: cheap path — no 50k-unit aim traces (those stalled VR frames via CalcView)
         if vrmod and vrmod.IsPlayerInVR and vrmod.IsPlayerInVR(user) and g_VR and g_VR.view then
             local hmdPos = g_VR.view.origin or user:EyePos()
             local hmdAng = g_VR.view.angles or user:EyeAngles()
@@ -294,53 +306,17 @@ function vrmod.utils.PatchGlideCamera()
                 local cfgCamDist = Config and Config.cameraDistance or 100
                 local cfgCamHeight = Config and Config.cameraHeight or 50
                 local baseOffset = (vehicle.CameraOffset or Vector(-100, 0, 50)) * Vector(cfgCamDist * (1 + (self.trailerDistanceFraction or 0) * (vehicle.CameraTrailerDistanceMultiplier or 0)), 1, cfgCamHeight)
-                local endPos = pivot + angles:Forward() * baseOffset[1] + angles:Right() * baseOffset[2] + angles:Up() * baseOffset[3]
-                local offsetDir = endPos - pivot
-                local offsetLen = offsetDir:Length()
-                if offsetLen > 0 then
-                    offsetDir:Normalize()
-                else
-                    offsetDir = angles:Forward() -- arbitrary fallback
-                    offsetLen = 1
-                end
-
-                -- Local trace table; do NOT rely on global traceData/traceResult
-                local tr = util.TraceLine({
-                    start = pivot,
-                    endpos = endPos + offsetDir * 10,
-                    mask = 16395, -- MASK_SOLID_BRUSHONLY
-                    filter = {vehicle}
-                })
-
+                -- Soft distance only — skip brush TraceLine every CalcView in VR
                 local fraction = self.distanceFraction or 1
-                if tr.Hit then
-                    fraction = tr.Fraction or fraction
-                    if fraction < (self.distanceFraction or 1) then self.distanceFraction = fraction end
-                end
-
                 offset = (self.shakeOffset or Vector()) + baseOffset * fraction
             end
 
             self.position = pivot + angles:Forward() * offset[1] + angles:Right() * offset[2] + angles:Up() * offset[3]
-            -- Aim trace from player's eyes using HMD forward
-            local trAim = util.TraceLine({
-                start = user:EyePos(),
-                endpos = user:EyePos() + hmdAng:Forward() * 50000,
-                filter = {user, vehicle}
-            })
-
-            self.lastAimPos = trAim.HitPos
-            self.lastAimEntity = trAim.Entity
-            local aimDir = trAim.HitPos - user:EyePos()
-            self.lastAimPosDistanceFromEyes = aimDir:Length()
-            if self.lastAimPosDistanceFromEyes > 0 then
-                aimDir:Normalize()
-                self.lastAimPosAnglesFromEyes = aimDir:Angle()
-            else
-                self.lastAimPosAnglesFromEyes = hmdAng
-            end
-
-            -- Keep player's eye angles synced to HMD for weapon aim
+            -- Aim: HMD forward only (no world TraceLine) — weapons still use VR tracking
+            self.lastAimPos = hmdPos + hmdAng:Forward() * 4096
+            self.lastAimEntity = NULL
+            self.lastAimPosDistanceFromEyes = 4096
+            self.lastAimPosAnglesFromEyes = hmdAng
             if user.SetEyeAngles then user:SetEyeAngles(hmdAng) end
             return {
                 origin = self.position,
@@ -355,7 +331,6 @@ function vrmod.utils.PatchGlideCamera()
 
     function Camera:CreateMove(cmd)
         if self.isActive and vrmod and vrmod.IsPlayerInVR and vrmod.IsPlayerInVR(self.user) then
-            -- Prefer the cached eye-relative aim angles; fall back to HMD or stored angles if missing.
             local setAng = self.lastAimPosAnglesFromEyes or g_VR and g_VR.view and g_VR.view.angles or self.angles or Angle(0, 0, 0)
             cmd:SetViewAngles(setAng)
             cmd:SetUpMove(math.Clamp(self.lastAimPosDistanceFromEyes or 0, 0, 10000))

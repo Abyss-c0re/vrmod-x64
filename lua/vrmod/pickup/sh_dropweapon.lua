@@ -26,12 +26,32 @@ if SERVER then
     end)
 
     net.Receive("SelectEmptyWeapon", function(_, ply) ply:SelectWeapon("weapon_vrmod_empty") end)
+    -- Block drops around vehicle enter/exit (action-set switch fires grip-release → gun becomes a prop)
+    local vehicleDropBlockUntil = {}
+    local function BlockVehicleDrop(ply, secs)
+        if not IsValid(ply) then return end
+        vehicleDropBlockUntil[ply] = CurTime() + (secs or 2)
+    end
+    hook.Add("PlayerEnteredVehicle", "vrmod_block_drop_vehicle", function(ply)
+        BlockVehicleDrop(ply, 3)
+    end)
+    hook.Add("PlayerLeaveVehicle", "vrmod_block_drop_vehicle", function(ply)
+        BlockVehicleDrop(ply, 2)
+    end)
+
     net.Receive("DropWeapon", function(_, ply)
         local dropAsWeapon = net.ReadBool()
         local rhandvel = net.ReadVector()
         local rhandangvel = net.ReadVector()
         local wep = ply:GetActiveWeapon()
-        if not IsValid(wep) or wep.undroppable or ply:InVehicle() or InBlackList(wep:GetClass()) then return end
+        if not IsValid(wep) or wep.undroppable or InBlackList(wep:GetClass()) then return end
+        if ply:InVehicle() then return end
+        if ply.GlideGetVehicle then
+            local ok, veh = pcall(function() return ply:GlideGetVehicle() end)
+            if ok and IsValid(veh) then return end
+        end
+        local blockUntil = vehicleDropBlockUntil[ply]
+        if blockUntil and CurTime() < blockUntil then return end
         local modelname = wep:GetModel()
         local guninhandpos = vrmod.GetRightHandPos(ply)
         local guninhandang = vrmod.GetRightHandAng(ply)
@@ -128,6 +148,10 @@ if CLIENT then
     local dropenable = CreateClientConVar("vrmod_weapondrop_enable", 1, true, FCVAR_ARCHIVE, "", 0, 1)
     hook.Add("VRMod_Input", "Weapon_Drop", function(action, state)
         if not dropenable:GetBool() or g_VR.antiDrop then return end
+        -- Never drop while seated / transitioning (action sets spam grip edges)
+        if g_VR.vehicle and (g_VR.vehicle.inside or g_VR.vehicle.driving) then return end
+        local ply = LocalPlayer()
+        if IsValid(ply) and ply:InVehicle() then return end
         if action == "boolean_right_pickup" and not state then
             net.Start("DropWeapon")
             net.WriteBool(true)

@@ -626,12 +626,45 @@ function vrmod.utils.GetClimbingGripState()
     return left, right
 end
 
+--- True when seated in stock vehicle, Glide, or VR vehicle state.
+local function IsSeatedInVehicle(ply)
+	if not IsValid(ply) then return false end
+	if ply:InVehicle() then return true end
+	-- Glide often leaves InVehicle() false while seated
+	if ply.GlideGetVehicle then
+		local ok, veh = pcall(function() return ply:GlideGetVehicle() end)
+		if ok and IsValid(veh) then return true end
+	end
+	if CLIENT and g_VR and g_VR.vehicle then
+		if g_VR.vehicle.inside or g_VR.vehicle.driving then return true end
+		if g_VR.vehicle.glide and IsValid(g_VR.vehicle.current) then return true end
+	end
+	return false
+end
+
+--- True when hand/head wall push must not run (vehicle, mag hold, wheel grip).
+local function ShouldSkipHandWall(ply)
+	if not IsValid(ply) then return true end
+	if IsSeatedInVehicle(ply) then return true end
+	-- Steering wheel grip — wall push fights bone-follow / wheel pose
+	if g_VR and (g_VR.wheelGripped or g_VR.wheelGrippedLeft or g_VR.wheelGrippedRight) then
+		return true
+	end
+	-- Held mag/clip: wall push fights reload (hand + mag near gun/cabin)
+	if CLIENT and g_VR then
+		local L, R = g_VR.heldEntityLeft, g_VR.heldEntityRight
+		if IsValid(L) and vrmod.utils.IsMagazine and vrmod.utils.IsMagazine(L) then return true end
+		if IsValid(R) and vrmod.utils.IsMagazine and vrmod.utils.IsMagazine(R) then return true end
+	end
+	return false
+end
+
 local PRECHECK_MOVE_SQR = PRECHECK_MOVE_THRESHOLD * PRECHECK_MOVE_THRESHOLD
 local POS_TOLERANCE_SQR = POS_TOLERANCE * POS_TOLERANCE
 
 function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
     local ply = LocalPlayer()
-    if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or ply:GetMoveType() == MOVETYPE_NOCLIP or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ply:InVehicle() then
+    if not IsValid(ply) or not g_VR.active or not ply:GetNWBool("vrmod_server_enforce_collision", true) or ply:GetMoveType() == MOVETYPE_NOCLIP or not ply:Alive() or not vrmod.IsPlayerInVR(ply) or ShouldSkipHandWall(ply) then
         vrmod._collisionNearby = false
         lastPreCheckResult = false
         return
@@ -1000,7 +1033,7 @@ function vrmod.utils.CheckWeaponPushout(pos, ang)
         or not ply:GetNWBool("vrmod_server_enforce_collision", true)
         or ply:GetMoveType() == MOVETYPE_NOCLIP
         or not ply:Alive()
-        or ply:InVehicle()
+        or ShouldSkipHandWall(ply)
     then
         return pos, ang
     end
@@ -1028,8 +1061,10 @@ local handWall = {
 -- If lastFree is farther than this from desired AND desired is free, re-acquire.
 -- When desired is still solid we KEEP lastFree (dropping it was the force-through bug).
 local MAX_LASTFREE_DIST_SQR = 48 * 48
--- Soft visual cap only — NEVER leave the hand inside solid by partial-correcting.
-local MAX_HAND_CORRECTION = 56
+-- Cap extreme tethers; still full block at wall (never partial-scale into solid).
+local MAX_HAND_CORRECTION = 40
+-- Ignore micro-corrections (steering / hull noise) to stop hand flicker
+local MIN_HAND_CORRECTION_SQR = 0.35 * 0.35
 
 --- Hull-sweep from last free sample → desired sample (climbing-style).
 --- Never returns a position still inside solid when a free sample is known.
@@ -1247,7 +1282,7 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         or ply:GetMoveType() == MOVETYPE_NOCLIP
         or not ply:Alive()
         or not vrmod.IsPlayerInVR(ply)
-        or ply:InVehicle()
+        or ShouldSkipHandWall(ply)
     then
         wepWall.hasFree = false
         return passthrough()
@@ -1260,8 +1295,14 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     end
 
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    -- Slightly larger than visual fist so force-push cannot slip a 1u gap into solid
-    local radius = math.max(vrmod.DEFAULT_RADIUS or 2.2, 2.75)
+    -- Per-hand wheel grip (steering) — same skip as climb grip
+    if g_VR then
+        if g_VR.wheelGrippedLeft then leftGrip = true end
+        if g_VR.wheelGrippedRight then rightGrip = true end
+        if g_VR.wheelGripped then leftGrip, rightGrip = true, true end
+    end
+    -- Modest hull: oversized radius caused StartSolid flicker near props / dashboards
+    local radius = math.max(vrmod.DEFAULT_RADIUS or 2.2, 2.35)
     local offset = math.min(vrmod.DEFAULT_OFFSET or 5, 2.5)
     -- Ignore held mags/props — otherwise left-hand mag reloads fight wall push (flicker)
     local filter = WallFilter(ply)
@@ -1336,33 +1377,24 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
             vrmod._lastGoodShapeRight = shape
         end
 
-        -- Only release absurd far locks (teleport / fly-away) — never mid-push
-        if clipped and ShouldReleaseWallLock(safeSample, desiredSample) then
-            -- Keep blocking this frame but re-seed free sample at rest
-            local stRel = handWall[handKey]
-            if stRel and IsVec(safeSample) then
-                if not IsVec(stRel.lastFree) then stRel.lastFree = Vector() end
-                stRel.lastFree:Set(safeSample)
-                stRel.hasFree = true
-            end
-        end
-
         if clipped then
-            -- FULL correction into free space — partial cap left hands inside walls
-            -- when players force-pushed (the "shove through wall" bug).
             local delta = safeSample - desiredSample
-            local dlen = delta:Length()
-            if dlen > MAX_HAND_CORRECTION then
-                -- Still apply full wall rest: re-anchor from safeSample, do not
-                -- partial-scale delta (that tunnels) and do not clear lastFree.
-                delta = safeSample - desiredSample
+            local dlenSqr = delta:LengthSqr()
+            -- Dead-zone: hull noise / steering micro-hits must not jitter the hand
+            if dlenSqr >= MIN_HAND_CORRECTION_SQR then
+                local dlen = math.sqrt(dlenSqr)
+                if dlen > MAX_HAND_CORRECTION then
+                    delta = delta * (MAX_HAND_CORRECTION / dlen)
+                end
+                trackPos = AddPosInPlace(trackPos, delta)
             end
-            trackPos = AddPosInPlace(trackPos, delta)
             cachedPushOutPos[handKey] = safeSample
             lastNonClippedNormal[handKey] = normal
-            -- Continuity: free sample is the wall rest, not the buried controller
+            -- CRITICAL: do NOT write wall rest into lastFree — that caused
+            -- StartSolid oscillation (flicker) next frame. Keep pre-contact free sample.
             local st = handWall[handKey]
-            if st and IsVec(safeSample) then
+            if st and not st.hasFree and IsVec(safeSample) then
+                -- Only seed if we had nothing (first contact after teleport)
                 if not IsVec(st.lastFree) then st.lastFree = Vector() end
                 st.lastFree:Set(safeSample)
                 st.hasFree = true
@@ -1455,19 +1487,22 @@ function vrmod.utils.UpdateHeadCollisions()
 	if not IsValid(ply) or not g_VR.active or not hmd or not IsVec(hmd.pos) then return end
 	local cvCol = GetConVar("vrmod_collisions")
 	local colOn = (not cvCol or cvCol:GetBool()) and ply:GetNWBool("vrmod_server_enforce_collision", true)
+	-- Never shift playspace while driving / Glide / wheel — fights steering & seats
 	if not colOn
 		or ply:GetMoveType() == MOVETYPE_NOCLIP
 		or not ply:Alive()
 		or not vrmod.IsPlayerInVR(ply)
-		or ply:InVehicle()
+		or ShouldSkipHandWall(ply)
 	then
 		hmdWall.hasFree = false
 		return
 	end
 
 	local desired = hmd.pos
+	-- Slightly smaller default than before — less false StartSolid near low ceilings
 	local radius = math.Clamp(cv_head_radius:GetFloat(), 3, 14)
-	local pad = math.max(1.0, GetWallPushPad() + 0.5)
+	if radius > 8 then radius = 8 end
+	local pad = math.max(0.75, GetWallPushPad() * 0.75)
 	local mins, maxs = SetSymmetricHull(radius)
 	local filter = WallFilter(ply)
 
@@ -1567,22 +1602,31 @@ function vrmod.utils.UpdateHeadCollisions()
 	end
 
 	local delta = safe - desired
-	if delta:LengthSqr() < 0.0001 then
-		hmdWall.lastFree:Set(safe)
+	local dlenSqr = delta:LengthSqr()
+	-- Dead-zone: tiny origin shoves caused whole-body hand flicker with steering
+	if dlenSqr < (0.6 * 0.6) then
+		if hmdWall.hasFree then return end
+		hmdWall.lastFree:Set(desired)
 		hmdWall.hasFree = true
 		return
 	end
-	-- Cap single-frame origin shove (teleport safety) but never leave head in solid
-	local dlen = delta:Length()
-	if dlen > 64 then
-		-- Prefer last free over a 64u snap if available
+	local dlen = math.sqrt(dlenSqr)
+	if dlen > 48 then
 		if hmdWall.hasFree and IsVec(hmdWall.lastFree) then
 			delta = hmdWall.lastFree - desired
+			dlen = delta:Length()
+		else
+			delta = delta * (48 / dlen)
 		end
 	end
+	-- Dampen multi-frame chatter (0.55 = not full shove every frame)
+	delta = delta * 0.55
 	ShiftPlayspaceWorld(delta)
-	hmdWall.lastFree:Set(safe)
-	hmdWall.hasFree = true
+	-- Keep last free as pre-block sample when we have one; else seed from safe
+	if not hmdWall.hasFree then
+		hmdWall.lastFree:Set(safe)
+		hmdWall.hasFree = true
+	end
 end
 
 function vrmod.utils.SphereCollidesWithProp(pos, radius, filter)

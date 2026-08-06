@@ -73,6 +73,7 @@ local function init()
 					self:SetAngles(self._vrHoldAng)
 				end
 				self:DrawModel()
+				self._vrHoldDrawnFrame = sf
 			end
 
 			ent.VRPickupRenderOverride = ent.RenderOverride
@@ -86,6 +87,9 @@ local function init()
 					g_VR.heldEntityRight = ent
 					if g_VR.heldEntityLeft == ent then g_VR.heldEntityLeft = nil end
 				end
+				-- Clip grab must not unhide the SWEP world model (second gun next to VM)
+				local aw = LocalPlayer():GetActiveWeapon()
+				if IsValid(aw) then aw:SetNoDraw(true) end
 			end
 
 			hook.Call("VRMod_Pickup", nil, ply, ent)
@@ -115,6 +119,31 @@ local function init()
 			local ent = net.ReadEntity()
 			if IsValid(ent) and ent.RenderOverride == ent.VRPickupRenderOverride then ent.RenderOverride = nil end
 			hook.Call("VRMod_Drop", nil, ply, ent)
+		end)
+
+		-- Vehicle leaves often cull physics mags so RenderOverride never runs.
+		-- Force-draw ONLY magazines — never weapons (that is a different dual-gun bug).
+		hook.Add("PostDrawTranslucentRenderables", "vrmod_arcvr_force_draw_mag", function(depth, sky)
+			if depth or sky then return end
+			if not g_VR or not g_VR.active then return end
+			if g_VR.stereoEye ~= "left" and g_VR.stereoEye ~= "right" then return end
+			local sf = g_VR.stereoFrame or 0
+			local function isMag(ent)
+				if not IsValid(ent) then return false end
+				if ent.ArcticVRMagazine or ent.MagID then return true end
+				local c = ent:GetClass() or ""
+				return c:find("avrmag_", 1, true) ~= nil
+			end
+			local function forceMag(ent)
+				if not isMag(ent) then return end
+				local fn = ent.VRPickupRenderOverride or ent.RenderOverride
+				if not isfunction(fn) then return end
+				-- Already painted this eye via engine RenderOverride
+				if ent._vrHoldDrawnFrame == sf then return end
+				fn(ent)
+			end
+			forceMag(g_VR.heldEntityLeft)
+			forceMag(g_VR.heldEntityRight)
 		end)
 	elseif SERVER then
 		util.AddNetworkString("vrutil_net_pickup")
@@ -170,9 +199,18 @@ local function init()
 						local relPos = v.left and frame.lefthandPos or frame.righthandPos
 						local relAng = v.left and frame.lefthandAng or frame.righthandAng
 						if not relPos or not relAng then continue end
-						-- latestFrame hand poses are relative to player origin
-						local handPos = LocalToWorld(relPos, Angle(), ply:GetPos(), Angle())
-						local handAng = relAng
+						-- latestFrame hand poses are relative to player origin;
+						-- in vehicle use seat angles so mag shadow tracks cabin hands
+						local originAng = Angle()
+						if ply:InVehicle() then
+							local veh = ply:GetVehicle()
+							if IsValid(veh) then originAng = veh:GetAngles() end
+						end
+						local handPos = LocalToWorld(relPos, Angle(), ply:GetPos(), originAng)
+						local handAng = Angle(relAng)
+						if originAng.yaw ~= 0 or originAng.p ~= 0 or originAng.r ~= 0 then
+							handAng = LocalToWorld(Vector(), relAng, Vector(), originAng)
+						end
 						local wPos, wAng = LocalToWorld(v.localPos, v.localAng, handPos, handAng)
 						v.targetPos = wPos
 						v.ent:GetPhysicsObject():UpdateShadow(wPos, wAng, 1 / tickrate)
