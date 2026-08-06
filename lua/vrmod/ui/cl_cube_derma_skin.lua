@@ -593,9 +593,9 @@ local function placeCloseButton(btn, panel)
 	btn:SetZPos(32767)
 	btn:MoveToFront()
 	btn:SetMouseInputEnabled(true)
-	-- Visible whenever VR theming is on (do not require flaky _cubeThemed re-checks)
-	local show = shouldTheme()
-	if panel._cubeThemed == false then show = false end
+	-- Always show in VR (context-opened tools need X even if theme lag / oversized frame)
+	local show = (g_VR and g_VR.active) or shouldTheme()
+	if panel._cubeThemed == false and not (g_VR and g_VR.active) then show = false end
 	btn:SetVisible(show)
 end
 
@@ -632,9 +632,25 @@ local function installCloseButton(panel, which)
 	end
 	function btn:DoClick()
 		local shell = self._cubeShell or "spawn"
-		if vrmod.panel2vr and vrmod.panel2vr.CloseSandboxShell then
-			vrmod.panel2vr.CloseSandboxShell(shell)
-		elseif shell == "context" and IsValid(g_ContextMenu) and g_ContextMenu.Close then
+		-- Prefer panel2vr close (handles spawn/context + any manifested Derma)
+		if vrmod.panel2vr then
+			if panel._p2vKind and panel._p2vKind ~= "spawnmenu" and panel._p2vKind ~= "contextmenu"
+				and panel._p2vKind ~= "spawn" and panel._p2vKind ~= "context" then
+				-- Generic / Glide / context-opened tools
+				if IsValid(panel) then
+					local uid = panel._p2vUid
+					if uid and isfunction(VRUtilMenuClose) then pcall(VRUtilMenuClose, uid) end
+					if panel.Close then pcall(function() panel:Close() end) end
+					if IsValid(panel) and panel.Remove then pcall(function() panel:Remove() end) end
+				end
+				return
+			end
+			if vrmod.panel2vr.CloseSandboxShell then
+				vrmod.panel2vr.CloseSandboxShell(shell)
+				return
+			end
+		end
+		if shell == "context" and IsValid(g_ContextMenu) and g_ContextMenu.Close then
 			g_ContextMenu:Close()
 		elseif IsValid(g_SpawnMenu) and g_SpawnMenu.Close then
 			g_SpawnMenu:Close()
@@ -720,66 +736,82 @@ local function polishSpawnTreePanels(root)
 end
 
 --- Context menu stock layout uses ScrW/ScrH — content sits OFF the VR RT.
-local function layoutContextForVR(panel)
+-- IMPORTANT: never force size back to GetVRUIPanelMetrics — that undoes corner-resize.
+-- @param pw, ph optional override (panel size if nil)
+function vrmod.cube.LayoutContextForVR(panel, pw, ph)
 	if not IsValid(panel) then return end
 	-- World clicker steals focus for "shoot world through UI" — kills VR laser clicks
 	if panel.SetWorldClicker then panel:SetWorldClicker(false) end
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
 	-- Stock ContextMenu: Dock FILL + DesktopWidgets Dock LEFT — undock into RT box
 	if panel.Dock then panel:Dock(NODOCK) end
-	-- Prefer VR eye metrics when available (keeps layout in sync with RT)
-	local mw, mh
-	if vrmod.GetVRUIPanelMetrics then
-		mw, mh = vrmod.GetVRUIPanelMetrics("contextmenu")
+
+	pw = math.floor(tonumber(pw) or panel:GetWide() or 420)
+	ph = math.floor(tonumber(ph) or panel:GetTall() or 480)
+	if pw < 280 then pw = 280 end
+	if ph < 240 then ph = 240 end
+	-- Keep current pixel size (resize / open); only clamp to clickable desktop FB
+	if vrmod.GetVRUIClickableMax then
+		local maxW, maxH = vrmod.GetVRUIClickableMax()
+		if pw > maxW then pw = maxW end
+		if ph > maxH then ph = maxH end
 	end
-	local pw = math.max(panel:GetWide(), mw or 320, 320)
-	local ph = math.max(panel:GetTall(), mh or 240, 240)
-	if mw and mh and (panel:GetWide() ~= mw or panel:GetTall() ~= mh) then
-		panel:SetSize(mw, mh)
-		pw, ph = mw, mh
+	if panel:GetWide() ~= pw or panel:GetTall() ~= ph then
+		panel:SetSize(pw, ph)
 	end
 	panel:SetPos(0, 0)
 	if panel.DockPadding then
 		panel:DockPadding(4, TITLE_H + 2, 4, 4)
 	end
-	-- Tool control panel lives on Canvas (DCategoryList)
+
+	local pad = 10
+	local iconsH = math.Clamp(math.floor(ph * 0.20), 72, 140)
+	local canvasTop = TITLE_H + pad
+	local canvasH = math.max(100, ph - canvasTop - iconsH - pad)
+	local contentW = math.max(120, pw - pad * 2)
+
+	-- Tool control panel (Canvas / ActiveControlPanel) — fill middle band
 	if IsValid(panel.Canvas) then
 		if panel.Canvas.Dock then panel.Canvas:Dock(NODOCK) end
 		if panel.Canvas.SetWorldClicker then panel.Canvas:SetWorldClicker(false) end
+		panel.Canvas:SetVisible(true)
+		panel.Canvas:SetPos(pad, canvasTop)
+		panel.Canvas:SetSize(contentW, canvasH)
+		if panel.Canvas.InvalidateLayout then panel.Canvas:InvalidateLayout(true) end
+
 		local acp = spawnmenu and spawnmenu.ActiveControlPanel and spawnmenu.ActiveControlPanel()
 		if IsValid(acp) then
-			pcall(function() acp:InvalidateLayout(true) end)
-			local tall = math.min((acp.GetTall and acp:GetTall() or 400) + 10, ph - TITLE_H - 24)
-			local wide = math.min(math.floor(pw * 0.88), math.max(220, pw - 24))
-			panel.Canvas:SetVisible(true)
-			panel.Canvas:SetSize(wide, math.max(120, tall))
-			panel.Canvas:SetPos(12, TITLE_H + 8)
-			if panel.Canvas.InvalidateLayout then panel.Canvas:InvalidateLayout(true) end
-		else
-			panel.Canvas:SetVisible(panel.Canvas:IsVisible())
-			if panel.Canvas:IsVisible() then
-				panel.Canvas:SetSize(math.max(200, pw - 24), math.max(120, ph - TITLE_H - 24))
-				panel.Canvas:SetPos(12, TITLE_H + 8)
+			-- Fit tool UI into canvas; scroll if stock panel is taller than band
+			if acp.Dock then pcall(function() acp:Dock(NODOCK) end) end
+			if acp.SetWide then pcall(function() acp:SetWide(contentW - 4) end) end
+			if acp.SetTall then
+				local want = acp.GetTall and acp:GetTall() or canvasH
+				pcall(function() acp:SetTall(math.min(want, canvasH - 4)) end)
 			end
+			if acp.SetPos then pcall(function() acp:SetPos(0, 0) end) end
+			if acp.InvalidateLayout then pcall(function() acp:InvalidateLayout(true) end) end
 		end
 	end
-	-- DesktopWidgets (DIconLayout) — undock and keep inside frame
+
+	-- DesktopWidgets (DIconLayout) — bottom strip, full width (was crushed to 40–100px)
 	if IsValid(panel.DesktopWidgets) then
 		if panel.DesktopWidgets.Dock then panel.DesktopWidgets:Dock(NODOCK) end
 		if panel.DesktopWidgets.SetWorldClicker then panel.DesktopWidgets:SetWorldClicker(false) end
-		local y0 = TITLE_H + 8
-		if IsValid(panel.Canvas) and panel.Canvas:IsVisible() then
-			y0 = panel.Canvas:GetY() + panel.Canvas:GetTall() + 8
-		end
-		-- Icons row under tool panel (or fill if no tool)
-		local ih = math.max(40, math.min(100, ph - y0 - 12))
+		local y0 = ph - iconsH - pad
 		if not (IsValid(panel.Canvas) and panel.Canvas:IsVisible()) then
-			ih = math.max(80, ph - y0 - 12)
+			y0 = canvasTop
+			iconsH = math.max(80, ph - canvasTop - pad)
 		end
-		panel.DesktopWidgets:SetPos(12, y0)
-		panel.DesktopWidgets:SetSize(math.max(100, pw - 24), ih)
+		panel.DesktopWidgets:SetPos(pad, y0)
+		panel.DesktopWidgets:SetSize(contentW, iconsH)
 		if panel.DesktopWidgets.InvalidateLayout then panel.DesktopWidgets:InvalidateLayout(true) end
+		if panel.DesktopWidgets.Layout then pcall(function() panel.DesktopWidgets:Layout() end) end
 	end
+end
+
+-- Back-compat local name used by themeWorkbench
+local function layoutContextForVR(panel, pw, ph)
+	return vrmod.cube.LayoutContextForVR(panel, pw, ph)
 end
 
 local function themeWorkbench(panel, title, which)
@@ -810,7 +842,7 @@ local function themeWorkbench(panel, title, which)
 		end
 
 		if isContext then
-			layoutContextForVR(panel)
+			layoutContextForVR(panel, panel:GetWide(), panel:GetTall())
 		else
 			local div = panel.HorizontalDivider
 			if IsValid(div) then

@@ -733,6 +733,10 @@ if CLIENT then
 		-- Zero-arg: mutates g_VR.tracking.pose_*.pos in place (Cube SoT).
 		-- Passing explicit Vector copies would break identity for gun readers.
 		vrmod.utils.UpdateHandCollisions()
+		-- Head/HMD brush block: slides playspace so camera cannot force through walls.
+		if vrmod.utils.UpdateHeadCollisions then
+			vrmod.utils.UpdateHeadCollisions()
+		end
 		-- Collisions can re-glue L/R if a path assigns one Vector to both — re-heal.
 		EnsurePoseIndependence()
 
@@ -1275,14 +1279,24 @@ if CLIENT then
 
 			-- XR Home: entire stereo RT must start magenta (#FF00FF), never black.
 			-- Black clear left the sky black while InfMap floor was already keyed pink.
+			-- Right-eye residual black: engine RenderView re-clears black and sky hooks
+			-- often skip when r_drawskybox=0 — re-clear each scissored half below.
+			local homeMap = false
 			do
 				local map = string.lower(tostring(game.GetMap() or ""))
-				local home = (map == "xr_infmap_passthrough")
+				homeMap = (map == "xr_infmap_passthrough")
 					or (CubeHome and CubeHome.IsHomeMap and CubeHome.IsHomeMap())
-				if home then
+				if homeMap then
 					render.Clear(255, 0, 255, 255, true, true)
 				else
 					render.Clear(0, 0, 0, 255, true, true)
+				end
+			end
+			-- Scissored eye clear: color (+ depth) so void is never black after engine clear.
+			local function ClearEyeHalf(x0, y0, x1, y1)
+				render.SetScissorRect(x0, y0, x1, y1, true)
+				if homeMap then
+					render.Clear(255, 0, 255, 255, true, true)
 				end
 			end
 
@@ -1334,7 +1348,7 @@ if CLIENT then
 			view.aspectratio = aspL
 			view.x, view.y, view.w, view.h = leftX, 0, rtHalfW, rtH
 			g_VR.stereoEye = "left"
-			render.SetScissorRect(leftX, 0, leftX + rtHalfW, rtH, true)
+			ClearEyeHalf(leftX, 0, leftX + rtHalfW, rtH)
 			hook.Call("VRMod_PreRender", nil, "left")
 			SafeRenderView(viewLeft)
 
@@ -1342,16 +1356,28 @@ if CLIENT then
 				-- mat_queue_mode 2: NO second RenderView (CThread crash on Linux).
 				-- Right half of SBS RT stays unpainted — submit maps BOTH eyes to the
 				-- LEFT half (mono stereo) so HMD never has one black eye.
+				-- Home map: still paint right half magenta so a stale mono flag never
+				-- shows black if submit briefly uses the true right UV rect.
 				g_VR._mq2MonoLeftForBoth = true
+				if homeMap then
+					ClearEyeHalf(rightX, 0, rightX + rtHalfW, rtH)
+				end
 				render.SetScissorRect(0, 0, 0, 0, false)
 				ResetStereoEyeState()
 				g_VR.stereoEye = "right"
 				hook.Call("VRMod_PreRender", nil, "right")
 			else
 				g_VR._mq2MonoLeftForBoth = false
-				-- Depth only — never Clear colour (would wipe left-eye world + decals).
+				-- Depth only on non-home — never Clear colour (would wipe left-eye world).
+				-- Home: re-clear RIGHT half colour to magenta under scissor (left untouched).
 				ResetStereoEyeState()
-				render.ClearDepth(true)
+				if homeMap then
+					-- Full-depth clear then right colour+depth magenta (scissor protects left colour).
+					render.ClearDepth(true)
+					ClearEyeHalf(rightX, 0, rightX + rtHalfW, rtH)
+				else
+					render.ClearDepth(true)
+				end
 				SyncMatQueueBetweenEyes()
 
 				-- RIGHT eye — full second RenderView (mode 0/1); same roll as left

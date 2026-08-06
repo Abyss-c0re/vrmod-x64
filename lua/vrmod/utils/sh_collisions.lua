@@ -764,6 +764,65 @@ local function WallRestPos(hitPos, hitNormal, pad, fallback)
 	return hitPos + n * (pad or 0)
 end
 
+local HAND_MASK = MASK_SOLID_BRUSHONLY
+local DEPEN_DIRS = {
+	Vector(1, 0, 0), Vector(-1, 0, 0),
+	Vector(0, 1, 0), Vector(0, -1, 0),
+	Vector(0, 0, 1), Vector(0, 0, -1),
+}
+
+--- Multi-direction depenetrate when buried in brush (force-push recovery).
+local function DepenetrateFromSolid(pos, radius, pad, filter, preferredNormal)
+	local mins, maxs = SetSymmetricHull(radius)
+	local n = preferredNormal
+	if not IsVec(n) or n:LengthSqr() < 0.01 then n = ZERO_UP end
+	local push = Vector(pos)
+	for _ = 1, 12 do
+		local t2 = util.TraceHull({
+			start = push,
+			endpos = push + n * math.max(radius * 2.5, 4),
+			mins = mins,
+			maxs = maxs,
+			mask = HAND_MASK,
+			filter = filter
+		})
+		if not t2.StartSolid and not t2.AllSolid then
+			if t2.Hit then
+				return WallRestPos(t2.HitPos, t2.HitNormal, pad, push), true,
+					(IsVec(t2.HitNormal) and t2.HitNormal) or n
+			end
+			return (IsVec(t2.EndPos) and t2.EndPos) or push, true, n
+		end
+		if IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01 then
+			n = t2.HitNormal
+		end
+		push = push + n * math.max(radius * 1.25, 2)
+	end
+	local best, bestN, bestDist
+	for i = 1, #DEPEN_DIRS do
+		local dir = DEPEN_DIRS[i]
+		local t3 = util.TraceHull({
+			start = pos,
+			endpos = pos + dir * (radius * 8 + 16),
+			mins = mins,
+			maxs = maxs,
+			mask = HAND_MASK,
+			filter = filter
+		})
+		if not t3.StartSolid and not t3.AllSolid then
+			local endp = t3.Hit and WallRestPos(t3.HitPos, t3.HitNormal, pad, pos)
+				or (IsVec(t3.EndPos) and t3.EndPos or pos)
+			local d = pos:DistToSqr(endp)
+			if not best or d < bestDist then
+				best, bestDist = endp, d
+				bestN = (IsVec(t3.HitNormal) and t3.HitNormal) or dir
+			end
+		end
+	end
+	if best then return best, true, bestN end
+	return pos + n * (radius + pad + 4), true, n
+end
+
 -- ONLY abandon wall correction for absurd teleports (safe sample far beyond arm reach
 -- of the HMD). Do NOT compare safe vs desired — that distance IS penetration depth,
 -- and releasing there made hands pass through walls as soon as you pressed in.
@@ -863,24 +922,9 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
         if wepWall.hasFree and IsVec(wepWall.lastFree) then
             safe = Vector(wepWall.lastFree)
         else
-            local push = Vector(desired)
-            -- Cap depenetrate steps (was 10 — latency spikes when buried in brush)
-            for _ = 1, 5 do
-                local t2 = hullSweep(push, push + normal * math.max(8, radius * 3))
-                if not t2.StartSolid then
-                    if t2.Hit then
-                        safe = WallRestPos(t2.HitPos, t2.HitNormal, pad, desired)
-                        normal = (IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01) and t2.HitNormal or normal
-                    else
-                        safe = (IsVec(t2.EndPos) and t2.EndPos) or push
-                    end
-                    break
-                end
-                if IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01 then
-                    normal = t2.HitNormal
-                end
-                push = push + normal * math.max(2, radius)
-            end
+            -- Strong multi-dir depenetrate (force-push recovery for gun hull)
+            safe, _, normal = DepenetrateFromSolid(desired, math.max(radius, 3), pad, filter, normal)
+            if not IsVec(safe) then safe = desired end
         end
     elseif tr.Hit then
         clipped = true
@@ -981,22 +1025,20 @@ local handWall = {
     }
 }
 
--- If lastFree is farther than this from desired, path-to-desired can cross solid
--- (doors, corners, map loads) and permanently "tie" the hand to the old free sample.
-local MAX_LASTFREE_DIST_SQR = 28 * 28
--- Never pull the hand more than this from device intent (anti-tether)
-local MAX_HAND_CORRECTION = 18
+-- If lastFree is farther than this from desired AND desired is free, re-acquire.
+-- When desired is still solid we KEEP lastFree (dropping it was the force-through bug).
+local MAX_LASTFREE_DIST_SQR = 48 * 48
+-- Soft visual cap only — NEVER leave the hand inside solid by partial-correcting.
+local MAX_HAND_CORRECTION = 56
 
---- Hull-sweep from last free sample → desired sample (same idea as
---- vrmod_climbing ResolveCameraOriginCollision). Returns safeSample, clipped, normal.
---- safeSample is always a Vector (never nil) when desiredSample is valid.
+--- Hull-sweep from last free sample → desired sample (climbing-style).
+--- Never returns a position still inside solid when a free sample is known.
 local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 	if not IsVec(desiredSample) then
 		return Vector(), false, nil
 	end
 
 	local mins, maxs = SetSymmetricHull(radius)
-	-- Hull already has radius; slider is pure extra push-out past the surface
 	local pad = GetWallPushPad()
 	local st = handWall[handKey]
 	if not st then
@@ -1006,8 +1048,6 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		st.lastFree = Vector()
 		st.hasFree = false
 	end
-
-	local HAND_MASK = MASK_SOLID_BRUSHONLY
 
 	local function isFree(pos)
 		local t = util.TraceHull({
@@ -1021,21 +1061,22 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		return not (t.StartSolid or t.AllSolid)
 	end
 
-	-- Drop stale free anchors — they are the "hands tied" bug (sweep from old room
-	-- always hits something between lastFree and the controller).
+	local desiredFree = isFree(desiredSample)
+
+	-- Drop stale free anchors only when desired is free (re-acquire) or lastFree invalid.
+	-- If desired is solid, KEEP lastFree even when far — that stops force-through.
 	if st.hasFree and IsVec(st.lastFree) then
-		if st.lastFree:DistToSqr(desiredSample) > MAX_LASTFREE_DIST_SQR or not isFree(st.lastFree) then
+		if not isFree(st.lastFree) then
+			st.hasFree = false
+		elseif desiredFree and st.lastFree:DistToSqr(desiredSample) > MAX_LASTFREE_DIST_SQR then
 			st.hasFree = false
 		end
 	end
 
-	-- Desired free + no valid continuous lastFree → pure tracking (device energy wins)
-	if isFree(desiredSample) and not st.hasFree then
+	if desiredFree and not st.hasFree then
 		return desiredSample, false, nil
 	end
 
-	-- Prefer last free → desired sweep (climbing-style). If lastFree is itself
-	-- buried (player teleported / map change), drop it and depenetrate from desired.
 	local startPos = desiredSample
 	if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
 		startPos = st.lastFree
@@ -1043,8 +1084,8 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		st.hasFree = false
 	end
 
-	-- Desired free, lastFree nearby: if short path is clear, unlock fully
-	if isFree(desiredSample) and startPos == st.lastFree then
+	-- Desired free, continuous lastFree: clear path → unlock
+	if desiredFree and st.hasFree and startPos == st.lastFree then
 		local clear = util.TraceHull({
 			start = startPos,
 			endpos = desiredSample,
@@ -1067,62 +1108,49 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		filter = filter
 	})
 
-	-- Stuck in solid at the start of the sweep
 	if tr.StartSolid or tr.AllSolid then
-		-- Prefer known free sample over raw desired (desired is still in the wall)
 		if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
 			local n = tr.HitNormal
 			if not IsVec(n) or n:LengthSqr() < 0.01 then n = ZERO_UP end
 			return Vector(st.lastFree), true, n
 		end
-
 		local n = tr.HitNormal
-		if not IsVec(n) or n:LengthSqr() < 0.01 then
-			n = ZERO_UP
-		end
-		local push = Vector(desiredSample)
-		for _ = 1, 6 do
-			local t2 = util.TraceHull({
-				start = push,
-				endpos = push + n * (radius * 3),
-				mins = mins,
-				maxs = maxs,
-				mask = HAND_MASK,
-				filter = filter
-			})
-			if not t2.StartSolid then
-				if t2.Hit then
-					return WallRestPos(t2.HitPos, t2.HitNormal, pad, push), true, (IsVec(t2.HitNormal) and t2.HitNormal) or n
-				end
-				local endp = (IsVec(t2.EndPos) and t2.EndPos) or push
-				return endp, true, n
-			end
-			if IsVec(t2.HitNormal) and t2.HitNormal:LengthSqr() > 0.01 then
-				n = t2.HitNormal
-			end
-			push = push + n * math.max(radius, 1)
-		end
-		-- Still solid: hold last free if any, else try a hard normal kick from desired
-		if st.hasFree and IsVec(st.lastFree) then
-			return Vector(st.lastFree), true, n
-		end
-		return desiredSample + n * (radius + pad + 2), true, n
+		if not IsVec(n) or n:LengthSqr() < 0.01 then n = ZERO_UP end
+		return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
 	end
 
 	if tr.Hit then
-		-- Contact: rest just outside the wall (climbing-style). This is the
-		-- path that must always block — never pass desired through.
 		local n = tr.HitNormal
 		if not IsVec(n) or n:LengthSqr() < 0.01 then
 			n = ZERO_UP
 		end
-		-- Floors/ceilings are not "walls" — locking hands to them sinks grabs to the ground.
+		-- Floors/ceilings: allow free vertical motion (climb/grab), but only if
+		-- the rest position is not still inside a wall brush.
 		if IsFloorOrCeilingNormal(n) then
-			return desiredSample, false, nil
+			if desiredFree then
+				return desiredSample, false, nil
+			end
+			-- Desired still solid (e.g. pressed into floor+wall joint) → depenetrate
+			return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
 		end
-		-- vrmod_hand_collision_push is the full extra clearance past the surface
-		local restPad = math.max(0.05, pad)
-		return WallRestPos(tr.HitPos, n, restPad, startPos), true, n
+		local restPad = math.max(0.15, pad)
+		local rest = WallRestPos(tr.HitPos, n, restPad, startPos)
+		-- Guarantee rest is free; if not, fall back to lastFree / depenetrate
+		if not isFree(rest) then
+			if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
+				return Vector(st.lastFree), true, n
+			end
+			return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
+		end
+		return rest, true, n
+	end
+
+	-- No hit but desired solid (degenerate hull / thin wall): still block
+	if not desiredFree then
+		if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
+			return Vector(st.lastFree), true, ZERO_UP
+		end
+		return DepenetrateFromSolid(desiredSample, radius, pad, filter, ZERO_UP)
 	end
 
 	return desiredSample, false, nil
@@ -1232,8 +1260,8 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     end
 
     local leftGrip, rightGrip = vrmod.utils.GetClimbingGripState()
-    -- Keep hull modest — oversized radius permanently clips near floors/walls ("tied")
-    local radius = math.max(vrmod.DEFAULT_RADIUS or 2.2, 2.2)
+    -- Slightly larger than visual fist so force-push cannot slip a 1u gap into solid
+    local radius = math.max(vrmod.DEFAULT_RADIUS or 2.2, 2.75)
     local offset = math.min(vrmod.DEFAULT_OFFSET or 5, 2.5)
     -- Ignore held mags/props — otherwise left-hand mag reloads fight wall push (flicker)
     local filter = WallFilter(ply)
@@ -1274,11 +1302,11 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
             ClearHandWallState(handKey)
         end
 
-        -- Also reject corrections that mostly drag the hand down toward the playspace floor
-        -- (bad lastFree sweeps along walls into the ground plane).
-        if clipped and IsVec(safeSample) and IsVec(desiredSample) then
+        -- Only reject strong downward pulls when the hit is floor-like — never cancel
+        -- a vertical wall block (that allowed force-push through walls).
+        if clipped and IsVec(safeSample) and IsVec(desiredSample) and IsFloorOrCeilingNormal(normal) then
             local drop = desiredSample.z - safeSample.z
-            if drop > 6 then
+            if drop > 8 then
                 clipped = false
                 safeSample = desiredSample
                 normal = nil
@@ -1308,23 +1336,37 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
             vrmod._lastGoodShapeRight = shape
         end
 
+        -- Only release absurd far locks (teleport / fly-away) — never mid-push
         if clipped and ShouldReleaseWallLock(safeSample, desiredSample) then
-            ClearHandWallState(handKey)
+            -- Keep blocking this frame but re-seed free sample at rest
+            local stRel = handWall[handKey]
+            if stRel and IsVec(safeSample) then
+                if not IsVec(stRel.lastFree) then stRel.lastFree = Vector() end
+                stRel.lastFree:Set(safeSample)
+                stRel.hasFree = true
+            end
         end
 
         if clipped then
-            -- IN-PLACE override of the tracking Vector (gun/hands see this immediately)
+            -- FULL correction into free space — partial cap left hands inside walls
+            -- when players force-pushed (the "shove through wall" bug).
             local delta = safeSample - desiredSample
-            -- Cap correction so a bad lastFree cannot tether hands far from controllers
             local dlen = delta:Length()
             if dlen > MAX_HAND_CORRECTION then
-                delta = delta * (MAX_HAND_CORRECTION / dlen)
-                -- Stale lock — drop free anchor so next frame re-evaluates from tracking
-                ClearHandWallState(handKey)
+                -- Still apply full wall rest: re-anchor from safeSample, do not
+                -- partial-scale delta (that tunnels) and do not clear lastFree.
+                delta = safeSample - desiredSample
             end
             trackPos = AddPosInPlace(trackPos, delta)
             cachedPushOutPos[handKey] = safeSample
             lastNonClippedNormal[handKey] = normal
+            -- Continuity: free sample is the wall rest, not the buried controller
+            local st = handWall[handKey]
+            if st and IsVec(safeSample) then
+                if not IsVec(st.lastFree) then st.lastFree = Vector() end
+                st.lastFree:Set(safeSample)
+                st.hasFree = true
+            end
         else
             local st = handWall[handKey]
             if st then
@@ -1366,6 +1408,181 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     end
 
     return lefthandPos, lefthandAng, righthandPos, righthandAng
+end
+
+------------------------------------------------------------------------
+-- HMD / head wall collision — playspace origin shift (climbing-style)
+------------------------------------------------------------------------
+local cv_head_coll = CreateClientConVar("vrmod_head_collision", "1", true, FCVAR_ARCHIVE,
+	"Block HMD/head from pushing through world brushes (shifts playspace)", 0, 1)
+local cv_head_radius = CreateClientConVar("vrmod_head_collision_radius", "6", true, FCVAR_ARCHIVE,
+	"Head collision hull radius (units)", 3, 14)
+
+local hmdWall = {
+	lastFree = Vector(),
+	hasFree = false,
+}
+
+local function ShiftPlayspaceWorld(delta)
+	if not IsVec(delta) or delta:LengthSqr() < 0.0001 then return end
+	if g_VR.origin and g_VR.origin.Add then
+		g_VR.origin:Add(delta)
+	elseif g_VR.origin then
+		g_VR.origin = g_VR.origin + delta
+	end
+	-- Tracking is already world-space this frame — keep SoT coherent with new origin
+	local function shiftTable(t)
+		if not t then return end
+		for _, pose in pairs(t) do
+			if pose and IsVec(pose.pos) then
+				if pose.pos.Add then
+					pose.pos:Add(delta)
+				else
+					pose.pos = pose.pos + delta
+				end
+			end
+		end
+	end
+	shiftTable(g_VR.tracking)
+	-- Do NOT shift rawTracking (device energy) — next frame rebuilds from origin
+end
+
+--- Block head through walls by sliding the room origin (camera + hands stay outside).
+function vrmod.utils.UpdateHeadCollisions()
+	if not cv_head_coll:GetBool() then return end
+	local ply = LocalPlayer()
+	local hmd = g_VR.tracking and g_VR.tracking.hmd
+	if not IsValid(ply) or not g_VR.active or not hmd or not IsVec(hmd.pos) then return end
+	local cvCol = GetConVar("vrmod_collisions")
+	local colOn = (not cvCol or cvCol:GetBool()) and ply:GetNWBool("vrmod_server_enforce_collision", true)
+	if not colOn
+		or ply:GetMoveType() == MOVETYPE_NOCLIP
+		or not ply:Alive()
+		or not vrmod.IsPlayerInVR(ply)
+		or ply:InVehicle()
+	then
+		hmdWall.hasFree = false
+		return
+	end
+
+	local desired = hmd.pos
+	local radius = math.Clamp(cv_head_radius:GetFloat(), 3, 14)
+	local pad = math.max(1.0, GetWallPushPad() + 0.5)
+	local mins, maxs = SetSymmetricHull(radius)
+	local filter = WallFilter(ply)
+
+	local function isFree(pos)
+		local t = util.TraceHull({
+			start = pos,
+			endpos = pos,
+			mins = mins,
+			maxs = maxs,
+			mask = HAND_MASK,
+			filter = filter
+		})
+		return not (t.StartSolid or t.AllSolid)
+	end
+
+	if hmdWall.hasFree and IsVec(hmdWall.lastFree) then
+		if not isFree(hmdWall.lastFree) or hmdWall.lastFree:DistToSqr(desired) > (120 * 120) then
+			hmdWall.hasFree = false
+		end
+	end
+
+	local desiredFree = isFree(desired)
+	if desiredFree and not hmdWall.hasFree then
+		hmdWall.lastFree:Set(desired)
+		hmdWall.hasFree = true
+		return
+	end
+
+	local startPos = desired
+	if hmdWall.hasFree and IsVec(hmdWall.lastFree) and isFree(hmdWall.lastFree) then
+		startPos = hmdWall.lastFree
+	end
+
+	if desiredFree and hmdWall.hasFree then
+		local clear = util.TraceHull({
+			start = startPos,
+			endpos = desired,
+			mins = mins,
+			maxs = maxs,
+			mask = HAND_MASK,
+			filter = filter
+		})
+		if not clear.Hit and not clear.StartSolid and not clear.AllSolid then
+			hmdWall.lastFree:Set(desired)
+			hmdWall.hasFree = true
+			return
+		end
+	end
+
+	local tr = util.TraceHull({
+		start = startPos,
+		endpos = desired,
+		mins = mins,
+		maxs = maxs,
+		mask = HAND_MASK,
+		filter = filter
+	})
+
+	local safe = desired
+	local blocked = false
+
+	if tr.StartSolid or tr.AllSolid then
+		blocked = true
+		if hmdWall.hasFree and IsVec(hmdWall.lastFree) and isFree(hmdWall.lastFree) then
+			safe = Vector(hmdWall.lastFree)
+		else
+			local n = (IsVec(tr.HitNormal) and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
+			safe = DepenetrateFromSolid(desired, radius, pad, filter, n)
+			if not IsVec(safe) then safe = desired + n * (radius + pad) end
+		end
+	elseif tr.Hit then
+		blocked = true
+		local n = (IsVec(tr.HitNormal) and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
+		safe = WallRestPos(tr.HitPos, n, pad, startPos)
+		if not isFree(safe) then
+			if hmdWall.hasFree and isFree(hmdWall.lastFree) then
+				safe = Vector(hmdWall.lastFree)
+			else
+				safe = DepenetrateFromSolid(desired, radius, pad, filter, n)
+			end
+		end
+	elseif not desiredFree then
+		blocked = true
+		if hmdWall.hasFree and isFree(hmdWall.lastFree) then
+			safe = Vector(hmdWall.lastFree)
+		else
+			safe = DepenetrateFromSolid(desired, radius, pad, filter, ZERO_UP)
+		end
+	end
+
+	if not blocked or not IsVec(safe) then
+		if desiredFree then
+			hmdWall.lastFree:Set(desired)
+			hmdWall.hasFree = true
+		end
+		return
+	end
+
+	local delta = safe - desired
+	if delta:LengthSqr() < 0.0001 then
+		hmdWall.lastFree:Set(safe)
+		hmdWall.hasFree = true
+		return
+	end
+	-- Cap single-frame origin shove (teleport safety) but never leave head in solid
+	local dlen = delta:Length()
+	if dlen > 64 then
+		-- Prefer last free over a 64u snap if available
+		if hmdWall.hasFree and IsVec(hmdWall.lastFree) then
+			delta = hmdWall.lastFree - desired
+		end
+	end
+	ShiftPlayspaceWorld(delta)
+	hmdWall.lastFree:Set(safe)
+	hmdWall.hasFree = true
 end
 
 function vrmod.utils.SphereCollidesWithProp(pos, radius, filter)

@@ -142,11 +142,15 @@ if CLIENT then
 	------------------------------------------------------------------------
 	local UI_KIND = {
 		-- fracW/H of one eye; designPhys = full panel width in Source units @ ui_scale=1
-		spawnmenu = { fracW = 0.58, fracH = 0.72, designPhys = 16, minW = 640, minH = 480 },
-		contextmenu = { fracW = 0.36, fracH = 0.62, designPhys = 11, minW = 320, minH = 400 },
-		settings = { fracW = 0.38, fracH = 0.58, designPhys = 12, minW = 380, minH = 460 },
-		-- Glide Styled_TabbedFrame design is 850×600 — need enough RT for form rows
-		popup = { fracW = 0.52, fracH = 0.62, designPhys = 14, minW = 420, minH = 360 },
+		-- aspect: lock W/H so Scr* clamp never turns spawn into a wide short strip.
+		-- Hard-capped to ScrW/ScrH below (VGUI mouse only works inside desktop FB).
+		spawnmenu = { fracW = 0.58, fracH = 0.72, designPhys = 16, minW = 640, minH = 480, aspect = 4 / 3 },
+		-- Context: tool panel + icon strip — needs real width (was portrait 0.66 → unusable)
+		contextmenu = { fracW = 0.52, fracH = 0.78, designPhys = 14, minW = 420, minH = 480, aspect = 3 / 4 },
+		settings = { fracW = 0.38, fracH = 0.58, designPhys = 12, minW = 380, minH = 420 },
+		-- Glide 850×600 + DMenu subwindows
+		popup = { fracW = 0.55, fracH = 0.70, designPhys = 14, minW = 480, minH = 400, aspect = 850 / 600 },
+		dmenu = { fracW = 0.32, fracH = 0.55, designPhys = 10, minW = 220, minH = 200, aspect = 0.55 },
 		panel = { fracW = 0.48, fracH = 0.55, designPhys = 13, minW = 320, minH = 280 },
 		-- Menu-first freefloat cinema (real MainMenu / GameUI)
 		mainmenu = { fracW = 0.78, fracH = 0.72, designPhys = 22, minW = 720, minH = 480 },
@@ -173,6 +177,15 @@ if CLIENT then
 		return math.Clamp(math.max(eyeW, eyeH), 512, 2048)
 	end
 
+	--- Desktop framebuffer limit for clickable VGUI (laser → input.SetCursorPos).
+	-- Anything painted past ScrW/ScrH looks fine on the RT but is unclickable.
+	function vrmod.GetVRUIClickableMax()
+		local sw = math.max((ScrW and ScrW()) or 1280, 64)
+		local sh = math.max((ScrH and ScrH()) or 720, 64)
+		-- Leave 2px margin so clamp never lands on exclusive edge
+		return math.max(sw - 2, 64), math.max(sh - 2, 64)
+	end
+
 	--- Pixel W/H + recommended base 3D2D scale for a UI kind (spawn/context/popup/…).
 	-- @param kind string
 	-- @param opts optional { fracW, fracH, designPhys, minW, minH, width, height }
@@ -188,14 +201,47 @@ if CLIENT then
 		local minW = opts.minW or spec.minW or 256
 		local minH = opts.minH or spec.minH or 256
 		local maxRT = vrmod.GetVRUIMaxRT()
+		local clickW, clickH = vrmod.GetVRUIClickableMax()
+		-- RT must not exceed desktop FB or bottom/right of menus become dead zones.
+		local maxW = math.min(maxRT, clickW)
+		local maxH = math.min(maxRT, clickH)
 
 		local w = opts.width or math.floor(eyeW * fracW * uiS + 0.5)
 		local h = opts.height or math.floor(eyeH * fracH * uiS + 0.5)
-		w = math.Clamp(w, minW, maxRT)
-		h = math.Clamp(h, minH, maxRT)
+		-- Cap to clickable desktop FB (bottom/right past Scr* is unclickable)
+		if w > maxW then w = maxW end
+		if h > maxH then h = maxH end
+		minW = math.min(minW, maxW)
+		minH = math.min(minH, maxH)
+		w = math.Clamp(w, minW, maxW)
+		h = math.Clamp(h, minH, maxH)
+
+		-- Keep intended aspect after clamp (spawn was going ultra-wide when ScrW >> ScrH).
+		-- Fit *inside* maxW×maxH — never stretch one axis to fill the screen.
+		local aspect = opts.aspect or spec.aspect
+		if aspect and aspect > 0.2 and aspect < 5 then
+			if (w / math.max(h, 1)) > aspect then
+				w = math.floor(h * aspect + 0.5)
+			else
+				h = math.floor(w / aspect + 0.5)
+			end
+			if w > maxW then
+				w = maxW
+				h = math.floor(w / aspect + 0.5)
+			end
+			if h > maxH then
+				h = maxH
+				w = math.floor(h * aspect + 0.5)
+			end
+			w = math.Clamp(w, math.min(minW, maxW), maxW)
+			h = math.Clamp(h, math.min(minH, maxH), maxH)
+		end
+
 		-- Even dims for RT
 		w = math.floor(w / 2) * 2
 		h = math.floor(h / 2) * 2
+		if w < 64 then w = 64 end
+		if h < 64 then h = 64 end
 
 		-- World width ≈ designPhys * ui_scale (draw multiplies baseScale × ui_scale)
 		local baseScale = designPhys / math.max(w, 1)
@@ -629,6 +675,18 @@ if CLIENT then
 		elseif e.scaleLocked and sc and sc > 0 then
 			menu.scaleLocked = false
 		end
+		-- Restore pixel window size so Derma reflows to saved dimensions
+		local ew, eh = tonumber(e.width), tonumber(e.height)
+		if ew and eh and ew >= 200 and eh >= 160 then
+			if isfunction(vrmod.ApplyMenuPixelSize) then
+				vrmod.ApplyMenuPixelSize(menu, ew, eh, { force = true, forceRT = true })
+			else
+				menu.width, menu.height = ew, eh
+				menu._pendingPixelW, menu._pendingPixelH = ew, eh
+			end
+			menu.sizeLocked = true
+			applied = true
+		end
 		if e.freeFloat and e.pos and e.ang then
 			local px, py, pz = e.pos.x or e.pos[1], e.pos.y or e.pos[2], e.pos.z or e.pos[3]
 			local ap, ay, ar = e.ang.p or e.ang[1], e.ang.y or e.ang[2], e.ang.r or e.ang[3]
@@ -958,7 +1016,12 @@ if CLIENT then
 		local uid = resizeState.uid
 		local menu = menus[uid]
 		if menu then
-			LockMenuScale(menu, menu.baseScale or menu.scale)
+			-- Finalize pixel size + content reflow (force RT rebuild)
+			if vrmod.ApplyMenuPixelSize then
+				vrmod.ApplyMenuPixelSize(menu, menu.width, menu.height, { force = true, forceRT = true })
+			else
+				LockMenuScale(menu, menu.baseScale or menu.scale)
+			end
 			-- Hand shells: stay attached and re-pose for new half-size (click UV must match draw)
 			if resizeState.keepAttached or (not menu.freeFloat and menu.attachment) then
 				menu.freeFloat = false
@@ -976,7 +1039,7 @@ if CLIENT then
 		end
 		resizeState = nil
 		g_VR.menuResizeActive = false
-		-- Drop focus freeze so next eye rebuilds cursor on new scale
+		-- Drop focus freeze so next eye rebuilds cursor on new size
 		focusSnap.frame = -1
 		focusSnap.uid = false
 		focusSnap.panel = nil
@@ -1065,6 +1128,8 @@ if CLIENT then
 	end
 
 	--- Resize from grip-hand distance (stereo-safe; no per-eye laser).
+	-- Changes *pixel* RT + Derma layout so content reflows into the window
+	-- (not only 3D2D scale zoom of a fixed layout).
 	local function UpdateResizeFromHand()
 		if not resizeState then return end
 		local menu = menus[resizeState.uid]
@@ -1075,7 +1140,7 @@ if CLIENT then
 		if startDist < 2 then startDist = 2 end
 		local dist
 		if resizeState.keepAttached then
-			-- Hand shell: scale from grip↔wrist span (stable while panel re-poses on palm)
+			-- Hand shell: size from grip↔wrist span (stable while panel re-poses on palm)
 			local wrist = HandPose(MenuAttachHandName(menu))
 			if not wrist or not wrist.pos then return end
 			dist = hand.pos:Distance(wrist.pos)
@@ -1085,20 +1150,38 @@ if CLIENT then
 			if not origin then return end
 			dist = hand.pos:Distance(origin)
 		end
-		local ns = (resizeState.startScale or 0.03) * (dist / startDist)
-		ns = math.Clamp(ns, SCALE_MIN, SCALE_MAX)
-		local prev = menu.baseScale or menu.scale or 0
-		if math.abs(ns - prev) < 1e-7 then return end
-		LockMenuScale(menu, ns)
-		if resizeState.keepAttached then
-			menu.freeFloat = false
-			menu.attachment = true
-			ReposeHandMenu(menu)
-		else
-			AdjustFreeFloatForScale(menu, prev, ns)
+		local ratio = dist / startDist
+		if ratio < 0.35 then ratio = 0.35 end
+		if ratio > 2.8 then ratio = 2.8 end
+
+		local sw = resizeState.startW or menu.width or 512
+		local sh = resizeState.startH or menu.height or 512
+		local snap = 8 -- pixel step during drag (matches PIXEL_SNAP near RT helpers)
+		local nw = math.floor((sw * ratio) / snap + 0.5) * snap
+		local nh = math.floor((sh * ratio) / snap + 0.5) * snap
+		-- Throttle: only apply when size actually steps
+		if math.abs(nw - (menu.width or 0)) < snap and math.abs(nh - (menu.height or 0)) < snap then
+			return
 		end
-		menu._snapFrame = -1
-		InvalidateMenuHit(menu)
+		if vrmod.ApplyMenuPixelSize then
+			vrmod.ApplyMenuPixelSize(menu, nw, nh)
+		else
+			-- Fallback: old 3D scale path
+			local ns = (resizeState.startScale or 0.03) * ratio
+			ns = math.Clamp(ns, SCALE_MIN, SCALE_MAX)
+			local prev = menu.baseScale or menu.scale or 0
+			if math.abs(ns - prev) < 1e-7 then return end
+			LockMenuScale(menu, ns)
+			if resizeState.keepAttached then
+				menu.freeFloat = false
+				menu.attachment = true
+				ReposeHandMenu(menu)
+			else
+				AdjustFreeFloatForScale(menu, prev, ns)
+			end
+			menu._snapFrame = -1
+			InvalidateMenuHit(menu)
+		end
 	end
 
 	--- World pose for a menu. Uses stereo-frozen hands only (never mutates mid-eye).
@@ -1245,18 +1328,21 @@ if CLIENT then
 				uid = uid,
 				hand = handName,
 				startScale = menu.baseScale or menu.scale or 0.03,
+				startW = menu.width or 512,
+				startH = menu.height or 512,
 				origin = Vector(center), -- free-float: fixed world center
 				startDist = startDist,
 				keepAttached = keepAttached and true or false,
 			}
 			menu.scaleLocked = true
+			menu.sizeLocked = true
 			menu.resizable = true
 			menu.cursorEnabled = true
 			g_VR.menuResizeActive = true
 			MarkConsumed(handName, pressed)
 			if vrmod.logger then
-				vrmod.logger.Debug("[UI] Panel resize start uid=%s hand=%s scale=%.4f attach=%s",
-					tostring(uid), handName, resizeState.startScale, tostring(keepAttached))
+				vrmod.logger.Debug("[UI] Panel resize start uid=%s hand=%s px=%sx%s attach=%s",
+					tostring(uid), handName, tostring(resizeState.startW), tostring(resizeState.startH), tostring(keepAttached))
 			end
 			return true
 		end
@@ -1620,19 +1706,131 @@ if CLIENT then
 		render.DepthRange(0, 1)
 	end
 
+	-- Unique RT name per size — Source does not resize existing named RTs.
 	local function CreateMenuRT(uid, width, height)
+		local name = string.format("vrmod_rt_ui_%s_%dx%d", tostring(uid), width, height)
 		local fmt = IMAGE_FORMAT_BGRA8888 or IMAGE_FORMAT_RGBA8888 or IMAGE_FORMAT_ARGB8888
 		if isfunction(GetRenderTargetEx) and fmt then
-			local ok, rtEx = pcall(GetRenderTargetEx, "vrmod_rt_ui_" .. uid, width, height,
+			local ok, rtEx = pcall(GetRenderTargetEx, name, width, height,
 				RT_SIZE_NO_CHANGE or 0, MATERIAL_RT_DEPTH_NONE or 0,
 				bit.bor(TEXTUREFLAGS_CLAMPS or 4, TEXTUREFLAGS_CLAMPT or 8), 0, fmt)
 			if ok and rtEx then return rtEx end
 		end
-		return GetRenderTarget("vrmod_rt_ui_" .. uid, width, height, false)
+		return GetRenderTarget(name, width, height, false)
+	end
+
+	local PIXEL_MIN_W, PIXEL_MIN_H = 280, 200
+
+	local function ClampMenuPixels(w, h)
+		local maxW, maxH = 2048, 2048
+		if vrmod.GetVRUIClickableMax then
+			maxW, maxH = vrmod.GetVRUIClickableMax()
+		else
+			maxW = math.max((ScrW and ScrW()) or 1280, 64) - 2
+			maxH = math.max((ScrH and ScrH()) or 720, 64) - 2
+		end
+		local maxRT = (vrmod.GetVRUIMaxRT and vrmod.GetVRUIMaxRT()) or 2048
+		maxW = math.min(maxW, maxRT)
+		maxH = math.min(maxH, maxRT)
+		w = math.Clamp(math.floor(tonumber(w) or 512), PIXEL_MIN_W, maxW)
+		h = math.Clamp(math.floor(tonumber(h) or 512), PIXEL_MIN_H, maxH)
+		w = math.floor(w / 2) * 2
+		h = math.floor(h / 2) * 2
+		return w, h
+	end
+
+	local function BindMenuMaterial(menu)
+		if not menu or not menu.rt then return end
+		local mat = menu.mat
+		if not mat or mat:IsError() then
+			mat = CreateMaterial("vrmod_mat_ui_" .. tostring(menu.uid), "UnlitGeneric", {
+				["$basetexture"] = menu.rt:GetName(),
+				["$translucent"] = 1,
+				["$vertexalpha"] = 1,
+				["$vertexcolor"] = 1,
+				["$nolod"] = 1,
+				["$nocull"] = 1,
+				["$ignorez"] = 1,
+			})
+			menu.mat = mat
+		end
+		if mat and not mat:IsError() then
+			mat:SetTexture("$basetexture", menu.rt)
+			mat:SetInt("$translucent", 1)
+			mat:SetInt("$vertexalpha", 1)
+		end
+		menu._boundRT = menu.rt
+	end
+
+	--- Keep free-float world *center* fixed when pixel size changes (fixed 3D scale).
+	local function AdjustFreeFloatForPixels(menu, oldW, oldH, newW, newH)
+		if not menu or not menu.pos or not menu.ang then return end
+		if not (menu.freeFloat or not menu.attachment) then return end
+		oldW, oldH = tonumber(oldW) or 512, tonumber(oldH) or 512
+		newW, newH = tonumber(newW) or oldW, tonumber(newH) or oldH
+		if oldW == newW and oldH == newH then return end
+		local uiS = vrmod.GetUIScale()
+		local sc = (menu.baseScale or menu.scale or 0.03) * uiS
+		local wPos, wAng = ResolveMenuWorldPose(menu)
+		if not wPos or not wAng then return end
+		local center = wPos + wAng:Right() * (oldW * sc * 0.5) - wAng:Forward() * (oldH * sc * 0.5)
+		local newTL = center - wAng:Right() * (newW * sc * 0.5) + wAng:Forward() * (newH * sc * 0.5)
+		local origin = g_VR.origin or Vector()
+		local originAng = g_VR.originAngle or Angle()
+		menu.pos, menu.ang = WorldToLocal(newTL, wAng, origin, originAng)
+	end
+
+	--- Resize VR window in *pixels* so Derma content reflows into the new box.
+	-- Corner grip uses this (not only 3D scale zoom).
+	function vrmod.ApplyMenuPixelSize(menu, w, h, opts)
+		opts = opts or {}
+		if not menu then return false end
+		w, h = ClampMenuPixels(w, h)
+		local oldW, oldH = menu.width or w, menu.height or h
+		local sizeChanged = (oldW ~= w) or (oldH ~= h)
+		if not sizeChanged and not opts.force then return false end
+
+		menu.width = w
+		menu.height = h
+		menu.sizeLocked = true
+		menu.scaleLocked = true
+
+		local panel = menu.panel
+		if IsValid(panel) then
+			local kind = menu._p2vKind or panel._p2vKind
+			if vrmod.panel2vr and vrmod.panel2vr.RefitPanel then
+				vrmod.panel2vr.RefitPanel(panel, w, h, kind)
+			else
+				if panel.SetSize then panel:SetSize(w, h) end
+				if panel.SetPos then panel:SetPos(0, 0) end
+				if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+			end
+			if vrmod.panel2vr and vrmod.panel2vr.EnsureCloseButton then
+				vrmod.panel2vr.EnsureCloseButton(panel, menu.uid, kind)
+			end
+		end
+
+		-- Rebuild RT when pixel box changes (unique name per size)
+		if sizeChanged or opts.forceRT or not menu.rt then
+			menu.rt = CreateMenuRT(menu.uid, w, h)
+			BindMenuMaterial(menu)
+		end
+
+		if menu.attachment and not menu.freeFloat and not menu.grabHand then
+			ReposeHandMenu(menu)
+		elseif menu.freeFloat or not menu.attachment then
+			AdjustFreeFloatForPixels(menu, oldW, oldH, w, h)
+		end
+
+		menu.dirty = true
+		menu._snapFrame = -1
+		InvalidateMenuHit(menu)
+		return true
 	end
 
 	function VRUtilMenuOpen(uid, width, height, panel, attachment, pos, ang, scale, cursorEnabled, closeFunc)
 		VRUtilMenuClose(uid)
+		width, height = ClampMenuPixels(width, height)
 		local rt = CreateMenuRT(uid, width, height)
 		local baseScale = scale or 0.03
 		menus[uid] = {
@@ -1656,6 +1854,7 @@ if CLIENT then
 			grabbable = true,
 			resizable = true,
 			scaleLocked = false,
+			sizeLocked = false,
 			freeFloat = not attachment,
 			-- Wrist menus default to secondary (non-primary) hand
 			attachHand = attachment and vrmod.GetSecondaryHand() or nil,
@@ -1670,35 +1869,33 @@ if CLIENT then
 		}
 
 		menuOrder[#menuOrder + 1] = menus[uid]
-		local mat = CreateMaterial("vrmod_mat_ui_" .. uid, "UnlitGeneric", {
-			["$basetexture"] = rt:GetName(),
-			["$translucent"] = 1,
-			["$vertexalpha"] = 1,
-			["$vertexcolor"] = 1,
-			["$nolod"] = 1,
-			["$nocull"] = 1,
-			["$ignorez"] = 1,
-		})
-		if mat and not mat:IsError() then
-			mat:SetTexture("$basetexture", rt)
-			mat:SetInt("$translucent", 1)
-			mat:SetInt("$vertexalpha", 1)
-		end
-		menus[uid].mat = mat
+		BindMenuMaterial(menus[uid])
 
-		-- Restore remembered pos / size (scale) / free-float for this panel
+		-- Restore remembered pos / size (scale + pixels) / free-float for this panel
 		vrmod.ApplyMenuLayout(uid, menus[uid])
+		local m = menus[uid]
+		if m and m._pendingPixelW and m._pendingPixelH and isfunction(vrmod.ApplyMenuPixelSize) then
+			vrmod.ApplyMenuPixelSize(m, m._pendingPixelW, m._pendingPixelH, { force = true, forceRT = true })
+			m._pendingPixelW, m._pendingPixelH = nil, nil
+		end
 
 		-- Clear once, then paint panel (never clear after paint — that blanked hand menus)
 		render.PushRenderTarget(menus[uid].rt)
 		cam.Start2D()
-		ClearMenuRT(width, height)
+		ClearMenuRT(menus[uid].width, menus[uid].height)
 		render.OverrideAlphaWriteEnable(false)
 		cam.End2D()
 		render.PopRenderTarget()
 
 		if panel then
 			panel:SetPaintedManually(true)
+			if vrmod.panel2vr and vrmod.panel2vr.EnsureCloseButton then
+				vrmod.panel2vr.EnsureCloseButton(panel, uid, panel._p2vKind)
+			end
+			-- Fit content into RT box (spawn/context/derma)
+			if vrmod.panel2vr and vrmod.panel2vr.RefitPanel then
+				vrmod.panel2vr.RefitPanel(panel, menus[uid].width, menus[uid].height, panel._p2vKind)
+			end
 			VRUtilMenuRenderPanel(uid)
 		end
 		menusExist = true
@@ -1711,8 +1908,14 @@ if CLIENT then
 		-- Panel-local laser UV (RT space). Shells are forced to SetPos(0,0) — LocalToScreen
 		-- is only safe when the panel actually sits at origin; otherwise clicks miss.
 		local x, y = menu.lastCursorX, menu.lastCursorY
-		x = math.Clamp(x, 0, (menu.width or 1024) - 1)
-		y = math.Clamp(y, 0, (menu.height or 768) - 1)
+		local mw = (menu.width or 1024) - 1
+		local mh = (menu.height or 768) - 1
+		-- Desktop FB is the only domain gui/input mouse accepts. If RT > Scr*,
+		-- clamp so we never set cursor into the unclickable zone (bottom dead strip).
+		local sw = math.max((ScrW and ScrW()) or 1280, 2) - 1
+		local sh = math.max((ScrH and ScrH()) or 720, 2) - 1
+		x = math.Clamp(x, 0, math.min(mw, sw))
+		y = math.Clamp(y, 0, math.min(mh, sh))
 		g_VR.menuCursorX = x
 		g_VR.menuCursorY = y
 		local panel = menu.panel
@@ -1728,6 +1931,8 @@ if CLIENT then
 			if panel.LocalToScreen then
 				local sx, sy = panel:LocalToScreen(x, y)
 				if sx and sy then
+					sx = math.Clamp(sx, 0, sw)
+					sy = math.Clamp(sy, 0, sh)
 					input.SetCursorPos(math.floor(sx + 0.5), math.floor(sy + 0.5))
 					return
 				end

@@ -120,6 +120,28 @@ local function shellMetrics(kind)
 	return 512, 512, 0.022
 end
 
+--- Clamp RT/panel size to GPU max AND ScrW×ScrH (VGUI mouse domain).
+-- Must stay above StyledTheme helpers — they call this at runtime.
+local function clampSize(w, h)
+	local mx = maxRT()
+	local clickW, clickH = mx, mx
+	if vrmod.GetVRUIClickableMax then
+		clickW, clickH = vrmod.GetVRUIClickableMax()
+	else
+		clickW = math.max((ScrW and ScrW()) or 1280, 64) - 2
+		clickH = math.max((ScrH and ScrH()) or 720, 64) - 2
+	end
+	local maxW = math.min(mx, clickW)
+	local maxH = math.min(mx, clickH)
+	w = math.Clamp(math.floor(tonumber(w) or 512), MIN_RT, maxW)
+	h = math.Clamp(math.floor(tonumber(h) or 512), MIN_RT, maxH)
+	w = math.floor(w / 2) * 2
+	h = math.floor(h / 2) * 2
+	if w < MIN_RT then w = MIN_RT end
+	if h < MIN_RT then h = MIN_RT end
+	return w, h
+end
+
 ------------------------------------------------------------------------
 -- StyledTheme (Glide settings etc.) — desktop ScrH × 850×600 → VR RT
 -- Without this, Glide opens at desktop size and clips on the VR surface.
@@ -129,11 +151,13 @@ local styledOrigScaleSize = nil
 local styledOrigBlur = nil
 
 local function styledDesignScale()
-	-- TabbedFrame design is 850×600 @ 1080p; map into VR popup metrics
+	-- TabbedFrame design is 850×600 @ 1080p; map into VR popup metrics (Scr*-capped)
 	local pw, ph = shellMetrics("popup")
+	pw, ph = clampSize(pw, ph)
 	local sx = pw / 850
 	local sy = ph / 600
-	return math.min(sx, sy)
+	-- Prefer fit-inside (never scale up past 1.1 — huge fonts blow layout)
+	return math.Clamp(math.min(sx, sy), 0.35, 1.1)
 end
 
 function W.ApplyStyledThemeVRScale()
@@ -159,9 +183,10 @@ function W.ApplyStyledThemeVRScale()
 		if styledOrigBlur then return styledOrigBlur(panel, alpha, density) end
 	end
 
-	-- Refresh dimensions + fonts against VR ScaleSize
+	-- Refresh dimensions + fonts against VR ScaleSize (use actual fitted panel size)
 	local pw, ph = shellMetrics("popup")
-	hook.Run("StyledTheme_OnResolutionChange", pw, math.max(ph, 720))
+	pw, ph = clampSize(pw, ph)
+	hook.Run("StyledTheme_OnResolutionChange", pw, ph)
 	return true
 end
 
@@ -172,17 +197,165 @@ function W.RestoreStyledThemeDesktop()
 	hook.Run("StyledTheme_OnResolutionChange", ScrW(), ScrH())
 end
 
---- Force a Derma frame into the VR RT box (kills MinWidth 850 traps).
+--- Force a Derma frame into the VR RT box (kills MinWidth 850 traps / ScrH crop).
 local function forcePanelIntoVRBox(panel, mw, mh)
 	if not IsValid(panel) then return end
-	if panel.SetMinWidth then panel:SetMinWidth(math.min(mw, 320)) end
-	if panel.SetMinHeight then panel:SetMinHeight(math.min(mh, 240)) end
+	mw, mh = clampSize(mw, mh)
+	-- Glide/Styled frames pin MinWidth=850 from desktop design — hard kill.
+	if panel.SetMinWidth then pcall(function() panel:SetMinWidth(math.min(mw, 280)) end) end
+	if panel.SetMinHeight then pcall(function() panel:SetMinHeight(math.min(mh, 200)) end) end
 	if panel.SetMaxWidth then pcall(function() panel:SetMaxWidth(mw) end) end
 	if panel.SetMaxHeight then pcall(function() panel:SetMaxHeight(mh) end) end
+	-- Keep Derma non-sizable via title drag; VR corner grip owns resize.
+	if panel.SetSizable then pcall(function() panel:SetSizable(false) end) end
 	if panel.Dock then panel:Dock(NODOCK) end
 	if panel.SetSize then panel:SetSize(mw, mh) end
 	if panel.SetPos then panel:SetPos(0, 0) end
 	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+	if panel.PerformLayout then pcall(function() panel:PerformLayout(mw, mh) end) end
+	-- Walk children: sheets / lists / scroll that keep desktop mins and clip content
+	local function walkReflow(p, depth)
+		if not IsValid(p) or (depth or 0) > 18 then return end
+		if p.SetMinWidth then pcall(function() p:SetMinWidth(math.min(mw - 16, 200)) end) end
+		if p.SetMinHeight then pcall(function() p:SetMinHeight(math.min(mh - 48, 80)) end) end
+		if p.InvalidateLayout then pcall(function() p:InvalidateLayout(true) end) end
+		for _, ch in ipairs(p:GetChildren() or {}) do
+			walkReflow(ch, (depth or 0) + 1)
+		end
+	end
+	for _, ch in ipairs(panel:GetChildren() or {}) do
+		walkReflow(ch, 1)
+	end
+end
+
+------------------------------------------------------------------------
+-- Universal close X on every VR-manifested window (spawn/context/derma/Glide)
+------------------------------------------------------------------------
+local CLOSE_W, CLOSE_H = 52, 32
+
+local function closePanelSurface(panel, uid, kind)
+	kind = kind or (panel and panel._p2vKind) or "panel"
+	uid = uid or (panel and panel._p2vUid)
+	if kind == "spawnmenu" or kind == "spawn" then
+		if W.CloseSandboxShell then return W.CloseSandboxShell("spawn") end
+	elseif kind == "contextmenu" or kind == "context" then
+		if W.CloseSandboxShell then return W.CloseSandboxShell("context") end
+	end
+	if uid and isfunction(VRUtilMenuClose) then
+		pcall(VRUtilMenuClose, uid)
+	end
+	if IsValid(panel) then
+		if panel.Close then pcall(function() panel:Close() end) end
+		if IsValid(panel) and panel.SetVisible then panel:SetVisible(false) end
+		if IsValid(panel) and panel.Remove and kind ~= "spawnmenu" and kind ~= "contextmenu" then
+			-- Don't Remove stock spawn/context; Close is enough
+			if kind == "popup" or kind == "panel" or kind == "settings" or kind == "dmenu" then
+				pcall(function() panel:Remove() end)
+			end
+		end
+	end
+	if uid then
+		bound[uid] = nil
+		if IsValid(panel) and panelUids[panel] == uid then panelUids[panel] = nil end
+	end
+	return true
+end
+
+--- Install / re-place a laser-friendly X on any VR panel (always on in VR).
+function W.EnsureCloseButton(panel, uid, kind)
+	if not IsValid(panel) then return nil end
+	kind = kind or panel._p2vKind or "panel"
+	uid = uid or panel._p2vUid
+	panel._p2vKind = kind
+	panel._p2vUid = uid
+
+	local btn = panel._cubeCloseBtn
+	if not IsValid(btn) then
+		btn = vgui.Create("DButton", panel)
+		panel._cubeCloseBtn = btn
+		btn:SetText("")
+		btn:SetSize(CLOSE_W, CLOSE_H)
+		btn:SetZPos(32767)
+		btn:SetMouseInputEnabled(true)
+		btn:SetCursor("hand")
+		function btn:Paint(w, h)
+			local hot = self:IsHovered()
+			surface.SetDrawColor(hot and 196 or 120, 20, 40, 255)
+			surface.DrawRect(0, 0, w, h)
+			surface.SetDrawColor(255, hot and 70 or 40, 90, 255)
+			surface.DrawOutlinedRect(0, 0, w, h, hot and 3 or 2)
+			draw.SimpleText("X", "DermaLarge", w * 0.5, h * 0.5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
+		function btn:DoClick()
+			closePanelSurface(panel, panel._p2vUid, panel._p2vKind)
+		end
+		function btn:Think()
+			if not IsValid(panel) then
+				if IsValid(self) then self:Remove() end
+				return
+			end
+			local pw = math.max(panel:GetWide(), 64)
+			self:SetSize(CLOSE_W, CLOSE_H)
+			self:SetPos(math.max(4, pw - CLOSE_W - 6), 2)
+			self:SetZPos(32767)
+			self:MoveToFront()
+			self:SetVisible(g_VR and g_VR.active and true or false)
+			self:SetMouseInputEnabled(true)
+		end
+	end
+	btn._cubeShell = (kind == "contextmenu" or kind == "context") and "context" or "spawn"
+	local pw = math.max(panel:GetWide(), 64)
+	btn:SetPos(math.max(4, pw - CLOSE_W - 6), 2)
+	btn:SetVisible(true)
+	btn:MoveToFront()
+	return btn
+end
+
+--- Refit Derma content into a new pixel window (corner-resize / open).
+function W.RefitPanel(panel, mw, mh, kind)
+	if not IsValid(panel) then return end
+	mw, mh = clampSize(mw, mh)
+	kind = kind or panel._p2vKind or detectKind(panel)
+	panel._p2vKind = kind
+	forcePanelIntoVRBox(panel, mw, mh)
+
+	if kind == "spawnmenu" then
+		-- fitSandboxLayout is assigned after definition (forward call)
+		if W._fitSandboxLayout then
+			W._fitSandboxLayout(panel, mw, mh)
+		end
+		if panel.DockPadding then panel:DockPadding(4, 34, 4, 4) end
+		local div = panel.HorizontalDivider
+		if IsValid(div) then
+			if div.DockMargin then div:DockMargin(8, 36, 8, 8) end
+			if div.SetLeftWidth then div:SetLeftWidth(math.floor(mw * 0.62)) end
+			if div.SetLeftMin then div:SetLeftMin(math.floor(mw * 0.40)) end
+			if div.SetRightMin then div:SetRightMin(math.floor(mw * 0.30)) end
+		end
+	elseif kind == "contextmenu" then
+		if vrmod.cube and vrmod.cube.LayoutContextForVR then
+			vrmod.cube.LayoutContextForVR(panel, mw, mh)
+		else
+			if panel.DockPadding then panel:DockPadding(4, 34, 4, 4) end
+			if IsValid(panel.Canvas) then
+				if panel.Canvas.Dock then panel.Canvas:Dock(NODOCK) end
+				panel.Canvas:SetPos(12, 36)
+				panel.Canvas:SetSize(math.max(100, mw - 24), math.max(80, mh - 48))
+			end
+			if IsValid(panel.DesktopWidgets) then
+				if panel.DesktopWidgets.Dock then panel.DesktopWidgets:Dock(NODOCK) end
+				local iconsH = math.Clamp(math.floor(mh * 0.20), 72, 140)
+				panel.DesktopWidgets:SetPos(12, mh - iconsH - 10)
+				panel.DesktopWidgets:SetSize(math.max(100, mw - 24), iconsH)
+			end
+		end
+	elseif kind == "popup" or kind == "panel" or kind == "settings" or kind == "dmenu" then
+		W.ApplyStyledThemeVRScale()
+	end
+
+	W.EnsureCloseButton(panel, panel._p2vUid, kind)
+	if panel.InvalidateLayout then panel:InvalidateLayout(true) end
+	return mw, mh
 end
 
 function W.IsVR()
@@ -285,16 +458,6 @@ function W.ResolvePlace(placeName, override, pixelW, pixelH)
 	return base
 end
 
-local function clampSize(w, h)
-	local mx = maxRT()
-	w = math.Clamp(math.floor(tonumber(w) or 512), MIN_RT, mx)
-	h = math.Clamp(math.floor(tonumber(h) or 512), MIN_RT, mx)
-	-- Even dims
-	w = math.floor(w / 2) * 2
-	h = math.floor(h / 2) * 2
-	return w, h
-end
-
 local function detectKind(panel)
 	if not IsValid(panel) then return "panel" end
 	local class = panel.ClassName or panel:GetClassName() or ""
@@ -335,9 +498,186 @@ local function GetVRShellHost()
 	return nil, nil
 end
 
---- Parent DMenu under spawn/context shell (same RT). Never MakePopup to world.
+--- DMenu is a DScrollPanel: options live on GetCanvas(), not direct children.
+-- Title bar via DockPadding + paint; stock PerformLayout still sizes options.
+local function installDMenuChrome(menu)
+	if not IsValid(menu) then return end
+	if menu._p2vChrome then
+		if menu.DockPadding then menu:DockPadding(2, 34, 2, 2) end
+		W.EnsureCloseButton(menu, menu._p2vUid, "dmenu")
+		return
+	end
+	menu._p2vChrome = true
+	menu._p2vPaintOrig = menu.Paint
+	if menu.DockPadding then menu:DockPadding(2, 34, 2, 2) end
+	-- Room for title + scroll; don't clip long menus (VR window can grow / resize)
+	if menu.SetMaxHeight then
+		local maxH = 720
+		if vrmod.GetVRUIClickableMax then
+			local _, mh = vrmod.GetVRUIClickableMax()
+			maxH = mh or maxH
+		end
+		menu:SetMaxHeight(math.max(200, maxH - 48))
+	end
+	menu.Paint = function(self, w, h)
+		surface.SetDrawColor(18, 8, 12, 250)
+		surface.DrawRect(0, 0, w, h)
+		surface.SetDrawColor(40, 12, 18, 245)
+		surface.DrawRect(0, 0, w, 32)
+		surface.SetDrawColor(196, 30, 58, 255)
+		surface.DrawRect(0, 0, w, 3)
+		surface.DrawRect(0, 31, w, 1)
+		surface.DrawOutlinedRect(0, 0, w, h, 2)
+		draw.SimpleText("MENU", "DermaDefaultBold", 10, 16, Color(255, 180, 190), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+		-- Stock menu skin for option area (below title)
+		if self._p2vPaintOrig then
+			return self._p2vPaintOrig(self, w, h)
+		end
+		derma.SkinHook("Paint", "Menu", self, w, h)
+		return true
+	end
+	if not menu._p2vLayoutHooked then
+		menu._p2vLayoutHooked = true
+		menu._p2vLayoutOrig = menu.PerformLayout
+		menu.PerformLayout = function(self, w, h)
+			if self.DockPadding then self:DockPadding(2, 34, 2, 2) end
+			if self._p2vLayoutOrig then
+				self._p2vLayoutOrig(self, w, h)
+			end
+			-- Title bar eats 34px — grow outer height so scroll canvas still fits options
+			if g_VR and g_VR.active then
+				local canvas = self.GetCanvas and self:GetCanvas() or nil
+				if IsValid(canvas) then
+					local cy = 0
+					for _, ch in ipairs(canvas:GetChildren() or {}) do
+						if IsValid(ch) then
+							cy = math.max(cy, (ch:GetY() or 0) + (ch:GetTall() or 0))
+						end
+					end
+					local need = cy + 42
+					local maxH = self.GetMaxHeight and self:GetMaxHeight() or 900
+					if need > (self:GetTall() or 0) and need <= maxH + 34 then
+						self:SetTall(math.min(need, maxH + 34))
+					end
+				end
+				if IsValid(self._cubeCloseBtn) then
+					self._cubeCloseBtn:SetPos(math.max(4, self:GetWide() - 58), 2)
+					self._cubeCloseBtn:SetZPos(32767)
+					self._cubeCloseBtn:MoveToFront()
+				end
+			end
+		end
+	end
+	W.EnsureCloseButton(menu, menu._p2vUid, "dmenu")
+end
+
+--- Present DMenu / submenu as a real resizable VR surface with close X.
+function W.PresentDMenuWindow(menu)
+	if not IsValid(menu) or not W.IsVR() then return false end
+	if not isfunction(VRUtilMenuOpen) then return false end
+
+	installDMenuChrome(menu)
+	if menu.InvalidateLayout then menu:InvalidateLayout(true) end
+
+	local maxW, maxH = 480, 720
+	if vrmod.GetVRUIPanelMetrics then
+		maxW, maxH = vrmod.GetVRUIPanelMetrics("dmenu")
+	end
+	maxW, maxH = clampSize(maxW, maxH)
+
+	-- After stock layout: content height on canvas + title padding
+	local pw = math.max(menu:GetWide() or 180, 180)
+	local ph = math.max(menu:GetTall() or 80, 80) + 36
+	if pw > maxW then pw = maxW end
+	if ph > maxH then ph = maxH end
+	pw, ph = clampSize(pw, ph)
+
+	menu:SetSize(pw, ph)
+	menu:SetPos(0, 0)
+	if menu.DockPadding then menu:DockPadding(2, 34, 2, 2) end
+	if menu.InvalidateLayout then menu:InvalidateLayout(true) end
+	installDMenuChrome(menu)
+
+	menu._p2vKind = "dmenu"
+	local uid = menu._p2vUid or uidFor(menu, "dmenu", "dmenu")
+	menu._p2vUid = uid
+	W.EnsureCloseButton(menu, uid, "dmenu")
+
+	-- Close any previous DMenu surface (avoid stack of ghost menus)
+	for buid, info in pairs(bound) do
+		if info.kind == "dmenu" and buid ~= uid and info.panel ~= menu then
+			W.Close(buid)
+			if IsValid(info.panel) and info.panel.Remove then
+				pcall(function() info.panel:Remove() end)
+			end
+		end
+	end
+
+	local place = W.ResolvePlace("popup", nil, pw, ph)
+	-- Float slightly in front of HMD so submenu isn't buried under spawn shell
+	if g_VR and g_VR.tracking and g_VR.tracking.hmd then
+		place.attachment = false
+		place.pos, place.ang = W.ComputeFloatPose(26, -6)
+	end
+
+	menu:SetVisible(true)
+	menu:SetMouseInputEnabled(true)
+	menu:SetKeyboardInputEnabled(false)
+	menu:SetPaintedManually(true)
+	if menu.SetDrawOnTop then menu:SetDrawOnTop(true) end
+
+	-- Already bound same menu: refit only
+	if bound[uid] and bound[uid].panel == menu and g_VR.menus and g_VR.menus[uid] then
+		if vrmod.ApplyMenuPixelSize then
+			vrmod.ApplyMenuPixelSize(g_VR.menus[uid], pw, ph, { force = true, forceRT = true })
+		end
+		g_VR.menus[uid].dirty = true
+		if isfunction(VRUtilMenuRenderPanel) then VRUtilMenuRenderPanel(uid, true) end
+		g_VR._dmenuOpened = true
+		return true
+	end
+
+	VRUtilMenuOpen(uid, pw, ph, menu, place.attachment, place.pos, place.ang, place.scale or 0.02, true, function()
+		if IsValid(menu) then
+			menu:SetPaintedManually(false)
+			menu:SetVisible(false)
+		end
+		bound[uid] = nil
+		if panelUids[menu] == uid then panelUids[menu] = nil end
+	end)
+
+	if g_VR.menus and g_VR.menus[uid] then
+		local m = g_VR.menus[uid]
+		m._p2vKind = "dmenu"
+		m.cubeMenu = true
+		m.grabbable = true
+		m.resizable = true
+		m.alwaysRedraw = true
+		m.paintInterval = 0
+		m.paintIntervalFocused = 0
+		m.attachment = place.attachment and true or false
+		m.freeFloat = not m.attachment
+		m.pos = place.pos
+		m.ang = place.ang
+		m.dirty = true
+	end
+	bound[uid] = {
+		panel = menu,
+		kind = "dmenu",
+		place = "popup",
+		alwaysPaint = true,
+	}
+	if isfunction(VRUtilMenuRenderPanel) then VRUtilMenuRenderPanel(uid, true) end
+	g_VR._dmenuOpened = true
+	log("dmenu window uid=%s %dx%d", uid, pw, ph)
+	return true
+end
+
+--- Legacy: parent under shell only as fallback (prefer PresentDMenuWindow).
 local function attachDMenuToShell(panel, mx, my)
 	if not IsValid(panel) then return false end
+	-- Prefer standalone window so content + X are not clipped by shell RT
+	if W.PresentDMenuWindow(panel) then return true end
 	local host, uid = GetVRShellHost()
 	if not IsValid(host) then return false end
 
@@ -346,10 +686,13 @@ local function attachDMenuToShell(panel, mx, my)
 	local ph = math.max(panel:GetTall() or 24, 20)
 	local hw = host:GetWide() or 1024
 	local hh = host:GetTall() or 768
+	-- Cap to host so options stay clickable
+	if pw > hw - 8 then pw = hw - 8 end
+	if ph > hh - 8 then ph = hh - 8 end
+	panel:SetSize(pw, ph)
 	mx = math.Clamp(math.floor(tonumber(mx) or g_VR.menuCursorX or 8), 0, math.max(0, hw - pw - 2))
 	my = math.Clamp(math.floor(tonumber(my) or g_VR.menuCursorY or 8), 0, math.max(0, hh - ph - 2))
 
-	-- Stay in shell tree so PaintManual of host draws us
 	panel:SetParent(host)
 	panel:SetPaintedManually(false)
 	panel:SetPos(mx, my)
@@ -360,16 +703,16 @@ local function attachDMenuToShell(panel, mx, my)
 	if panel.MoveToFront then panel:MoveToFront() end
 	panel._vrmod_shell_host = host
 	panel._vrmod_shell_uid = uid
+	installDMenuChrome(panel)
 
 	if isfunction(VRUtilMenuRenderPanel) then
 		VRUtilMenuRenderPanel(uid, true)
 	end
 	g_VR._dmenuOpened = true
-	log("dmenu attached to shell uid=%s at %s,%s size=%sx%s", uid, tostring(mx), tostring(my), tostring(pw), tostring(ph))
 	return true
 end
 
---- Patch DMenu:Open so ContentIcon right-click menus appear on the spawn RT.
+--- Patch DMenu:Open so right-click / submenus become chrome windows in VR.
 local dmenuOpenPatched = false
 local function PatchDMenuOpen()
 	if dmenuOpenPatched then return end
@@ -381,28 +724,29 @@ local function PatchDMenuOpen()
 		if not W.IsVR() then
 			return oldOpen(self, x, y, skipAnim, ownerpanel)
 		end
-		local host, uid = GetVRShellHost()
-		if not IsValid(host) then
-			return oldOpen(self, x, y, skipAnim, ownerpanel)
-		end
 
 		-- Layout options first (AddOption already ran)
 		if self.InvalidateLayout then self:InvalidateLayout(true) end
-		local mx = g_VR.menuCursorX or 8
-		local my = g_VR.menuCursorY or 8
-		if IsValid(ownerpanel) and ownerpanel.LocalToScreen and host.ScreenToLocal then
-			local sx, sy = ownerpanel:LocalToScreen(0, ownerpanel:GetTall() or 0)
-			if sx and sy then
-				local lx, ly = host:ScreenToLocal(sx, sy)
-				if lx then mx, my = lx, ly end
+		-- Open stock first so children exist, then pull into VR window
+		-- (skip MakePopup path by not using world parent)
+		if self.SetVisible then self:SetVisible(true) end
+		if self.SetMouseInputEnabled then self:SetMouseInputEnabled(true) end
+		if not W.PresentDMenuWindow(self) then
+			local host = GetVRShellHost()
+			if IsValid(host) then
+				local mx = g_VR.menuCursorX or 8
+				local my = g_VR.menuCursorY or 8
+				if not attachDMenuToShell(self, mx, my) then
+					return oldOpen(self, x, y, skipAnim, ownerpanel)
+				end
+			else
+				return oldOpen(self, x, y, skipAnim, ownerpanel)
 			end
 		end
-		if not attachDMenuToShell(self, mx, my) then
-			return oldOpen(self, x, y, skipAnim, ownerpanel)
-		end
-		-- Do NOT call MakePopup — that tears us out of the spawn RT
+		-- Do NOT call MakePopup — that tears us out to desktop coords
 	end
-	log("DMenu:Open patched for VR shell menus")
+	-- Submenus call child:Open → our Open patch presents them as windows.
+	log("DMenu:Open patched for VR menu windows")
 end
 
 local function tryNative(kind, panel, opts)
@@ -469,6 +813,7 @@ local function fitSandboxLayout(panel, tw, th)
 
 	walk(panel, 0)
 end
+W._fitSandboxLayout = fitSandboxLayout
 
 --- Prepare oversized sandbox shells for VR (RT from eye res × ui_scale, not ScrW×ScrH)
 -- Cube: one size + one fit + one theme — no restyle storms (freeze on open).
@@ -476,6 +821,7 @@ local function preparePanelForVR(panel, kind)
 	if not IsValid(panel) then return end
 	if kind == "spawnmenu" or kind == "contextmenu" then
 		local tw, th = shellMetrics(kind)
+		tw, th = clampSize(tw, th)
 		local sizeKey = tw .. "x" .. th
 		local sameSize = panel._cubeVRSizeKey == sizeKey
 
@@ -494,6 +840,11 @@ local function preparePanelForVR(panel, kind)
 			panel._cubeFitDone = true
 		elseif kind == "spawnmenu" and not sameSize then
 			fitSandboxLayout(panel, tw, th)
+		elseif kind == "contextmenu" then
+			-- Always reflow context into current box (resize + open)
+			if vrmod.cube and vrmod.cube.LayoutContextForVR then
+				vrmod.cube.LayoutContextForVR(panel, tw, th)
+			end
 		end
 
 		-- Layout only when size changed (true = full tree; freezes VR if every open)
@@ -510,16 +861,15 @@ local function preparePanelForVR(panel, kind)
 				vrmod.cube.ApplyDermaSkin(panel)
 			end
 		end
+		-- Always guarantee laser close X (even if theme skipped)
+		W.EnsureCloseButton(panel, panel._p2vUid, kind)
 		-- One deferred close-X reassert only (no re-theme / re-fit)
 		if not panel._cubeCloseShot then
 			panel._cubeCloseShot = true
 			timer.Simple(0.08, function()
 				panel._cubeCloseShot = nil
 				if not IsValid(panel) then return end
-				if IsValid(panel._cubeCloseBtn) then
-					panel._cubeCloseBtn:SetVisible(true)
-					panel._cubeCloseBtn:MoveToFront()
-				end
+				W.EnsureCloseButton(panel, panel._p2vUid, kind)
 			end)
 		end
 	elseif kind == "settings" or kind == "popup" or kind == "panel" then
@@ -538,6 +888,7 @@ local function preparePanelForVR(panel, kind)
 		else
 			if panel.SetPos then panel:SetPos(0, 0) end
 		end
+		W.EnsureCloseButton(panel, panel._p2vUid, kind)
 	end
 end
 
@@ -566,9 +917,11 @@ function W.ManifestPanel(panel, opts)
 		return "native_" .. kind
 	end
 
-	preparePanelForVR(panel, kind)
-
 	local uid = opts.uid or uidFor(panel, opts.hint or kind, kind)
+	panel._p2vUid = uid
+	panel._p2vKind = kind
+	preparePanelForVR(panel, kind)
+	W.EnsureCloseButton(panel, uid, kind)
 	-- Drop any other bound shells of same kind (prevents multi-stack)
 	for buid, info in pairs(bound) do
 		if info.kind == kind and buid ~= uid then
@@ -712,6 +1065,7 @@ function W.ManifestPanel(panel, opts)
 
 	if g_VR.menus and g_VR.menus[uid] then
 		local m = g_VR.menus[uid]
+		m._p2vKind = kind
 		local disk = isfunction(vrmod.GetMenuLayout) and vrmod.GetMenuLayout(uid) or nil
 		-- Prefer layout already applied by VRUtilMenuOpen; only fill defaults if missing
 		if not (disk and disk.scale) then
@@ -723,7 +1077,7 @@ function W.ManifestPanel(panel, opts)
 		end
 		m.cubeMenu = true
 		m.grabbable = true
-		m.resizable = not isCinema -- cinema stays large and stable
+		m.resizable = not isCinema -- cinema stays large and stable; everything else corner-resizable
 		-- Stay alive while QM / other menus open (IsVisible flicker must not kill shell)
 		m.persistOpen = isShell or isCinema
 		m.keepAlive = isShell or isCinema
@@ -935,15 +1289,16 @@ function W.InstallHooks()
 		if kind == "spawnmenu" or kind == "contextmenu" then
 			return origMakePopup(panel, ...)
 		end
-		-- DMenu: Open patch parents to shell — skip MakePopup entirely if already attached
-		if kind == "dmenu" or panel._vrmod_shell_host then
-			if panel._vrmod_shell_host then
-				return -- already on shell from DMenu:Open patch
+		-- DMenu: own chrome window (or already presented via Open patch)
+		if kind == "dmenu" or panel._p2vKind == "dmenu" or panel._vrmod_shell_host then
+			if panel._p2vUid and g_VR.menus and g_VR.menus[panel._p2vUid] then
+				return -- already a VR surface
 			end
-			-- Legacy path: someone called MakePopup without Open
-			origMakePopup(panel, ...)
+			if panel._vrmod_shell_host then
+				return
+			end
 			timer.Simple(0, function()
-				if IsValid(panel) then attachDMenuToShell(panel) end
+				if IsValid(panel) then W.PresentDMenuWindow(panel) end
 			end)
 			return
 		end
@@ -960,18 +1315,42 @@ function W.InstallHooks()
 				hint = kind,
 			})
 		end)
-		-- Re-fit after StyledTheme slide-in anim / layout settle
+		-- Re-fit after StyledTheme slide-in anim / layout settle.
+		-- If panel still exceeds RT (or RT was undersized), rebuild surface so nothing crops.
 		timer.Simple(0.12, function()
 			if not IsValid(panel) or not W.IsVR() then return end
-			local mw, mh = shellMetrics("popup")
-			local pw, ph = panel:GetSize()
-			if pw and ph and (pw > mw + 4 or ph > mh + 4) then
-				forcePanelIntoVRBox(panel, mw, mh)
-				local uid = panelUids[panel]
-				if uid and g_VR and g_VR.menus and g_VR.menus[uid] then
-					-- RT already created at open size; keep paint box in panel bounds
-					g_VR.menus[uid].dirty = true
+			local metricKind = "popup"
+			local title = (panel.GetTitle and tostring(panel:GetTitle() or "")) or ""
+			if title:lower():find("glide", 1, true) then metricKind = "popup" end
+			local mw, mh = shellMetrics(metricKind)
+			mw, mh = clampSize(mw, mh)
+			forcePanelIntoVRBox(panel, mw, mh)
+			local uid = panelUids[panel]
+			local m = uid and g_VR and g_VR.menus and g_VR.menus[uid]
+			if m then
+				local needRebuild = (m.width ~= mw) or (m.height ~= mh)
+				if needRebuild then
+					-- Rebuild RT at fitted size (old RT would keep cropping Glide tabs/rows)
+					W.Close(uid)
+					W.ManifestPanel(panel, {
+						kind = kind,
+						place = "popup",
+						hint = kind,
+						width = mw,
+						height = mh,
+					})
+				else
+					m.dirty = true
+					if isfunction(VRUtilMenuRenderPanel) then VRUtilMenuRenderPanel(uid, true) end
 				end
+			elseif not W.IsBound(panel) then
+				W.ManifestPanel(panel, {
+					kind = kind,
+					place = "popup",
+					hint = kind,
+					width = mw,
+					height = mh,
+				})
 			end
 		end)
 	end
