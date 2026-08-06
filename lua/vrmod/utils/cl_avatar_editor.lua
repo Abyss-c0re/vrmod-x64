@@ -381,6 +381,12 @@ function Session:ReloadIK()
 	self.targets = {}
 	self.ik = nil
 	self.mirrorBoneMap = {}
+	self._unwriteableBones = {}
+	-- Fresh SetupBones after skeleton swap
+	pcall(function()
+		e:InvalidateBoneCache()
+		e:SetupBones()
+	end)
 	self:_cacheBones()
 	self:_measureArms()
 	local charik0 = vrmod.charik or vrmod.frameik
@@ -392,6 +398,7 @@ function Session:ReloadIK()
 		})
 	end
 	self:_applyHideBones()
+	if g_VR then g_VR.avatarPoseSnap = nil end
 	if vrmod.logger then
 		vrmod.logger.Info("[Avatar] twin ReloadIK model=%s bones=%s",
 			tostring(self.model or e:GetModel()), tostring(table.Count(self.bones or {})))
@@ -421,8 +428,14 @@ function Session:SetModel(path, opts)
 	-- Always rebuild twin IK caches for the new skeleton
 	self:ReloadIK()
 
-	-- Preview twin model change: refresh snap from live player IK
+	-- Preview twin model change: refresh snap from live player IK (next frames)
 	timer.Simple(0, function()
+		if not self.active then return end
+		if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+			pcall(vrmod.character.ForceLocalIKAndPublish)
+		end
+	end)
+	timer.Simple(0.1, function()
 		if not self.active then return end
 		if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
 			pcall(vrmod.character.ForceLocalIKAndPublish)
@@ -1119,9 +1132,11 @@ function Session:_applyIKnetClone(playerFeet, playerYaw)
 end
 
 --- Stamp targets onto twin skeleton (call EVERY stereo eye before DrawModel).
+-- Skip procedural/unwriteable bones — Source errors "Bone is unwriteable" spam.
 function Session:_applyTargets()
 	if not IsValid(self.ent) or not self.targets or not next(self.targets) then return false end
 	local e = self.ent
+	self._unwriteableBones = self._unwriteableBones or {}
 	e:InvalidateBoneCache()
 	e:SetupBones()
 	-- Direct SetBoneMatrix (don't rely only on BuildBonePositions — stereo-safe)
@@ -1129,9 +1144,16 @@ function Session:_applyTargets()
 	for boneId in pairs(self.targets) do ids[#ids + 1] = boneId end
 	table.sort(ids)
 	for _, boneId in ipairs(ids) do
+		if self._unwriteableBones[boneId] then continue end
 		local mat = self.targets[boneId]
-		if boneId and mat then
+		if not boneId or not mat then continue end
+		if not e:GetBoneMatrix(boneId) then continue end
+		local ok = pcall(function()
 			e:SetBoneMatrix(boneId, mat)
+		end)
+		if not ok then
+			self._unwriteableBones[boneId] = true
+			self.targets[boneId] = nil
 		end
 	end
 	return true
@@ -1322,14 +1344,21 @@ function vrmod.avatar.Open(opts)
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
 		if not s.active then return end
 		if not s.targets or not next(s.targets) then return end
+		s._unwriteableBones = s._unwriteableBones or {}
 		-- Paste only — never charik.ApplyHead (spike head) on twin
 		local ids = {}
 		for boneId in pairs(s.targets) do ids[#ids + 1] = boneId end
 		table.sort(ids)
 		for _, boneId in ipairs(ids) do
+			if s._unwriteableBones[boneId] then continue end
 			local mat = s.targets[boneId]
-			if boneId and mat and e:GetBoneMatrix(boneId) then
+			if not boneId or not mat or not e:GetBoneMatrix(boneId) then continue end
+			local ok = pcall(function()
 				e:SetBoneMatrix(boneId, mat)
+			end)
+			if not ok then
+				s._unwriteableBones[boneId] = true
+				s.targets[boneId] = nil
 			end
 		end
 	end)
@@ -1406,6 +1435,28 @@ function vrmod.avatar.ReloadAllIK()
 	end
 	if vrmod.logger then
 		vrmod.logger.Info("[Avatar] ReloadAllIK twins=%d", n)
+	end
+	return n
+end
+
+--- After player PM change: match twin mesh to live player + full IK rebuild (no respawn).
+function vrmod.avatar.SyncAllToPlayer()
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return 0 end
+	local live = ply.vrmod_pm or ply:GetModel() or ""
+	local n = 0
+	for id, s in pairs(sessions) do
+		if not (s and s:IsValid()) then continue end
+		if live ~= "" and s.SetModel and tostring(s.model or "") ~= live then
+			if s:SetModel(live, { persist = false, keepLooks = true }) then
+				n = n + 1
+			end
+		elseif s.ReloadIK then
+			if s:ReloadIK() then n = n + 1 end
+		end
+	end
+	if vrmod.logger then
+		vrmod.logger.Info("[Avatar] SyncAllToPlayer model=%s twins=%d", tostring(live), n)
 	end
 	return n
 end

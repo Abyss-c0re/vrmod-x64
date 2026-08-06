@@ -796,10 +796,12 @@ if CLIENT then
 					pcall(vrmod.character.ForceLocalIKAndPublish)
 				end
 			end)
-			-- Twin: full bone/IK rebuild after player skeleton is live
+			-- Twin: match live PM + full bone/IK rebuild (no respawn)
 			timer.Simple(0.12, function()
 				if not IsValid(ply) or not g_VR or not g_VR.active then return end
-				if vrmod.avatar and vrmod.avatar.ReloadAllIK then
+				if vrmod.avatar and vrmod.avatar.SyncAllToPlayer then
+					pcall(vrmod.avatar.SyncAllToPlayer)
+				elseif vrmod.avatar and vrmod.avatar.ReloadAllIK then
 					pcall(vrmod.avatar.ReloadAllIK)
 				end
 				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
