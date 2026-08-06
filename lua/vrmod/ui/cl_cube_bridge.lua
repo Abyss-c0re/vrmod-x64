@@ -21,10 +21,10 @@ local RELAUNCH_LOG = "/tmp/CubeUI_return.log"
 local RELAUNCH_PID = "/tmp/CubeUI_relaunch.pid"
 
 -- After XR shutdown, wait for runtime drain before first CubeUI attempt.
-local SPAWN_DELAY_SEC = 2.5
+local SPAWN_DELAY_SEC = 3.5
 -- Only retry *boot* failures (process dies in first few seconds).
-local HOST_BOOT_RETRIES = 8
-local HOST_BOOT_FAIL_MAX_SEC = 6
+local HOST_BOOT_RETRIES = 10
+local HOST_BOOT_FAIL_MAX_SEC = 8
 
 local function log(fmt, ...)
 	local msg = string.format(fmt, ...)
@@ -150,6 +150,15 @@ function vrmod.CubeBridge_ResolveBin()
 	return home .. "/Dev/GMod/gVRMod/install/native/CubeUI"
 end
 
+--- Soft-stop previous relaunch script only (do not clear return intent flags).
+local function killPriorRelaunchScript()
+	hostPopen(
+		"if [ -f " .. RELAUNCH_PID .. " ]; then kill $(cat " .. RELAUNCH_PID .. ") 2>/dev/null; rm -f "
+			.. RELAUNCH_PID .. "; fi; "
+			.. "pkill -f 'CubeUI_relaunch.sh' 2>/dev/null; true"
+	)
+end
+
 --- Spawn CubeUI once with boot-only retries (not handoff-exit retries).
 function vrmod.CubeBridge_SpawnLauncher(reason)
 	-- If GMod VR is live again, never fight it
@@ -162,7 +171,7 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 	if not bin or bin == "" then
 		log("no CubeUI path")
 		if vrmod.Toast then
-			vrmod.Toast("Cube path unknown · launch gVRMod Cube from desktop", 6, "warn")
+			vrmod.Toast("Cube path unknown · launch gVRMod from desktop", 6, "warn")
 		end
 		return false
 	end
@@ -174,13 +183,16 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 		"ts=" .. tostring(os.time and os.time() or 0),
 	}, "\n") .. "\n")
 
-	-- Cancel any previous retry loop first
-	vrmod.CubeBridge_CancelRelaunch("respawn")
+	-- Only kill prior script — full CancelRelaunch would wipe return intent
+	killPriorRelaunchScript()
 
 	local display = (os.getenv and os.getenv("DISPLAY")) or ":0"
 	local xrJson = (os.getenv and os.getenv("XR_RUNTIME_JSON")) or ""
 	local xdg = (os.getenv and os.getenv("XDG_RUNTIME_DIR")) or ""
+	local home = (os.getenv and os.getenv("HOME")) or ""
 	local qbin = shellQuote(bin)
+	-- Prefer wrapper script if present (sets env / cwd)
+	local wrapper = home .. "/Dev/GMod/gVRMod/scripts/CubeUI.sh"
 	local reasonSafe = (tostring(reason or "?"):gsub("[^%w%._%-]", "_"))
 
 	-- Boot-only retry: if CubeUI lives longer than HOST_BOOT_FAIL_MAX_SEC, treat
@@ -190,12 +202,18 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 		"echo $$ > " .. RELAUNCH_PID,
 		"log=" .. RELAUNCH_LOG,
 		"bin=" .. qbin,
+		"wrap=" .. shellQuote(wrapper),
 		"max_boot=" .. tostring(HOST_BOOT_FAIL_MAX_SEC),
-		"echo \"[cube-bridge] spawn begin $(date -Iseconds) reason=" .. reasonSafe .. "\" >>\"$log\"",
+		"echo \"[cube-bridge] spawn begin $(date -Iseconds) reason=" .. reasonSafe .. " bin=$bin\" >>\"$log\"",
 		"export DISPLAY=" .. shellQuote(display),
 		"export XDG_RUNTIME_DIR=" .. shellQuote(xdg),
+		"export HOME=" .. shellQuote(home),
 		xrJson ~= "" and ("export XR_RUNTIME_JSON=" .. shellQuote(xrJson)) or "true",
+		-- Drop Steam pressure-vessel / game lib path so host OpenXR + GLX work
 		"unset LD_LIBRARY_PATH",
+		"unset LD_PRELOAD",
+		"unset STEAM_RUNTIME",
+		"unset STEAM_RUNTIME_LIBRARY_PATH",
 		"for i in $(seq 1 " .. tostring(HOST_BOOT_RETRIES) .. "); do",
 		"  if pgrep -x CubeUI >/dev/null 2>&1; then",
 		"    echo \"[cube-bridge] CubeUI already running — ok\" >>\"$log\"",
@@ -204,56 +222,98 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 		"  fi",
 		"  echo \"[cube-bridge] boot attempt $i/" .. tostring(HOST_BOOT_RETRIES) .. "\" >>\"$log\"",
 		"  t0=$(date +%s)",
-		"  \"$bin\" >>\"$log\" 2>&1",
+		"  if [ -x \"$wrap\" ]; then",
+		"    \"$wrap\" >>\"$log\" 2>&1",
+		"  else",
+		"    \"$bin\" >>\"$log\" 2>&1",
+		"  fi",
 		"  rc=$?",
 		"  t1=$(date +%s)",
 		"  lived=$((t1 - t0))",
 		"  echo \"[cube-bridge] exit rc=$rc lived=${lived}s\" >>\"$log\"",
-		"  # Lived long enough → normal handoff/quit, not crash. Stop retries.",
 		"  if [ \"$lived\" -ge \"$max_boot\" ]; then",
 		"    echo \"[cube-bridge] normal exit after ${lived}s (handoff/quit) — not a crash\" >>\"$log\"",
 		"    rm -f " .. RELAUNCH_PID,
 		"    exit 0",
 		"  fi",
-		"  # rc==0 quick exit also ok (instant handoff edge)",
 		"  if [ $rc -eq 0 ]; then",
 		"    echo \"[cube-bridge] clean exit — stop\" >>\"$log\"",
 		"    rm -f " .. RELAUNCH_PID,
 		"    exit 0",
 		"  fi",
-		"  echo \"[cube-bridge] boot failure — retry in 1s\" >>\"$log\"",
-		"  sleep 1",
+		"  echo \"[cube-bridge] boot failure — retry in 1.5s\" >>\"$log\"",
+		"  sleep 1.5",
 		"done",
-		"echo \"[cube-bridge] boot failed after retries — desktop: scripts/CubeUI.sh\" >>\"$log\"",
+		"echo \"[cube-bridge] boot failed after retries — desktop: gVRMod\" >>\"$log\"",
 		"rm -f " .. RELAUNCH_PID,
 		"exit 1",
 		"",
 	}, "\n")
 
-	local writeCmd = "cat > " .. RELAUNCH_SH .. " <<'CUBEEOF'\n" .. shBody .. "CUBEEOF\nchmod +x "
-		.. RELAUNCH_SH .. "\nsetsid bash " .. RELAUNCH_SH .. " </dev/null >/dev/null 2>&1 &"
+	-- Write script with io.open (works when shell cat via popen is blocked)
+	local wrote = false
+	pcall(function()
+		if io and io.open then
+			local f = io.open(RELAUNCH_SH, "w")
+			if f then
+				f:write(shBody)
+				f:close()
+				wrote = true
+			end
+		end
+	end)
+	if not wrote then
+		pcall(function()
+			local f = io.popen("cat > " .. RELAUNCH_SH, "w")
+			if f then
+				f:write(shBody)
+				f:close()
+				wrote = true
+			end
+		end)
+	end
 
 	local ok = false
+	local launchCmd = "chmod +x " .. RELAUNCH_SH
+		.. " && setsid nohup bash " .. RELAUNCH_SH
+		.. " </dev/null >>" .. RELAUNCH_LOG .. " 2>&1 &"
 	pcall(function()
 		if io and io.popen then
-			local f = io.popen(writeCmd)
+			local f = io.popen(launchCmd)
 			if f then f:close(); ok = true end
 		end
 	end)
 	if not ok then
 		pcall(function()
 			if os and os.execute then
-				local r = os.execute(writeCmd)
+				local r = os.execute(launchCmd)
 				ok = (r == 0 or r == true)
 			end
 		end)
 	end
+	-- Last resort: direct binary
+	if not ok and wrote then
+		pcall(function()
+			if io and io.popen then
+				local f = io.popen(
+					"setsid nohup " .. qbin
+						.. " </dev/null >>" .. RELAUNCH_LOG .. " 2>&1 & echo started"
+				)
+				if f then
+					local out = f:read("*a") or ""
+					f:close()
+					ok = out:find("started", 1, true) ~= nil
+				end
+			end
+		end)
+	end
 
-	log("spawn CubeUI scheduled ok=%s reason=%s bin=%s", tostring(ok), tostring(reason or "?"), bin)
+	log("spawn CubeUI scheduled ok=%s wrote=%s reason=%s bin=%s",
+		tostring(ok), tostring(wrote), tostring(reason or "?"), bin)
 	if ok and vrmod.Toast then
 		vrmod.Toast("Opening Cube launcher…", 3, "hint")
 	elseif not ok and vrmod.Toast then
-		vrmod.Toast("Could not spawn CubeUI · desktop gVRMod Cube · /tmp/CubeUI_return.log", 6, "warn")
+		vrmod.Toast("Could not spawn CubeUI · desktop gVRMod · /tmp/CubeUI_return.log", 6, "warn")
 	end
 	return ok
 end

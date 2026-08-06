@@ -803,12 +803,13 @@ if CLIENT then
 	local function ClearEntityBoneState(ent)
 		if not IsValid(ent) then return end
 		pcall(function()
-			local n = ent:GetBoneCount() or 0
+			-- Clear a fixed high range: old PM may have had more bones than the new one
+			local n = math.max(ent:GetBoneCount() or 0, 128)
 			local zeroA, zeroV, oneS = Angle(0, 0, 0), Vector(0, 0, 0), Vector(1, 1, 1)
 			for i = 0, n - 1 do
-				ent:ManipulateBoneAngles(i, zeroA)
-				ent:ManipulateBonePosition(i, zeroV)
-				ent:ManipulateBoneScale(i, oneS)
+				pcall(ent.ManipulateBoneAngles, ent, i, zeroA)
+				pcall(ent.ManipulateBonePosition, ent, i, zeroV)
+				pcall(ent.ManipulateBoneScale, ent, i, oneS)
 			end
 			if ent.InvalidateBoneCache then ent:InvalidateBoneCache() end
 			ent:SetupBones()
@@ -816,13 +817,17 @@ if CLIENT then
 	end
 
 	--- Full character + FBT + twin IK reload after PM apply (player or twin→player).
+	-- Must re-apply model on the PLAYER entity, clear manip from the OLD skeleton, then
+	-- rebuild CharacterInit against the new bone set — without requiring a map respawn.
 	function g_VR.ReloadCharacterSystem(ply, reason)
 		if not IsValid(ply) then return false end
 		if not g_VR or not g_VR.active then return false end
 		local sid = ply:SteamID()
 		if not sid then return false end
+		local targetModel = ply.vrmod_pm or ply:GetModel() or ""
 		if vrmod.logger then
-			vrmod.logger.Info("ReloadCharacterSystem %s (%s)", sid, tostring(reason or "pm"))
+			vrmod.logger.Info("ReloadCharacterSystem %s (%s) model=%s",
+				sid, tostring(reason or "pm"), tostring(targetModel))
 		end
 		-- Invalidate caches so Init always rebuilds
 		if characterInfo[sid] then characterInfo[sid].modelName = nil end
@@ -831,43 +836,67 @@ if CLIENT then
 		end
 		if g_VR.fbtActive then g_VR.fbtActive[sid] = nil end
 		if g_VR.avatarPoseSnap then g_VR.avatarPoseSnap = nil end
+		lastFrames[sid] = nil
 
+		-- 1) Wipe manip on current (possibly old) skeleton
 		ClearEntityBoneState(ply)
 		pcall(g_VR.StopCharacterSystem, sid)
 
-		timer.Simple(0, function()
+		-- 2) Force engine model to target (GetModel can lag after cl_playermodel)
+		if targetModel ~= "" then
+			util.PrecacheModel(targetModel)
+			pcall(function() ply:SetModel(targetModel) end)
+			ply.vrmod_pm = targetModel
+		end
+		ClearEntityBoneState(ply)
+
+		local function startAndSnap(tag)
 			if not IsValid(ply) or not g_VR or not g_VR.active then return end
 			ClearEntityBoneState(ply)
-			-- Force model cache string so CharacterInit never skips
 			ply.vrmod_pm = ply.vrmod_pm or ply:GetModel()
+			-- Ensure net slot exists (StartCharacterSystem requires g_VR.net[sid])
+			if not g_VR.net then g_VR.net = {} end
+			if not g_VR.net[sid] then
+				g_VR.net[sid] = g_VR.net[sid] or {
+					characterAltHead = false,
+					dontHideBullets = false,
+					lerpedFrame = nil,
+				}
+			end
 			pcall(g_VR.StartCharacterSystem, ply, true)
 			if vrmod_fbt and vrmod_fbt.Init then
 				pcall(vrmod_fbt.Init, ply)
 			end
-			timer.Simple(0.05, function()
-				if not IsValid(ply) or not g_VR or not g_VR.active then return end
-				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
-					pcall(vrmod.character.ForceLocalIKAndPublish)
-				end
-			end)
-			-- Twin: match live PM + full bone/IK rebuild (no respawn)
-			timer.Simple(0.12, function()
-				if not IsValid(ply) or not g_VR or not g_VR.active then return end
-				if vrmod.avatar and vrmod.avatar.SyncAllToPlayer then
-					pcall(vrmod.avatar.SyncAllToPlayer)
-				elseif vrmod.avatar and vrmod.avatar.ReloadAllIK then
-					pcall(vrmod.avatar.ReloadAllIK)
-				end
-				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
-					pcall(vrmod.character.ForceLocalIKAndPublish)
-				end
-			end)
-			timer.Simple(0.28, function()
-				if not IsValid(ply) or not g_VR or not g_VR.active then return end
-				if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
-					pcall(vrmod.character.ForceLocalIKAndPublish)
-				end
-			end)
+			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+				pcall(vrmod.character.ForceLocalIKAndPublish)
+			end
+			if vrmod.logger then
+				local ci = characterInfo[sid]
+				vrmod.logger.Info("ReloadCharacterSystem %s ok bones=%s ikReady=%s",
+					tostring(tag),
+					tostring(ci and table.Count(ci.bones or {}) or 0),
+					tostring(ci and ci.ikReady))
+			end
+		end
+
+		-- Staggered restarts: engine finishes SetModel async
+		timer.Simple(0, function() startAndSnap("t0") end)
+		timer.Simple(0.08, function() startAndSnap("t08") end)
+		timer.Simple(0.2, function()
+			if not IsValid(ply) or not g_VR or not g_VR.active then return end
+			startAndSnap("t20")
+			if vrmod.avatar and vrmod.avatar.SyncAllToPlayer then
+				pcall(vrmod.avatar.SyncAllToPlayer)
+			elseif vrmod.avatar and vrmod.avatar.ReloadAllIK then
+				pcall(vrmod.avatar.ReloadAllIK)
+			end
+		end)
+		timer.Simple(0.45, function()
+			if not IsValid(ply) or not g_VR or not g_VR.active then return end
+			startAndSnap("t45")
+			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+				pcall(vrmod.character.ForceLocalIKAndPublish)
+			end
 		end)
 		return true
 	end

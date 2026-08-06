@@ -38,6 +38,13 @@ local cvSmooth = CreateClientConVar("vrmod_desktop_cam_smooth", "0.15", true, FC
 	"Follow-cam position/angle smooth (0=snap 1=heavy)", 0, 1)
 local cvDrawLocal = CreateClientConVar("vrmod_desktop_cam_draw", "1", true, FCVAR_ARCHIVE,
 	"When desktopview=follow cam, also blit to GMod window (0=broadcast-only)", 0, 1)
+-- Orbit: yaw offset around player (0 = behind facing direction) + auto spin loop
+local cvOrbitYaw = CreateClientConVar("vrmod_desktop_cam_orbit_yaw", "0", true, FCVAR_ARCHIVE,
+	"Follow-cam yaw offset around player (degrees, 0=behind, 90=side, 180=front)", -180, 180)
+local cvOrbitSpin = CreateClientConVar("vrmod_desktop_cam_orbit_spin", "0", true, FCVAR_ARCHIVE,
+	"Auto orbit spin (deg/sec). 0=fixed angle from orbit_yaw. e.g. 12 = slow loop", -90, 90)
+local cvOrbitPitch = CreateClientConVar("vrmod_desktop_cam_orbit_pitch", "0", true, FCVAR_ARCHIVE,
+	"Follow-cam pitch bias (degrees, positive = look slightly down from high)", -45, 45)
 
 -- Registered external modules (id → mod table)
 local modules = {}
@@ -61,16 +68,22 @@ local function log(fmt, ...)
 	end
 end
 
---- Pure pose math (offline-testable). Target looks along `fwd`, camera sits behind + up.
-function DC.ComputeFollowPose(targetPos, targetAng, dist, height)
+--- Pure pose math (offline-testable).
+-- Camera orbits target: yawOffset degrees around vertical (0 = behind facing dir).
+function DC.ComputeFollowPose(targetPos, targetAng, dist, height, yawOffset, pitchBias)
 	if not targetPos then return Vector(), Angle() end
 	targetAng = targetAng or Angle(0, 0, 0)
 	dist = tonumber(dist) or 72
 	height = tonumber(height) or 28
-	local yaw = Angle(0, targetAng.y, 0)
-	local back = -yaw:Forward()
+	yawOffset = tonumber(yawOffset) or 0
+	pitchBias = tonumber(pitchBias) or 0
+	local baseYaw = Angle(0, targetAng.y + yawOffset, 0)
+	-- 0° offset = behind the facing direction
+	local back = -baseYaw:Forward()
 	local pos = targetPos + back * dist + Vector(0, 0, height)
-	local look = (targetPos + Vector(0, 0, height * 0.35) - pos):Angle()
+	local aimAt = targetPos + Vector(0, 0, height * 0.35)
+	local look = (aimAt - pos):Angle()
+	look.p = look.p + pitchBias
 	look.r = 0
 	return pos, look
 end
@@ -284,6 +297,16 @@ function DC.ResolveCamera()
 	local dist = cvDist:GetFloat()
 	local height = cvHeight:GetFloat()
 	local fov = cvFov:GetFloat()
+	local orbitYaw = cvOrbitYaw:GetFloat()
+	local orbitSpin = cvOrbitSpin:GetFloat()
+	local orbitPitch = cvOrbitPitch:GetFloat()
+	-- Auto orbit loop: continuous yaw around player
+	if math.abs(orbitSpin) > 0.01 then
+		orbitYaw = orbitYaw + (CurTime() * orbitSpin)
+	end
+	-- Normalize to -180..180 for stability
+	orbitYaw = math.NormalizeAngle(orbitYaw)
+
 	local targetPos, targetAng
 
 	if mode == 1 then
@@ -313,7 +336,7 @@ function DC.ResolveCamera()
 		end
 	end
 
-	local pos, ang = DC.ComputeFollowPose(targetPos, targetAng, dist, height)
+	local pos, ang = DC.ComputeFollowPose(targetPos, targetAng, dist, height, orbitYaw, orbitPitch)
 	return pos, ang, fov
 end
 

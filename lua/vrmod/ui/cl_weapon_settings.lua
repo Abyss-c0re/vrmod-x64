@@ -14,7 +14,8 @@ local open = false
 local buttons = {}
 local statusMsg = ""
 local statusUntil = 0
-local stepFine = false -- false = coarse 1.0 / 5°, true = fine 0.1 / 1°
+-- 0 = coarse, 1 = fine, 2 = ultra (VR menu was too coarse for precise holds)
+local stepLevel = 0
 local W, H = 520, 620
 local livePos, liveAng, liveScale = Vector(2.5, 3, 4), Angle(0, -90, 55), 0.026
 local HEADER, PAD = 52, 12
@@ -101,11 +102,27 @@ local function SetStatus(msg, sec)
 end
 
 local function PosStep()
-	return stepFine and 0.25 or 1.0
+	if stepLevel >= 2 then return 0.05 end
+	if stepLevel == 1 then return 0.15 end
+	return 0.5
 end
 
 local function AngStep()
-	return stepFine and 1 or 5
+	if stepLevel >= 2 then return 0.5 end
+	if stepLevel == 1 then return 1 end
+	return 3
+end
+
+local function StepLabel()
+	if stepLevel >= 2 then return "Step: ULTRA" end
+	if stepLevel == 1 then return "Step: FINE" end
+	return "Step: COARSE"
+end
+
+local function StepStatus()
+	if stepLevel >= 2 then return "Ultra 0.05u / 0.5°" end
+	if stepLevel == 1 then return "Fine 0.15u / 1°" end
+	return "Coarse 0.5u / 3°"
 end
 
 local function NudgePos(axis, sign)
@@ -213,14 +230,14 @@ local function rebuildButtons()
 		label = "X", action = function() vrmod.WeaponSettings_Close() end,
 	}
 
-	-- Step fine/coarse
+	-- Step: COARSE → FINE → ULTRA (cycle)
 	buttons[#buttons + 1] = {
 		id = "step", x = PAD, y = y, w = 140, h = 36,
-		label = stepFine and "Step: FINE" or "Step: COARSE",
-		toggle = true, on = stepFine,
+		label = StepLabel(),
+		toggle = true, on = stepLevel > 0,
 		action = function()
-			stepFine = not stepFine
-			SetStatus(stepFine and "Fine 0.25u / 1°" or "Coarse 1u / 5°", 1)
+			stepLevel = (stepLevel + 1) % 3
+			SetStatus(StepStatus(), 1.5)
 		end,
 	}
 	buttons[#buttons + 1] = {
@@ -445,7 +462,7 @@ function vrmod.WeaponSettings_Open()
 	end
 
 	open = true
-	stepFine = false
+	stepLevel = 1 -- open on fine by default (was too coarse)
 	livePos, liveAng, liveScale = WristPose()
 	SetStatus("Editing: " .. (class or "?"), 2)
 
