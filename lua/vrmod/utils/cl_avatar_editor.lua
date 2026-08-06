@@ -522,12 +522,14 @@ function Session:ApplyToPlayer()
 		pcall(vrmod.character.Reload, ply, "avatar_apply")
 	end
 
-	-- 3) Twin follows after reload settles — full ReloadIK (not half-cache)
+	-- 3) Twin follows after reload settles — mesh + full ReloadIK (no respawn)
 	timer.Simple(0.15, function()
 		if not IsValid(ply) or not g_VR or not g_VR.active then return end
 		pcall(ApplyLooksToEnt, ply, path, skin, bodyMap)
 		ply.vrmod_pm = path
-		if vrmod.avatar and vrmod.avatar.ReloadAllIK then
+		if vrmod.avatar and vrmod.avatar.SyncAllToPlayer then
+			pcall(vrmod.avatar.SyncAllToPlayer)
+		elseif vrmod.avatar and vrmod.avatar.ReloadAllIK then
 			pcall(vrmod.avatar.ReloadAllIK)
 		else
 			local twin = vrmod.avatar and vrmod.avatar.Get and vrmod.avatar.Get("avatar")
