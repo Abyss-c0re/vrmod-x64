@@ -1273,7 +1273,18 @@ if CLIENT then
 				return
 			end
 
-			render.Clear(0, 0, 0, 255, true, true)
+			-- XR Home: entire stereo RT must start magenta (#FF00FF), never black.
+			-- Black clear left the sky black while InfMap floor was already keyed pink.
+			do
+				local map = string.lower(tostring(game.GetMap() or ""))
+				local home = (map == "xr_infmap_passthrough")
+					or (CubeHome and CubeHome.IsHomeMap and CubeHome.IsHomeMap())
+				if home then
+					render.Clear(255, 0, 255, 255, true, true)
+				else
+					render.Clear(0, 0, 0, 255, true, true)
+				end
+			end
 
 			-- ============================================================
 			-- ONE pose/solve phase for the whole frame (not per-eye).
