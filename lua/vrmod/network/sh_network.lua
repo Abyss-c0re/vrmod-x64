@@ -467,9 +467,13 @@ if CLIENT then
 					timer.Remove("vrutil_timer_tryautostart")
 					return
 				end
-				-- Cube / OpenXR / menu-first: never gate on LocalPlayer model (stuck logo)
+				-- Cube / OpenXR: use take_xr handshake (do not call VRUtilClientStart while Cube holds XR)
 				if cubeWrapper or hubMode or menuMode or launch then
-					if isfunction(VRUtilClientStart) then
+					if vrmod.OpenXR_ForceStartWithHandoff then
+						pcall(vrmod.OpenXR_ForceStartWithHandoff, "createmove_autostart")
+						-- ForceStartWithHandoff owns its own retry timer
+						timer.Remove("vrutil_timer_tryautostart")
+					elseif isfunction(VRUtilClientStart) then
 						pcall(VRUtilClientStart)
 					end
 					if g_VR and g_VR.active then

@@ -146,6 +146,14 @@ end
 local handoffSignaled = false
 local handoffDelayUntil = 0
 
+--- Reset take_xr handshake so RESUME / second session can ask Cube to drop XR again.
+function vrmod.OpenXR_ResetHandoff(reason)
+	handoffSignaled = false
+	handoffDelayUntil = 0
+	startAttempts = 0
+	log("handoff reset (%s)", tostring(reason or "?"))
+end
+
 local function forceStartVR()
 	if g_VR and g_VR.active then
 		writeHandoff("vr_active")
@@ -162,10 +170,10 @@ local function forceStartVR()
 		return false
 	end
 
-	-- Ask native launcher to drop OpenXR first (only one session). Wait ~1.2s once.
+	-- Ask native launcher to drop OpenXR first (only one session).
 	if not handoffSignaled then
 		handoffSignaled = true
-		-- Native orderly release needs room for xrRequestExitSession + STOPPING (research-3 race)
+		-- Native orderly release needs room for xrRequestExitSession + STOPPING
 		handoffDelayUntil = CurTime() + 2.5
 		writeHandoff("take_xr")
 		writeStatus("take_xr_signaled")
@@ -200,6 +208,45 @@ local function forceStartVR()
 	writeStatus("start_returned_inactive")
 	return false
 end
+
+--- Product entry for soft resume from Cube (warm_attach): re-run take_xr + start.
+-- Must NOT only call vrmod_start force — Cube still owns OpenXR until take_xr.
+function vrmod.OpenXR_ForceStartWithHandoff(reason)
+	if g_VR and g_VR.active then
+		writeHandoff("vr_active")
+		return true
+	end
+	vrmod.OpenXR_ResetHandoff(reason or "force_handoff")
+	vrmod.ApplyOpenXRLaunchMarker()
+	-- Immediate take_xr poke, then tick until active or attempts exhausted
+	forceStartVR()
+	timer.Remove("vrmod_openxr_resume_start")
+	local n = 0
+	timer.Create("vrmod_openxr_resume_start", 0.5, 0, function()
+		n = n + 1
+		if g_VR and g_VR.active then
+			timer.Remove("vrmod_openxr_resume_start")
+			return
+		end
+		if n > MAX_START_ATTEMPTS then
+			timer.Remove("vrmod_openxr_resume_start")
+			log("resume handoff gave up after %d ticks", n)
+			if vrmod.Toast then
+				vrmod.Toast("Resume VR failed — Cube still holding XR?", 6, "warn")
+			end
+			return
+		end
+		forceStartVR()
+	end)
+	return false
+end
+
+-- After any VR exit, next start must re-signal take_xr (stale flag blocked soft resume).
+hook.Add("VRMod_Exit", "vrmod_openxr_reset_handoff", function(ply)
+	if ply and IsValid(ply) and IsValid(LocalPlayer()) and ply ~= LocalPlayer() then return end
+	vrmod.OpenXR_ResetHandoff("vrmod_exit")
+	timer.Remove("vrmod_openxr_resume_start")
+end)
 
 --- Native VR launcher UI (Cube hub) — automatic product surface.
 -- Never stock GameUI. Never requires a concommand.

@@ -358,29 +358,53 @@ hook.Add("Think", "vrmod_cube_bridge_remember_path", function()
 	end)
 end)
 
--- Resume poll: Cube wrote warm_attach while we sit without VR
+-- Resume poll: Cube wrote warm_attach while we sit without VR.
+-- Must run take_xr handshake (Cube still owns OpenXR) — plain vrmod_start fails for ~90s.
 local lastWarmTs = 0
-timer.Create("vrmod_cube_resume_poll", 1.0, 0, function()
+timer.Create("vrmod_cube_resume_poll", 0.5, 0, function()
 	if not g_VR or g_VR.active then return end
-	if not file.Exists(MARKER, "DATA") then return end
-	local raw = file.Read(MARKER, "DATA") or ""
-	if not string.find(raw, "warm_attach=1", 1, true) then return end
-	if not string.find(raw, "autostart=1", 1, true) then return end
-	local ts = tonumber(string.match(raw, "ts=(%d+)")) or 0
-	if ts <= 0 or ts == lastWarmTs then return end
+
+	local raw
+	if file.Exists(MARKER, "DATA") then
+		raw = file.Read(MARKER, "DATA") or ""
+	end
+	-- Also accept handoff phase=warm_attach if openxr_launch was already consumed
+	local handoffRaw
+	if file.Exists("vrmod/cube_handoff.txt", "DATA") then
+		handoffRaw = file.Read("vrmod/cube_handoff.txt", "DATA") or ""
+	end
+
+	local fromMarker = raw
+		and string.find(raw, "warm_attach=1", 1, true)
+		and (string.find(raw, "autostart=1", 1, true) or string.find(raw, "native_wrapper=1", 1, true))
+	local fromHandoff = handoffRaw and string.find(handoffRaw, "phase=warm_attach", 1, true)
+
+	if not fromMarker and not fromHandoff then return end
+
+	local ts = 0
+	if fromMarker then
+		ts = tonumber(string.match(raw, "ts=(%d+)")) or 0
+	elseif fromHandoff then
+		ts = tonumber(string.match(handoffRaw, "ts=(%d+)")) or 0
+	end
+	if ts <= 0 then ts = os.time and os.time() or 1 end
+	if ts == lastWarmTs then return end
 	local now = os.time and os.time() or 0
-	if now > 0 and ts < now - 120 then return end
+	if now > 0 and ts < now - 180 then return end
 	lastWarmTs = ts
+
 	-- Cancel any CubeUI relaunch so we don't steal XR mid-resume
 	vrmod.CubeBridge_CancelRelaunch("warm_attach_resume")
-	log("warm_attach marker → force VR start (resume from Cube)")
+	log("warm_attach → take_xr + force start (resume from Cube) ts=%s", tostring(ts))
 	if vrmod.Toast then
-		vrmod.Toast("Cube RESUME · starting VR…", 3, "hint")
+		vrmod.Toast("Cube RESUME · taking XR…", 3, "hint")
 	end
-	pcall(function()
-		vrmod.ApplyOpenXRLaunchMarker()
-	end)
-	pcall(function()
-		RunConsoleCommand("vrmod_start", "force")
-	end)
+	if vrmod.OpenXR_ForceStartWithHandoff then
+		pcall(vrmod.OpenXR_ForceStartWithHandoff, "warm_attach_resume")
+	else
+		pcall(function()
+			if vrmod.ApplyOpenXRLaunchMarker then vrmod.ApplyOpenXRLaunchMarker() end
+			RunConsoleCommand("vrmod_start", "force")
+		end)
+	end
 end)

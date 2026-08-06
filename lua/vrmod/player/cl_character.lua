@@ -159,17 +159,27 @@ if CLIENT then
 		end
 		if ply == LocalPlayer() then
 			timer.Create("vrutil_timer_validatefingertracking", 0.1, 0, function()
-				if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_righthand and g_VR.tracking.pose_lefthand.simulatedPos == nil and g_VR.tracking.pose_righthand.simulatedPos == nil then
+				if not (g_VR and g_VR.tracking and g_VR.input) then return end
+				local lh = g_VR.tracking.pose_lefthand
+				local rh = g_VR.tracking.pose_righthand
+				if not (lh and rh) or lh.simulatedPos ~= nil or rh.simulatedPos ~= nil then return end
+				local skL = g_VR.input.skeleton_lefthand
+				local skR = g_VR.input.skeleton_righthand
+				-- OpenXR / WiVRn often has no finger skeleton — never index nil
+				if not (skL and skL.fingerCurls and skR and skR.fingerCurls) then
 					timer.Remove("vrutil_timer_validatefingertracking")
-					for i = 1, 2 do
-						for k, v in pairs(i == 1 and g_VR.input.skeleton_lefthand.fingerCurls or g_VR.input.skeleton_righthand.fingerCurls) do
-							if v < 0 or v > 1 or k == 3 and v == 0.75 then
-								g_VR.defaultOpenHandAngles = g_VR.defaultOpenHandAngles
-								g_VR.defaultClosedHandAngles = g_VR.defaultClosedHandAngles
-								g_VR.openHandAngles = g_VR.defaultOpenHandAngles
-								g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
-								break
-							end
+					return
+				end
+				timer.Remove("vrutil_timer_validatefingertracking")
+				for i = 1, 2 do
+					local curls = (i == 1) and skL.fingerCurls or skR.fingerCurls
+					for k, v in pairs(curls) do
+						if v < 0 or v > 1 or (k == 3 and v == 0.75) then
+							g_VR.defaultOpenHandAngles = g_VR.defaultOpenHandAngles
+							g_VR.defaultClosedHandAngles = g_VR.defaultClosedHandAngles
+							g_VR.openHandAngles = g_VR.defaultOpenHandAngles
+							g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
+							break
 						end
 					end
 				end
