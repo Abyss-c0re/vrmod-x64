@@ -2451,18 +2451,9 @@ if CLIENT then
 		end
 		hook.Add("PostDrawTranslucentRenderables", "vrutil_hook_drawplayerandviewmodel", function(bSky, _)
 			if bSky or not LocalPlayer():Alive() then return end
-			-- Worldmodel-only path: skip HL2 viewModel draw when worldModelVM owns the gun
-			local drawVm = true
-			if vrmod.utils and vrmod.utils.WorldModelLaw_FromBool then
-				local wm = g_VR.currentvmi and g_VR.currentvmi.useWorldModel
-				local gwm = convars.vrmod_useworldmodels and convars.vrmod_useworldmodels:GetBool()
-				if wm or gwm then
-					drawVm = false
-				end
-			elseif g_VR.currentvmi and g_VR.currentvmi.useWorldModel then
-				drawVm = false
-			end
-			if drawVm and IsValid(g_VR.viewModel) then
+			-- Pre-G38 path: always DrawModel g_VR.viewModel when valid.
+			-- (G38 drawVm=false on useWorldModel skipped drawing worldModelVM too — guns vanished.)
+			if IsValid(g_VR.viewModel) then
 				blockViewModelDraw = false
 				-- Stamp frozen gun matrix both eyes (same pose — no live re-pose here)
 				local sf = g_VR.stereoFrame or 0

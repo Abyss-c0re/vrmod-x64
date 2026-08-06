@@ -355,12 +355,23 @@ if CLIENT then
 		local isMag = string.StartWith(class, "avrmag_") -- Check if the entity is a magazine
 		-- Handle invalid weapon/magazine
 		if class == "" or vm == "" then
+			-- Race: server sometimes samples before viewmodel path is ready.
+			-- Do not wipe a good bind if we still hold a real weapon.
+			local weapon = LocalPlayer():GetActiveWeapon()
+			if IsValid(weapon) and vrmod.utils and vrmod.utils.IsValidWep and vrmod.utils.IsValidWep(weapon) then
+				local viewModel = LocalPlayer():GetViewModel()
+				if IsValid(viewModel) then
+					viewModel:SetNoDraw(false)
+					g_VR.viewModel = viewModel
+				end
+				if IsValid(weapon) then weapon:SetNoDraw(true) end
+				return
+			end
 			g_VR.viewModel = nil
 			g_VR.openHandAngles = g_VR.defaultOpenHandAngles
 			g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
 			g_VR.currentvmi = nil
 			g_VR.viewModelMuzzle = nil
-			local weapon = LocalPlayer():GetActiveWeapon()
 			if IsValid(weapon) then weapon:SetNoDraw(true) end
 			local viewModel = LocalPlayer():GetViewModel()
 			if IsValid(viewModel) then viewModel:SetNoDraw(false) end
@@ -655,21 +666,25 @@ if SERVER then
 	end)
 
 	hook.Add("PlayerSwitchWeapon", "vrutil_hook_playerswitchweapon", function(ply, old, new)
-		if g_VR[ply:SteamID()] ~= nil then
+		if g_VR[ply:SteamID()] == nil then return end
+		-- Next tick: GetWeaponViewModel is often empty on the switch frame.
+		timer.Simple(0, function()
+			if not IsValid(ply) or g_VR[ply:SteamID()] == nil then return end
+			local wep = IsValid(new) and new or ply:GetActiveWeapon()
 			net.Start("vrutil_net_switchweapon", true)
-			local class, vm = vrmod.utils.WepInfo(new)
+			local class, vm = vrmod.utils.WepInfo(wep)
 			if class and vm then
-				timer.Simple(0, function() vrmod.utils.ComputePhysicsParams(vm) end)
+				if vrmod.utils.ComputePhysicsParams then
+					pcall(vrmod.utils.ComputePhysicsParams, vm)
+				end
 				net.WriteString(class)
 				net.WriteString(vm)
 			else
 				net.WriteString("")
 				net.WriteString("")
 			end
-
 			net.Send(ply)
-			timer.Simple(0, function() end)
-		end
+		end)
 	end)
 
 	hook.Add("PlayerEnteredVehicle", "vrutil_hook_playerenteredvehicle", function(ply, veh)
