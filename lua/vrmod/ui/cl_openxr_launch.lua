@@ -539,6 +539,47 @@ local function afterVRLive()
 	end)
 end
 
+--- Cube Start can leave GMod on the main menu when +map ran before workshop
+-- mounted (GMA-only maps). Retry map once BSP is visible to GAME.
+local function scheduleDeferredMap()
+	local want = g_VR._openxrLaunch and g_VR._openxrLaunch.bg_map
+	if not want or want == "" then return end
+	want = tostring(want):gsub("^maps/", ""):gsub("%.bsp$", "")
+	timer.Remove("vrmod_cube_deferred_map")
+	local tries = 0
+	timer.Create("vrmod_cube_deferred_map", 1.0, 45, function()
+		tries = tries + 1
+		local cur = (game.GetMap and game.GetMap()) or ""
+		if cur ~= "" and string.lower(cur) == string.lower(want) then
+			timer.Remove("vrmod_cube_deferred_map")
+			log("deferred map ok — already on %s", want)
+			return
+		end
+		-- Main menu / wrong map: only load when filesystem can see the BSP
+		local path = "maps/" .. want .. ".bsp"
+		if not (file and file.Exists and file.Exists(path, "GAME")) then
+			if tries == 1 or tries % 10 == 0 then
+				log("deferred map wait — %s not in GAME yet (try %d)", path, tries)
+			end
+			if tries >= 45 and vrmod.Toast then
+				vrmod.Toast("Map not found: " .. want .. " (extract/workshop?)", 8, "warn")
+			end
+			return
+		end
+		log("deferred map load → %s (was %s)", want, tostring(cur))
+		writeStatus("map_" .. want)
+		writeHandoff("map_load")
+		if vrmod.Toast then
+			vrmod.Toast("Loading map " .. want .. "…", 4, "hint")
+		end
+		-- Prefer map (full load) over changelevel from empty menu
+		pcall(function()
+			RunConsoleCommand("map", want)
+		end)
+		timer.Remove("vrmod_cube_deferred_map")
+	end)
+end
+
 local function bootFromLaunch()
 	local had = vrmod.ApplyOpenXRLaunchMarker()
 	if not had and not vrmod.IsOpenXRLaunchSession() then
@@ -572,6 +613,9 @@ local function bootFromLaunch()
 	writeHandoff("boot")
 	writeStatus("boot")
 
+	-- If cold +map failed (menu), recover once workshop/extract is visible
+	scheduleDeferredMap()
+
 	timer.Create("vrmod_openxr_launch_start", 0.5, 0, function()
 		if g_VR and g_VR.active then
 			timer.Remove("vrmod_openxr_launch_start")
@@ -586,7 +630,16 @@ local function bootFromLaunch()
 			end
 			return
 		end
-		-- Always try — do not wait for player model (that left users on desktop only)
+		-- Don't start VR on pure main menu with no map — wait for deferred map
+		local cur = (game.GetMap and game.GetMap()) or ""
+		local want = g_VR._openxrLaunch and g_VR._openxrLaunch.bg_map
+		if want and want ~= "" and cur ~= "" and string.lower(cur) ~= string.lower(want) then
+			-- still wrong map; keep waiting (forceStart would claim XR on menu)
+			if startAttempts < 3 then
+				writeStatus("wait_map_" .. tostring(want))
+			end
+			-- still try VR after a few map waits so hub can appear
+		end
 		forceStartVR()
 	end)
 end
