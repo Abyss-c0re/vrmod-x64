@@ -38,11 +38,13 @@ local cvSmooth = CreateClientConVar("vrmod_desktop_cam_smooth", "0.15", true, FC
 	"Follow-cam position/angle smooth (0=snap 1=heavy)", 0, 1)
 local cvDrawLocal = CreateClientConVar("vrmod_desktop_cam_draw", "1", true, FCVAR_ARCHIVE,
 	"When desktopview=follow cam, also blit to GMod window (0=broadcast-only)", 0, 1)
--- Orbit: yaw offset around player (0 = behind facing direction) + auto spin loop
+-- Orbit: fixed yaw offset + optional auto spin (toggle — don't use spin slider to "reach 0")
 local cvOrbitYaw = CreateClientConVar("vrmod_desktop_cam_orbit_yaw", "0", true, FCVAR_ARCHIVE,
 	"Follow-cam yaw offset around player (degrees, 0=behind, 90=side, 180=front)", -180, 180)
-local cvOrbitSpin = CreateClientConVar("vrmod_desktop_cam_orbit_spin", "0", true, FCVAR_ARCHIVE,
-	"Auto orbit spin (deg/sec). 0=fixed angle from orbit_yaw. e.g. 12 = slow loop", -90, 90)
+local cvOrbitAuto = CreateClientConVar("vrmod_desktop_cam_orbit_auto", "0", true, FCVAR_ARCHIVE,
+	"Auto orbit around player (1=on continuous spin, 0=fixed orbit_yaw)")
+local cvOrbitSpin = CreateClientConVar("vrmod_desktop_cam_orbit_spin", "12", true, FCVAR_ARCHIVE,
+	"Auto orbit spin rate (deg/sec) when orbit_auto is on", 1, 90)
 local cvOrbitPitch = CreateClientConVar("vrmod_desktop_cam_orbit_pitch", "0", true, FCVAR_ARCHIVE,
 	"Follow-cam pitch bias (degrees, positive = look slightly down from high)", -45, 45)
 
@@ -90,6 +92,27 @@ end
 
 function DC.IsFollowMode(desktopView)
 	return tonumber(desktopView) == DC.VIEW_FOLLOW_CAM
+end
+
+--- Reset follow-cam cvars to defaults (orbit off, behind player, standard framing).
+function DC.ResetFollowCamera()
+	RunConsoleCommand("vrmod_desktop_cam_dist", "72")
+	RunConsoleCommand("vrmod_desktop_cam_height", "28")
+	RunConsoleCommand("vrmod_desktop_cam_fov", "75")
+	RunConsoleCommand("vrmod_desktop_cam_mode", "0")
+	RunConsoleCommand("vrmod_desktop_cam_smooth", "0.15")
+	RunConsoleCommand("vrmod_desktop_cam_draw", "1")
+	RunConsoleCommand("vrmod_desktop_cam_orbit_yaw", "0")
+	RunConsoleCommand("vrmod_desktop_cam_orbit_auto", "0")
+	RunConsoleCommand("vrmod_desktop_cam_orbit_spin", "12")
+	RunConsoleCommand("vrmod_desktop_cam_orbit_pitch", "0")
+	session.pos = nil
+	session.ang = nil
+	if vrmod.Toast then
+		vrmod.Toast("Follow camera reset · behind HMD, orbit off", 3, "hint")
+	end
+	log("Follow-cam reset to defaults")
+	return true
 end
 
 --- Clamp to 1..4 (none / left / right / follow-cam). Pure — G23 call-site SoT.
@@ -298,13 +321,13 @@ function DC.ResolveCamera()
 	local height = cvHeight:GetFloat()
 	local fov = cvFov:GetFloat()
 	local orbitYaw = cvOrbitYaw:GetFloat()
-	local orbitSpin = cvOrbitSpin:GetFloat()
 	local orbitPitch = cvOrbitPitch:GetFloat()
-	-- Auto orbit loop: continuous yaw around player
-	if math.abs(orbitSpin) > 0.01 then
-		orbitYaw = orbitYaw + (CurTime() * orbitSpin)
+	-- Auto orbit is a toggle (not "spin slider to 0")
+	if cvOrbitAuto:GetBool() then
+		local spin = math.abs(cvOrbitSpin:GetFloat())
+		if spin < 0.5 then spin = 12 end -- default rate when auto on
+		orbitYaw = orbitYaw + (CurTime() * spin)
 	end
-	-- Normalize to -180..180 for stability
 	orbitYaw = math.NormalizeAngle(orbitYaw)
 
 	local targetPos, targetAng

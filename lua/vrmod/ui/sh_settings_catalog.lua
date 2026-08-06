@@ -103,14 +103,22 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Follow-cam distance", cvar = "vrmod_desktop_cam_dist", min = 16, max = 256, decimals = 0 },
 			{ kind = "slider", label = "Follow-cam height", cvar = "vrmod_desktop_cam_height", min = -32, max = 128, decimals = 0 },
 			{ kind = "slider", label = "Follow-cam FOV", cvar = "vrmod_desktop_cam_fov", min = 40, max = 120, decimals = 0 },
-			{ kind = "slider", label = "Follow-cam orbit yaw", cvar = "vrmod_desktop_cam_orbit_yaw", min = -180, max = 180, decimals = 0 },
-			{ kind = "help", label = "Orbit yaw: 0=behind, ±90=side, 180=front of player." },
-			{ kind = "slider", label = "Follow-cam orbit spin", cvar = "vrmod_desktop_cam_orbit_spin", min = -45, max = 45, decimals = 1 },
-			{ kind = "help", label = "Orbit spin deg/sec for auto orbit loop (0 = fixed angle)." },
+			{ kind = "combo", label = "Orbit angle preset", cvar = "vrmod_desktop_cam_orbit_yaw", choices = {
+				{ text = "behind (0°)", value = 0 },
+				{ text = "left (90°)", value = 90 },
+				{ text = "right (−90°)", value = -90 },
+				{ text = "front (180°)", value = 180 },
+			}},
+			{ kind = "slider", label = "Orbit yaw (fine)", cvar = "vrmod_desktop_cam_orbit_yaw", min = -180, max = 180, decimals = 0 },
+			{ kind = "help", label = "Fixed film angle when auto orbit is OFF. Preset snaps to common angles." },
+			{ kind = "bool", label = "Auto orbit loop", cvar = "vrmod_desktop_cam_orbit_auto" },
+			{ kind = "help", label = "ON = continuous spin around player. OFF = fixed orbit yaw (no need to zero a spinner)." },
+			{ kind = "slider", label = "Auto orbit speed", cvar = "vrmod_desktop_cam_orbit_spin", min = 1, max = 45, decimals = 0 },
 			{ kind = "slider", label = "Follow-cam orbit pitch", cvar = "vrmod_desktop_cam_orbit_pitch", min = -30, max = 30, decimals = 0 },
 			{ kind = "slider", label = "Follow-cam smooth", cvar = "vrmod_desktop_cam_smooth", min = 0, max = 1, decimals = 2 },
 			{ kind = "bool", label = "Follow-cam draw on desktop", cvar = "vrmod_desktop_cam_draw" },
-			{ kind = "help", label = "Off = capture for broadcast module only (no local blit). Module: vrmod.DesktopBroadcast.Register." },
+			{ kind = "action", label = "Reset follow camera", action_id = "desktop_cam_reset" },
+			{ kind = "help", label = "Reset distance/height/FOV/orbit/smooth to defaults (behind HMD, auto orbit off)." },
 			{ kind = "header", label = "Stereo / head tilt (rigid world)" },
 			{ kind = "bool", label = "Rigid stereo under roll", cvar = "vrmod_stereo_rigid" },
 			{ kind = "help", label = "ON: shared FOV both eyes + IPD along head Right() (can help shoulder tilt). OFF (default): legacy per-eye. Prefer Video calibration for image fill first." },
@@ -688,6 +696,25 @@ function vrmod.SettingsRunAction(action_id, ctx)
 			vrmod.Experience_Reset()
 		else
 			RunConsoleCommand("vrmod_experience_reset")
+		end
+		return true
+	end
+	if action_id == "desktop_cam_reset" then
+		if vrmod.DesktopCam and vrmod.DesktopCam.ResetFollowCamera then
+			return vrmod.DesktopCam.ResetFollowCamera()
+		end
+		RunConsoleCommand("vrmod_desktop_cam_dist", "72")
+		RunConsoleCommand("vrmod_desktop_cam_height", "28")
+		RunConsoleCommand("vrmod_desktop_cam_fov", "75")
+		RunConsoleCommand("vrmod_desktop_cam_mode", "0")
+		RunConsoleCommand("vrmod_desktop_cam_smooth", "0.15")
+		RunConsoleCommand("vrmod_desktop_cam_draw", "1")
+		RunConsoleCommand("vrmod_desktop_cam_orbit_yaw", "0")
+		RunConsoleCommand("vrmod_desktop_cam_orbit_auto", "0")
+		RunConsoleCommand("vrmod_desktop_cam_orbit_spin", "12")
+		RunConsoleCommand("vrmod_desktop_cam_orbit_pitch", "0")
+		if vrmod.Toast then
+			vrmod.Toast("Follow camera reset", 3, "hint")
 		end
 		return true
 	end
