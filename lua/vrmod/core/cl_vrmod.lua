@@ -841,23 +841,33 @@ if CLIENT then
 			finalPos, finalAng = LocalToWorld(rawPos, rawAng, vePos, veAng)
 		end
 
-		-- Detect Glide vehicle and apply small lift/forward
+		-- Glide seat nudge: ONE shared offset for camera + both hands, then re-slave gun.
+		-- Old path: camera +6F/+6U (or bike +8/+3) but hands only +5F, applied AFTER
+		-- ApplyPoseModifiers already placed the viewmodel → LH vs mag-bone desync (~5u)
+		-- so ArcVR insert (LeftHandInMaxs vs VM bone) failed in vehicles.
 		if g_VR.vehicle and g_VR.vehicle.glide then
-			local forward = g_VR.view.angles:Forward() -- view/vehicle facing direction
+			local forward = g_VR.view.angles:Forward()
 			local up = g_VR.view.angles:Up()
+			local seatOff
 			if g_VR.vehicle.type == "motorcycle" then
-				-- Move 6 units forward instead of just down
-				g_VR.view.origin = finalPos + forward * 8 + up * 3
+				seatOff = forward * 8 + up * 3
 			else
-				-- Move slightly forward and up
-				g_VR.view.origin = finalPos + forward * 6 + up * 6
+				seatOff = forward * 6 + up * 6
 			end
+			g_VR.view.origin = finalPos + seatOff
 
-			if g_VR.tracking.pose_lefthand and g_VR.tracking.pose_lefthand.pos then
-				g_VR.tracking.pose_lefthand.pos = g_VR.tracking.pose_lefthand.pos + forward * 5
-			end
-			if g_VR.tracking.pose_righthand and g_VR.tracking.pose_righthand.pos then
-				g_VR.tracking.pose_righthand.pos = g_VR.tracking.pose_righthand.pos + forward * 5
+			local tr = g_VR.tracking
+			if tr then
+				if tr.pose_lefthand and tr.pose_lefthand.pos then
+					tr.pose_lefthand.pos = tr.pose_lefthand.pos + seatOff
+				end
+				if tr.pose_righthand and tr.pose_righthand.pos then
+					tr.pose_righthand.pos = tr.pose_righthand.pos + seatOff
+					-- Gun was solved pre-nudge in ApplyPoseModifiers; re-slave to RH.
+					if vrmod.utils and vrmod.utils.UpdateViewModelPos then
+						vrmod.utils.UpdateViewModelPos(tr.pose_righthand.pos, tr.pose_righthand.ang)
+					end
+				end
 			end
 		else
 			g_VR.view.origin = finalPos
