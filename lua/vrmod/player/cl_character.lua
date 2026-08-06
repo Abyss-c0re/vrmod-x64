@@ -23,6 +23,57 @@ if CLIENT then
 		end
 		return istable(convarValues) and convarValues or {}
 	end
+
+	-- Bones required for VR body IK (Wrist/Ulna optional — same as CharacterInit).
+	local REQUIRED_VR_BONES = {
+		"ValveBiped.Bip01_L_Clavicle", "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_L_Forearm", "ValveBiped.Bip01_L_Hand",
+		"ValveBiped.Bip01_L_Thigh", "ValveBiped.Bip01_L_Calf", "ValveBiped.Bip01_L_Foot",
+		"ValveBiped.Bip01_R_Clavicle", "ValveBiped.Bip01_R_UpperArm", "ValveBiped.Bip01_R_Forearm", "ValveBiped.Bip01_R_Hand",
+		"ValveBiped.Bip01_R_Thigh", "ValveBiped.Bip01_R_Calf", "ValveBiped.Bip01_R_Foot",
+		"ValveBiped.Bip01_Head1", "ValveBiped.Bip01_Spine",
+	}
+	local _pmValidateCache = {} -- path → { ok, missing, reason, t }
+
+	--- Pure check: can this .mdl run VR body IK?
+	-- Returns ok, missingNames[], reason
+	vrmod.character = vrmod.character or {}
+	function vrmod.character.ValidatePlayerModel(path)
+		path = tostring(path or "")
+		if path == "" then
+			return false, { "(empty)" }, "empty model path"
+		end
+		local cached = _pmValidateCache[path]
+		if cached and (CurTime() - (cached.t or 0)) < 120 then
+			return cached.ok, cached.missing, cached.reason
+		end
+		util.PrecacheModel(path)
+		local okCm, cm = pcall(ClientsideModel, path)
+		if not okCm or not IsValid(cm) then
+			local missing = { "(load failed)" }
+			local reason = "could not load model"
+			_pmValidateCache[path] = { ok = false, missing = missing, reason = reason, t = CurTime() }
+			return false, missing, reason
+		end
+		pcall(function()
+			cm:SetupBones()
+		end)
+		local missing = {}
+		for _, name in ipairs(REQUIRED_VR_BONES) do
+			local b = cm:LookupBone(name)
+			if not isnumber(b) or b < 0 then
+				missing[#missing + 1] = name
+			end
+		end
+		pcall(function() cm:Remove() end)
+		if #missing > 0 then
+			local reason = string.format("missing %d bones (e.g. %s)", #missing, missing[1])
+			_pmValidateCache[path] = { ok = false, missing = missing, reason = reason, t = CurTime() }
+			return false, missing, reason
+		end
+		_pmValidateCache[path] = { ok = true, missing = {}, reason = "ok", t = CurTime() }
+		return true, {}, "ok"
+	end
+
 	------------------------------------------------------------------------
 	-- CONVARS
 	------------------------------------------------------------------------
@@ -316,6 +367,9 @@ if CLIENT then
 		end
 
 		ci.modelName = pmname
+		if ci.ikReady and pmname and pmname ~= "" then
+			g_VR._lastGoodPlayerModel = pmname
+		end
 		local b = ci.bones
 		ci.clavicleLen = BoneDist(cm, b.b_leftClavicle, b.b_leftUpperarm, 8)
 		ci.upperArmLen = BoneDist(cm, b.b_leftUpperarm, b.b_leftForearm, 12)

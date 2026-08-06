@@ -407,8 +407,22 @@ function Session:ReloadIK()
 end
 
 function Session:SetModel(path, opts)
-	if not self:IsValid() or not path or path == "" then return false end
+	if not self:IsValid() or not path or path == "" then return false, "empty path" end
 	opts = opts or {}
+	-- Block incomplete skeletons (VR body IK needs full ValveBiped limbs + head/spine)
+	if not opts.forceIncomplete and vrmod.character and vrmod.character.ValidatePlayerModel then
+		local okPm, missing, reason = vrmod.character.ValidatePlayerModel(path)
+		if not okPm then
+			self.vrCompatible = false
+			local msg = "VR model blocked · " .. tostring(reason or "missing bones")
+			if vrmod.Toast then vrmod.Toast(msg, 5, "warn") end
+			if vrmod.logger then
+				vrmod.logger.Warn("[Avatar] SetModel blocked %s: %s", path, tostring(reason))
+			end
+			return false, reason, missing
+		end
+	end
+	self.vrCompatible = true
 	util.PrecacheModel(path)
 	self.ent:SetModel(path)
 	self.model = path
@@ -486,6 +500,15 @@ function Session:ApplyToPlayer()
 	if not g_VR or not g_VR.active then return false, "VR inactive" end
 
 	local path = self.ent:GetModel()
+	if vrmod.character and vrmod.character.ValidatePlayerModel then
+		local okPm, _missing, reason = vrmod.character.ValidatePlayerModel(path)
+		if not okPm then
+			local msg = "Cannot apply · " .. tostring(reason or "missing bones")
+			if vrmod.Toast then vrmod.Toast(msg, 6, "warn") end
+			return false, reason or "incompatible model"
+		end
+	end
+
 	local skin = self.ent:GetSkin() or 0
 	local bodyStr = EncodeBodygroups(self.ent)
 	local bodyMap = ParseBodygroups(bodyStr)
@@ -1446,6 +1469,15 @@ function vrmod.avatar.SyncAllToPlayer()
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return 0 end
 	local live = ply.vrmod_pm or ply:GetModel() or ""
+	-- Prefer last good VR-compatible model if live is incomplete
+	if live ~= "" and vrmod.character and vrmod.character.ValidatePlayerModel then
+		local okLive = vrmod.character.ValidatePlayerModel(live)
+		if not okLive and g_VR and g_VR._lastGoodPlayerModel then
+			live = g_VR._lastGoodPlayerModel
+		elseif not okLive then
+			live = ""
+		end
+	end
 	local n = 0
 	for id, s in pairs(sessions) do
 		if not (s and s:IsValid()) then continue end
@@ -1463,7 +1495,9 @@ function vrmod.avatar.SyncAllToPlayer()
 	return n
 end
 
-function vrmod.avatar.ListPlayerModels()
+function vrmod.avatar.ListPlayerModels(opts)
+	opts = opts or {}
+	local onlyCompatible = opts.vrOnly ~= false -- default: VR-capable only
 	local list = {}
 	if player_manager and player_manager.AllValidModels then
 		for name, path in pairs(player_manager.AllValidModels()) do
@@ -1483,7 +1517,17 @@ function vrmod.avatar.ListPlayerModels()
 			{ name = "breen", path = "models/player/breen.mdl" },
 		}
 	end
-	return list
+	if not onlyCompatible or not (vrmod.character and vrmod.character.ValidatePlayerModel) then
+		return list
+	end
+	local filtered = {}
+	for _, e in ipairs(list) do
+		local ok = vrmod.character.ValidatePlayerModel(e.path)
+		if ok then
+			filtered[#filtered + 1] = e
+		end
+	end
+	return filtered
 end
 
 --- Cube Avatar twin: tracking-matched customization preview.

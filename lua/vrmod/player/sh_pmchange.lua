@@ -53,6 +53,30 @@ if CLIENT then
 		if not IsValid(ply) or ply ~= LocalPlayer() then return end
 		if not (g_VR and g_VR.active) then return end
 		model = tostring(model or ply:GetModel() or "")
+		-- Refuse incomplete skeletons — keep last good VR model if available
+		if model ~= "" and vrmod.character and vrmod.character.ValidatePlayerModel then
+			local okPm, _miss, why = vrmod.character.ValidatePlayerModel(model)
+			if not okPm then
+				local msg = "VR: playermodel blocked · " .. tostring(why or "missing bones")
+				if vrmod.Toast then vrmod.Toast(msg, 6, "warn") end
+				if vrmod.logger then
+					vrmod.logger.Warn("[pmchange] blocked %s: %s", model, tostring(why))
+				end
+				local good = g_VR._lastGoodPlayerModel
+				if good and good ~= "" and good ~= model then
+					ply.vrmod_pm = good
+					if vrmod.avatar and vrmod.avatar.SyncAllToPlayer then
+						timer.Simple(0.05, function()
+							pcall(vrmod.avatar.SyncAllToPlayer)
+						end)
+					end
+					if vrmod.Toast then
+						vrmod.Toast("VR: kept previous compatible model", 4, "hint")
+					end
+				end
+				return
+			end
+		end
 		if model ~= "" then
 			ply.vrmod_pm = model
 		end

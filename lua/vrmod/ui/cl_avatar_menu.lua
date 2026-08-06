@@ -438,11 +438,17 @@ local function activate(mx, my)
 			end
 		elseif k == "model" and modelList[btn.index] then
 			local s = sess()
-			if s and s.SetModel then
-				-- Preview only (no archive) + IK refresh
-				s:SetModel(modelList[btn.index].path, { persist = false })
-				statusMsg = "preview · " .. tostring(modelList[btn.index].name or "")
-				statusUntil = CurTime() + 2
+			local entry = modelList[btn.index]
+			if s and s.SetModel and entry then
+				-- Preview only if skeleton has VR bones (blocked otherwise)
+				local ok, reason = s:SetModel(entry.path, { persist = false })
+				if ok then
+					statusMsg = "preview · " .. tostring(entry.name or "")
+					statusUntil = CurTime() + 2
+				else
+					statusMsg = "blocked · " .. tostring(reason or "missing bones")
+					statusUntil = CurTime() + 4
+				end
 			end
 		elseif k == "model_up" then
 			modelScroll = math.max(0, modelScroll - 1)
@@ -452,9 +458,15 @@ local function activate(mx, my)
 			local s = sess()
 			local ply = LocalPlayer()
 			if s and s.SetModel and IsValid(ply) then
-				s:SetModel(ply.vrmod_pm or ply:GetModel(), { persist = false, keepLooks = true })
-				statusMsg = "twin = live player model"
-				statusUntil = CurTime() + 2
+				local path = ply.vrmod_pm or ply:GetModel()
+				local ok, reason = s:SetModel(path, { persist = false, keepLooks = true })
+				if ok then
+					statusMsg = "twin = live player model"
+					statusUntil = CurTime() + 2
+				else
+					statusMsg = "live PM blocked · " .. tostring(reason or "missing bones")
+					statusUntil = CurTime() + 4
+				end
 			end
 		elseif k == "model_save" then
 			doSave()
