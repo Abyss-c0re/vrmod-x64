@@ -1033,6 +1033,16 @@ if CLIENT then
 			wp.drawing = true
 		end
 		ResetStereoEyeState()
+		-- XR Home AR layer: content-only eye pass (no map). Signal for submit void.
+		if g_VR.cubeHomeArLayer then
+			view.drawhud = false
+			view.drawmonitors = false
+			-- World/sky already off via r_drawworld; re-assert every eye.
+			if render and render.Clear then
+				-- Clear depth so empty stays far; color ignore for alpha (module sets alpha).
+				render.ClearDepth()
+			end
+		end
 		local rv = GetEngineRenderView()
 		rv(view)
 		ResetStereoEyeState()
