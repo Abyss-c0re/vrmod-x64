@@ -697,26 +697,34 @@ if SERVER then
 		end)
 	end)
 
-	-- Remember gun across vehicle holster (Source often forces empty seat weapon)
-	local vehicleWepClass = {} -- steamid → class
+	-- Remember gun only if you ENTERED with one (Source often holsters seat weapons).
+	-- Bare hands / weapon_vrmod_empty must clear the slot — never re-force a stale class.
+	local vehicleWepClass = {} -- steamid → class or false (entered empty)
 
 	local function SaveVehicleWeapon(ply)
 		if not IsValid(ply) then return end
+		local sid = ply:SteamID()
 		local wep = ply:GetActiveWeapon()
-		if not IsValid(wep) then return end
+		if not IsValid(wep) then
+			vehicleWepClass[sid] = false
+			return
+		end
 		local c = wep:GetClass()
 		if c and c ~= "" and c ~= "weapon_vrmod_empty" then
-			vehicleWepClass[ply:SteamID()] = c
+			vehicleWepClass[sid] = c
+		else
+			vehicleWepClass[sid] = false -- holstered / bare hands
 		end
 	end
 
 	local function RestoreVehicleWeapon(ply)
 		if not IsValid(ply) or not ply:Alive() then return end
 		local c = vehicleWepClass[ply:SteamID()]
-		if not c or not ply:HasWeapon(c) then return end
+		if not c or c == false then return end -- no save or entered empty
+		if not ply:HasWeapon(c) then return end
 		local cur = ply:GetActiveWeapon()
 		local curC = IsValid(cur) and cur:GetClass() or ""
-		-- Only reselect when holstered/empty — avoid ArcVR redeploy (clip wipe)
+		-- Only reselect when seat forced empty — never steal another active gun
 		if curC == c then return end
 		if curC ~= "" and curC ~= "weapon_vrmod_empty" and curC ~= c then return end
 		ply:SelectWeapon(c)
@@ -729,26 +737,30 @@ if SERVER then
 		vrmod.SetVRHandsNoCollide(ply, true)
 		net.Start("vrutil_net_entervehicle", true)
 		net.Send(ply)
-		-- Seat often holsters after enter — restore once if empty
-		timer.Simple(0.15, function()
-			if IsValid(ply) and ply:InVehicle() then RestoreVehicleWeapon(ply) end
-		end)
-		timer.Simple(0.5, function()
-			if IsValid(ply) and ply:InVehicle() then RestoreVehicleWeapon(ply) end
-		end)
+		-- Only restore if we saved a real gun (entered armed); skip if bare hands
+		if vehicleWepClass[ply:SteamID()] then
+			timer.Simple(0.15, function()
+				if IsValid(ply) and ply:InVehicle() then RestoreVehicleWeapon(ply) end
+			end)
+			timer.Simple(0.5, function()
+				if IsValid(ply) and ply:InVehicle() then RestoreVehicleWeapon(ply) end
+			end)
+		end
 	end)
 
 	hook.Add("PlayerLeaveVehicle", "vrutil_hook_playerleavevehicle", function(ply, veh)
 		if g_VR[ply:SteamID()] == nil then return end
 		net.Start("vrutil_net_exitvehicle", true)
 		net.Send(ply)
-		-- Restore gun if seat left us on empty (do not reselect same gun)
-		timer.Simple(0.1, function()
-			if IsValid(ply) and not ply:InVehicle() then RestoreVehicleWeapon(ply) end
-		end)
-		timer.Simple(0.4, function()
-			if IsValid(ply) and not ply:InVehicle() then RestoreVehicleWeapon(ply) end
-		end)
+		-- Restore only if we entered with a gun and seat left us empty
+		if vehicleWepClass[ply:SteamID()] then
+			timer.Simple(0.1, function()
+				if IsValid(ply) and not ply:InVehicle() then RestoreVehicleWeapon(ply) end
+			end)
+			timer.Simple(0.4, function()
+				if IsValid(ply) and not ply:InVehicle() then RestoreVehicleWeapon(ply) end
+			end)
+		end
 		timer.Simple(1, function()
 			if IsValid(ply) and vrmod.IsPlayerInVR(ply) and not ply:InVehicle() then
 				vrmod.SetVRHandsNoCollide(ply, false)
