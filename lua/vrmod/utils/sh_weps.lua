@@ -63,35 +63,20 @@ function vrmod.utils.CreateWorldModelVM(class, vmi)
     g_VR.viewModel = g_VR.worldModelVM
 end
 
---- Resolve a drawable model for VR gun path (viewmodel preferred, world model fallback).
-function vrmod.utils.ResolveWeaponModel(wep)
-    if not IsValid(wep) then return nil end
-    local class = wep:GetClass()
-    if not class or class == "" or class == "weapon_vrmod_empty" then return nil end
-    local vm = ""
-    if wep.GetWeaponViewModel then
-        vm = wep:GetWeaponViewModel() or ""
-    end
-    if (vm == "" or vm == "models/weapons/c_arms.mdl") and isstring(wep.ViewModel) then
-        vm = wep.ViewModel
-    end
-    if (vm == "" or vm == "models/weapons/c_arms.mdl") and wep.GetModel then
-        local m = wep:GetModel()
-        if isstring(m) and m ~= "" and m ~= "models/error.mdl" then
-            vm = m
-        end
-    end
-    if vm == "" or vm == "models/weapons/c_arms.mdl" then return nil end
-    return class, vm
-end
-
+-- NOTE: IsValidWep / WepInfo must return the *viewmodel* path only.
+-- Falling back to wep:GetModel() (world mesh) corrupts vrutil_net_switchweapon
+-- and auto bone offsets → gun floats off the hand (regression).
 function vrmod.utils.IsValidWep(wep, get)
-    local class, vm = vrmod.utils.ResolveWeaponModel(wep)
-    if not class then return false end
+    if not IsValid(wep) then return false end
+    local class = wep:GetClass()
+    local vm
+    vm = wep:GetWeaponViewModel()
+    if class == "weapon_vrmod_empty" or vm == "" or vm == "models/weapons/c_arms.mdl" then return false end
     if get then
         return class, vm
+    else
+        return true
     end
-    return true
 end
 
 function vrmod.utils.IsWeaponEntity(ent)
@@ -110,90 +95,6 @@ end
 function vrmod.utils.WepInfo(wep)
     local class, vm = vrmod.utils.IsValidWep(wep, true)
     if class and vm then return class, vm end
-end
-
---- Client: ensure g_VR.viewModel is bound so PostDrawTranslucent can DrawModel the gun.
-function vrmod.utils.EnsureViewModelBound(wep)
-    if not CLIENT then return end
-    if not (g_VR and g_VR.active) then return end
-    wep = wep or (IsValid(LocalPlayer()) and LocalPlayer():GetActiveWeapon() or nil)
-    if not IsValid(wep) then return end
-    local class, model = vrmod.utils.ResolveWeaponModel(wep)
-    if not class then
-        -- Empty hands / fists — clear gun draw target
-        if g_VR.viewModel and IsValid(g_VR.viewModel) and g_VR.viewModel:GetClass() == "class C_BaseFlex" then
-            -- keep floating hands model
-        else
-            g_VR.viewModel = nil
-            g_VR.currentvmi = nil
-        end
-        return
-    end
-    local vmi = (g_VR.viewModelInfo and g_VR.viewModelInfo[class]) or {}
-    if not vmi.offsetPos then vmi.offsetPos = Vector(0, 0, 0) end
-    if not vmi.offsetAng then vmi.offsetAng = Angle(0, 0, 0) end
-    g_VR.viewModelInfo = g_VR.viewModelInfo or {}
-    g_VR.viewModelInfo[class] = vmi
-    g_VR.currentvmi = vmi
-
-    if vmi.useWorldModel or (GetConVar("vrmod_useworldmodels") and GetConVar("vrmod_useworldmodels"):GetBool()) then
-        if vrmod.utils.CreateWorldModelVM then
-            vrmod.utils.CreateWorldModelVM(class, vmi)
-        end
-        if IsValid(wep) then wep:SetNoDraw(true) end
-        local evm = LocalPlayer():GetViewModel()
-        if IsValid(evm) then evm:SetNoDraw(true) end
-        return
-    end
-
-    local viewModel = LocalPlayer():GetViewModel()
-    if IsValid(viewModel) then
-        viewModel:SetNoDraw(false)
-        g_VR.viewModel = viewModel
-    end
-    if IsValid(wep) then wep:SetNoDraw(true) end
-    if IsValid(g_VR.worldModelVM) then
-        g_VR.worldModelVM:Remove()
-        g_VR.worldModelVM = nil
-    end
-end
-
-if CLIENT then
-	-- Net switchweapon can lag or send empty VM paths — bind gun mesh client-side too.
-	hook.Add("PlayerSwitchWeapon", "vrmod_ensure_viewmodel", function(ply, old, new)
-		if ply ~= LocalPlayer() then return end
-		timer.Simple(0, function()
-			if vrmod.utils.EnsureViewModelBound then
-				vrmod.utils.EnsureViewModelBound(new)
-			end
-		end)
-	end)
-	hook.Add("VRMod_Start", "vrmod_ensure_viewmodel_start", function(ply)
-		if ply and IsValid(ply) and ply ~= LocalPlayer() then return end
-		timer.Simple(0.1, function()
-			if vrmod.utils.EnsureViewModelBound then
-				vrmod.utils.EnsureViewModelBound()
-			end
-		end)
-		timer.Simple(0.5, function()
-			if vrmod.utils.EnsureViewModelBound then
-				vrmod.utils.EnsureViewModelBound()
-			end
-		end)
-	end)
-	-- Periodic safety: if VR active and viewModel lost, rebind
-	timer.Create("vrmod_viewmodel_rebind", 1.0, 0, function()
-		if not (g_VR and g_VR.active) then return end
-		local ply = LocalPlayer()
-		if not IsValid(ply) then return end
-		local wep = ply:GetActiveWeapon()
-		if not IsValid(wep) then return end
-		if not vrmod.utils.ResolveWeaponModel or not vrmod.utils.ResolveWeaponModel(wep) then return end
-		if IsValid(g_VR.viewModel) or IsValid(g_VR.worldModelVM) then return end
-		if vrmod.utils.EnsureViewModelBound then
-			vrmod.utils.EnsureViewModelBound(wep)
-		end
-	end)
 end
 
 --- Viewmodel / gun is a pure slave of g_VR.tracking.pose_righthand (SoT).
