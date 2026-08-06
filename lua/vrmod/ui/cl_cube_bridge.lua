@@ -191,8 +191,8 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 	local xdg = (os.getenv and os.getenv("XDG_RUNTIME_DIR")) or ""
 	local home = (os.getenv and os.getenv("HOME")) or ""
 	local qbin = shellQuote(bin)
-	-- Prefer wrapper script if present (sets env / cwd)
-	local wrapper = home .. "/Dev/GMod/gVRMod/scripts/CubeUI.sh"
+	-- Host launcher: never CubeUI.sh (rebuild/sync/set -e). Clean env + wait for XR free.
+	local host = home .. "/Dev/GMod/gVRMod/scripts/CubeUI_host.sh"
 	local reasonSafe = (tostring(reason or "?"):gsub("[^%w%._%-]", "_"))
 
 	-- Boot-only retry: if CubeUI lives longer than HOST_BOOT_FAIL_MAX_SEC, treat
@@ -202,13 +202,14 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 		"echo $$ > " .. RELAUNCH_PID,
 		"log=" .. RELAUNCH_LOG,
 		"bin=" .. qbin,
-		"wrap=" .. shellQuote(wrapper),
+		"host=" .. shellQuote(host),
 		"max_boot=" .. tostring(HOST_BOOT_FAIL_MAX_SEC),
 		"echo \"[cube-bridge] spawn begin $(date -Iseconds) reason=" .. reasonSafe .. " bin=$bin\" >>\"$log\"",
 		"export DISPLAY=" .. shellQuote(display),
 		"export XDG_RUNTIME_DIR=" .. shellQuote(xdg),
 		"export HOME=" .. shellQuote(home),
 		xrJson ~= "" and ("export XR_RUNTIME_JSON=" .. shellQuote(xrJson)) or "true",
+		"export GVRMOD_CUBE_BIN=" .. qbin,
 		-- Drop Steam pressure-vessel / game lib path so host OpenXR + GLX work
 		"unset LD_LIBRARY_PATH",
 		"unset LD_PRELOAD",
@@ -222,8 +223,8 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 		"  fi",
 		"  echo \"[cube-bridge] boot attempt $i/" .. tostring(HOST_BOOT_RETRIES) .. "\" >>\"$log\"",
 		"  t0=$(date +%s)",
-		"  if [ -x \"$wrap\" ]; then",
-		"    \"$wrap\" >>\"$log\" 2>&1",
+		"  if [ -x \"$host\" ]; then",
+		"    bash \"$host\"",
 		"  else",
 		"    \"$bin\" >>\"$log\" 2>&1",
 		"  fi",
@@ -246,7 +247,7 @@ function vrmod.CubeBridge_SpawnLauncher(reason)
 		"done",
 		"echo \"[cube-bridge] boot failed after retries — desktop: gVRMod\" >>\"$log\"",
 		"rm -f " .. RELAUNCH_PID,
-		"exit 1",
+		"exit 0",
 		"",
 	}, "\n")
 
