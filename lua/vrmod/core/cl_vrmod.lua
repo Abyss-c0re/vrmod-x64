@@ -1483,13 +1483,11 @@ if CLIENT then
 				render.CullMode(0)
 			end)
 		elseif isFollow then
-			-- Capture+present AFTER Submit (PresentFollowCamAfterSubmit). Mid-frame
-			-- only syncs the mode so we never pay a third RenderView before EndFrame.
-			if DC and DC.SyncFromDesktopView then
-				pcall(DC.SyncFromDesktopView, dv)
+			if DC then
+				if DC.SyncFromDesktopView then pcall(DC.SyncFromDesktopView, dv) end
+				if DC.CaptureFrame then pcall(DC.CaptureFrame) end
+				if DC.PresentDesktop then pcall(DC.PresentDesktop) end
 			end
-			pcall(function() render.CullMode(0) end)
-		elseif g_VR._skipDesktopThisFrame then
 			pcall(function() render.CullMode(0) end)
 		elseif isEyeCrop and g_VR.rtMaterial then
 			-- Legacy mid-frame eye crop (samples stereo RT material — after PopRT only).
@@ -1508,18 +1506,6 @@ if CLIENT then
 		elseif DC and DC.SyncFromDesktopView then
 			pcall(DC.SyncFromDesktopView, dv)
 		end
-	end
-
-	--- Follow-cam private RT: capture + blit only after OpenXR EndFrame.
-	local function PresentFollowCamAfterSubmit()
-		local dv = g_VR.desktopView or 1
-		local DC = vrmod.DesktopCam
-		local isFollow = (DC and DC.IsFollowMode and DC.IsFollowMode(dv)) or (dv == 4)
-		if not isFollow or not DC then return end
-		if DC.SyncFromDesktopView then pcall(DC.SyncFromDesktopView, dv) end
-		if DC.CaptureFrame then pcall(DC.CaptureFrame) end
-		if DC.PresentDesktop then pcall(DC.PresentDesktop) end
-		pcall(function() render.CullMode(0) end)
 	end
 
 	-- 1) Startup checks & init
@@ -2339,8 +2325,6 @@ if CLIENT then
 
 			UpdateTracking()
 			ApplyPoseModifiers()
-			-- G51: input after Submit (quality ladder). Net frame stays here —
-			-- PreStereo IK / laser read lerpedFrame this same stereo pair.
 			-- G25: one pose energy path snapshot (pain #4 — no dual-truth forks).
 			if vrmod.utils and vrmod.utils.PoseSoT_Decide then
 				local tr = g_VR.tracking
@@ -2361,6 +2345,7 @@ if CLIENT then
 				g_VR._poseSoTHmdExpect = vrmod.utils.PoseSoT_HmdExpect
 					and vrmod.utils.PoseSoT_HmdExpect(pdec) or nil
 			end
+			HandleInput()
 			VRUtilNetUpdateLocalPly()
 			UpdateViewFromEntity()
 
@@ -2454,7 +2439,6 @@ if CLIENT then
 				if vrmod.utils and vrmod.utils.SubmitLaw_AllowCollect then
 					collectOk = vrmod.utils.SubmitLaw_AllowCollect({ mat_queue_mode = mq })
 				end
-				if budget and budget.skip_collect then collectOk = false end
 				if collectOk and isfunction(VRMOD_CollectEyes) then
 					PushKnownSubmitSize()
 					local okC = pcall(VRMOD_CollectEyes)
@@ -2482,12 +2466,6 @@ if CLIENT then
 			-- G05: keep Submit while active (policy.keep_submit) — avoids HMD void on load frames
 			if policy.keep_submit ~= false and isfunction(VRMOD_SubmitSharedTexture) then
 				VRMOD_SubmitSharedTexture()
-			end
-			-- After EndFrame: input + follow-cam (private RT). Never a third
-			-- world RenderView on the WaitFrame → Submit path (shutter).
-			HandleInput()
-			if not (g_VR._skipDesktopThisFrame) then
-				PresentFollowCamAfterSubmit()
 			end
 			hook.Call("VRMod_PostRender")
 			return true

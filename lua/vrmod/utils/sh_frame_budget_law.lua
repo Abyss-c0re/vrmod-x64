@@ -10,11 +10,11 @@ function vrmod.utils.FrameBudget_DesktopSkipMs()
 end
 
 function vrmod.utils.FrameBudget_InputAfterSubmit()
-	return true
+	return false
 end
 
 function vrmod.utils.FrameBudget_FollowCamAfterSubmit()
-	return true
+	return false
 end
 
 function vrmod.utils.FrameBudget_AllowNestedMonitorsInFollowCam()
@@ -38,8 +38,8 @@ function vrmod.utils.FrameBudget_Decide(opts)
 		late = late,
 		frame_ms = ms,
 		skip_ms = lim,
-		skip_desktop = late and (follow or eyeCrop),
-		skip_collect = late,
+		skip_desktop = late and follow,
+		skip_collect = false,
 		follow_after_submit = vrmod.utils.FrameBudget_FollowCamAfterSubmit(),
 		input_after_submit = vrmod.utils.FrameBudget_InputAfterSubmit(),
 		drawmonitors = vrmod.utils.FrameBudget_AllowNestedMonitorsInFollowCam(),
