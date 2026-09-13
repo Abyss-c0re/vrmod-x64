@@ -18,6 +18,31 @@ local LIGHT_CLASSES = {
 	"env_projectedtexture",
 }
 
+local cachedLights = {}
+local cachedLightsFrame = -1
+
+local function LightEntities()
+	local sf = (g_VR and g_VR.stereoFrame) or -1
+	if cachedLightsFrame == sf and sf >= 0 then
+		return cachedLights
+	end
+	cachedLightsFrame = sf
+	local n = 0
+	for c = 1, #LIGHT_CLASSES do
+		local list = ents.FindByClass(LIGHT_CLASSES[c])
+		if istable(list) then
+			for i = 1, #list do
+				n = n + 1
+				cachedLights[n] = list[i]
+			end
+		end
+	end
+	for i = n + 1, #cachedLights do
+		cachedLights[i] = nil
+	end
+	return cachedLights
+end
+
 local function UpdateProjected(pt)
 	if not pt or not isfunction(pt.Update) then return end
 	pcall(pt.Update, pt)
@@ -57,13 +82,9 @@ function vrmod.utils.RefreshStereoLights(eye)
 	end
 	if not g_VR or not g_VR.active then return false end
 
-	for c = 1, #LIGHT_CLASSES do
-		local list = ents.FindByClass(LIGHT_CLASSES[c])
-		if istable(list) then
-			for i = 1, #list do
-				RefreshEntityLight(list[i])
-			end
-		end
+	local list = LightEntities()
+	for i = 1, #list do
+		RefreshEntityLight(list[i])
 	end
 	return true
 end

@@ -59,6 +59,9 @@ if CLIENT then
 	end)
 
 	hook.Add("Think", "vrmod_find_pickup_target", function()
+		-- Sphere+trace both hands every Think hitches prop-dense maps. 30 Hz is enough.
+		local fn = FrameNumber and FrameNumber() or 0
+		if fn % 2 == 1 then return end
 		local ply = LocalPlayer()
 		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) or not ply:Alive() then return end
 		local pickupRange = GetConVar("vrmod_pickup_range"):GetFloat()

@@ -1100,11 +1100,14 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 
 	-- Drop stale free anchors only when desired is free (re-acquire) or lastFree invalid.
 	-- If desired is solid, KEEP lastFree even when far — that stops force-through.
+	local lastFreeOk = false
 	if st.hasFree and IsVec(st.lastFree) then
-		if not isFree(st.lastFree) then
+		lastFreeOk = isFree(st.lastFree)
+		if not lastFreeOk then
 			st.hasFree = false
 		elseif desiredFree and st.lastFree:DistToSqr(desiredSample) > MAX_LASTFREE_DIST_SQR then
 			st.hasFree = false
+			lastFreeOk = false
 		end
 	end
 
@@ -1113,7 +1116,7 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 	end
 
 	local startPos = desiredSample
-	if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
+	if st.hasFree and lastFreeOk then
 		startPos = st.lastFree
 	else
 		st.hasFree = false
@@ -1518,9 +1521,12 @@ function vrmod.utils.UpdateHeadCollisions()
 		return not (t.StartSolid or t.AllSolid)
 	end
 
+	local lastFreeOk = false
 	if hmdWall.hasFree and IsVec(hmdWall.lastFree) then
-		if not isFree(hmdWall.lastFree) or hmdWall.lastFree:DistToSqr(desired) > (120 * 120) then
+		lastFreeOk = isFree(hmdWall.lastFree)
+		if not lastFreeOk or hmdWall.lastFree:DistToSqr(desired) > (120 * 120) then
 			hmdWall.hasFree = false
+			lastFreeOk = false
 		end
 	end
 
@@ -1532,7 +1538,7 @@ function vrmod.utils.UpdateHeadCollisions()
 	end
 
 	local startPos = desired
-	if hmdWall.hasFree and IsVec(hmdWall.lastFree) and isFree(hmdWall.lastFree) then
+	if hmdWall.hasFree and lastFreeOk then
 		startPos = hmdWall.lastFree
 	end
 

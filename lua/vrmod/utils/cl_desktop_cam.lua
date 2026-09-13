@@ -538,7 +538,7 @@ function DC.CaptureFrame()
 			fov = fov or 75,
 			aspectratio = w / math.max(h, 1),
 			drawhud = false,
-			drawmonitors = true,
+			drawmonitors = false,
 			drawviewmodel = false,
 			dopostprocess = false,
 		})
