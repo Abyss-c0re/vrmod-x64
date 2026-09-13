@@ -276,6 +276,7 @@ function Session:Close()
 	self.active = false
 	hook.Remove("PostDrawTranslucentRenderables", self.hookId)
 	hook.Remove("Think", self.thinkId)
+	hook.Remove("Think", self.thinkId .. "_load")
 	hook.Remove("VRMod_PreStereo", self.thinkId .. "_pose")
 	if self.boneCb and IsValid(self.ent) then
 		self.ent:RemoveCallback("BuildBonePositions", self.boneCb)
@@ -406,12 +407,55 @@ function Session:ReloadIK()
 	return true
 end
 
+local function AvatarPlaceholder()
+	if vrmod.utils and vrmod.utils.AvatarLoadLaw_PlaceholderModel then
+		return vrmod.utils.AvatarLoadLaw_PlaceholderModel()
+	end
+	return "models/player/kleiner.mdl"
+end
+
+local function ModelIsReady(path)
+	if not path or path == "" then return false end
+	if vrmod.character and vrmod.character.IsModelReady then
+		return vrmod.character.IsModelReady(path)
+	end
+	if util.IsModelLoaded then
+		local ok, loaded = pcall(util.IsModelLoaded, path)
+		return ok and loaded == true
+	end
+	local ply = LocalPlayer()
+	return IsValid(ply) and ply:GetModel() == path
+end
+
 function Session:SetModel(path, opts)
 	if not self:IsValid() or not path or path == "" then return false, "empty path" end
 	opts = opts or {}
+	-- Unloaded workshop PMs hitch if Precache/ClientsideModel run here — queue instead.
+	if not opts.forceLoad and not ModelIsReady(path) then
+		self.pendingModel = path
+		self.pendingOpts = opts
+		self._precacheIssued = false
+		if vrmod.logger then
+			vrmod.logger.Info("[Avatar] twin model queued (async) %s", path)
+		end
+		return true, "loading"
+	end
 	-- Block incomplete skeletons (VR body IK needs full ValveBiped limbs + head/spine)
-	if not opts.forceIncomplete and vrmod.character and vrmod.character.ValidatePlayerModel then
-		local okPm, missing, reason = vrmod.character.ValidatePlayerModel(path)
+	if not opts.forceIncomplete and vrmod.character then
+		local okPm, missing, reason
+		if vrmod.character.ValidatePlayerModelOnEnt and IsValid(self.ent) and self.ent:GetModel() == path then
+			okPm, missing, reason = vrmod.character.ValidatePlayerModelOnEnt(self.ent)
+		elseif vrmod.character.ValidatePlayerModel then
+			okPm, missing, reason = vrmod.character.ValidatePlayerModel(path, { allowLoad = opts.forceLoad == true })
+		else
+			okPm = true
+		end
+		if okPm == nil then
+			self.pendingModel = path
+			self.pendingOpts = opts
+			self._precacheIssued = false
+			return true, "loading"
+		end
 		if not okPm then
 			self.vrCompatible = false
 			local msg = "VR model blocked · " .. tostring(reason or "missing bones")
@@ -423,7 +467,12 @@ function Session:SetModel(path, opts)
 		end
 	end
 	self.vrCompatible = true
-	util.PrecacheModel(path)
+	self.pendingModel = nil
+	self.pendingOpts = nil
+	self._precacheIssued = nil
+	if not ModelIsReady(path) then
+		pcall(util.PrecacheModel, path)
+	end
 	self.ent:SetModel(path)
 	self.model = path
 	-- Preview only: do NOT archive to cv_model unless explicitly saved (ApplyToPlayer)
@@ -1273,11 +1322,18 @@ function vrmod.avatar.Open(opts)
 		mdl = live
 	end
 	if not mdl or mdl == "" then
-		mdl = "models/player/kleiner.mdl"
+		mdl = AvatarPlaceholder()
 	end
-	util.PrecacheModel(mdl)
+	local spawnPath = mdl
+	if not ModelIsReady(spawnPath) then
+		if live ~= "" and ModelIsReady(live) then
+			spawnPath = live
+		else
+			spawnPath = AvatarPlaceholder()
+		end
+	end
 
-	local ent = ClientsideModel(mdl, RENDERGROUP_BOTH)
+	local ent = ClientsideModel(spawnPath, RENDERGROUP_BOTH)
 	if not IsValid(ent) then return nil end
 	ent:SetNoDraw(true)
 	ent:DrawShadow(true)
@@ -1291,7 +1347,9 @@ function vrmod.avatar.Open(opts)
 	ent:ResetSequence(idle >= 0 and idle or 0)
 	ent:SetCycle(0)
 	ent:SetPlaybackRate(0)
-	ent:SetupBones()
+	if ModelIsReady(spawnPath) then
+		pcall(function() ent:SetupBones() end)
+	end
 
 	local follow = { hmd = true, hands = true, waist = false, feet = false }
 	if opts.follow then
@@ -1354,16 +1412,17 @@ function vrmod.avatar.Open(opts)
 		lowerLegLen = 16,
 	}, Session)
 
-	s:_cacheBones()
-	s:_measureArms()
-	local charik0 = vrmod.charik or vrmod.frameik
-	s.ik = charik0 and charik0.Init(ent, {
-		noStretch = true,
-		headDampen = s.headDampen ~= false,
-		headMaxPitch = s.headMaxPitch or 55,
-	}) or nil
-	s:_applyHideBones()
 	sessions[id] = s
+	if spawnPath ~= mdl then
+		s.pendingModel = mdl
+		s.pendingOpts = { persist = false, keepLooks = true }
+		s._precacheIssued = false
+	end
+	-- IK + bone cache next frame so menu open never hitch-stalls stereo
+	timer.Simple(0, function()
+		if not s.active or not IsValid(s.ent) then return end
+		pcall(function() s:ReloadIK() end)
+	end)
 
 	-- Prefer self.targets (clone full-skeleton snap, or charik arm targets)
 	s.boneCb = ent:AddCallback("BuildBonePositions", function(e, _num)
@@ -1408,6 +1467,27 @@ function vrmod.avatar.Open(opts)
 		if not s.active then return end
 		if s.laserPickBones then
 			s:UpdateLaserHover()
+		end
+	end)
+
+	hook.Add("Think", s.thinkId .. "_load", function()
+		if not s.active then return end
+		local want = s.pendingModel
+		if not want then return end
+		if ModelIsReady(want) then
+			local popts = s.pendingOpts or { persist = false, keepLooks = true }
+			s.pendingModel = nil
+			s.pendingOpts = nil
+			s._precacheIssued = nil
+			s:SetModel(want, popts)
+			return
+		end
+		if not s._precacheIssued then
+			s._precacheIssued = true
+			timer.Simple(0, function()
+				if not s.active or not s.pendingModel then return end
+				pcall(util.PrecacheModel, s.pendingModel)
+			end)
 		end
 	end)
 
@@ -1497,7 +1577,10 @@ end
 
 function vrmod.avatar.ListPlayerModels(opts)
 	opts = opts or {}
-	local onlyCompatible = opts.vrOnly ~= false -- default: VR-capable only
+	-- Default: never sync-validate the whole workshop list (Avatar open freeze).
+	local validateNow = opts.validateNow == true
+	local onlyCompatible = opts.vrOnly == true or (validateNow and opts.vrOnly ~= false)
+	local cacheOnly = opts.cacheOnly ~= false
 	local list = {}
 	if player_manager and player_manager.AllValidModels then
 		for name, path in pairs(player_manager.AllValidModels()) do
@@ -1522,8 +1605,12 @@ function vrmod.avatar.ListPlayerModels(opts)
 	end
 	local filtered = {}
 	for _, e in ipairs(list) do
-		local ok = vrmod.character.ValidatePlayerModel(e.path)
-		if ok then
+		local vopts = validateNow and { allowLoad = true } or { cacheOnly = cacheOnly }
+		local ok, _, reason = vrmod.character.ValidatePlayerModel(e.path, vopts)
+		if ok == true then
+			filtered[#filtered + 1] = e
+		elseif ok == nil and (reason == "pending" or reason == "not_loaded") then
+			-- Still scanning — keep visible until we know it is incompatible
 			filtered[#filtered + 1] = e
 		end
 	end

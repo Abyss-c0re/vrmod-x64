@@ -343,6 +343,10 @@ local function paint()
 			end
 		end
 
+		if s and s.pendingModel and (statusMsg == "" or CurTime() >= statusUntil) then
+			statusMsg = "loading model…"
+			statusUntil = CurTime() + 0.4
+		end
 		if statusMsg ~= "" and CurTime() < statusUntil then
 			draw.SimpleText(statusMsg, "DermaDefaultBold", W * 0.5, H - 22, Theme().ok, TEXT_ALIGN_CENTER)
 		end
@@ -442,7 +446,10 @@ local function activate(mx, my)
 			if s and s.SetModel and entry then
 				-- Preview only if skeleton has VR bones (blocked otherwise)
 				local ok, reason = s:SetModel(entry.path, { persist = false })
-				if ok then
+				if ok and reason == "loading" then
+					statusMsg = "loading · " .. tostring(entry.name or "")
+					statusUntil = CurTime() + 4
+				elseif ok then
 					statusMsg = "preview · " .. tostring(entry.name or "")
 					statusUntil = CurTime() + 2
 				else
@@ -598,10 +605,12 @@ function vrmod.AvatarMenu_Open()
 	tab = 1
 	modelScroll = 0
 	bodyScroll = 0
-	modelList = (vrmod.avatar and vrmod.avatar.ListPlayerModels and vrmod.avatar.ListPlayerModels()) or {}
+	-- Never validate every workshop PM on this frame (that froze stereo).
+	modelList = (vrmod.avatar and vrmod.avatar.ListPlayerModels and vrmod.avatar.ListPlayerModels({
+		validateNow = false,
+		vrOnly = false,
+	})) or {}
 	livePos, liveAng, liveScale = WristPose()
-
-	pcall(StartTwin)
 
 	VRUtilMenuOpen(UID, W, H, nil, true, livePos, liveAng, liveScale, true, function()
 		open = false
@@ -645,6 +654,14 @@ function vrmod.AvatarMenu_Open()
 	end
 
 	paint()
+
+	-- Twin spawn + IK next frame so menu RT is already up.
+	timer.Simple(0, function()
+		if not open then return end
+		pcall(StartTwin)
+		statusMsg = "loading twin…"
+		statusUntil = CurTime() + 2
+	end)
 
 	hook.Add("PreRender", "avatar_menu_paint", function()
 		if not open then

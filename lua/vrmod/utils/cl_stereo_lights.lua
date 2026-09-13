@@ -1,0 +1,77 @@
+-- Stereo-correct sandbox lights (lamps / gmod_light / env_projectedtexture).
+-- Source ProjectedTexture + DynamicLight are consumed by one RenderView;
+-- refresh immediately before each stereo eye so the left eye is not dark.
+if SERVER then return end
+
+g_VR = g_VR or {}
+vrmod = vrmod or {}
+vrmod.utils = vrmod.utils or {}
+
+local PT_FIELDS = {
+	"flashlight", "Flashlight", "projectedTexture", "ProjectedTexture",
+	"lamp", "Light", "m_pFlashlight", "texture",
+}
+
+local LIGHT_CLASSES = {
+	"gmod_lamp",
+	"gmod_light",
+	"env_projectedtexture",
+}
+
+local function UpdateProjected(pt)
+	if not pt or not isfunction(pt.Update) then return end
+	pcall(pt.Update, pt)
+end
+
+local function RefreshEntityLight(ent)
+	if not IsValid(ent) then return end
+	if isfunction(ent.UpdateLight) then
+		pcall(ent.UpdateLight, ent)
+		return
+	end
+	local found = false
+	for i = 1, #PT_FIELDS do
+		local pt = ent[PT_FIELDS[i]]
+		if pt and isfunction(pt.Update) then
+			UpdateProjected(pt)
+			found = true
+		end
+	end
+	if found then return end
+	-- gmod_light: Think re-emits DynamicLight for the upcoming view
+	if isfunction(ent.Think) then
+		pcall(ent.Think, ent)
+	end
+end
+
+function vrmod.utils.RefreshStereoLights(eye)
+	local law = vrmod.utils.StereoLightLaw_Decide
+	if isfunction(law) then
+		local d = law({
+			eye = eye,
+			vr_active = g_VR and g_VR.active and true or false,
+		})
+		if not d or not d.refresh then return false end
+	elseif eye ~= "left" and eye ~= "right" then
+		return false
+	end
+	if not g_VR or not g_VR.active then return false end
+
+	for c = 1, #LIGHT_CLASSES do
+		local list = ents.FindByClass(LIGHT_CLASSES[c])
+		if istable(list) then
+			for i = 1, #list do
+				RefreshEntityLight(list[i])
+			end
+		end
+	end
+	return true
+end
+
+hook.Add("VRMod_PreRender", "vrmod_stereo_lights", function(eye)
+	vrmod.utils.RefreshStereoLights(eye)
+end)
+
+hook.Add("VRMod_Exit", "vrmod_stereo_lights", function(ply)
+	if ply and ply ~= LocalPlayer() then return end
+end)

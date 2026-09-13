@@ -9,7 +9,7 @@
 --   • Inject into Glide's stock queue on VRMod_PreRender(left|right) so
 --     PreDrawEffects still does the real draw (self-draw paths went black)
 --   • Snapshot buffer count once per stereo pair (same sprites both eyes)
---   • ProjectedTexture:Update once on PreStereo only (not left PreRender flash)
+--   • ProjectedTexture:Update on each stereo eye (PreStereo-only = right eye only)
 --   • Pass dir through for natural size falloff (Glide math)
 
 if SERVER then return end
@@ -23,7 +23,6 @@ local spriteBuffer = {}
 local spriteBufferCount = 0
 local injectCount = 0
 local injectFrame = -1
-local projFrame = -1
 local origDrawLightSprite
 local spriteColorScratch = Color(255, 255, 255, 255)
 
@@ -35,11 +34,7 @@ local function LocalGlideVehicle()
 	return nil
 end
 
-local function UpdateProjectedHeadlightsOnce()
-	local sf = g_VR.stereoFrame or 0
-	if projFrame == sf then return end
-	projFrame = sf
-
+local function UpdateProjectedHeadlights()
 	local ent = LocalGlideVehicle()
 	if not IsValid(ent) then return end
 
@@ -140,11 +135,12 @@ function vrmod.utils.PatchGlideLights()
 		return origDrawLightSprite(pos, dir, size, color, material)
 	end
 
-	-- PT once before either eye (not on left PreRender — that flashed left only)
-	hook.Add("VRMod_PreStereo", "vrmod_glide_lights_pt", function()
+	-- PT on each real stereo eye (last-view-wins otherwise → right eye only)
+	hook.Add("VRMod_PreRender", "vrmod_glide_lights_pt", function(eye)
 		if not g_VR or not g_VR.active then return end
+		if eye ~= "left" and eye ~= "right" then return end
 		if not LocalGlideVehicle() then return end
-		UpdateProjectedHeadlightsOnce()
+		UpdateProjectedHeadlights()
 	end)
 
 	-- Inject only on real stereo eyes. Never when stereoEye is nil (radar / HUD RT).
@@ -159,18 +155,16 @@ function vrmod.utils.PatchGlideLights()
 	hook.Add("VRMod_PostRender", "vrmod_glide_lights", function()
 		if not g_VR or not g_VR.active then return end
 		ClearSpriteBuffer()
-		projFrame = -1
 	end)
 
 	hook.Add("VRMod_Exit", "vrmod_glide_lights_cleanup", function(ply)
 		if ply and ply ~= LocalPlayer() then return end
 		ClearSpriteBuffer()
-		projFrame = -1
 	end)
 
 	patched = true
 	if vrmod.logger then
-		vrmod.logger.Debug("[Glide] Lights: inject on left/right PreRender only, PT on PreStereo")
+		vrmod.logger.Debug("[Glide] Lights: inject + PT on left/right PreRender")
 	end
 	return true
 end

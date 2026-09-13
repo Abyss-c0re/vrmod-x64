@@ -33,12 +33,64 @@ if CLIENT then
 		"ValveBiped.Bip01_Head1", "ValveBiped.Bip01_Spine",
 	}
 	local _pmValidateCache = {} -- path → { ok, missing, reason, t }
+	local _pmProbe = nil
 
-	--- Pure check: can this .mdl run VR body IK?
-	-- Returns ok, missingNames[], reason
+	local function ModelIsReady(path)
+		if not path or path == "" then return false end
+		if util.IsModelLoaded then
+			local ok, loaded = pcall(util.IsModelLoaded, path)
+			return ok and loaded == true
+		end
+		return false
+	end
+
+	local function CacheValidate(path, ok, missing, reason)
+		_pmValidateCache[path] = {
+			ok = ok and true or false,
+			missing = missing or {},
+			reason = reason or "",
+			t = CurTime(),
+		}
+		return ok, missing, reason
+	end
+
+	local function BonesOnEnt(ent)
+		local missing = {}
+		if not IsValid(ent) then
+			return false, { "(load failed)" }, "could not load model"
+		end
+		pcall(function()
+			ent:SetupBones()
+		end)
+		for _, name in ipairs(REQUIRED_VR_BONES) do
+			local b = ent:LookupBone(name)
+			if not isnumber(b) or b < 0 then
+				missing[#missing + 1] = name
+			end
+		end
+		if #missing > 0 then
+			return false, missing, string.format("missing %d bones (e.g. %s)", #missing, missing[1])
+		end
+		return true, {}, "ok"
+	end
+
 	vrmod.character = vrmod.character or {}
-	function vrmod.character.ValidatePlayerModel(path)
+
+	--- Check an already-spawned entity (no Precache, no extra ClientsideModel).
+	function vrmod.character.ValidatePlayerModelOnEnt(ent)
+		return BonesOnEnt(ent)
+	end
+
+	function vrmod.character.IsModelReady(path)
+		return ModelIsReady(tostring(path or ""))
+	end
+
+	--- Cached / loaded-only check. Does not hitch: never Precache unless opts.allowLoad.
+	-- Returns ok, missingNames[], reason
+	-- reason "pending" / "not_loaded" when opts.cacheOnly / noLoad and work remains.
+	function vrmod.character.ValidatePlayerModel(path, opts)
 		path = tostring(path or "")
+		opts = type(opts) == "table" and opts or {}
 		if path == "" then
 			return false, { "(empty)" }, "empty model path"
 		end
@@ -46,33 +98,38 @@ if CLIENT then
 		if cached and (CurTime() - (cached.t or 0)) < 120 then
 			return cached.ok, cached.missing, cached.reason
 		end
-		util.PrecacheModel(path)
-		local okCm, cm = pcall(ClientsideModel, path)
-		if not okCm or not IsValid(cm) then
-			local missing = { "(load failed)" }
-			local reason = "could not load model"
-			_pmValidateCache[path] = { ok = false, missing = missing, reason = reason, t = CurTime() }
-			return false, missing, reason
+		if opts.cacheOnly then
+			return nil, nil, "pending"
 		end
-		pcall(function()
-			cm:SetupBones()
-		end)
-		local missing = {}
-		for _, name in ipairs(REQUIRED_VR_BONES) do
-			local b = cm:LookupBone(name)
-			if not isnumber(b) or b < 0 then
-				missing[#missing + 1] = name
+		if not opts.allowLoad and not ModelIsReady(path) then
+			return nil, nil, "not_loaded"
+		end
+		if opts.allowLoad and not ModelIsReady(path) then
+			pcall(util.PrecacheModel, path)
+		end
+		if IsValid(opts.ent) then
+			local ok, missing, reason = BonesOnEnt(opts.ent)
+			return CacheValidate(path, ok, missing, reason)
+		end
+		if not IsValid(_pmProbe) then
+			local okCm, cm = pcall(ClientsideModel, path, RENDERGROUP_OTHER)
+			if not okCm or not IsValid(cm) then
+				return CacheValidate(path, false, { "(load failed)" }, "could not load model")
 			end
+			_pmProbe = cm
+			_pmProbe:SetNoDraw(true)
+		else
+			pcall(function() _pmProbe:SetModel(path) end)
 		end
-		pcall(function() cm:Remove() end)
-		if #missing > 0 then
-			local reason = string.format("missing %d bones (e.g. %s)", #missing, missing[1])
-			_pmValidateCache[path] = { ok = false, missing = missing, reason = reason, t = CurTime() }
-			return false, missing, reason
-		end
-		_pmValidateCache[path] = { ok = true, missing = {}, reason = "ok", t = CurTime() }
-		return true, {}, "ok"
+		local ok, missing, reason = BonesOnEnt(_pmProbe)
+		return CacheValidate(path, ok, missing, reason)
 	end
+
+	hook.Add("VRMod_Exit", "vrmod_pm_validate_probe", function(ply)
+		if ply and ply ~= LocalPlayer() then return end
+		if IsValid(_pmProbe) then pcall(function() _pmProbe:Remove() end) end
+		_pmProbe = nil
+	end)
 
 	------------------------------------------------------------------------
 	-- CONVARS
