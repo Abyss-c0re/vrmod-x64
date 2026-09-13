@@ -65,13 +65,13 @@ local function init()
 					self._vrHoldFrame = sf
 					self:SetPos(self._vrHoldPos)
 					self:SetAngles(self._vrHoldAng)
-					self:SetupBones()
-					self._vrHoldBonesFrame = sf
 				else
-					-- Second eye: same matrix, no re-SetupBones
 					self:SetPos(self._vrHoldPos)
 					self:SetAngles(self._vrHoldAng)
 				end
+				-- Both eyes: bone cache dies between stereo RenderViews
+				pcall(function() self:SetupBones() end)
+				self._vrHoldBonesFrame = sf
 				self:DrawModel()
 				self._vrHoldDrawnFrame = sf
 			end

@@ -2528,18 +2528,14 @@ if CLIENT then
 					g_VR.viewModelAng = g_VR._weaponSnapAng
 					vm:SetPos(g_VR._weaponSnapPos)
 					vm:SetAngles(g_VR._weaponSnapAng)
-					if g_VR._weaponBonesFrame ~= sf then
-						vm:SetupBones()
-						g_VR._weaponBonesFrame = sf
-					end
 				elseif g_VR.viewModelPos and g_VR.viewModelAng then
 					vm:SetPos(g_VR.viewModelPos)
 					vm:SetAngles(g_VR.viewModelAng)
-					if g_VR._weaponBonesFrame ~= sf then
-						vm:SetupBones()
-						g_VR._weaponBonesFrame = sf
-					end
 				end
+				-- Both eyes: Source drops bone matrices between RenderViews.
+				-- Skipping right-eye SetupBones left ArcVR chamber/slide/mag on bind pose.
+				pcall(function() vm:SetupBones() end)
+				g_VR._weaponBonesFrame = sf
 				local okDraw, errDraw = pcall(function()
 					vm:DrawModel()
 				end)

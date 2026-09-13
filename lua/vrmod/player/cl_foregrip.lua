@@ -349,8 +349,8 @@ local function ApplyFrozenGunDraw()
 	PublishSnap(sf, state.gunPos, state.gunAng)
 	vm:SetPos(state.gunPos)
 	vm:SetAngles(state.gunAng)
+	pcall(function() vm:SetupBones() end)
 	if state.bonesFrame ~= sf then
-		vm:SetupBones()
 		state.bonesFrame = sf
 		local muz = vm:GetAttachment(1)
 		if muz and muz.Pos and muz.Pos:DistToSqr(state.gunPos) < (100 * 100) then
