@@ -549,9 +549,14 @@ function Session:ApplyToPlayer()
 	if not g_VR or not g_VR.active then return false, "VR inactive" end
 
 	local path = self.ent:GetModel()
-	if vrmod.character and vrmod.character.ValidatePlayerModel then
-		local okPm, _missing, reason = vrmod.character.ValidatePlayerModel(path)
-		if not okPm then
+	if vrmod.character then
+		local okPm, _missing, reason
+		if vrmod.character.ValidatePlayerModelOnEnt then
+			okPm, _missing, reason = vrmod.character.ValidatePlayerModelOnEnt(self.ent)
+		elseif vrmod.character.ValidatePlayerModel then
+			okPm, _missing, reason = vrmod.character.ValidatePlayerModel(path)
+		end
+		if okPm == false then
 			local msg = "Cannot apply · " .. tostring(reason or "missing bones")
 			if vrmod.Toast then vrmod.Toast(msg, 6, "warn") end
 			return false, reason or "incompatible model"
@@ -1552,9 +1557,9 @@ function vrmod.avatar.SyncAllToPlayer()
 	-- Prefer last good VR-compatible model if live is incomplete
 	if live ~= "" and vrmod.character and vrmod.character.ValidatePlayerModel then
 		local okLive = vrmod.character.ValidatePlayerModel(live)
-		if not okLive and g_VR and g_VR._lastGoodPlayerModel then
+		if okLive == false and g_VR and g_VR._lastGoodPlayerModel then
 			live = g_VR._lastGoodPlayerModel
-		elseif not okLive then
+		elseif okLive == false then
 			live = ""
 		end
 	end

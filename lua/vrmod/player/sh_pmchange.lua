@@ -56,7 +56,8 @@ if CLIENT then
 		-- Refuse incomplete skeletons — keep last good VR model if available
 		if model ~= "" and vrmod.character and vrmod.character.ValidatePlayerModel then
 			local okPm, _miss, why = vrmod.character.ValidatePlayerModel(model)
-			if not okPm then
+			-- nil = not loaded / still scanning — do not treat as blocked
+			if okPm == false then
 				local msg = "VR: playermodel blocked · " .. tostring(why or "missing bones")
 				if vrmod.Toast then vrmod.Toast(msg, 6, "warn") end
 				if vrmod.logger then
