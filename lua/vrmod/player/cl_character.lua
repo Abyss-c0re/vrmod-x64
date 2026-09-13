@@ -91,28 +91,29 @@ if CLIENT then
 	function vrmod.character.MarkPlayerModelValid(path)
 		path = tostring(path or "")
 		if path == "" then return end
+		-- Do not write lastGood here — only CharacterInit ikReady may.
+		-- A 120s "ok" cache is for probe-skip, not for skipping spawn rebuild.
 		_pmValidateCache[path] = {
 			ok = true,
 			missing = {},
 			reason = "twin_ok",
 			t = CurTime(),
 		}
-		g_VR._lastGoodPlayerModel = path
 		g_VR._avatarApplyPath = path
 		g_VR._avatarApplyUntil = CurTime() + ApplyWindowSeconds()
 	end
 
+	function vrmod.character.InApplyWindow(path)
+		local want = tostring(path or g_VR._avatarApplyPath or "")
+		if want == "" then return false end
+		if g_VR._avatarApplyPath ~= want then return false end
+		return CurTime() < (g_VR._avatarApplyUntil or 0)
+	end
+
 	function vrmod.character.IsTrustedPlayerModel(path)
-		path = tostring(path or "")
-		if path == "" then return false end
-		if g_VR._avatarApplyPath == path and CurTime() < (g_VR._avatarApplyUntil or 0) then
-			return true
-		end
-		local cached = _pmValidateCache[path]
-		if cached and cached.ok == true and (CurTime() - (cached.t or 0)) < 120 then
-			return true
-		end
-		return false
+		-- Short apply window only. A 120s validate cache must not count as
+		-- trusted — that skipped PlayerSetModel rebuild after respawn.
+		return vrmod.character.InApplyWindow(path)
 	end
 
 	--- Check an already-spawned entity (no Precache, no extra ClientsideModel).
@@ -420,8 +421,7 @@ if CLIENT then
 			if trusted then
 				ci.incompatible = false
 				ci.ikReady = false
-				ci.modelName = pmname
-				g_VR._lastGoodPlayerModel = pmname
+				ci.modelName = nil -- allow a later force-init to rebuild
 				return true
 			end
 			if ply == LocalPlayer() then
@@ -525,8 +525,10 @@ if CLIENT then
 			vrmod.logger.Info("CharacterInit bones pending %s model=%s — retry, not incompatible", steamid, pmname)
 		end
 
-		ci.modelName = pmname
-		if (ci.ikReady or trusted) and pmname and pmname ~= "" then
+		-- Pending (trusted, bones not ready) must not stamp modelName —
+		-- StartCharacterSystem(force=false) on spawn would skip rebuild.
+		ci.modelName = (ci.ikReady or markBad) and pmname or nil
+		if ci.ikReady and pmname and pmname ~= "" then
 			g_VR._lastGoodPlayerModel = pmname
 		end
 		local b = ci.bones
@@ -1016,7 +1018,6 @@ if CLIENT then
 			if not IsValid(ply) or not g_VR or not g_VR.active then return end
 			if targetModel ~= "" then
 				ply.vrmod_pm = targetModel
-				pcall(function() ply:SetModel(targetModel) end)
 			end
 			ClearEntityBoneState(ply)
 			ply.vrmod_pm = targetModel ~= "" and targetModel or (ply.vrmod_pm or ply:GetModel())
@@ -1060,17 +1061,6 @@ if CLIENT then
 		timer.Simple(0.45, function()
 			if not IsValid(ply) or not g_VR or not g_VR.active then return end
 			startAndSnap("t45")
-			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
-				pcall(vrmod.character.ForceLocalIKAndPublish)
-			end
-		end)
-		-- Workshop PMs often lack bones on the first 0.45s probes. One more
-		-- pass inside the apply window, still pinned to the applied path.
-		timer.Simple(1.0, function()
-			if not IsValid(ply) or not g_VR or not g_VR.active then return end
-			if targetModel == "" then return end
-			if g_VR._avatarApplyPath and g_VR._avatarApplyPath ~= targetModel then return end
-			startAndSnap("t100")
 			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
 				pcall(vrmod.character.ForceLocalIKAndPublish)
 			end

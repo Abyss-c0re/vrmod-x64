@@ -10,6 +10,10 @@ function vrmod.utils.AvatarApplyLaw_ApplyWindowSeconds()
 	return 2.5
 end
 
+function vrmod.utils.AvatarApplyLaw_AllowSkipReloadOnSpawn()
+	return false
+end
+
 function vrmod.utils.AvatarApplyLaw_AllowProbeFalseCache()
 	return false
 end
@@ -28,7 +32,9 @@ end
 ---   last_good    string
 ---   apply_path   string
 ---   apply_age    number seconds since apply (optional)
----   from_net     bool   -- pmchange net/poll during an in-flight apply
+---   from_net          bool  -- pmchange net/poll
+---   from_spawn        bool  -- PlayerSpawn / PlayerSetModel after death
+---   in_apply_window   bool  -- only the short in-flight apply, not a 120s cache
 function vrmod.utils.AvatarApplyLaw_Decide(opts)
 	opts = type(opts) == "table" and opts or {}
 	local phase = tostring(opts.phase or "reload_local")
@@ -67,7 +73,8 @@ function vrmod.utils.AvatarApplyLaw_Decide(opts)
 
 	if phase == "apply" then
 		if twinOk then
-			d.update_last_good = true
+			-- Pin the path; lastGood only after CharacterInit ikReady.
+			d.update_last_good = false
 			d.pin_apply_path = true
 			d.reason = "twin_validated"
 			return d
@@ -106,12 +113,26 @@ function vrmod.utils.AvatarApplyLaw_Decide(opts)
 	end
 
 	if phase == "reload_local" or phase == "sync_all" then
-		if trusted then
+		local inWindow = opts.in_apply_window == true
+		local fromSpawn = opts.from_spawn == true
+		if fromSpawn or (opts.from_net == true and not inWindow) then
+			-- Respawn / later PlayerSetModel must rebuild IK. A 120s
+			-- "trusted" cache must not skip that (new mesh + old bones).
 			d.keep_live = true
 			d.revert = false
-			d.update_last_good = true
+			d.skip_reload = vrmod.utils.AvatarApplyLaw_AllowSkipReloadOnSpawn()
+			if d.skip_reload then
+				d.risk = "spawn_skip"
+			end
+			d.reason = fromSpawn and "spawn_rebuild" or "net_rebuild"
+			return d
+		end
+		if trusted or inWindow then
+			d.keep_live = true
+			d.revert = false
+			d.update_last_good = false
 			d.pin_apply_path = true
-			d.skip_reload = opts.from_net == true
+			d.skip_reload = inWindow and opts.from_net == true and not fromSpawn
 			d.reason = "apply_window"
 			return d
 		end
@@ -140,7 +161,7 @@ function vrmod.utils.AvatarApplyLaw_Decide(opts)
 		if trusted then
 			d.mark_incompatible = false
 			d.pin_apply_path = true
-			d.update_last_good = true
+			d.update_last_good = probeOk == true
 			if probeOk ~= true then
 				d.treat_pending = true
 				d.reason = "init_retry"
@@ -166,6 +187,7 @@ function vrmod.utils.AvatarApplyLaw_StatusLabel(decision)
 	if type(decision) ~= "table" then return "APPLY · IDLE" end
 	if decision.risk == "apply_revert" then return "APPLY · REVERT BONES" end
 	if decision.risk == "false_cache" then return "APPLY · FALSE CACHE" end
+	if decision.risk == "spawn_skip" then return "APPLY · SPAWN SKIP" end
 	if decision.reason == "apply_window" or decision.reason == "twin_validated" then
 		return "APPLY · HOLD PATH"
 	end
@@ -199,6 +221,14 @@ function vrmod.utils.AvatarApplyLaw_HmdExpect(decision)
 		e.fail_line = "Probe cached missing bones on a valid PM"
 		return e
 	end
+	if decision.risk == "spawn_skip" then
+		e.verdict = "expect_spawn_skip"
+		e.expect_keep_applied = false
+		e.checklist = "G52 · SPAWN SKIP · trusted cache blocked PlayerSetModel rebuild"
+		e.pass_line = "Must not ship — new mesh, old bone tables after respawn"
+		e.fail_line = "After respawn bones are messed up on the new model"
+		return e
+	end
 	e.verdict = "expect_applied"
 	e.expect_keep_applied = true
 	e.checklist = "G52 · HOLD · twin-validated path stays"
@@ -209,5 +239,8 @@ end
 
 function vrmod.utils.AvatarApplyLaw_IsRevertRisk(decision)
 	if type(decision) ~= "table" then return false end
-	return decision.revert == true or decision.risk == "apply_revert" or decision.risk == "false_cache"
+	return decision.revert == true
+		or decision.risk == "apply_revert"
+		or decision.risk == "false_cache"
+		or decision.risk == "spawn_skip"
 end

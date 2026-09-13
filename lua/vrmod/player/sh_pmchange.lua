@@ -35,9 +35,8 @@ if SERVER then
 		if (_pmApplyAt[ply] or 0) + 0.35 > now then return end
 		_pmApplyAt[ply] = now
 		pcall(util.PrecacheModel, path)
-		if name ~= "" and player_manager and player_manager.SetPlayerModel then
-			pcall(player_manager.SetPlayerModel, ply, name)
-		end
+		-- SetModel only. player_manager.SetPlayerModel runs spawn-like
+		-- resets and fights a second SetModel (broken bones after respawn).
 		pcall(function() ply:SetModel(path) end)
 		if ply:GetModel() ~= path then return end
 		ply.vrmod_pm = path
@@ -87,35 +86,52 @@ if CLIENT then
 		if not (g_VR and g_VR.active) then return end
 		model = tostring(model or ply:GetModel() or "")
 		local applyPath = g_VR._avatarApplyPath
-		local inApply = applyPath and applyPath ~= "" and CurTime() < (g_VR._avatarApplyUntil or 0)
-		-- Server still on the old PM until vrmod_pmapply lands — do not adopt it.
+		local inApply = vrmod.character and vrmod.character.InApplyWindow
+			and vrmod.character.InApplyWindow(applyPath)
+		if not inApply then
+			inApply = applyPath and applyPath ~= "" and CurTime() < (g_VR._avatarApplyUntil or 0)
+				and applyPath == model
+		end
+		-- In-flight apply: keep the chosen path, do not adopt the old server
+		-- mesh, and do not SetModel-fight replication (that wrecks bones).
 		if inApply and model ~= applyPath then
 			ply.vrmod_pm = applyPath
-			pcall(function() ply:SetModel(applyPath) end)
 			return
 		end
-		local trusted = vrmod.character and vrmod.character.IsTrustedPlayerModel
-			and vrmod.character.IsTrustedPlayerModel(model)
-		-- Apply already queued ReloadCharacterSystem — net/poll must not Stop+restart.
-		if trusted and (reason == "pmchange_net" or reason == "pmchange_poll") then
-			ply.vrmod_pm = model
-			return
-		end
-		local okPm, _miss, why
-		if model ~= "" and not trusted and vrmod.character and vrmod.character.ValidatePlayerModel then
-			okPm, _miss, why = vrmod.character.ValidatePlayerModel(model)
-		end
+		local fromNet = reason == "pmchange_net" or reason == "pmchange_poll"
 		local law
 		if vrmod.utils and vrmod.utils.AvatarApplyLaw_Decide then
 			law = vrmod.utils.AvatarApplyLaw_Decide({
 				phase = "reload_local",
 				live_path = model,
 				last_good = g_VR._lastGoodPlayerModel,
-				trusted = trusted == true,
-				probe_ok = okPm,
+				trusted = inApply == true,
+				in_apply_window = inApply == true,
+				from_net = fromNet,
+				from_spawn = reason == "pmchange_spawn" or (reason == "pmchange_net" and not inApply),
 				apply_path = applyPath,
-				from_net = reason == "pmchange_net" or reason == "pmchange_poll",
 			})
+		end
+		-- Duplicate reload only while ApplyToPlayer's ReloadCharacterSystem
+		-- is already running. After the window (respawn included) always rebuild.
+		if law and law.skip_reload then
+			if model ~= "" then ply.vrmod_pm = model end
+			return
+		end
+		local okPm, _miss, why
+		if model ~= "" and not inApply and vrmod.character and vrmod.character.ValidatePlayerModel then
+			okPm, _miss, why = vrmod.character.ValidatePlayerModel(model)
+			if law == nil and vrmod.utils and vrmod.utils.AvatarApplyLaw_Decide then
+				law = vrmod.utils.AvatarApplyLaw_Decide({
+					phase = "reload_local",
+					live_path = model,
+					last_good = g_VR._lastGoodPlayerModel,
+					trusted = false,
+					in_apply_window = false,
+					probe_ok = okPm,
+					from_net = fromNet,
+				})
+			end
 		end
 		local doRevert = law and law.revert
 		if not law and okPm == false then doRevert = true end
@@ -199,5 +215,15 @@ if CLIENT then
 		end
 		lastPM = m
 		ReloadLocalPM(ply, m, "pmchange_poll")
+	end)
+
+	-- Respawn must rebuild IK against the live skeleton. A prior apply
+	-- window must not leave mid-apply bone tables on the new mesh.
+	hook.Add("PlayerSpawn", "vrmod_pmchange_spawn", function(ply)
+		if ply ~= LocalPlayer() then return end
+		timer.Simple(0.05, function()
+			if not IsValid(ply) or not (g_VR and g_VR.active) then return end
+			ReloadLocalPM(ply, ply.vrmod_pm or ply:GetModel() or "", "pmchange_spawn")
+		end)
 	end)
 end
