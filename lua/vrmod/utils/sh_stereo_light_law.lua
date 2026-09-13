@@ -20,13 +20,28 @@ function vrmod.utils.StereoLightLaw_RefreshDynamicPerEye()
 	return true
 end
 
+function vrmod.utils.StereoLightLaw_AllowSkipGlideIfNotSeated()
+	return false
+end
+
+function vrmod.utils.StereoLightLaw_UpdateAllGlideVehicles()
+	return true
+end
+
+function vrmod.utils.StereoLightLaw_KeepSpriteBufferAcrossEyes()
+	return true
+end
+
 --- Pure: may we refresh world lights for this eye?
 --- opts:
 ---   eye                    "left"|"right"|nil
 ---   vr_active              bool
 ---   update_left_only       bool
 ---   update_pre_stereo_only bool
----   projected_count        number
+---   projected_count              number
+---   glide_skip_if_not_seated     bool
+---   glide_clear_buffer_pre_inject bool
+---   glide_lock_empty_inject      bool
 function vrmod.utils.StereoLightLaw_Decide(opts)
 	opts = type(opts) == "table" and opts or {}
 	local eye = opts.eye
@@ -57,6 +72,15 @@ function vrmod.utils.StereoLightLaw_Decide(opts)
 		d.reason = opts.update_left_only and "left_only_update" or "pre_stereo_only"
 		return d
 	end
+	if opts.glide_skip_if_not_seated
+		or opts.glide_clear_buffer_pre_inject
+		or opts.glide_lock_empty_inject then
+		d.path_ok = false
+		d.risk = "glide_dark"
+		d.reason = opts.glide_skip_if_not_seated and "glide_seat_gate"
+			or (opts.glide_lock_empty_inject and "glide_empty_lock" or "glide_buffer_clear")
+		return d
+	end
 	d.refresh = true
 	d.update_projected = vrmod.utils.StereoLightLaw_UpdateProjectedPerEye()
 	d.update_dynamic = vrmod.utils.StereoLightLaw_RefreshDynamicPerEye()
@@ -67,6 +91,7 @@ end
 function vrmod.utils.StereoLightLaw_StatusLabel(decision)
 	if type(decision) ~= "table" then return "LIGHT · IDLE" end
 	if decision.risk == "right_eye_only" then return "LIGHT · RIGHT EYE ONLY" end
+	if decision.risk == "glide_dark" then return "LIGHT · GLIDE DARK" end
 	if decision.refresh then
 		return "LIGHT · PER EYE " .. string.upper(tostring(decision.eye or "?"))
 	end
@@ -91,6 +116,14 @@ function vrmod.utils.StereoLightLaw_HmdExpect(decision)
 		e.fail_line = "Light sources only on the right eye"
 		return e
 	end
+	if decision.risk == "glide_dark" then
+		e.verdict = "expect_glide_dark"
+		e.expect_both_eyes = false
+		e.checklist = "G49 · GLIDE DARK · seat-gate / empty inject lock / PostRender wipe"
+		e.pass_line = "Must not ship — Glide headlights emit no light"
+		e.fail_line = "No light source from Glide vehicle lights"
+		return e
+	end
 	if decision.refresh then
 		e.verdict = "expect_both_eyes"
 		e.expect_both_eyes = true
@@ -108,4 +141,8 @@ end
 
 function vrmod.utils.StereoLightLaw_IsRightEyeOnlyRisk(decision)
 	return type(decision) == "table" and decision.risk == "right_eye_only"
+end
+
+function vrmod.utils.StereoLightLaw_IsGlideDarkRisk(decision)
+	return type(decision) == "table" and decision.risk == "glide_dark"
 end

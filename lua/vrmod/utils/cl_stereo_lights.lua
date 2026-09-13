@@ -86,6 +86,11 @@ function vrmod.utils.RefreshStereoLights(eye)
 	for i = 1, #list do
 		RefreshEntityLight(list[i])
 	end
+	-- Glide headlights are ProjectedTexture objects on the vehicle, not
+	-- env_projectedtexture ents — sandbox FindByClass never sees them.
+	if vrmod.utils.UpdateGlideHeadlights then
+		pcall(vrmod.utils.UpdateGlideHeadlights)
+	end
 	return true
 end
 
