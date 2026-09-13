@@ -361,6 +361,9 @@ local function ApplyFrozenGunDraw()
 				Ang = Angle(state.gunAng.p, state.gunAng.y, state.gunAng.r),
 			}
 		end
+		if vrmod.utils and vrmod.utils.ApplyViewModelMuzzleOffset then
+			g_VR.viewModelMuzzle = vrmod.utils.ApplyViewModelMuzzleOffset(g_VR.viewModelMuzzle, g_VR.currentvmi)
+		end
 	end
 	-- Same frozen LH both eyes (FBT/avatar read tracking + lerpedFrame)
 	ReassertLeftSnap(sf)

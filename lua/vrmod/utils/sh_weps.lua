@@ -227,5 +227,35 @@ function vrmod.utils.UpdateViewModel(handPos, handAng)
         local tip = g_VR.viewModelPos + g_VR.viewModelAng:Forward() * 14
         muz = { Pos = tip, Ang = Angle(g_VR.viewModelAng.p, g_VR.viewModelAng.y, g_VR.viewModelAng.r) }
     end
-    g_VR.viewModelMuzzle = muz
+    g_VR.viewModelMuzzle = vrmod.utils.ApplyViewModelMuzzleOffset(muz, vmi)
+end
+
+--- Per-weapon muzzleOffsetPos/Ang (same viewModelInfo store as hold offset).
+function vrmod.utils.ApplyViewModelMuzzleOffset(muz, vmi)
+    if not muz or not muz.Pos then return muz end
+    vmi = vmi or g_VR.currentvmi
+    if not vmi then return muz end
+    local off = vmi.muzzleOffsetPos
+    local oang = vmi.muzzleOffsetAng
+    if not off and not oang then return muz end
+    off = off or Vector(0, 0, 0)
+    oang = oang or Angle(0, 0, 0)
+    local ox, oy, oz = off.x or 0, off.y or 0, off.z or 0
+    local op, oyaw, oroll = oang.p or 0, oang.y or 0, oang.r or 0
+    if ox == 0 and oy == 0 and oz == 0 and op == 0 and oyaw == 0 and oroll == 0 then
+        return muz
+    end
+    local baseAng = muz.Ang or Angle(0, 0, 0)
+    if LocalToWorld then
+        local pos, ang = LocalToWorld(Vector(ox, oy, oz), Angle(op, oyaw, oroll), muz.Pos, baseAng)
+        return { Pos = pos, Ang = ang }
+    end
+    local pos = muz.Pos + baseAng:Forward() * ox + baseAng:Right() * oy + baseAng:Up() * oz
+    local ang = Angle(baseAng.p, baseAng.y, baseAng.r)
+    if ang.RotateAroundAxis then
+        ang:RotateAroundAxis(ang:Right(), op)
+        ang:RotateAroundAxis(ang:Up(), oyaw)
+        ang:RotateAroundAxis(ang:Forward(), oroll)
+    end
+    return { Pos = pos, Ang = ang }
 end

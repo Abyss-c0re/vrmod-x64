@@ -16,9 +16,11 @@ local statusMsg = ""
 local statusUntil = 0
 -- 0 = coarse, 1 = fine, 2 = ultra (VR menu was too coarse for precise holds)
 local stepLevel = 0
-local W, H = 520, 620
+local tab = 1 -- 1 hold  2 muzzle
+local TAB_NAMES = { "Hold", "Muzzle" }
+local W, H = 520, 660
 local livePos, liveAng, liveScale = Vector(2.5, 3, 4), Angle(0, -90, 55), 0.026
-local HEADER, PAD = 52, 12
+local HEADER, TAB_H, PAD = 52, 36, 12
 
 local function Theme()
 	if vrmod.cube and vrmod.cube.ThemeLive then
@@ -80,6 +82,8 @@ local function Entry()
 	g_VR.viewModelInfo[class] = g_VR.viewModelInfo[class] or {
 		offsetPos = Vector(),
 		offsetAng = Angle(),
+		muzzleOffsetPos = Vector(),
+		muzzleOffsetAng = Angle(),
 	}
 	return class, g_VR.viewModelInfo[class]
 end
@@ -131,14 +135,20 @@ local function NudgePos(axis, sign)
 		SetStatus("No weapon", 1.5)
 		return
 	end
-	d.offsetPos = d.offsetPos or Vector()
-	local p = d.offsetPos
+	local muzzle = (tab == 2)
+	local key = muzzle and "muzzleOffsetPos" or "offsetPos"
+	d[key] = d[key] or Vector()
+	local p = d[key]
 	local s = PosStep() * (sign or 1)
 	if axis == "x" then p.x = p.x + s
 	elseif axis == "y" then p.y = p.y + s
 	else p.z = p.z + s end
-	d.offsetPos = Vector(p.x, p.y, p.z)
-	if vrmod.SetViewModelOffsetForWeaponClass then
+	d[key] = Vector(p.x, p.y, p.z)
+	if muzzle then
+		if vrmod.SetViewModelMuzzleOffsetForWeaponClass then
+			vrmod.SetViewModelMuzzleOffsetForWeaponClass(class, d.muzzleOffsetPos, d.muzzleOffsetAng or Angle())
+		end
+	elseif vrmod.SetViewModelOffsetForWeaponClass then
 		vrmod.SetViewModelOffsetForWeaponClass(class, d.offsetPos, d.offsetAng or Angle())
 	end
 	LiveApply(class)
@@ -150,14 +160,20 @@ local function NudgeAng(axis, sign)
 		SetStatus("No weapon", 1.5)
 		return
 	end
-	d.offsetAng = d.offsetAng or Angle()
-	local a = d.offsetAng
+	local muzzle = (tab == 2)
+	local key = muzzle and "muzzleOffsetAng" or "offsetAng"
+	d[key] = d[key] or Angle()
+	local a = d[key]
 	local s = AngStep() * (sign or 1)
 	if axis == "p" then a.p = a.p + s
 	elseif axis == "y" then a.y = a.y + s
 	else a.r = a.r + s end
-	d.offsetAng = Angle(a.p, a.y, a.r)
-	if vrmod.SetViewModelOffsetForWeaponClass then
+	d[key] = Angle(a.p, a.y, a.r)
+	if muzzle then
+		if vrmod.SetViewModelMuzzleOffsetForWeaponClass then
+			vrmod.SetViewModelMuzzleOffsetForWeaponClass(class, d.muzzleOffsetPos or Vector(), d.muzzleOffsetAng)
+		end
+	elseif vrmod.SetViewModelOffsetForWeaponClass then
 		vrmod.SetViewModelOffsetForWeaponClass(class, d.offsetPos or Vector(), d.offsetAng)
 	end
 	LiveApply(class)
@@ -182,12 +198,17 @@ local function ResetThisWeapon()
 	g_VR.viewModelInfo[class] = {
 		offsetPos = Vector(0, 0, 0),
 		offsetAng = Angle(0, 0, 0),
+		muzzleOffsetPos = Vector(0, 0, 0),
+		muzzleOffsetAng = Angle(0, 0, 0),
 		wrongMuzzleAng = false,
 		noLaser = false,
 		useWorldModel = false,
 	}
 	if vrmod.SetViewModelOffsetForWeaponClass then
 		vrmod.SetViewModelOffsetForWeaponClass(class, Vector(), Angle())
+	end
+	if vrmod.SetViewModelMuzzleOffsetForWeaponClass then
+		vrmod.SetViewModelMuzzleOffsetForWeaponClass(class, Vector(), Angle())
 	end
 	if vrmod.SetViewModelFixMuzzle then vrmod.SetViewModelFixMuzzle(class, false) end
 	if vrmod.SetViewModelNoLaser then vrmod.SetViewModelNoLaser(class, false) end
@@ -201,6 +222,17 @@ local function CaptureFromHand()
 	-- Zero offsets so gun sits at hand pose (good base for non-VR weapons)
 	local class, d = Entry()
 	if not class or not d then return end
+	if tab == 2 then
+		d.muzzleOffsetPos = Vector(0, 0, 0)
+		d.muzzleOffsetAng = Angle(0, 0, 0)
+		if vrmod.SetViewModelMuzzleOffsetForWeaponClass then
+			vrmod.SetViewModelMuzzleOffsetForWeaponClass(class, d.muzzleOffsetPos, d.muzzleOffsetAng)
+		end
+		LiveApply(class)
+		SaveAll()
+		SetStatus("Muzzle base (0,0,0)", 1.5)
+		return
+	end
 	d.offsetPos = Vector(0, 0, 0)
 	d.offsetAng = Angle(0, 0, 0)
 	if vrmod.SetViewModelOffsetForWeaponClass then
@@ -253,35 +285,63 @@ local function rebuildButtons()
 	}
 	buttons[#buttons + 1] = {
 		id = "hand0", x = PAD + 370, y = y, w = 130, h = 36,
-		label = "HAND BASE", action = CaptureFromHand,
+		label = (tab == 2) and "MUZ ZERO" or "HAND BASE", action = CaptureFromHand,
 	}
 
 	y = y + 48
+	local nTab = #TAB_NAMES
+	local twTab = (W - PAD * 2) / nTab
+	for i = 1, nTab do
+		buttons[#buttons + 1] = {
+			id = "tab" .. i, x = PAD + (i - 1) * twTab, y = y, w = twTab - 3, h = TAB_H,
+			label = TAB_NAMES[i], toggle = true, on = (tab == i),
+			action = function()
+				tab = i
+			end,
+		}
+	end
+	y = y + TAB_H + 10
+
+	local muzzle = (tab == 2)
+	local function posOf(e)
+		if not e then return nil end
+		return muzzle and e.muzzleOffsetPos or e.offsetPos
+	end
+	local function angOf(e)
+		if not e then return nil end
+		return muzzle and e.muzzleOffsetAng or e.offsetAng
+	end
 	-- Position rows
 	local axes = {
-		{ key = "x", label = "POS X (fwd)", get = function()
+		{ key = "x", label = (muzzle and "MUZ X (fwd)" or "POS X (fwd)"), get = function()
 			local _, e = Entry()
-			return e and e.offsetPos and e.offsetPos.x or 0
+			local p = posOf(e)
+			return p and p.x or 0
 		end, nudge = function(s) NudgePos("x", s) end },
-		{ key = "y", label = "POS Y (right)", get = function()
+		{ key = "y", label = (muzzle and "MUZ Y (right)" or "POS Y (right)"), get = function()
 			local _, e = Entry()
-			return e and e.offsetPos and e.offsetPos.y or 0
+			local p = posOf(e)
+			return p and p.y or 0
 		end, nudge = function(s) NudgePos("y", s) end },
-		{ key = "z", label = "POS Z (up)", get = function()
+		{ key = "z", label = (muzzle and "MUZ Z (up)" or "POS Z (up)"), get = function()
 			local _, e = Entry()
-			return e and e.offsetPos and e.offsetPos.z or 0
+			local p = posOf(e)
+			return p and p.z or 0
 		end, nudge = function(s) NudgePos("z", s) end },
-		{ key = "p", label = "ANG PITCH", get = function()
+		{ key = "p", label = (muzzle and "MUZ PITCH" or "ANG PITCH"), get = function()
 			local _, e = Entry()
-			return e and e.offsetAng and e.offsetAng.p or 0
+			local a = angOf(e)
+			return a and a.p or 0
 		end, nudge = function(s) NudgeAng("p", s) end },
-		{ key = "a", label = "ANG YAW", get = function()
+		{ key = "a", label = (muzzle and "MUZ YAW" or "ANG YAW"), get = function()
 			local _, e = Entry()
-			return e and e.offsetAng and e.offsetAng.y or 0
+			local a = angOf(e)
+			return a and a.y or 0
 		end, nudge = function(s) NudgeAng("y", s) end },
-		{ key = "r", label = "ANG ROLL", get = function()
+		{ key = "r", label = (muzzle and "MUZ ROLL" or "ANG ROLL"), get = function()
 			local _, e = Entry()
-			return e and e.offsetAng and e.offsetAng.r or 0
+			local a = angOf(e)
+			return a and a.r or 0
 		end, nudge = function(s) NudgeAng("r", s) end },
 	}
 
@@ -302,27 +362,33 @@ local function rebuildButtons()
 	buttons._axes = axes
 
 	y = y + 8
-	local tw = math.floor((W - PAD * 2 - 16) / 3)
-	local toggles = {
-		{ id = "laser", label = "LASER", get = function()
-			local _, e = Entry()
-			return e and not e.noLaser
-		end, action = function()
-			ToggleFlag("noLaser", vrmod.SetViewModelNoLaser)
-		end },
-		{ id = "muzzle", label = "FIX MUZ", get = function()
-			local _, e = Entry()
-			return e and e.wrongMuzzleAng
-		end, action = function()
-			ToggleFlag("wrongMuzzleAng", vrmod.SetViewModelFixMuzzle)
-		end },
-		{ id = "world", label = "WORLD MD", get = function()
-			local _, e = Entry()
-			return e and e.useWorldModel
-		end, action = function()
-			ToggleFlag("useWorldModel", vrmod.SetViewModelUseWorldModel)
-		end },
-	}
+	local toggles
+	if muzzle then
+		toggles = {
+			{ id = "muzzle", label = "FIX MUZ ANG", get = function()
+				local _, e = Entry()
+				return e and e.wrongMuzzleAng
+			end, action = function()
+				ToggleFlag("wrongMuzzleAng", vrmod.SetViewModelFixMuzzle)
+			end },
+		}
+	else
+		toggles = {
+			{ id = "laser", label = "LASER", get = function()
+				local _, e = Entry()
+				return e and not e.noLaser
+			end, action = function()
+				ToggleFlag("noLaser", vrmod.SetViewModelNoLaser)
+			end },
+			{ id = "world", label = "WORLD MD", get = function()
+				local _, e = Entry()
+				return e and e.useWorldModel
+			end, action = function()
+				ToggleFlag("useWorldModel", vrmod.SetViewModelUseWorldModel)
+			end },
+		}
+	end
+	local tw = math.floor((W - PAD * 2 - 8 * math.max(0, #toggles - 1)) / math.max(1, #toggles))
 	for i, tg in ipairs(toggles) do
 		local x = PAD + (i - 1) * (tw + 8)
 		buttons[#buttons + 1] = {
@@ -399,6 +465,8 @@ local function paint()
 	local foot = "trigger: select · grip: move panel · corner: scale"
 	if statusUntil > CurTime() and statusMsg ~= "" then
 		foot = statusMsg
+	elseif d and tab == 2 then
+		foot = string.format("muzzle %s  %s", tostring(d.muzzleOffsetPos), tostring(d.muzzleOffsetAng))
 	elseif d then
 		foot = string.format("pos %s  ang %s", tostring(d.offsetPos), tostring(d.offsetAng))
 	end
@@ -462,6 +530,7 @@ function vrmod.WeaponSettings_Open()
 	end
 
 	open = true
+	tab = 1
 	stepLevel = 1 -- open on fine by default (was too coarse)
 	livePos, liveAng, liveScale = WristPose()
 	SetStatus("Editing: " .. (class or "?"), 2)

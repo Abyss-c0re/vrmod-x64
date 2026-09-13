@@ -121,8 +121,12 @@ local function ResolveMuzzle()
 	end
 
 	-- Aim direction: gun matrix (or hand if wrongMuzzleAng / broken att)
+	local muzAng = vmi.muzzleOffsetAng
+	local customMuzAng = muzAng and (math.abs(muzAng.p or 0) > 0.001 or math.abs(muzAng.y or 0) > 0.001 or math.abs(muzAng.r or 0) > 0.001)
 	if vmi.wrongMuzzleAng then
 		dir = hand.ang:Forward()
+	elseif customMuzAng and muz and muz.Ang then
+		dir = muz.Ang:Forward()
 	elseif attOk and muz.Ang and IsArcVRWeapon(class) then
 		-- ArcVR: trust attachment angles more often
 		dir = muz.Ang:Forward()

@@ -119,6 +119,12 @@ if CLIENT then
 				if v.offsetAng then
 					e.offsetAng = { v.offsetAng.p or v.offsetAng[1] or 0, v.offsetAng.y or v.offsetAng[2] or 0, v.offsetAng.r or v.offsetAng[3] or 0 }
 				end
+				if v.muzzleOffsetPos then
+					e.muzzleOffsetPos = { v.muzzleOffsetPos.x or v.muzzleOffsetPos[1] or 0, v.muzzleOffsetPos.y or v.muzzleOffsetPos[2] or 0, v.muzzleOffsetPos.z or v.muzzleOffsetPos[3] or 0 }
+				end
+				if v.muzzleOffsetAng then
+					e.muzzleOffsetAng = { v.muzzleOffsetAng.p or v.muzzleOffsetAng[1] or 0, v.muzzleOffsetAng.y or v.muzzleOffsetAng[2] or 0, v.muzzleOffsetAng.r or v.muzzleOffsetAng[3] or 0 }
+				end
 				if v.wrongMuzzleAng ~= nil then e.wrongMuzzleAng = v.wrongMuzzleAng and true or false end
 				if v.noLaser ~= nil then e.noLaser = v.noLaser and true or false end
 				if v.useWorldModel ~= nil then e.useWorldModel = v.useWorldModel and true or false end
@@ -146,6 +152,8 @@ if CLIENT then
 			g_VR.viewModelInfo[class] = {
 				offsetPos = Vector(0, 0, 0),
 				offsetAng = Angle(0, 0, 0),
+				muzzleOffsetPos = Vector(0, 0, 0),
+				muzzleOffsetAng = Angle(0, 0, 0),
 				wrongMuzzleAng = false,
 				noLaser = false,
 				useWorldModel = false,
@@ -154,6 +162,8 @@ if CLIENT then
 			local d = g_VR.viewModelInfo[class]
 			if not d.offsetPos then d.offsetPos = Vector(0, 0, 0) end
 			if not d.offsetAng then d.offsetAng = Angle(0, 0, 0) end
+			if not d.muzzleOffsetPos then d.muzzleOffsetPos = Vector(0, 0, 0) end
+			if not d.muzzleOffsetAng then d.muzzleOffsetAng = Angle(0, 0, 0) end
 		end
 		return g_VR.viewModelInfo[class]
 	end
@@ -210,8 +220,11 @@ if CLIENT then
 				-- Merge loaded data, only updating fields that exist
 				if loadedData.offsetPos and type(loadedData.offsetPos) == "table" then g_VR.viewModelInfo[cls].offsetPos = Vector(loadedData.offsetPos[1] or 0, loadedData.offsetPos[2] or 0, loadedData.offsetPos[3] or 0) end
 				if loadedData.offsetAng and type(loadedData.offsetAng) == "table" then g_VR.viewModelInfo[cls].offsetAng = Angle(loadedData.offsetAng[1] or 0, loadedData.offsetAng[2] or 0, loadedData.offsetAng[3] or 0) end
+				if loadedData.muzzleOffsetPos and type(loadedData.muzzleOffsetPos) == "table" then g_VR.viewModelInfo[cls].muzzleOffsetPos = Vector(loadedData.muzzleOffsetPos[1] or 0, loadedData.muzzleOffsetPos[2] or 0, loadedData.muzzleOffsetPos[3] or 0) end
+				if loadedData.muzzleOffsetAng and type(loadedData.muzzleOffsetAng) == "table" then g_VR.viewModelInfo[cls].muzzleOffsetAng = Angle(loadedData.muzzleOffsetAng[1] or 0, loadedData.muzzleOffsetAng[2] or 0, loadedData.muzzleOffsetAng[3] or 0) end
 				if loadedData.wrongMuzzleAng ~= nil then g_VR.viewModelInfo[cls].wrongMuzzleAng = loadedData.wrongMuzzleAng end
 				if loadedData.noLaser ~= nil then g_VR.viewModelInfo[cls].noLaser = loadedData.noLaser end
+				if loadedData.useWorldModel ~= nil then g_VR.viewModelInfo[cls].useWorldModel = loadedData.useWorldModel end
 			end
 
 			-- Handle autoOffsetAddPos separately if present in loaded config
@@ -406,14 +419,18 @@ Are you sure you want to continue?]]
 
 	function CreateAddWeaponConfigGUI(class, isEditing)
 		local frame = vgui.Create("DFrame")
-		frame:SetSize(300, 300)
+		frame:SetSize(300, 520)
 		frame:Center()
 		frame:SetTitle(isEditing and "Edit ViewModel Config" or "Add ViewModel Config")
 		frame:MakePopup()
 		local data = g_VR.viewModelInfo[class] or {
 			offsetPos = Vector(),
-			offsetAng = Angle()
+			offsetAng = Angle(),
+			muzzleOffsetPos = Vector(),
+			muzzleOffsetAng = Angle(),
 		}
+		if not data.muzzleOffsetPos then data.muzzleOffsetPos = Vector() end
+		if not data.muzzleOffsetAng then data.muzzleOffsetAng = Angle() end
 
 		local originalData = table.Copy(data)
 		-- Offset Position
@@ -474,13 +491,70 @@ Are you sure you want to continue?]]
 			end
 		end
 
+		local muzPosPanel = vgui.Create("DPanel", frame)
+		muzPosPanel:Dock(TOP)
+		muzPosPanel:SetHeight(100)
+		muzPosPanel:SetPaintBackground(false)
+		local muzPosLabel = vgui.Create("DLabel", muzPosPanel)
+		muzPosLabel:SetText("Muzzle Offset Position:")
+		muzPosLabel:Dock(TOP)
+		local muzPosSliders = {}
+		for i, axis in ipairs({"X", "Y", "Z"}) do
+			local slider = vgui.Create("DNumSlider", muzPosPanel)
+			slider:Dock(TOP)
+			slider:SetText(axis)
+			slider:SetMin(-100)
+			slider:SetMax(100)
+			slider:SetValue(data.muzzleOffsetPos[i] or 0)
+			slider:SetDecimals(3)
+			muzPosSliders[i] = slider
+		end
+
+		local muzAngPanel = vgui.Create("DPanel", frame)
+		muzAngPanel:Dock(TOP)
+		muzAngPanel:SetHeight(100)
+		muzAngPanel:SetPaintBackground(false)
+		local muzAngLabel = vgui.Create("DLabel", muzAngPanel)
+		muzAngLabel:SetText("Muzzle Offset Angle:")
+		muzAngLabel:Dock(TOP)
+		local muzAngSliders = {}
+		for i, axis in ipairs({"P", "Y", "R"}) do
+			local slider = vgui.Create("DNumSlider", muzAngPanel)
+			slider:Dock(TOP)
+			slider:SetText(axis)
+			slider:SetMin(-180)
+			slider:SetMax(180)
+			slider:SetValue(data.muzzleOffsetAng[i] or 0)
+			slider:SetDecimals(3)
+			muzAngSliders[i] = slider
+		end
+
+		local function PushMuzzleLive()
+			if vrmod.SetViewModelMuzzleOffsetForWeaponClass then
+				vrmod.SetViewModelMuzzleOffsetForWeaponClass(class,
+					Vector(muzPosSliders[1]:GetValue(), muzPosSliders[2]:GetValue(), muzPosSliders[3]:GetValue()),
+					Angle(muzAngSliders[1]:GetValue(), muzAngSliders[2]:GetValue(), muzAngSliders[3]:GetValue()))
+			end
+		end
+		for _, slider in ipairs(muzPosSliders) do
+			slider.OnValueChanged = PushMuzzleLive
+		end
+		for _, slider in ipairs(muzAngSliders) do
+			slider.OnValueChanged = PushMuzzleLive
+		end
+
 		local applyButton = vgui.Create("DButton", frame)
 		applyButton:SetText("Apply")
 		applyButton:Dock(BOTTOM)
 		applyButton.DoClick = function()
 			data.offsetPos = Vector(posSliders[1]:GetValue(), posSliders[2]:GetValue(), posSliders[3]:GetValue())
 			data.offsetAng = Angle(angSliders[1]:GetValue(), angSliders[2]:GetValue(), angSliders[3]:GetValue())
+			data.muzzleOffsetPos = Vector(muzPosSliders[1]:GetValue(), muzPosSliders[2]:GetValue(), muzPosSliders[3]:GetValue())
+			data.muzzleOffsetAng = Angle(muzAngSliders[1]:GetValue(), muzAngSliders[2]:GetValue(), muzAngSliders[3]:GetValue())
 			vrmod.SetViewModelOffsetForWeaponClass(class, data.offsetPos, data.offsetAng)
+			if vrmod.SetViewModelMuzzleOffsetForWeaponClass then
+				vrmod.SetViewModelMuzzleOffsetForWeaponClass(class, data.muzzleOffsetPos, data.muzzleOffsetAng)
+			end
 			g_VR.viewModelInfo[class] = data
 			SaveViewModelConfig()
 			frame:Close()
@@ -488,6 +562,9 @@ Are you sure you want to continue?]]
 
 		local cancelButton = vgui.Create("DButton", frame)
 		vrmod.SetViewModelOffsetForWeaponClass(class, originalData.offsetPos, originalData.offsetAng)
+		if vrmod.SetViewModelMuzzleOffsetForWeaponClass then
+			vrmod.SetViewModelMuzzleOffsetForWeaponClass(class, originalData.muzzleOffsetPos or Vector(), originalData.muzzleOffsetAng or Angle())
+		end
 		cancelButton:SetText("Cancel")
 		cancelButton:Dock(BOTTOM)
 		cancelButton.DoClick = function() frame:Close() end

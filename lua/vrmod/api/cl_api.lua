@@ -635,6 +635,12 @@ if CLIENT then
         g_VR.viewModelInfo[classname].offsetAng = ang
     end
 
+    function vrmod.SetViewModelMuzzleOffsetForWeaponClass(classname, pos, ang)
+        g_VR.viewModelInfo[classname] = g_VR.viewModelInfo[classname] or {}
+        g_VR.viewModelInfo[classname].muzzleOffsetPos = pos
+        g_VR.viewModelInfo[classname].muzzleOffsetAng = ang
+    end
+
     function vrmod.SetViewModelFixMuzzle(classname, bool)
         g_VR.viewModelInfo[classname] = g_VR.viewModelInfo[classname] or {}
         g_VR.viewModelInfo[classname].wrongMuzzleAng = bool
