@@ -45,6 +45,11 @@ if CLIENT then
 	end
 
 	local function CacheValidate(path, ok, missing, reason)
+		-- Never store pending as false — probe SetModel+LookupBone false-negatives
+		-- would block a just-applied PM for 120s and revert to lastGood.
+		if ok == nil then
+			return nil, missing, reason or "pending"
+		end
 		_pmValidateCache[path] = {
 			ok = ok and true or false,
 			missing = missing or {},
@@ -52,6 +57,13 @@ if CLIENT then
 			t = CurTime(),
 		}
 		return ok, missing, reason
+	end
+
+	local function ApplyWindowSeconds()
+		if vrmod.utils and vrmod.utils.AvatarApplyLaw_ApplyWindowSeconds then
+			return vrmod.utils.AvatarApplyLaw_ApplyWindowSeconds()
+		end
+		return 2.5
 	end
 
 	local function BonesOnEnt(ent)
@@ -76,6 +88,33 @@ if CLIENT then
 
 	vrmod.character = vrmod.character or {}
 
+	function vrmod.character.MarkPlayerModelValid(path)
+		path = tostring(path or "")
+		if path == "" then return end
+		_pmValidateCache[path] = {
+			ok = true,
+			missing = {},
+			reason = "twin_ok",
+			t = CurTime(),
+		}
+		g_VR._lastGoodPlayerModel = path
+		g_VR._avatarApplyPath = path
+		g_VR._avatarApplyUntil = CurTime() + ApplyWindowSeconds()
+	end
+
+	function vrmod.character.IsTrustedPlayerModel(path)
+		path = tostring(path or "")
+		if path == "" then return false end
+		if g_VR._avatarApplyPath == path and CurTime() < (g_VR._avatarApplyUntil or 0) then
+			return true
+		end
+		local cached = _pmValidateCache[path]
+		if cached and cached.ok == true and (CurTime() - (cached.t or 0)) < 120 then
+			return true
+		end
+		return false
+	end
+
 	--- Check an already-spawned entity (no Precache, no extra ClientsideModel).
 	function vrmod.character.ValidatePlayerModelOnEnt(ent)
 		return BonesOnEnt(ent)
@@ -93,6 +132,9 @@ if CLIENT then
 		opts = type(opts) == "table" and opts or {}
 		if path == "" then
 			return false, { "(empty)" }, "empty model path"
+		end
+		if vrmod.character.IsTrustedPlayerModel(path) then
+			return true, {}, "trusted"
 		end
 		local cached = _pmValidateCache[path]
 		if cached and (CurTime() - (cached.t or 0)) < 120 then
@@ -114,7 +156,8 @@ if CLIENT then
 		if not IsValid(_pmProbe) then
 			local okCm, cm = pcall(ClientsideModel, path, RENDERGROUP_OTHER)
 			if not okCm or not IsValid(cm) then
-				return CacheValidate(path, false, { "(load failed)" }, "could not load model")
+				-- Load can lag after Precache — do not cache as permanently bad
+				return nil, { "(load failed)" }, "pending"
 			end
 			_pmProbe = cm
 			_pmProbe:SetNoDraw(true)
@@ -122,6 +165,26 @@ if CLIENT then
 			pcall(function() _pmProbe:SetModel(path) end)
 		end
 		local ok, missing, reason = BonesOnEnt(_pmProbe)
+		local law
+		if vrmod.utils and vrmod.utils.AvatarApplyLaw_Decide then
+			law = vrmod.utils.AvatarApplyLaw_Decide({
+				phase = "validate_probe",
+				live_path = path,
+				probe_ok = ok,
+				model_ready = ModelIsReady(path),
+			})
+		end
+		if ok == true then
+			return CacheValidate(path, true, {}, "ok")
+		end
+		-- Probe just SetModel'd: missing bones is pending, not incompatible.
+		if law and not law.cache_false then
+			return nil, missing, "pending"
+		end
+		if vrmod.utils and vrmod.utils.AvatarApplyLaw_AllowProbeFalseCache
+			and not vrmod.utils.AvatarApplyLaw_AllowProbeFalseCache() then
+			return nil, missing, "pending"
+		end
 		return CacheValidate(path, ok, missing, reason)
 	end
 
@@ -333,7 +396,34 @@ if CLIENT then
 		local okCm, cmOrErr = pcall(ClientsideModel, pmname)
 		if okCm and IsValid(cmOrErr) then
 			cm = cmOrErr
-		else
+			pcall(function()
+				cm:SetPos(IsValid(LocalPlayer()) and LocalPlayer():GetPos() or Vector())
+				cm:SetAngles(Angle(0, 0, 0))
+				cm:SetupBones()
+			end)
+		end
+		-- Prefer the live player skeleton when the probe has no bones yet
+		-- (workshop PM: ClientsideModel + immediate LookupBone is often empty).
+		pcall(function() ply:SetupBones() end)
+		local function clavOf(ent)
+			if not IsValid(ent) then return -1 end
+			local b = ent:LookupBone("ValveBiped.Bip01_L_Clavicle")
+			if isnumber(b) and b >= 0 then return b end
+			return -1
+		end
+		local boneSrc = cm
+		if clavOf(cm) < 0 and clavOf(ply) >= 0 then
+			boneSrc = ply
+		end
+		local trusted = vrmod.character.IsTrustedPlayerModel and vrmod.character.IsTrustedPlayerModel(pmname)
+		if not IsValid(boneSrc) then
+			if trusted then
+				ci.incompatible = false
+				ci.ikReady = false
+				ci.modelName = pmname
+				g_VR._lastGoodPlayerModel = pmname
+				return true
+			end
 			if ply == LocalPlayer() then
 				g_VR.errorText = "Could not load player model for VR body IK"
 			end
@@ -343,16 +433,10 @@ if CLIENT then
 			return true -- no crash; system runs without IK
 		end
 
-		pcall(function()
-			cm:SetPos(IsValid(LocalPlayer()) and LocalPlayer():GetPos() or Vector())
-			cm:SetAngles(Angle(0, 0, 0))
-			cm:SetupBones()
-		end)
-
-		local lClav = cm:LookupBone("ValveBiped.Bip01_L_Clavicle")
-		local rClav = cm:LookupBone("ValveBiped.Bip01_R_Clavicle")
-		pcall(RecursiveBoneTable2, cm, lClav, ci.boneinfo, ci.boneorder)
-		pcall(RecursiveBoneTable2, cm, rClav, ci.boneinfo, ci.boneorder)
+		local lClav = boneSrc:LookupBone("ValveBiped.Bip01_L_Clavicle")
+		local rClav = boneSrc:LookupBone("ValveBiped.Bip01_R_Clavicle")
+		pcall(RecursiveBoneTable2, boneSrc, lClav, ci.boneinfo, ci.boneorder)
+		pcall(RecursiveBoneTable2, boneSrc, rClav, ci.boneinfo, ci.boneorder)
 		for _, data in pairs(ci.boneinfo) do
 			data.targetMatrix = data.targetMatrix or Matrix()
 			data.pos = data.pos or Vector()
@@ -399,13 +483,13 @@ if CLIENT then
 		}
 		ci.bones.fingers = {}
 		for i = 1, #fingerNames do
-			ci.bones.fingers[i] = cm:LookupBone(fingerNames[i]) or -1
+			ci.bones.fingers[i] = boneSrc:LookupBone(fingerNames[i]) or -1
 		end
 
 		local missing = {}
 		if ply == LocalPlayer() then g_VR.errorText = "" end
 		for k, v in pairs(boneNames) do
-			local bone = cm:LookupBone(v)
+			local bone = boneSrc:LookupBone(v)
 			if not isnumber(bone) then bone = -1 end
 			ci.bones[k] = bone
 			if bone < 0 and not string.find(k, "Wrist", 1, true) and not string.find(k, "Ulna", 1, true) then
@@ -414,37 +498,55 @@ if CLIENT then
 		end
 
 		ci.missingBones = missing
-		ci.incompatible = #missing > 0
+		local law
+		if vrmod.utils and vrmod.utils.AvatarApplyLaw_Decide then
+			law = vrmod.utils.AvatarApplyLaw_Decide({
+				phase = "character_init",
+				live_path = pmname,
+				trusted = trusted == true,
+				probe_ok = #missing == 0,
+				apply_path = g_VR._avatarApplyPath,
+			})
+		end
+		local markBad = #missing > 0
+		if law and not law.mark_incompatible then
+			markBad = false
+		elseif trusted then
+			markBad = false
+		end
+		ci.incompatible = markBad
 		ci.ikReady = #missing == 0
-		if #missing > 0 then
+		if #missing > 0 and markBad then
 			local msg = "Incompatible player model (missing " .. #missing .. " bones, e.g. " .. missing[1] .. "). VR body IK limited."
 			if ply == LocalPlayer() then g_VR.errorText = msg end
 			vrmod.logger.Warn("CharacterInit soft-fail %s model=%s missing=%s", steamid, pmname, table.concat(missing, ", "))
 			-- Do NOT StopCharacterSystem / return false — no crash, degraded IK only
+		elseif #missing > 0 then
+			vrmod.logger.Info("CharacterInit bones pending %s model=%s — retry, not incompatible", steamid, pmname)
 		end
 
 		ci.modelName = pmname
-		if ci.ikReady and pmname and pmname ~= "" then
+		if (ci.ikReady or trusted) and pmname and pmname ~= "" then
 			g_VR._lastGoodPlayerModel = pmname
 		end
 		local b = ci.bones
-		ci.clavicleLen = BoneDist(cm, b.b_leftClavicle, b.b_leftUpperarm, 8)
-		ci.upperArmLen = BoneDist(cm, b.b_leftUpperarm, b.b_leftForearm, 12)
-		ci.lowerArmLen = BoneDist(cm, b.b_leftForearm, b.b_leftHand, 12)
-		ci.upperLegLen = BoneDist(cm, b.b_leftThigh, b.b_leftCalf, 16)
-		ci.lowerLegLen = BoneDist(cm, b.b_leftCalf, b.b_leftFoot, 16)
+		ci.clavicleLen = BoneDist(boneSrc, b.b_leftClavicle, b.b_leftUpperarm, 8)
+		ci.upperArmLen = BoneDist(boneSrc, b.b_leftUpperarm, b.b_leftForearm, 12)
+		ci.lowerArmLen = BoneDist(boneSrc, b.b_leftForearm, b.b_leftHand, 12)
+		ci.upperLegLen = BoneDist(boneSrc, b.b_leftThigh, b.b_leftCalf, 16)
+		ci.lowerLegLen = BoneDist(boneSrc, b.b_leftCalf, b.b_leftFoot, 16)
 		ci.characterEyeHeight = DEFAULT_EYE_HEIGHT
 		ci.characterHeadToHmdDist = DEFAULT_HEAD_TO_HMD_DIST
 		if isnumber(b.b_spine) and b.b_spine >= 0 then
-			local okSp, spinePos = pcall(function() return cm:GetBonePosition(b.b_spine) end)
+			local okSp, spinePos = pcall(function() return boneSrc:GetBonePosition(b.b_spine) end)
 			if okSp and spinePos then
-				local baseZ = cm:GetPos().z
+				local baseZ = boneSrc:GetPos().z
 				ci.spineZ = spinePos.z - baseZ
 				ci.spineLen = math.max(4, (baseZ + ci.characterEyeHeight) - spinePos.z)
 			end
 		end
 
-		if IsValid(cm) then cm:Remove() end
+		if IsValid(cm) and cm ~= ply then cm:Remove() end
 		return true
 	end
 
@@ -882,6 +984,9 @@ if CLIENT then
 		local sid = ply:SteamID()
 		if not sid then return false end
 		local targetModel = ply.vrmod_pm or ply:GetModel() or ""
+		if g_VR._avatarApplyPath and CurTime() < (g_VR._avatarApplyUntil or 0) then
+			targetModel = g_VR._avatarApplyPath
+		end
 		if vrmod.logger then
 			vrmod.logger.Info("ReloadCharacterSystem %s (%s) model=%s",
 				sid, tostring(reason or "pm"), tostring(targetModel))
@@ -909,8 +1014,12 @@ if CLIENT then
 
 		local function startAndSnap(tag)
 			if not IsValid(ply) or not g_VR or not g_VR.active then return end
+			if targetModel ~= "" then
+				ply.vrmod_pm = targetModel
+				pcall(function() ply:SetModel(targetModel) end)
+			end
 			ClearEntityBoneState(ply)
-			ply.vrmod_pm = ply.vrmod_pm or ply:GetModel()
+			ply.vrmod_pm = targetModel ~= "" and targetModel or (ply.vrmod_pm or ply:GetModel())
 			-- Ensure net slot exists (StartCharacterSystem requires g_VR.net[sid])
 			if not g_VR.net then g_VR.net = {} end
 			if not g_VR.net[sid] then
@@ -951,6 +1060,17 @@ if CLIENT then
 		timer.Simple(0.45, function()
 			if not IsValid(ply) or not g_VR or not g_VR.active then return end
 			startAndSnap("t45")
+			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
+				pcall(vrmod.character.ForceLocalIKAndPublish)
+			end
+		end)
+		-- Workshop PMs often lack bones on the first 0.45s probes. One more
+		-- pass inside the apply window, still pinned to the applied path.
+		timer.Simple(1.0, function()
+			if not IsValid(ply) or not g_VR or not g_VR.active then return end
+			if targetModel == "" then return end
+			if g_VR._avatarApplyPath and g_VR._avatarApplyPath ~= targetModel then return end
+			startAndSnap("t100")
 			if vrmod.character and vrmod.character.ForceLocalIKAndPublish then
 				pcall(vrmod.character.ForceLocalIKAndPublish)
 			end

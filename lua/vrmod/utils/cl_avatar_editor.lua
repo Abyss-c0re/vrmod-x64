@@ -531,6 +531,9 @@ function Session:ApplyToPlayer()
 			return false, reason or "incompatible model"
 		end
 	end
+	if vrmod.character and vrmod.character.MarkPlayerModelValid then
+		vrmod.character.MarkPlayerModelValid(path)
+	end
 
 	local skin = self.ent:GetSkin() or 0
 	local bodyStr = EncodeBodygroups(self.ent)
@@ -557,9 +560,19 @@ function Session:ApplyToPlayer()
 		RunConsoleCommand("cl_playerbodygroups", table.concat(parts, " "))
 	end
 
-	-- 1) Apply looks immediately on client player
+	-- 1) Apply looks immediately on client player + tell the server.
+	-- cl_playermodel only applies on spawn; without vrmod_pmapply the engine
+	-- snaps the mesh back to the old PM (empty bone tables) a moment later.
 	pcall(ApplyLooksToEnt, ply, path, skin, bodyMap)
 	ply.vrmod_pm = path
+	if path and path ~= "" then
+		net.Start("vrmod_pmapply")
+		net.WriteString(path)
+		net.WriteString(name or "")
+		net.WriteUInt(math.Clamp(tonumber(skin) or 0, 0, 255), 8)
+		net.WriteString(bodyStr or "")
+		net.SendToServer()
+	end
 
 	-- 2) Full character/FBT reload (safe for incomplete PMs — soft IK fail, no crash)
 	if g_VR.ReloadCharacterSystem then
@@ -1513,13 +1526,31 @@ function vrmod.avatar.SyncAllToPlayer()
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return 0 end
 	local live = ply.vrmod_pm or ply:GetModel() or ""
-	-- Prefer last good VR-compatible model if live is incomplete
-	if live ~= "" and vrmod.character and vrmod.character.ValidatePlayerModel then
+	if g_VR and g_VR._avatarApplyPath and CurTime() < (g_VR._avatarApplyUntil or 0) then
+		live = g_VR._avatarApplyPath
+		ply.vrmod_pm = live
+	end
+	local trusted = vrmod.character and vrmod.character.IsTrustedPlayerModel
+		and vrmod.character.IsTrustedPlayerModel(live)
+	-- Prefer last good VR-compatible model if live is confirmed incomplete
+	if live ~= "" and not trusted and vrmod.character and vrmod.character.ValidatePlayerModel then
 		local okLive = vrmod.character.ValidatePlayerModel(live)
-		if okLive == false and g_VR and g_VR._lastGoodPlayerModel then
-			live = g_VR._lastGoodPlayerModel
-		elseif okLive == false then
-			live = ""
+		local law
+		if vrmod.utils and vrmod.utils.AvatarApplyLaw_Decide then
+			law = vrmod.utils.AvatarApplyLaw_Decide({
+				phase = "sync_all",
+				live_path = live,
+				last_good = g_VR and g_VR._lastGoodPlayerModel,
+				trusted = false,
+				probe_ok = okLive,
+			})
+		end
+		if (law and law.revert) or (not law and okLive == false) then
+			if g_VR and g_VR._lastGoodPlayerModel then
+				live = g_VR._lastGoodPlayerModel
+			elseif okLive == false then
+				live = ""
+			end
 		end
 	end
 	local n = 0

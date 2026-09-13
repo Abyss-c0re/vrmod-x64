@@ -7,6 +7,7 @@
 
 if SERVER then
 	util.AddNetworkString("vrmod_pmchange")
+	util.AddNetworkString("vrmod_pmapply")
 
 	local function NotifyPM(ply, model)
 		if not IsValid(ply) or not ply:IsPlayer() then return end
@@ -17,6 +18,38 @@ if SERVER then
 		net.WriteString(model)
 		net.Broadcast()
 	end
+
+	-- Avatar SAVE/APPLY: cl_playermodel only takes effect on spawn. Without a
+	-- server SetModel the client flashes the new PM then snaps back to the
+	-- old mesh (empty bone tables) until respawn.
+	local _pmApplyAt = {}
+	net.Receive("vrmod_pmapply", function(_, ply)
+		if not IsValid(ply) or not ply:IsPlayer() then return end
+		local path = tostring(net.ReadString() or "")
+		local name = tostring(net.ReadString() or "")
+		local skin = net.ReadUInt(8) or 0
+		local bodyStr = tostring(net.ReadString() or "")
+		if path == "" or #path > 260 then return end
+		if not string.match(path, "^[Mm]odels/.+%.mdl$") then return end
+		local now = CurTime()
+		if (_pmApplyAt[ply] or 0) + 0.35 > now then return end
+		_pmApplyAt[ply] = now
+		pcall(util.PrecacheModel, path)
+		if name ~= "" and player_manager and player_manager.SetPlayerModel then
+			pcall(player_manager.SetPlayerModel, ply, name)
+		end
+		pcall(function() ply:SetModel(path) end)
+		if ply:GetModel() ~= path then return end
+		ply.vrmod_pm = path
+		pcall(function() ply:SetSkin(skin) end)
+		if bodyStr ~= "" then
+			for pair in string.gmatch(bodyStr, "[^;]+") do
+				local a, b = string.match(pair, "(%d+):(%d+)")
+				if a then pcall(function() ply:SetBodygroup(tonumber(a), tonumber(b)) end) end
+			end
+		end
+		NotifyPM(ply, path)
+	end)
 
 	-- Reliable when GMod/server sets the player model
 	hook.Add("PlayerSetModel", "vrmod_pmchange", function(ply)
@@ -53,30 +86,58 @@ if CLIENT then
 		if not IsValid(ply) or ply ~= LocalPlayer() then return end
 		if not (g_VR and g_VR.active) then return end
 		model = tostring(model or ply:GetModel() or "")
-		-- Refuse incomplete skeletons — keep last good VR model if available
-		if model ~= "" and vrmod.character and vrmod.character.ValidatePlayerModel then
-			local okPm, _miss, why = vrmod.character.ValidatePlayerModel(model)
-			-- nil = not loaded / still scanning — do not treat as blocked
-			if okPm == false then
-				local msg = "VR: playermodel blocked · " .. tostring(why or "missing bones")
-				if vrmod.Toast then vrmod.Toast(msg, 6, "warn") end
-				if vrmod.logger then
-					vrmod.logger.Warn("[pmchange] blocked %s: %s", model, tostring(why))
-				end
-				local good = g_VR._lastGoodPlayerModel
-				if good and good ~= "" and good ~= model then
-					ply.vrmod_pm = good
-					if vrmod.avatar and vrmod.avatar.SyncAllToPlayer then
-						timer.Simple(0.05, function()
-							pcall(vrmod.avatar.SyncAllToPlayer)
-						end)
-					end
-					if vrmod.Toast then
-						vrmod.Toast("VR: kept previous compatible model", 4, "hint")
-					end
-				end
-				return
+		local applyPath = g_VR._avatarApplyPath
+		local inApply = applyPath and applyPath ~= "" and CurTime() < (g_VR._avatarApplyUntil or 0)
+		-- Server still on the old PM until vrmod_pmapply lands — do not adopt it.
+		if inApply and model ~= applyPath then
+			ply.vrmod_pm = applyPath
+			pcall(function() ply:SetModel(applyPath) end)
+			return
+		end
+		local trusted = vrmod.character and vrmod.character.IsTrustedPlayerModel
+			and vrmod.character.IsTrustedPlayerModel(model)
+		-- Apply already queued ReloadCharacterSystem — net/poll must not Stop+restart.
+		if trusted and (reason == "pmchange_net" or reason == "pmchange_poll") then
+			ply.vrmod_pm = model
+			return
+		end
+		local okPm, _miss, why
+		if model ~= "" and not trusted and vrmod.character and vrmod.character.ValidatePlayerModel then
+			okPm, _miss, why = vrmod.character.ValidatePlayerModel(model)
+		end
+		local law
+		if vrmod.utils and vrmod.utils.AvatarApplyLaw_Decide then
+			law = vrmod.utils.AvatarApplyLaw_Decide({
+				phase = "reload_local",
+				live_path = model,
+				last_good = g_VR._lastGoodPlayerModel,
+				trusted = trusted == true,
+				probe_ok = okPm,
+				apply_path = applyPath,
+				from_net = reason == "pmchange_net" or reason == "pmchange_poll",
+			})
+		end
+		local doRevert = law and law.revert
+		if not law and okPm == false then doRevert = true end
+		if doRevert then
+			local msg = "VR: playermodel blocked · " .. tostring(why or "missing bones")
+			if vrmod.Toast then vrmod.Toast(msg, 6, "warn") end
+			if vrmod.logger then
+				vrmod.logger.Warn("[pmchange] blocked %s: %s", model, tostring(why))
 			end
+			local good = g_VR._lastGoodPlayerModel
+			if good and good ~= "" and good ~= model then
+				ply.vrmod_pm = good
+				if vrmod.avatar and vrmod.avatar.SyncAllToPlayer then
+					timer.Simple(0.05, function()
+						pcall(vrmod.avatar.SyncAllToPlayer)
+					end)
+				end
+				if vrmod.Toast then
+					vrmod.Toast("VR: kept previous compatible model", 4, "hint")
+				end
+			end
+			return
 		end
 		if model ~= "" then
 			ply.vrmod_pm = model
@@ -108,9 +169,10 @@ if CLIENT then
 		local model = net.ReadString()
 		local ply = player.GetBySteamID(sid)
 		if not IsValid(ply) then return end
-		ply.vrmod_pm = model
 		if ply == LocalPlayer() then
 			ReloadLocalPM(ply, model, "pmchange_net")
+		else
+			ply.vrmod_pm = model
 		end
 	end)
 
@@ -126,6 +188,9 @@ if CLIENT then
 		local ply = LocalPlayer()
 		if not IsValid(ply) then return end
 		local m = ply.vrmod_pm or ply:GetModel() or ""
+		if g_VR._avatarApplyPath and CurTime() < (g_VR._avatarApplyUntil or 0) then
+			m = g_VR._avatarApplyPath
+		end
 		if m == "" or m == lastPM then return end
 		-- First sample after VR start: seed only
 		if lastPM == "" then
