@@ -430,49 +430,12 @@ end
 function Session:SetModel(path, opts)
 	if not self:IsValid() or not path or path == "" then return false, "empty path" end
 	opts = opts or {}
-	-- Unloaded workshop PMs hitch if Precache/ClientsideModel run here — queue instead.
-	if not opts.forceLoad and not ModelIsReady(path) then
-		self.pendingModel = path
-		self.pendingOpts = opts
-		self._precacheIssued = false
-		if vrmod.logger then
-			vrmod.logger.Info("[Avatar] twin model queued (async) %s", path)
-		end
-		return true, "loading"
-	end
-	-- Block incomplete skeletons (VR body IK needs full ValveBiped limbs + head/spine)
-	if not opts.forceIncomplete and vrmod.character then
-		local okPm, missing, reason
-		if vrmod.character.ValidatePlayerModelOnEnt and IsValid(self.ent) and self.ent:GetModel() == path then
-			okPm, missing, reason = vrmod.character.ValidatePlayerModelOnEnt(self.ent)
-		elseif vrmod.character.ValidatePlayerModel then
-			okPm, missing, reason = vrmod.character.ValidatePlayerModel(path, { allowLoad = opts.forceLoad == true })
-		else
-			okPm = true
-		end
-		if okPm == nil then
-			self.pendingModel = path
-			self.pendingOpts = opts
-			self._precacheIssued = false
-			return true, "loading"
-		end
-		if not okPm then
-			self.vrCompatible = false
-			local msg = "VR model blocked · " .. tostring(reason or "missing bones")
-			if vrmod.Toast then vrmod.Toast(msg, 5, "warn") end
-			if vrmod.logger then
-				vrmod.logger.Warn("[Avatar] SetModel blocked %s: %s", path, tostring(reason))
-			end
-			return false, reason, missing
-		end
-	end
-	self.vrCompatible = true
+	-- Click must change the twin now. Do not wait on util.IsModelLoaded (stays
+	-- false after Precache for many workshop PMs — pick did nothing).
 	self.pendingModel = nil
 	self.pendingOpts = nil
 	self._precacheIssued = nil
-	if not ModelIsReady(path) then
-		pcall(util.PrecacheModel, path)
-	end
+	pcall(util.PrecacheModel, path)
 	self.ent:SetModel(path)
 	self.model = path
 	-- Preview only: do NOT archive to cv_model unless explicitly saved (ApplyToPlayer)
@@ -490,6 +453,12 @@ function Session:SetModel(path, opts)
 
 	-- Always rebuild twin IK caches for the new skeleton
 	self:ReloadIK()
+	if vrmod.character and vrmod.character.ValidatePlayerModelOnEnt then
+		local okPm = vrmod.character.ValidatePlayerModelOnEnt(self.ent)
+		self.vrCompatible = okPm ~= false
+	else
+		self.vrCompatible = true
+	end
 
 	-- Preview twin model change: refresh snap from live player IK (next frames)
 	timer.Simple(0, function()
@@ -1479,21 +1448,11 @@ function vrmod.avatar.Open(opts)
 		if not s.active then return end
 		local want = s.pendingModel
 		if not want then return end
-		if ModelIsReady(want) then
-			local popts = s.pendingOpts or { persist = false, keepLooks = true }
-			s.pendingModel = nil
-			s.pendingOpts = nil
-			s._precacheIssued = nil
-			s:SetModel(want, popts)
-			return
-		end
-		if not s._precacheIssued then
-			s._precacheIssued = true
-			timer.Simple(0, function()
-				if not s.active or not s.pendingModel then return end
-				pcall(util.PrecacheModel, s.pendingModel)
-			end)
-		end
+		local popts = s.pendingOpts or { persist = false, keepLooks = true }
+		s.pendingModel = nil
+		s.pendingOpts = nil
+		s._precacheIssued = nil
+		s:SetModel(want, popts)
 	end)
 
 	-- Pose once per stereo frame (shared by both eyes)

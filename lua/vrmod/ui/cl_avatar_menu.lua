@@ -160,14 +160,14 @@ local function rebuildButtons()
 			local idx = modelScroll + i
 			if modelList[idx] then
 				buttons[#buttons + 1] = {
-					x = PAD, y = y0 + (i - 1) * (ROW_H + 4),
+					x = PAD, y = y0 + 14 + (i - 1) * (ROW_H + 4),
 					w = W - PAD * 2 - 48, h = ROW_H,
 					kind = "model", index = idx,
 				}
 			end
 		end
-		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0, w = 36, h = 40, kind = "model_up" }
-		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0 + 200, w = 36, h = 40, kind = "model_dn" }
+		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0 + 14, w = 36, h = 40, kind = "model_up" }
+		buttons[#buttons + 1] = { x = W - PAD - 40, y = y0 + 214, w = 36, h = 40, kind = "model_dn" }
 		buttons[#buttons + 1] = { x = PAD, y = H - 120, w = W - PAD * 2, h = 40, kind = "model_player" }
 		buttons[#buttons + 1] = { x = PAD, y = H - 70, w = W - PAD * 2, h = 48, kind = "model_save" }
 	elseif tab == 3 then
@@ -442,6 +442,10 @@ local function activate(mx, my)
 			end
 		elseif k == "model" and modelList[btn.index] then
 			local s = sess()
+			if not s then
+				pcall(StartTwin)
+				s = sess()
+			end
 			local entry = modelList[btn.index]
 			if s and s.SetModel and entry then
 				-- Preview only if skeleton has VR bones (blocked otherwise)
