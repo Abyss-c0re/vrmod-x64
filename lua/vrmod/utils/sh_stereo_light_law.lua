@@ -32,6 +32,14 @@ function vrmod.utils.StereoLightLaw_KeepSpriteBufferAcrossEyes()
 	return true
 end
 
+function vrmod.utils.StereoLightLaw_AllowDropSpriteWhenNoEye()
+	return false
+end
+
+function vrmod.utils.StereoLightLaw_RefreshLampSpriteAfterPT()
+	return true
+end
+
 --- Pure: may we refresh world lights for this eye?
 --- opts:
 ---   eye                    "left"|"right"|nil
@@ -42,6 +50,8 @@ end
 ---   glide_skip_if_not_seated     bool
 ---   glide_clear_buffer_pre_inject bool
 ---   glide_lock_empty_inject      bool
+---   drop_sprite_when_no_eye      bool  -- swallow DrawLightSprite in Think
+---   skip_lamp_sprite             bool  -- PT Update then return, no Think/sprite
 function vrmod.utils.StereoLightLaw_Decide(opts)
 	opts = type(opts) == "table" and opts or {}
 	local eye = opts.eye
@@ -72,6 +82,12 @@ function vrmod.utils.StereoLightLaw_Decide(opts)
 		d.reason = opts.update_left_only and "left_only_update" or "pre_stereo_only"
 		return d
 	end
+	if opts.drop_sprite_when_no_eye or opts.skip_lamp_sprite then
+		d.path_ok = false
+		d.risk = "sprite_off"
+		d.reason = opts.drop_sprite_when_no_eye and "sprite_swallow" or "lamp_sprite_skip"
+		return d
+	end
 	if opts.glide_skip_if_not_seated
 		or opts.glide_clear_buffer_pre_inject
 		or opts.glide_lock_empty_inject then
@@ -92,6 +108,7 @@ function vrmod.utils.StereoLightLaw_StatusLabel(decision)
 	if type(decision) ~= "table" then return "LIGHT · IDLE" end
 	if decision.risk == "right_eye_only" then return "LIGHT · RIGHT EYE ONLY" end
 	if decision.risk == "glide_dark" then return "LIGHT · GLIDE DARK" end
+	if decision.risk == "sprite_off" then return "LIGHT · SPRITE OFF" end
 	if decision.refresh then
 		return "LIGHT · PER EYE " .. string.upper(tostring(decision.eye or "?"))
 	end
@@ -124,6 +141,14 @@ function vrmod.utils.StereoLightLaw_HmdExpect(decision)
 		e.fail_line = "No light source from Glide vehicle lights"
 		return e
 	end
+	if decision.risk == "sprite_off" then
+		e.verdict = "expect_sprite_off"
+		e.expect_both_eyes = false
+		e.checklist = "G49 · SPRITE OFF · PT emits, corona/fixture looks off"
+		e.pass_line = "Must not ship — lights look off while they emit"
+		e.fail_line = "Light fixtures look off while the world is lit"
+		return e
+	end
 	if decision.refresh then
 		e.verdict = "expect_both_eyes"
 		e.expect_both_eyes = true
@@ -145,4 +170,8 @@ end
 
 function vrmod.utils.StereoLightLaw_IsGlideDarkRisk(decision)
 	return type(decision) == "table" and decision.risk == "glide_dark"
+end
+
+function vrmod.utils.StereoLightLaw_IsSpriteOffRisk(decision)
+	return type(decision) == "table" and decision.risk == "sprite_off"
 end

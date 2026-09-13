@@ -22,7 +22,7 @@ vrmod.utils = vrmod.utils or {}
 local patched = false
 local spriteBuffer = {}
 local spriteBufferCount = 0
-local fillFrame = -1
+local allowReplace = true
 local origDrawLightSprite
 local spriteColorScratch = Color(255, 255, 255, 255)
 
@@ -102,12 +102,11 @@ end
 
 local function BufferSprite(pos, dir, size, color, material)
 	if not pos then return end
-	local sf = (g_VR and g_VR.stereoFrame) or 0
-	-- First sprite of a new pair replaces last pair. Never wipe on PostRender
-	-- (that left the next left-eye inject with count 0).
-	if fillFrame ~= sf then
+	-- Replace only after both eyes have injected the previous pair.
+	-- Never start a new fill on Think/radar (that wiped coronas before left inject).
+	if allowReplace then
 		spriteBufferCount = 0
-		fillFrame = sf
+		allowReplace = false
 	end
 	if spriteBufferCount >= 128 then return end
 
@@ -162,10 +161,8 @@ function vrmod.utils.PatchGlideLights()
 
 	function Glide.DrawLightSprite(pos, dir, size, color, material)
 		if g_VR and g_VR.active and pos then
-			-- Nested / HUD views: do not consume the once-per-eye token
-			if g_VR.stereoEye ~= "left" and g_VR.stereoEye ~= "right" then
-				return
-			end
+			-- Always buffer (Think + Draw). Never orig() here — that would
+			-- consume the once-per-eye queue on radar / nil-eye frames.
 			BufferSprite(pos, dir, size, color, material)
 			return
 		end
@@ -182,12 +179,15 @@ function vrmod.utils.PatchGlideLights()
 		if not g_VR or not g_VR.active then return end
 		if eye ~= "left" and eye ~= "right" then return end
 		InjectSpritesForEye()
+		if eye == "right" then
+			allowReplace = true
+		end
 	end)
 
 	hook.Add("VRMod_Exit", "vrmod_glide_lights_cleanup", function(ply)
 		if ply and ply ~= LocalPlayer() then return end
 		spriteBufferCount = 0
-		fillFrame = -1
+		allowReplace = true
 	end)
 
 	patched = true

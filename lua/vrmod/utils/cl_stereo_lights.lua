@@ -16,6 +16,7 @@ local LIGHT_CLASSES = {
 	"gmod_lamp",
 	"gmod_light",
 	"env_projectedtexture",
+	"light_dynamic",
 }
 
 local cachedLights = {}
@@ -52,18 +53,16 @@ local function RefreshEntityLight(ent)
 	if not IsValid(ent) then return end
 	if isfunction(ent.UpdateLight) then
 		pcall(ent.UpdateLight, ent)
-		return
-	end
-	local found = false
-	for i = 1, #PT_FIELDS do
-		local pt = ent[PT_FIELDS[i]]
-		if pt and isfunction(pt.Update) then
-			UpdateProjected(pt)
-			found = true
+	else
+		for i = 1, #PT_FIELDS do
+			local pt = ent[PT_FIELDS[i]]
+			if pt and isfunction(pt.Update) then
+				UpdateProjected(pt)
+			end
 		end
 	end
-	if found then return end
-	-- gmod_light: Think re-emits DynamicLight for the upcoming view
+	-- PT Update lights the world; Think/DrawSprite is what makes the
+	-- fixture look on. Skipping Think left lamps/headlights looking off.
 	if isfunction(ent.Think) then
 		pcall(ent.Think, ent)
 	end
