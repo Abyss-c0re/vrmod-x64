@@ -22,6 +22,82 @@ function vrmod.utils.HandBulletLaw_HeadDamageScale()
 	return 10.0
 end
 
+--- Source inches. Skull radius (~3–4"); physics proxy is 2.8.
+function vrmod.utils.HandBulletLaw_HeadSphereRadius()
+	return 3.25
+end
+
+--- Max ray length for a self-headshot (arm's reach, not a 45u bubble).
+function vrmod.utils.HandBulletLaw_SelfHeadMaxT()
+	return 16
+end
+
+--- Hand pose → muzzle along weapon forward (inches).
+function vrmod.utils.HandBulletLaw_MuzzleAlong()
+	return 10
+end
+
+--- Forbidden: dist<45 and aim·toHead>0.3 (≈72° cone) false-killed hip/down shots.
+function vrmod.utils.HandBulletLaw_AllowProximityCone()
+	return false
+end
+
+local function nrm3(x, y, z)
+	local l = math.sqrt(x * x + y * y + z * z)
+	if l < 1e-8 then return nil, nil, nil, 0 end
+	return x / l, y / l, z / l, l
+end
+
+--- Unit ray O+tD, t>=0, vs sphere |X-C|^2 = R^2.
+--- Returns hit, t (nearest t>=0) or false, nil.
+function vrmod.utils.HandBulletLaw_RayHitsSphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, radius)
+	ox, oy, oz = tonumber(ox) or 0, tonumber(oy) or 0, tonumber(oz) or 0
+	dx, dy, dz = tonumber(dx) or 0, tonumber(dy) or 0, tonumber(dz) or 0
+	cx, cy, cz = tonumber(cx) or 0, tonumber(cy) or 0, tonumber(cz) or 0
+	radius = tonumber(radius) or vrmod.utils.HandBulletLaw_HeadSphereRadius()
+	if radius < 0 then return false, nil end
+	dx, dy, dz = nrm3(dx, dy, dz)
+	if not dx then return false, nil end
+	local ocx, ocy, ocz = ox - cx, oy - cy, oz - cz
+	local b = ocx * dx + ocy * dy + ocz * dz
+	local oc2 = ocx * ocx + ocy * ocy + ocz * ocz
+	local k = oc2 - radius * radius
+	local disc = b * b - k
+	if disc < 0 then return false, nil end
+	local s = math.sqrt(disc)
+	local t0, t1 = -b - s, -b + s
+	local t
+	if t0 >= 0 then
+		t = t0
+	elseif t1 >= 0 then
+		t = t1
+	else
+		return false, nil
+	end
+	return true, t
+end
+
+--- opts.muzzle / .dir / .head = {x,y,z}. Optional radius, max_t.
+--- True iff the bullet ray from the VR muzzle intersects the head sphere
+--- within SelfHeadMaxT. Not a proximity cone.
+function vrmod.utils.HandBulletLaw_SelfHeadshotHits(opts)
+	opts = type(opts) == "table" and opts or {}
+	if vrmod.utils.HandBulletLaw_AllowProximityCone() then
+		return false
+	end
+	local m, d, h = opts.muzzle, opts.dir, opts.head
+	if type(m) ~= "table" or type(d) ~= "table" or type(h) ~= "table" then
+		return false
+	end
+	local r = tonumber(opts.radius) or vrmod.utils.HandBulletLaw_HeadSphereRadius()
+	local maxT = tonumber(opts.max_t) or vrmod.utils.HandBulletLaw_SelfHeadMaxT()
+	local hit, t = vrmod.utils.HandBulletLaw_RayHitsSphere(
+		m.x, m.y, m.z, d.x, d.y, d.z, h.x, h.y, h.z, r)
+	if not hit then return false end
+	if t > maxT then return false end
+	return true, t
+end
+
 --- Proxies must not fight world solids (separate wall path exists).
 function vrmod.utils.HandBulletLaw_ProxySolidToWorld()
 	return false

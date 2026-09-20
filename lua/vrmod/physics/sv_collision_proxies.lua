@@ -383,6 +383,31 @@ hook.Add("VRMod_Drop", "VRProxy_AVRMagDrop", function(ply, ent)
     if proxies and proxies.left and IsValid(proxies.left.ent) then proxies.left.ent:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) end
 end)
 
+-- Self-headshot: ray from VR muzzle through head sphere (Source inches).
+-- Do not use engine Src (eye sits on the proxy) or dist<45 ∧ dot>0.3.
+local function VRProxy_SelfHeadRayHits(ply, aimDir)
+    local U = vrmod.utils
+    if not U or not U.HandBulletLaw_SelfHeadshotHits then return false end
+    local proxies = vrProxies[ply]
+    local headEnt = proxies and proxies.head and proxies.head.ent
+    if not IsValid(headEnt) then return false end
+    local hp, ha = vrmod.GetRightHandPose(ply)
+    if not hp or not ha then return false end
+    local along = U.HandBulletLaw_MuzzleAlong and U.HandBulletLaw_MuzzleAlong() or 10
+    local fwd = ha.Forward and ha:Forward() or nil
+    if not fwd then return false end
+    local mz = hp + fwd * along
+    local dir = aimDir or fwd
+    if not dir then return false end
+    local headPos = headEnt:GetPos()
+    local hit = U.HandBulletLaw_SelfHeadshotHits({
+        muzzle = { x = mz.x, y = mz.y, z = mz.z },
+        dir = { x = dir.x, y = dir.y, z = dir.z },
+        head = { x = headPos.x, y = headPos.y, z = headPos.z },
+    })
+    return hit and true or false
+end
+
 -- ==================== Damage redirect (ONLY bullet damage triggers VR logic) ====================
 -- G37 / W9: pure HandBulletLaw — hands Real for grabs; bullets filtered/redirected
 hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
@@ -432,6 +457,17 @@ hook.Add("EntityTakeDamage", "VRProxy_DamageRedirect", function(ent, dmginfo)
         return true
     end
 
+    -- Self-head: engine traces often start at the eye, which sits on the head
+    -- proxy. Only 10x if the VR-muzzle ray actually intersects the skull sphere.
+    if isSelfDamage and part == "head" then
+        if not VRProxy_SelfHeadRayHits(ply, nil) then
+            dmginfo:SetDamage(0)
+            dmginfo:ScaleDamage(0)
+            Log("Self head proxy ignored — muzzle ray missed skull")
+            return true
+        end
+    end
+
     local scale = (U and U.HandBulletLaw_RedirectScale and U.HandBulletLaw_RedirectScale(part))
         or ((part == "head") and 10 or 0.45)
     local finalDamage = damage * scale
@@ -471,24 +507,17 @@ hook.Add("EntityFireBullets", "VRProxy_HeadshotBackup", function(ent, data)
     if not IsValid(ent) or not ent:IsPlayer() or not vrmod.IsPlayerInVR(ent) then return end
     local proxies = vrProxies[ent]
     if not proxies or not proxies.head or not IsValid(proxies.head.ent) then return end
+    local aimDir = data.Dir or ent:GetAimVector()
+    if not VRProxy_SelfHeadRayHits(ent, aimDir) then return end
     local head = proxies.head.ent
-    local muzzle = data.Src or ent:GetShootPos()
-    local headPos = head:GetPos()
-    local dist = muzzle:Distance(headPos)
-    if dist < 45 then
-        local dirToHead = (headPos - muzzle):GetNormalized()
-        local aimDir = data.Dir or ent:GetAimVector()
-        local dot = dirToHead:Dot(aimDir)
-        if dot > 0.3 then
-            local dmginfo = DamageInfo()
-            dmginfo:SetDamage((data.Damage or 25) * 10) -- ← 10x damage
-            dmginfo:SetAttacker(ent)
-            dmginfo:SetInflictor(ent:GetActiveWeapon() or ent)
-            dmginfo:SetDamageType(DMG_BULLET)
-            dmginfo:SetDamagePosition(headPos)
-            head:TakeDamageInfo(dmginfo)
-        end
-    end
+    local dmginfo = DamageInfo()
+    -- Raw bullet damage; EntityTakeDamage applies HeadDamageScale once.
+    dmginfo:SetDamage(data.Damage or 25)
+    dmginfo:SetAttacker(ent)
+    dmginfo:SetInflictor(ent:GetActiveWeapon() or ent)
+    dmginfo:SetDamageType(DMG_BULLET)
+    dmginfo:SetDamagePosition(head:GetPos())
+    head:TakeDamageInfo(dmginfo)
 end)
 
 -- ==================== VEHICLE COLLISION HANDLING ====================
