@@ -153,6 +153,7 @@ if CLIENT then
         local ply = LocalPlayer()
         if IsValid(ply) and ply:InVehicle() then return end
         if action == "boolean_right_pickup" and not state then
+            if vrmod.RestoreDefaultHandAngles then vrmod.RestoreDefaultHandAngles() end
             net.Start("DropWeapon")
             net.WriteBool(true)
             net.WriteVector(vrmod.GetRightHandVelocity() * 2.5)

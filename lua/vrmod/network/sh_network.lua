@@ -365,16 +365,18 @@ if CLIENT then
 					g_VR.viewModel = viewModel
 				end
 				weapon:SetNoDraw(true)
+				if vrmod.RestoreDefaultHandAngles then vrmod.RestoreDefaultHandAngles() end
 				return
 			end
-			-- Empty holster slot: keep last viewModel binding if still valid (vehicle flash)
+			-- Empty holster/drop: keep last viewModel bind for one tick (vehicle flash)
+			-- but ALWAYS restore default fingers. a8c91f0 returned here and the
+			-- gun-wrap pose stuck after drop/holster.
+			if vrmod.RestoreDefaultHandAngles then vrmod.RestoreDefaultHandAngles() end
 			if IsValid(g_VR.viewModel) then
 				if IsValid(weapon) then weapon:SetNoDraw(true) end
 				return
 			end
 			g_VR.viewModel = nil
-			g_VR.openHandAngles = g_VR.defaultOpenHandAngles
-			g_VR.closedHandAngles = g_VR.defaultClosedHandAngles
 			g_VR.currentvmi = nil
 			g_VR.viewModelMuzzle = nil
 			if IsValid(weapon) then weapon:SetNoDraw(true) end
@@ -429,19 +431,15 @@ if CLIENT then
 			end
 		end
 
-		-- Finger poses
-		vmi.closedHandAngles = vrmod.GetRightHandFingerAnglesFromModel(model)
-		vrmod.SetRightHandClosedFingerAngles(vmi.closedHandAngles)
-		vrmod.SetRightHandOpenFingerAngles(vmi.closedHandAngles)
+		-- Gun mesh is a slave of the hand. Never copy viewmodel finger bones onto
+		-- the player (open=closed wrap, then holster never reset).
+		if vrmod.RestoreDefaultHandAngles then vrmod.RestoreDefaultHandAngles() end
 		-- Handle world model per VMI
 		if vmi.useWorldModel then
 			-- Remove previous world model if exists
 			if IsValid(g_VR.worldModelVM) then g_VR.worldModelVM:Remove() end
 			-- Create new world model VM
 			vrmod.utils.CreateWorldModelVM(class, vmi)
-			-- Zero out hand animations
-			vrmod.SetRightHandOpenFingerAngles(g_VR.zeroHandAngles)
-			vrmod.SetRightHandClosedFingerAngles(g_VR.zeroHandAngles)
 			-- Hide real weapon & viewmodel
 			if IsValid(wep) then wep:SetNoDraw(true) end
 			if IsValid(viewModel) then viewModel:SetNoDraw(true) end

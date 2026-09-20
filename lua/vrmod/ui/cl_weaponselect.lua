@@ -374,6 +374,7 @@ function VRUtilWeaponMenuOpen(opts)
 			local ac = IsValid(aw) and aw:GetClass() or nil
 			if ac and ac ~= "weapon_vrmod_empty" then
 				lastWeaponClass = ac
+				if vrmod.RestoreDefaultHandAngles then vrmod.RestoreDefaultHandAngles() end
 				local emptyWep = p:GetWeapon("weapon_vrmod_empty")
 				if IsValid(emptyWep) then input.SelectWeapon(emptyWep) end
 			elseif ac == "weapon_vrmod_empty" and lastWeaponClass then

@@ -481,6 +481,27 @@ if CLIENT then
         end
     end
 
+    --- Clone default open/closed. Never alias the default tables (in-place writes
+    --- would poison restore). Drop/holster must call this; switchweapon used to
+    --- skip it while g_VR.viewModel still pointed at the old gun.
+    function vrmod.RestoreDefaultHandAngles()
+        local function clone(src)
+            local t = {}
+            for i = 1, 30 do
+                local a = src and src[i]
+                if a then
+                    t[i] = Angle(a.p, a.y, a.r)
+                else
+                    t[i] = Angle()
+                end
+            end
+            return t
+        end
+        if not g_VR.defaultOpenHandAngles or not g_VR.defaultClosedHandAngles then return end
+        g_VR.openHandAngles = clone(g_VR.defaultOpenHandAngles)
+        g_VR.closedHandAngles = clone(g_VR.defaultClosedHandAngles)
+    end
+
     -- Getter functions
     function vrmod.GetLeftHandOpenFingerAngles()
         return HandleFingerAngles("get", "left", "open")
