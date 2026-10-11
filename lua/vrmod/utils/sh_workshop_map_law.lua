@@ -54,6 +54,7 @@ function vrmod.utils.WorkshopMap_Decide(opts)
 		d.reason = "on_map"
 		return d
 	end
+	-- A download still in progress. No timeout: mapping now is the stuck plaque.
 	if opts.workshop_busy or opts.subscriptions_busy or pending > 0 then
 		d.reason = "workshop_downloading"
 		return d
@@ -63,9 +64,15 @@ function vrmod.utils.WorkshopMap_Decide(opts)
 		quiet = tonumber(quiet) or 0
 		if quiet < 0 then quiet = 0 end
 	end
+	-- Nil quiet means the caller has no idle clock, so elapsed is the clock.
+	-- An explicit 0 means activity just stopped. That is not idle yet.
+	local held = quiet ~= nil and quiet or elapsed
+	local QUIET_LOAD = 12
 	if opts.list_ready ~= nil then
 		if not opts.list_ready then
-			if not opts.workshop_idle_seen then
+			-- GetAddons is not readable yet. Menu state often never sees
+			-- WorkshopEnd. A long quiet with nothing pending is still idle.
+			if not opts.workshop_idle_seen and held < QUIET_LOAD then
 				d.reason = "list_not_ready"
 				return d
 			end
@@ -78,16 +85,14 @@ function vrmod.utils.WorkshopMap_Decide(opts)
 			-- A non-empty list with no WorkshopEnd yet is often the previous
 			-- boot's cache. Steam can still start this boot's download.
 			-- Do not run `map` until that reading has stayed quiet.
-			if n > 0 and not opts.workshop_idle_seen then
-				local held = quiet ~= nil and quiet or elapsed
-				if held < 12 then
-					d.reason = "workshop_confirm"
-					return d
-				end
+			if n > 0 and not opts.workshop_idle_seen and held < QUIET_LOAD then
+				d.reason = "workshop_confirm"
+				return d
 			end
 		end
-	elseif not opts.workshop_idle_seen then
-		-- No addon list and no WorkshopEnd. A timeout here is the stuck plaque.
+	elseif not opts.workshop_idle_seen and held < QUIET_LOAD then
+		-- No addon list and no WorkshopEnd yet. Waiting forever left Cube
+		-- on the main menu. Quiet long enough, with nothing pending, loads.
 		d.reason = "workshop_settle"
 		return d
 	end
