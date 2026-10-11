@@ -693,6 +693,14 @@ if CLIENT then
 
 		-- Reset public tracking from raw every frame, then run early modifiers
 		CopyRawIntoTracking()
+		-- Gaze may drop for a blink. Do not keep the previous sample — that
+		-- would hold the character's eyes on a stale look point. Hands and
+		-- the HMD stay latched; this key is allowed to disappear.
+		local gazeSample = rawPoses.pose_gaze
+		if not gazeSample or not gazeSample.pos or not gazeSample.ang then
+			g_VR.rawTracking.pose_gaze = nil
+			if g_VR.tracking then g_VR.tracking.pose_gaze = nil end
+		end
 		EnsurePoseIndependence()
 		g_VR.sixPoints = (g_VR.tracking.pose_waist and g_VR.tracking.pose_leftfoot and g_VR.tracking.pose_rightfoot) and true or false
 		-- Early modifiers (seated offset, crouch, hand simulation…) may edit g_VR.tracking

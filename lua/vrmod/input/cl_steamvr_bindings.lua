@@ -60,6 +60,10 @@ g_VR.action_manifest = [[
 			"type": "pose"
 		},
 		{
+			"name": "/actions/base/in/pose_gaze",
+			"type": "pose"
+		},
+		{
 			"name": "/actions/base/in/skeleton_lefthand",
 			"type": "skeleton",
 			"skeleton": "/skeleton/hand/left"
@@ -324,6 +328,7 @@ g_VR.action_manifest = [[
 
 			"/actions/base/in/pose_lefthand" : "Left Hand Pose",
 			"/actions/base/in/pose_righthand" : "Right Hand Pose",
+			"/actions/base/in/pose_gaze" : "Eye Gaze Pose",
 			"/actions/base/in/skeleton_lefthand" : "Left Hand Skeleton",
 			"/actions/base/in/skeleton_righthand" : "Right Hand Skeleton",
 			"/actions/base/out/vibration_left" : "Left Haptic Feedback",

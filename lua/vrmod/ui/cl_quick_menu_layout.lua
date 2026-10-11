@@ -49,6 +49,8 @@ local NAME_TO_ID = {
 	["Exit Game"] = "exit_game",
 	["Calibrate Full-body Tracking"] = "fbt_calibrate",
 	["Disable Full-body Tracking"] = "fbt_disable",
+	["Enable Eye Tracking"] = "eyetrack_enable",
+	["Disable Eye Tracking"] = "eyetrack_disable",
 	["VRClimb"] = "vrclimb",
 	["VR Climb"] = "vrclimb",
 	["VR Climbing"] = "vrclimb",
@@ -57,7 +59,7 @@ local NAME_TO_ID = {
 -- Default multi-page layout (cols 0-5, rows 0+)
 local function DefaultLayout()
 	return {
-		version = 5,
+		version = 6,
 		pages = {
 			{
 				name = "Main",
@@ -97,6 +99,8 @@ local function DefaultLayout()
 					{ id = "exit_game", col = 4, row = 2 },
 					{ id = "fbt_calibrate", col = 5, row = 2 },
 					{ id = "fbt_disable", col = 0, row = 3 },
+					{ id = "eyetrack_enable", col = 1, row = 3 },
+					{ id = "eyetrack_disable", col = 2, row = 3 },
 				},
 			},
 		},
@@ -184,6 +188,57 @@ function QM.ValidateLayout(L)
 		L.pages = def.pages
 		ver = 5
 	end
+	if ver < 6 then
+		-- v6: eye-tracking toggles. Keep the user's pages; only fill a free cell.
+		local sys = nil
+		for _, page in ipairs(L.pages or {}) do
+			if page.name == "System" then
+				sys = page
+				break
+			end
+		end
+		if not sys then
+			for _, page in ipairs(L.pages or {}) do
+				for _, it in ipairs(page.items or {}) do
+					if it.id == "settings" or it.id == "fbt_calibrate" then
+						sys = page
+						break
+					end
+				end
+				if sys then break end
+			end
+		end
+		if sys then
+			sys.items = sys.items or {}
+			local function hasId(id)
+				for _, it in ipairs(sys.items) do
+					if it.id == id then return true end
+				end
+				return false
+			end
+			local function firstFree()
+				local used = {}
+				for _, it in ipairs(sys.items) do
+					used[(tonumber(it.col) or 0) .. ":" .. (tonumber(it.row) or 0)] = true
+				end
+				for row = 0, MAX_ROWS - 1 do
+					for col = 0, COLS - 1 do
+						if not used[col .. ":" .. row] then return col, row end
+					end
+				end
+				return nil, nil
+			end
+			for _, id in ipairs({ "eyetrack_enable", "eyetrack_disable" }) do
+				if not hasId(id) then
+					local col, row = firstFree()
+					if col ~= nil then
+						sys.items[#sys.items + 1] = { id = id, col = col, row = row }
+					end
+				end
+			end
+		end
+		ver = 6
+	end
 	L.version = ver
 	return L
 end
@@ -195,7 +250,7 @@ function QM.Load()
 		if ok and type(decoded) == "table" then
 			local oldVer = tonumber(decoded.version) or 1
 			layout = QM.ValidateLayout(decoded)
-			if oldVer < 5 then
+			if oldVer < 6 then
 				QM.Save()
 			end
 			return layout
@@ -533,6 +588,7 @@ function QM.ListCustomizableItems()
 		"flashlight", "laser", "noclip", "undo", "cleanup", "admin_cleanup",
 		"vehicle_view", "ui_reset", "border_cal", "blacklist", "map",
 		"respawn", "vr_exit", "disconnect", "fbt_calibrate", "fbt_disable",
+		"eyetrack_enable", "eyetrack_disable",
 	}
 	local idToName = {}
 	for name, id in pairs(NAME_TO_ID) do idToName[id] = name end

@@ -214,6 +214,8 @@ vrmod.SettingsCatalog = {
 		rows = {
 			{ kind = "header", label = "Animation" },
 			{ kind = "bool", label = "Character IK", cvar = "vrmod_characterik" },
+			{ kind = "bool", label = "Eye tracking", cvar = "vrmod_eyetracking" },
+			{ kind = "help", label = "Off by default. OpenXR eye gaze moves character eyes when the headset provides it (Pico, Quest Pro, Index, and other runtimes on the same extension)." },
 			{ kind = "bool", label = "Arm stretcher", cvar = "vrmod_armstretcher" },
 			{ kind = "header", label = "Calibration" },
 			{ kind = "slider", label = "Eye height", cvar = "vrmod_charactereyeheight", min = 30, max = 100, decimals = 1 },
