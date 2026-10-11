@@ -71,6 +71,8 @@ local function ClearGrip()
 	state.class = nil
 	state.weaponBox = nil
 	state.hasSmoothR = false
+	state.basisOrigin = nil
+	state.basisYaw = nil
 	g_VR._leftHandSnapFrame = -1
 	local aw = IsValid(LocalPlayer()) and LocalPlayer():GetActiveWeapon() or NULL
 	if not (IsValid(aw) and aw.ArcticVR and aw.ForegripGrabbed) then
@@ -226,6 +228,53 @@ local function ReassertLeftSnap(sf)
 	end
 end
 
+--- Cached gun/hand are world poses. Walk and snap-turn move g_VR.origin
+-- after that cache is built. Shift the cache with the playspace before the
+-- deadzone and the RH low-pass, or the left hand stays in the old world
+-- pose and the arm mesh stretches when the body moves.
+local function RebaseGripCache()
+	local origin = g_VR.origin
+	if not origin then return end
+	local yaw = 0
+	if g_VR.originAngle then
+		yaw = g_VR.originAngle.y or g_VR.originAngle.yaw or 0
+	end
+	if not state.basisOrigin then
+		state.basisOrigin = Vector(origin.x, origin.y, origin.z)
+		state.basisYaw = yaw
+		return
+	end
+	local moved = origin:DistToSqr(state.basisOrigin) > 1e-8
+		or math.abs(math.AngleDifference(yaw, state.basisYaw or 0)) > 1e-3
+	if not moved then return end
+	local oldO = Vector(state.basisOrigin.x, state.basisOrigin.y, state.basisOrigin.z)
+	local oldY = state.basisYaw or 0
+	local function shift(pos, ang)
+		if not (pos and ang and vrmod.utils and vrmod.utils.RebasePlayspacePose) then return end
+		local np, na = vrmod.utils.RebasePlayspacePose(pos, ang, oldO, oldY, origin, yaw)
+		if np and pos.Set then pos:Set(np) end
+		if na and ang.Set then ang:Set(na) end
+	end
+	if state.hasSmoothR then shift(state.smoothRPos, state.smoothRAng) end
+	if state.frame >= 0 then
+		shift(state.gunPos, state.gunAng)
+		shift(state.leftPos, state.leftAng)
+	end
+	state.basisOrigin:Set(origin)
+	state.basisYaw = yaw
+end
+
+local function PoseViewModel(vm)
+	if not IsValid(vm) then return end
+	if vm.InvalidateBoneCache then vm:InvalidateBoneCache() end
+	vm:SetPos(state.gunPos)
+	vm:SetAngles(state.gunAng)
+	-- SetPos does not drop a bone cache built earlier this frame. The stock
+	-- viewmodel's left arm then stays at the old world matrices and stretches.
+	if vm.InvalidateBoneCache then vm:InvalidateBoneCache() end
+	pcall(function() vm:SetupBones() end)
+end
+
 local function SolveForegripFrame()
 	if not state.gripping then return false end
 
@@ -247,15 +296,24 @@ local function SolveForegripFrame()
 
 	local vmi = EnsureVMI(wep)
 	local sf = g_VR.stereoFrame or 0
+	-- Playspace first, including the same-frame reassert path. A snap-turn
+	-- can land between the solve and the second eye.
+	RebaseGripCache()
 	if state.frame == sf then
 		PublishSnap(sf, state.gunPos, state.gunAng)
-		ReassertLeftSnap(sf)
+		StampLeftStable(sf)
 		return true
 	end
 
 	local lpos, lang, rpos, rang = StereoHands()
 	if not lpos or not rpos then
-		return false -- keep grip one frame if tracking glitch
+		-- Keep the grip, but the rebased pose must still publish or the
+		-- hand stays where the playspace was last frame.
+		if state.frame >= 0 then
+			PublishSnap(sf, state.gunPos, state.gunAng)
+			StampLeftStable(sf)
+		end
+		return false
 	end
 
 	local maxDist = state.startDist * RELEASE_MULT
@@ -324,8 +382,7 @@ local function SolveForegripFrame()
 		if IsValid(vm) then g_VR.viewModel = vm end
 	end
 	if IsValid(vm) then
-		vm:SetPos(state.gunPos)
-		vm:SetAngles(state.gunAng)
+		PoseViewModel(vm)
 	end
 
 	PublishSnap(sf, state.gunPos, state.gunAng)
@@ -347,9 +404,7 @@ local function ApplyFrozenGunDraw()
 	if not IsValid(vm) then return end
 
 	PublishSnap(sf, state.gunPos, state.gunAng)
-	vm:SetPos(state.gunPos)
-	vm:SetAngles(state.gunAng)
-	pcall(function() vm:SetupBones() end)
+	PoseViewModel(vm)
 	if state.bonesFrame ~= sf then
 		state.bonesFrame = sf
 		local muz = vm:GetAttachment(1)

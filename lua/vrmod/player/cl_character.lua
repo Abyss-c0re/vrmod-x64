@@ -617,9 +617,20 @@ if CLIENT then
 
 		-- Foregrip parks LH on the gun next to RH → L–R atan2 is near-singular and
 		-- shakes full-body yaw (reads as left-hand flicker on FBT / avatar).
+		-- Still turn the torso with the HMD past ±45. A frozen yaw leaves the
+		-- shoulders behind while the grip moves, and the left arm stretches.
 		if g_VR.foregripActive then
-			if g_VR.input and (g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright) then
-				g_VR.characterYaw = g_VR.tracking.hmd.ang.yaw
+			local hmdAng = g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.ang
+			if hmdAng then
+				local yawDiff = math.NormalizeAngle(hmdAng.yaw - (g_VR.characterYaw or 0))
+				if yawDiff > 45 then
+					g_VR.characterYaw = math.NormalizeAngle((g_VR.characterYaw or 0) + yawDiff - 45)
+				elseif yawDiff < -45 then
+					g_VR.characterYaw = math.NormalizeAngle((g_VR.characterYaw or 0) + yawDiff + 45)
+				end
+				if g_VR.input and (g_VR.input.boolean_walk or g_VR.input.boolean_turnleft or g_VR.input.boolean_turnright) then
+					g_VR.characterYaw = hmdAng.yaw
+				end
 			end
 			return
 		end
@@ -846,6 +857,11 @@ if CLIENT then
 		end
 
 		if not updatedPlayers[steamid] then
+			-- Foregrip moves the grip with the playspace every frame. Do not
+			-- skip IK on a frame that still looks like the previous hand pose.
+			if ply == LocalPlayer() and g_VR.foregripActive then
+				lastFrames[steamid] = nil
+			end
 			local ok, err = pcall(UpdateIK, ply)
 			if not ok and vrmod.logger then
 				vrmod.logger.Debug("UpdateIK: %s", tostring(err))

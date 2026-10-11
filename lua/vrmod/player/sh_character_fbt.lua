@@ -348,11 +348,14 @@ function vrmod_fbt.CalculateBonePositions(ply)
 	-- Target poses
 	local pelvisTargetPos, pelvisTargetAng = LocalToWorld(info.waistCalibrationPos, info.waistCalibrationAng, frame.waistPos, frame.waistAng)
 	local headTargetPos, headTargetAng = LocalToWorld(info.headCalibrationPos, info.headCalibrationAng, frame.hmdPos, frame.hmdAng)
-	-- Stock foregrip: frozen attach hand (same both eyes) — not live device LH
+	-- Stock foregrip: grip on the gun this frame. Copy — do not alias the snap.
 	local leftHandTargetPos, leftHandTargetAng = frame.lefthandPos, frame.lefthandAng
+	local stockForegrip = false
 	if g_VR.foregripActive and g_VR._leftHandSnapFrame == sf and g_VR._leftHandSnapPos and g_VR._leftHandSnapAng then
-		leftHandTargetPos = g_VR._leftHandSnapPos
-		leftHandTargetAng = g_VR._leftHandSnapAng
+		local sp, sa = g_VR._leftHandSnapPos, g_VR._leftHandSnapAng
+		leftHandTargetPos = Vector(sp.x, sp.y, sp.z)
+		leftHandTargetAng = Angle(sa.p, sa.y, sa.r)
+		stockForegrip = true
 	end
 	local rightHandTargetPos, rightHandTargetAng = frame.righthandPos, frame.righthandAng
 	local leftFootTargetPos, leftFootTargetAng = LocalToWorld(info.leftFootCalibrationPos, info.leftFootCalibrationAng, frame.leftfootPos, frame.leftfootAng)
@@ -408,8 +411,12 @@ function vrmod_fbt.CalculateBonePositions(ply)
 			if boneids.rightClavicle < boneids.leftClavicle then _, upperBodyAng = LocalToWorld(vrmod_fbt.zeroVec, Angle(90, 0, -90), vrmod_fbt.zeroVec, neutralClavicleAng) end
 		end
 
-		-- Left arm IK
-		if i == boneids.leftUpperArm then vrmod_fbt.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, boneids.leftUpperArm, boneids.leftForearm, boneids.leftHand, boneids.leftWrist, boneids.leftUlna, leftHandTargetPos, leftHandTargetAng, upperBodyAng, vrmod_fbt.convarValues, true) end
+		-- Left arm IK. Stock foregrip must not scale the arm to a world-frozen grip.
+		if i == boneids.leftUpperArm then
+			local leftCv = vrmod_fbt.convarValues
+			if stockForegrip then leftCv = { armStretcher = false } end
+			vrmod_fbt.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, boneids.leftUpperArm, boneids.leftForearm, boneids.leftHand, boneids.leftWrist, boneids.leftUlna, leftHandTargetPos, leftHandTargetAng, upperBodyAng, leftCv, true)
+		end
 		-- Right arm IK
 		if i == boneids.rightUpperArm then vrmod_fbt.CalculateArmIK(boneinfo, boneids, upperArmLen, lowerArmLen, boneids.rightUpperArm, boneids.rightForearm, boneids.rightHand, boneids.rightWrist, boneids.rightUlna, rightHandTargetPos, rightHandTargetAng + Angle(0, 0, 180), upperBodyAng, vrmod_fbt.convarValues, false) end
 		-- Apply overrides and build matrix

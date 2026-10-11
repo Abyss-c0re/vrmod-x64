@@ -262,12 +262,17 @@ function C.Update(ent, state, frame, opts)
 	if not IsValid(ent) or not state or not frame then return false end
 	if not frame.lefthandPos and not frame.righthandPos then return false end
 	opts = opts or {}
-	-- Stock foregrip: force left hand target to stereo-frozen attach (FBT/avatar body)
+	-- Stock foregrip: left hand target is the grip on the gun this frame.
+	-- Copy. Aliasing the snap vector into the frame makes the bone dirty-check
+	-- compare a vector to itself, so the hand matrix stays at the grab pose
+	-- and the arm stretches when the body moves.
 	local sf = (g_VR and g_VR.stereoFrame) or 0
-	if g_VR and g_VR.foregripActive and g_VR._leftHandSnapFrame == sf
-		and g_VR._leftHandSnapPos and g_VR._leftHandSnapAng then
-		frame.lefthandPos = g_VR._leftHandSnapPos
-		frame.lefthandAng = g_VR._leftHandSnapAng
+	local stockForegrip = g_VR and g_VR.foregripActive and g_VR._leftHandSnapFrame == sf
+		and g_VR._leftHandSnapPos and g_VR._leftHandSnapAng
+	if stockForegrip then
+		local sp, sa = g_VR._leftHandSnapPos, g_VR._leftHandSnapAng
+		frame.lefthandPos = Vector(sp.x, sp.y, sp.z)
+		frame.lefthandAng = Angle(sa.p, sa.y, sa.r)
 	end
 
 	local bones = state.bones
@@ -292,6 +297,9 @@ function C.Update(ent, state, frame, opts)
 	if not istable(convars) then convars = {} end
 	local stretchAllowed = (not state.noStretch)
 		and (convars.armStretcher == true or convars.armStretcher == 1)
+	-- Stock foregrip: never scale the left arm to a grip point. A stale or
+	-- out-of-reach target was stretching ValveBiped bones instead of bending.
+	if stockForegrip then stretchAllowed = false end
 
 	-- Clear arm overrides / finger offsets
 	for _, bd in pairs(boneinfo) do
@@ -426,7 +434,7 @@ function C.Update(ent, state, frame, opts)
 			armStretchScale = targetVecLen / (totalArmLen * 0.98)
 			effUpper = state.upperArmLen * armStretchScale
 			effLower = state.lowerArmLen * armStretchScale
-		elseif state.noStretch and targetVecLen > totalArmLen * 0.98 then
+		elseif (state.noStretch or (stockForegrip and isLeft)) and targetVecLen > totalArmLen * 0.98 then
 			targetVecLen = totalArmLen * 0.98
 			targetVec = targetVec:GetNormalized() * targetVecLen
 			targetPos = upperarmPos + targetVec
@@ -573,7 +581,18 @@ function C.Update(ent, state, frame, opts)
 		end
 
 		local mat = bd.targetMatrix
-		local dirty = not bd.pos or not bd.ang
+		local name = bd.name
+		-- Foregrip: always rebuild the left arm. A cached matrix stays in the
+		-- world while the player moves, which reads as a frozen hand + stretch.
+		local forceLeft = stockForegrip and (
+			name == "ValveBiped.Bip01_L_Clavicle"
+			or name == "ValveBiped.Bip01_L_UpperArm"
+			or name == "ValveBiped.Bip01_L_Forearm"
+			or name == "ValveBiped.Bip01_L_Hand"
+			or name == "ValveBiped.Bip01_L_Wrist"
+			or name == "ValveBiped.Bip01_L_Ulna"
+		)
+		local dirty = forceLeft or not bd.pos or not bd.ang
 			or wpos:DistToSqr(bd.pos) > POS_THRESHOLD
 			or math.abs(wang.pitch - bd.ang.pitch) > ANGLE_THRESHOLD
 			or math.abs(wang.yaw - bd.ang.yaw) > ANGLE_THRESHOLD
@@ -582,18 +601,19 @@ function C.Update(ent, state, frame, opts)
 			mat:Identity()
 			mat:SetTranslation(wpos)
 			mat:SetAngles(wang)
-			if not state.noStretch then
+			if not state.noStretch and not stockForegrip then
 				if state.L_armStretchScale ~= 1
-					and (bd.name == "ValveBiped.Bip01_L_UpperArm" or bd.name == "ValveBiped.Bip01_L_Forearm") then
+					and (name == "ValveBiped.Bip01_L_UpperArm" or name == "ValveBiped.Bip01_L_Forearm") then
 					mat:Scale(Vector(state.L_armStretchScale, 1, 1))
 				end
 				if state.R_armStretchScale ~= 1
-					and (bd.name == "ValveBiped.Bip01_R_UpperArm" or bd.name == "ValveBiped.Bip01_R_Forearm") then
+					and (name == "ValveBiped.Bip01_R_UpperArm" or name == "ValveBiped.Bip01_R_Forearm") then
 					mat:Scale(Vector(state.R_armStretchScale, 1, 1))
 				end
 			end
-			bd.pos = wpos
-			bd.ang = wang
+			-- Copies. Sharing wpos/wang with the foregrip snap freezes the next dirty check.
+			bd.pos = Vector(wpos.x, wpos.y, wpos.z)
+			bd.ang = Angle(wang.p, wang.y, wang.r)
 		end
 		targets[bone] = mat
 	end

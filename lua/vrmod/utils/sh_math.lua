@@ -48,6 +48,27 @@ function vrmod.utils.SmoothAngle(current, target, smoothingFactor)
     return current + diff * smoothingFactor
 end
 
+--- Move a world pose with the VR playspace (origin + yaw).
+-- Walk and snap-turn change origin after a grip is cached. Rebase the cache
+-- before smoothing so the left hand rides with the body instead of staying
+-- in the old world pose (arm bones then stretch to reach it).
+-- Yaw uses Source's yaw-0 = +X, yaw-90 = +Y. Returns new Vector and Angle.
+function vrmod.utils.RebasePlayspacePose(pos, ang, oldOrigin, oldYaw, newOrigin, newYaw)
+    if not pos or not ang or not oldOrigin or not newOrigin then return pos, ang end
+    oldYaw = oldYaw or 0
+    newYaw = newYaw or 0
+    local dyaw = math.AngleDifference(newYaw, oldYaw)
+    local rel = Vector(pos.x - oldOrigin.x, pos.y - oldOrigin.y, pos.z - oldOrigin.z)
+    if dyaw ~= 0 then
+        local r = math.rad(dyaw)
+        local c, s = math.cos(r), math.sin(r)
+        rel = Vector(rel.x * c - rel.y * s, rel.x * s + rel.y * c, rel.z)
+    end
+    local np = Vector(newOrigin.x + rel.x, newOrigin.y + rel.y, newOrigin.z + rel.z)
+    local na = Angle(ang.p or 0, math.NormalizeAngle((ang.y or 0) + dyaw), ang.r or 0)
+    return np, na
+end
+
 --- Type-dispatch smooth (number / Vector / Angle). Prefer this over ad-hoc FrameTime Lerp.
 function vrmod.utils.SmoothValue(current, target, factor)
     factor = tonumber(factor) or 0

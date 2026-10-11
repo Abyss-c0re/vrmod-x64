@@ -2542,6 +2542,9 @@ if CLIENT then
 				end
 				-- Both eyes: Source drops bone matrices between RenderViews.
 				-- Skipping right-eye SetupBones left ArcVR chamber/slide/mag on bind pose.
+				-- Stock viewmodels keep the previous frame's left-arm matrices unless
+				-- the cache is dropped. The hand stays put and the arm stretches.
+				if vm.InvalidateBoneCache then vm:InvalidateBoneCache() end
 				pcall(function() vm:SetupBones() end)
 				g_VR._weaponBonesFrame = sf
 				local okDraw, errDraw = pcall(function()

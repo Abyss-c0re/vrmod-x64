@@ -188,6 +188,7 @@ function vrmod.utils.UpdateViewModel(handPos, handAng)
         g_VR.viewModelAng = ang
         vm:SetPos(pos)
         vm:SetAngles(ang)
+        if vm.InvalidateBoneCache then vm:InvalidateBoneCache() end
         vm:SetupBones()
     else
         if handPos and handAng and vmi then
@@ -198,6 +199,7 @@ function vrmod.utils.UpdateViewModel(handPos, handAng)
         if g_VR.viewModelPos and g_VR.viewModelAng then
             vm:SetPos(g_VR.viewModelPos)
             vm:SetAngles(g_VR.viewModelAng)
+            if vm.InvalidateBoneCache then vm:InvalidateBoneCache() end
             vm:SetupBones()
         end
     end
