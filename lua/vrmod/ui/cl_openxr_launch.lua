@@ -539,42 +539,76 @@ local function afterVRLive()
 	end)
 end
 
---- Cube Start can leave GMod on the main menu when +map ran before workshop
--- mounted (GMA-only maps). Retry map once BSP is visible to GAME.
+--- Backup if we are already in a session on the wrong map.
+-- Do not change map while workshop addons are still downloaded=false.
 local function scheduleDeferredMap()
 	local want = g_VR._openxrLaunch and g_VR._openxrLaunch.bg_map
 	if not want or want == "" then return end
 	want = tostring(want):gsub("^maps/", ""):gsub("%.bsp$", "")
 	timer.Remove("vrmod_cube_deferred_map")
-	local tries = 0
-	timer.Create("vrmod_cube_deferred_map", 1.0, 45, function()
-		tries = tries + 1
+	local t0 = SysTime()
+	timer.Create("vrmod_cube_deferred_map", 1.0, 0, function()
 		local cur = (game.GetMap and game.GetMap()) or ""
-		if cur ~= "" and string.lower(cur) == string.lower(want) then
+		local elapsed_pre = SysTime() - t0
+		-- Menu script owns the first load. Client only corrects a wrong map,
+		-- or takes over if the menu never started one.
+		if cur == "" and elapsed_pre < 8 then return end
+		local path = "maps/" .. want .. ".bsp"
+		local bsp = file and file.Exists and file.Exists(path, "GAME")
+		local list, list_ready, pending, count = nil, false, 0, 0
+		if engine and engine.GetAddons then
+			local ok, res = pcall(engine.GetAddons)
+			if ok and type(res) == "table" then
+				list = res
+				list_ready = true
+				for _, a in ipairs(list) do
+					if type(a) == "table" then
+						local id = tostring(a.wsid or "")
+						if id ~= "" and id ~= "0" then
+							count = count + 1
+							if a.downloaded == false then pending = pending + 1 end
+						end
+					end
+				end
+			end
+		end
+		local elapsed = SysTime() - t0
+		local d = vrmod.utils.WorkshopMap_Decide({
+			want_map = want,
+			current_map = cur,
+			elapsed_sec = elapsed,
+			list_ready = list_ready,
+			addon_count = count,
+			pending_downloads = pending,
+			workshop_busy = not list_ready or pending > 0,
+			require_bsp = true,
+			bsp_visible = bsp and true or false,
+		})
+		if d.action == "already" or d.action == "idle" then
 			timer.Remove("vrmod_cube_deferred_map")
-			log("deferred map ok — already on %s", want)
+			if d.action == "already" then
+				log("deferred map ok — already on %s", want)
+			end
 			return
 		end
-		-- Main menu / wrong map: only load when filesystem can see the BSP
-		local path = "maps/" .. want .. ".bsp"
-		if not (file and file.Exists and file.Exists(path, "GAME")) then
-			if tries == 1 or tries % 10 == 0 then
-				log("deferred map wait — %s not in GAME yet (try %d)", path, tries)
+		if d.action ~= "load" then
+			if math.floor(elapsed) % 10 == 0 then
+				log("deferred map wait — %s pending=%d", d.reason, pending)
+				writeStatus("workshop_" .. tostring(d.reason))
 			end
-			if tries >= 45 and vrmod.Toast then
+			if d.reason == "bsp_missing" and elapsed >= 45 and vrmod.Toast then
 				vrmod.Toast("Map not found: " .. want .. " (extract/workshop?)", 8, "warn")
 			end
 			return
 		end
-		log("deferred map load → %s (was %s)", want, tostring(cur))
+		log("deferred map load → %s (was %s, %s)", want, tostring(cur), d.reason)
 		writeStatus("map_" .. want)
 		writeHandoff("map_load")
 		if vrmod.Toast then
 			vrmod.Toast("Loading map " .. want .. "…", 4, "hint")
 		end
-		-- Prefer map (full load) over changelevel from empty menu
 		pcall(function()
-			RunConsoleCommand("map", want)
+			RunConsoleCommand("map", d.want_map)
 		end)
 		timer.Remove("vrmod_cube_deferred_map")
 	end)
@@ -663,6 +697,10 @@ hook.Add("InitPostEntity", "vrmod_openxr_launch_map", function()
 	writeHandoff("map_ready")
 	writeStatus("map_ready_" .. mapName)
 	log("InitPostEntity map=%s — force VR", mapName)
+	-- Command-line exec runs before the deferred map. Re-apply after the map
+	-- so video defaults do not stomp Cube gfx.
+	pcall(function() RunConsoleCommand("exec", "gvrmod_cube") end)
+	pcall(function() RunConsoleCommand("exec", "cube_gfx") end)
 	timer.Simple(0.5, function()
 		if not (g_VR and g_VR.active) then forceStartVR() end
 	end)
