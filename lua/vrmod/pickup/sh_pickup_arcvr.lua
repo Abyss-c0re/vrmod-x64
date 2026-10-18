@@ -69,11 +69,14 @@ local function init()
 					self:SetPos(self._vrHoldPos)
 					self:SetAngles(self._vrHoldAng)
 				end
-				-- Both eyes: bone cache dies between stereo RenderViews
+				-- Both eyes: bone cache dies between stereo RenderViews.
+				-- Stamp the eye too. A frame-only stamp made the other eye skip the mag.
+				if self.InvalidateBoneCache then self:InvalidateBoneCache() end
 				pcall(function() self:SetupBones() end)
 				self._vrHoldBonesFrame = sf
 				self:DrawModel()
 				self._vrHoldDrawnFrame = sf
+				self._vrHoldDrawnEye = (g_VR and g_VR.stereoEye) or nil
 			end
 
 			ent.VRPickupRenderOverride = ent.RenderOverride
@@ -138,8 +141,19 @@ local function init()
 				if not isMag(ent) then return end
 				local fn = ent.VRPickupRenderOverride or ent.RenderOverride
 				if not isfunction(fn) then return end
-				-- Already painted this eye via engine RenderOverride
-				if ent._vrHoldDrawnFrame == sf then return end
+				local eye = g_VR.stereoEye
+				local skip = ent._vrHoldDrawnFrame == sf
+				if vrmod.utils and vrmod.utils.ArcVrHoldDraw_AlreadyPainted then
+					skip = vrmod.utils.ArcVrHoldDraw_AlreadyPainted({
+						drawn_frame = ent._vrHoldDrawnFrame,
+						drawn_eye = ent._vrHoldDrawnEye,
+						frame = sf,
+						eye = eye,
+					})
+				elseif ent._vrHoldDrawnEye ~= nil then
+					skip = skip and ent._vrHoldDrawnEye == eye
+				end
+				if skip then return end
 				fn(ent)
 			end
 			forceMag(g_VR.heldEntityLeft)

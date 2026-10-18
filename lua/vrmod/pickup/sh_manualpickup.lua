@@ -52,40 +52,64 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	if not IsValid(ply) or not ply:IsPlayer() then return end
 	if not IsValid(ent) or not ent:IsWeapon() then return end
 	if not ply.PickupWeapon then return end
-	-- ─────────────────────────────────────────────────────────────────────────
+	-- Copy before ReplaceWeapon / Remove. The ground entity is gone next tick.
+	local U = vrmod.utils
+	local snap = nil
+	if ent.ArcticVR and U then
+		snap = (U.ArcVrDrop_CloneState and U.ArcVrDrop_CloneState(ent.avrSnapshot))
+			or (U.ArcVrDrop_CopyState and U.ArcVrDrop_CopyState(ent))
+	end
 	local wepClass = ent:GetClass()
 	-- Temporarily disable pickup protection
 	hook.Call("VRMod_Drop", nil, ply, ent)
 	-- Try to replace with VR weapon
-	local replacement = vrmod.utils.ReplaceWeapon(ply, ent)
+	local replacement = U and U.ReplaceWeapon and U.ReplaceWeapon(ply, ent)
 	if replacement then wepClass = replacement end
+
+	local function pushArcState()
+		if not SERVER or not snap then return end
+		local function push()
+			if not IsValid(ply) then return end
+			local newWep = ply:GetWeapon(wepClass)
+			if not IsValid(newWep) or not newWep.ArcticVR then return end
+			if U and U.ArcVrDrop_ApplyState then
+				U.ArcVrDrop_ApplyState(newWep, snap)
+			else
+				newWep.LoadedRounds = snap.LoadedRounds
+				newWep.Chambered = snap.Chambered
+				newWep.Magazine = snap.Magazine
+			end
+			if newWep.SendWeapon then newWep:SendWeapon(true, true) end
+		end
+		push()
+		timer.Simple(0, push)
+		timer.Simple(0.25, push)
+		-- Entity may not exist on the client for the first sends.
+		timer.Simple(1, push)
+	end
+
 	if ply:HasWeapon(wepClass) then
-		-- Give ammo based on dropped weapon's clip (vanilla fallback for non-ArcVR weapons)
-		local ammoType = ent:GetPrimaryAmmoType()
-		local clip = ent:Clip1()
-		if ammoType >= 0 and clip > 0 then ply:GiveAmmo(clip, ammoType, true) end
+		if snap and SERVER then
+			local rounds = U and U.ArcVrDrop_ReserveRounds and U.ArcVrDrop_ReserveRounds(snap) or ((snap.LoadedRounds or 0) + (snap.Chambered or 0))
+			local ammoType = IsValid(ent) and ent.GetPrimaryAmmoType and ent:GetPrimaryAmmoType() or -1
+			if rounds > 0 and isnumber(ammoType) and ammoType >= 0 then
+				ply:GiveAmmo(rounds, ammoType, true)
+			end
+		elseif IsValid(ent) then
+			local ammoType = ent:GetPrimaryAmmoType()
+			local clip = ent:Clip1()
+			if ammoType >= 0 and clip > 0 then ply:GiveAmmo(clip, ammoType, true) end
+		end
 		ply:SelectWeapon(wepClass)
 	else
 		ply:Give(wepClass, true)
 		timer.Simple(0, function() if IsValid(ply) then ply:SelectWeapon(wepClass) end end)
+		pushArcState()
 	end
 
-	if SERVER and ent.ArcticVR and ent.avrSnapshot then
-		timer.Simple(0, function()
-			local newWep = ply:GetWeapon(wepClass)
-			if not IsValid(newWep) or not newWep.ArcticVR then return end
-			local snap = ent.avrSnapshot
-			newWep.LoadedRounds = snap.LoadedRounds
-			newWep.Chambered = snap.Chambered
-			newWep.Magazine = snap.Magazine
-			if snap.Attachments then newWep.Attachments = snap.Attachments end
-			timer.Simple(0, function() if IsValid(newWep) then newWep:SendWeapon(true, true) end end)
-			
-		end)
-	end
-
-	ent:Remove()
-	-- ─────────────────────────────────────────────────────────────────────────
+	if IsValid(ent) and ent:GetOwner() ~= ply then ent:Remove() end
+	-- Equipped as a weapon. Do not also physics-hold the entity we just removed.
+	if snap and SERVER then return false end
 end)
 
 -- Disable touch-based item pickup

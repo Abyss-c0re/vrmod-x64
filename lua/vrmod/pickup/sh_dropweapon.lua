@@ -10,6 +10,29 @@ local function InBlackList(weaponClass)
     return false
 end
 
+local function WriteClientArcSnap(snap)
+    local list = {}
+    for i, name in pairs(snap.AttInstalled or {}) do
+        if isnumber(i) and i >= 0 and i <= 255 then
+            list[#list + 1] = { i, name or "" }
+        end
+    end
+    table.sort(list, function(a, b) return a[1] < b[1] end)
+    local n = #list
+    if n > 64 then n = 64 end
+    net.WriteUInt(math.min(snap.LoadedRounds or 0, 65535), 16)
+    net.WriteUInt(math.min(snap.Chambered or 0, 255), 8)
+    net.WriteUInt(math.min(snap.EmptyChambered or 0, 255), 8)
+    net.WriteString(snap.Magazine or "")
+    net.WriteBool(snap.SlideLockedBack and true or false)
+    net.WriteInt(snap.Firemode or 0, 8)
+    net.WriteUInt(n, 8)
+    for i = 1, n do
+        net.WriteUInt(list[i][1], 8)
+        net.WriteString(list[i][2] or "")
+    end
+end
+
 if SERVER then
     -- Create blacklist file with defaults if missing
     if not file.Exists(blacklist_path, "DATA") then
@@ -26,6 +49,33 @@ if SERVER then
     end)
 
     net.Receive("SelectEmptyWeapon", function(_, ply) ply:SelectWeapon("weapon_vrmod_empty") end)
+
+    -- Client ammo is what the player sees. Read it before any early return
+    -- so a rejected drop still consumes the message.
+    local function ReadClientArcSnap()
+        if not net.ReadBool() then return nil end
+        local snap = {
+            LoadedRounds = net.ReadUInt(16),
+            Chambered = net.ReadUInt(8),
+            EmptyChambered = net.ReadUInt(8),
+            Magazine = net.ReadString(),
+            SlideLockedBack = net.ReadBool(),
+            Firemode = net.ReadInt(8),
+            AttInstalled = {},
+        }
+        if snap.Magazine == "" then snap.Magazine = nil end
+        local n = net.ReadUInt(8)
+        for i = 1, n do
+            local idx = net.ReadUInt(8)
+            local name = net.ReadString()
+            if i <= 64 then snap.AttInstalled[idx] = name end
+        end
+        if vrmod.utils and vrmod.utils.ArcVrDrop_CloneState then
+            return vrmod.utils.ArcVrDrop_CloneState(snap)
+        end
+        return snap
+    end
+
     -- Block drops around vehicle enter/exit (action-set switch fires grip-release → gun becomes a prop)
     local vehicleDropBlockUntil = {}
     local function BlockVehicleDrop(ply, secs)
@@ -43,6 +93,7 @@ if SERVER then
         local dropAsWeapon = net.ReadBool()
         local rhandvel = net.ReadVector()
         local rhandangvel = net.ReadVector()
+        local clientSnap = ReadClientArcSnap()
         local wep = ply:GetActiveWeapon()
         if not IsValid(wep) or wep.undroppable or InBlackList(wep:GetClass()) then return end
         if ply:InVehicle() then return end
@@ -63,27 +114,35 @@ if SERVER then
         end
 
         if not IsValid(dropEnt) then return end
-        -- Restore some ammo into dropped weapon if applicable
-        local ammoType = wep:GetPrimaryAmmoType()
-        local ammoCount = ply:GetAmmoCount(ammoType)
-        local clipSize = wep:GetMaxClip1()
-        local currentClip = wep:Clip1()
-        if ammoCount > 0 and currentClip < clipSize then
-            local ammoNeeded = clipSize - currentClip
-            local ammoToGive = math.min(ammoNeeded, ammoCount)
-            wep:SetClip1(currentClip + ammoToGive)
-            ply:RemoveAmmo(ammoToGive, ammoType)
+        -- ArcVR ammo is LoadedRounds, not Clip1. Stuffing reserve into Clip1
+        -- on drop deletes those rounds when the weapon is stripped.
+        local refillClip = true
+        if vrmod.utils and vrmod.utils.ArcVrDrop_ShouldRefillClip then
+            refillClip = vrmod.utils.ArcVrDrop_ShouldRefillClip(wep)
+        elseif wep.ArcticVR or wep.ArcticVRNade then
+            refillClip = false
+        end
+        if refillClip then
+            local ammoType = wep:GetPrimaryAmmoType()
+            local ammoCount = ply:GetAmmoCount(ammoType)
+            local clipSize = wep:GetMaxClip1()
+            local currentClip = wep:Clip1()
+            if ammoCount > 0 and currentClip < clipSize then
+                local ammoNeeded = clipSize - currentClip
+                local ammoToGive = math.min(ammoNeeded, ammoCount)
+                wep:SetClip1(currentClip + ammoToGive)
+                ply:RemoveAmmo(ammoToGive, ammoType)
+            end
         end
 
-        -- ── ArcticVR snapshot ─────────────────────────
+        -- Prefer the client's live mag. Server fields lag rack/chamber.
         local avrSnapshot
-        if dropAsWeapon and wep.ArcticVR then
-            avrSnapshot = {
-                LoadedRounds = wep.LoadedRounds or 0,
-                Chambered = wep.Chambered or 0,
-                Magazine = wep.Magazine or nil,
-                Attachments = wep.Attachments or nil
-            }
+        if dropAsWeapon and (wep.ArcticVR or clientSnap) then
+            if clientSnap then
+                avrSnapshot = clientSnap
+            elseif vrmod.utils and vrmod.utils.ArcVrDrop_CopyState then
+                avrSnapshot = vrmod.utils.ArcVrDrop_CopyState(wep)
+            end
         end
 
         -- ─────────────────────────────────────────────
@@ -95,10 +154,17 @@ if SERVER then
         dropEnt:SetPos(guninhandpos + boneAng:Forward() * 10 + boneAng:Right() * 4)
         dropEnt:SetAngles(guninhandang)
         dropEnt:Spawn()
-        -- ── Apply ArcticVR state AFTER spawn ─────────
-        if avrSnapshot then
+        -- Spawn/Initialize zeroes LoadedRounds. Write the mag onto the entity
+        -- itself so a later pickup still has it after the table is cloned.
+        if avrSnapshot and vrmod.utils and vrmod.utils.ArcVrDrop_ApplyState then
+            vrmod.utils.ArcVrDrop_ApplyState(dropEnt, avrSnapshot)
+            dropEnt.ArcticVR = true
+        elseif avrSnapshot then
             dropEnt.ArcticVR = true
             dropEnt.avrSnapshot = avrSnapshot
+            dropEnt.LoadedRounds = avrSnapshot.LoadedRounds or 0
+            dropEnt.Chambered = avrSnapshot.Chambered or 0
+            dropEnt.Magazine = avrSnapshot.Magazine
         end
 
         -- ─────────────────────────────────────────────
@@ -154,20 +220,15 @@ if CLIENT then
         if IsValid(ply) and ply:InVehicle() then return end
         if action == "boolean_right_pickup" and not state then
             if vrmod.RestoreDefaultHandAngles then vrmod.RestoreDefaultHandAngles() end
+            local wep = LocalPlayer():GetActiveWeapon()
+            local snap = vrmod.utils and vrmod.utils.ArcVrDrop_CopyState and vrmod.utils.ArcVrDrop_CopyState(wep) or nil
             net.Start("DropWeapon")
             net.WriteBool(true)
             net.WriteVector(vrmod.GetRightHandVelocity() * 2.5)
             net.WriteVector(vrmod.GetRightHandAngularVelocity() * 2.5)
+            net.WriteBool(snap ~= nil)
+            if snap then WriteClientArcSnap(snap) end
             net.SendToServer()
-        end
-    end)
-
-    hook.Add("Think", "ArcticVR_Drop_AttachmentCleanup", function()
-        for _, wep in ipairs(ents.FindByClass("arcticvr_*")) do
-            if IsValid(wep) and wep.ArcticVR and not IsValid(wep:GetOwner()) then
-                wep:VRHolster()
-                if wep.RebuildAttModels then wep:RebuildAttModels() end
-            end
         end
     end)
 end
