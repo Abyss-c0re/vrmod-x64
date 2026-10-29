@@ -199,8 +199,12 @@ local function InitializeMenuItems()
 	-- Quit GMod entirely (System page)
 	add("Exit Game", 4, 4, function()
 		timer.Simple(0, function()
-			pcall(function() RunConsoleCommand("gamemenucommand", "quit") end)
-			pcall(function() RunConsoleCommand("quit") end)
+			if vrmod.RequestQuitGame then
+				vrmod.RequestQuitGame()
+			else
+				pcall(function() RunConsoleCommand("gamemenucommand", "QuitNoConfirm") end)
+				pcall(function() RunConsoleCommand("quit") end)
+			end
 		end)
 	end, true, "close Garry's Mod", "exit_game")
 	if vrmod.DedupInGameMenuItems then

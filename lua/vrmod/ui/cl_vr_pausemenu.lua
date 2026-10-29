@@ -17,6 +17,13 @@ local function vrLive()
 end
 
 local function forceUnpause()
+	local allow = true
+	if vrmod.utils and vrmod.utils.MenuLaw_AllowForceUnpause then
+		allow = vrmod.utils.MenuLaw_AllowForceUnpause({ quitting = g_VR._quitting and true or false })
+	elseif g_VR and g_VR._quitting then
+		allow = false
+	end
+	if not allow then return end
 	-- Kill any projection flag so HideGameUI is allowed
 	g_VR._gameUIProjected = false
 	if gui and gui.HideGameUI then pcall(gui.HideGameUI) end
@@ -105,6 +112,10 @@ end)
 -- While VR is live: never leave GameUI up (it re-pauses every frame)
 hook.Add("Think", "vrmod_force_no_gameui", function()
 	if not vrLive() then return end
+	if vrmod.utils and vrmod.utils.MenuLaw_AllowForceUnpause
+		and not vrmod.utils.MenuLaw_AllowForceUnpause({ quitting = g_VR._quitting and true or false }) then
+		return
+	end
 	local t = CurTime()
 	if (g_VR._forceUnpauseT or 0) > t then return end
 	g_VR._forceUnpauseT = t + 0.2

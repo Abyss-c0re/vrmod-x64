@@ -271,3 +271,16 @@ function vrmod.utils.MenuLaw_KeepScreenClicker(opts)
 	opts = type(opts) == "table" and opts or {}
 	return opts.derma_focused and true or false
 end
+
+--- Engine quit that does not wait on a confirm dialog.
+--- "quit" opens that dialog; the VR unpause hook then hides GameUI and the quit vanishes.
+function vrmod.utils.MenuLaw_QuitArgs()
+	return "gamemenucommand", "QuitNoConfirm"
+end
+
+--- Force-unpause / HideGameUI must stand down while a quit is in flight.
+function vrmod.utils.MenuLaw_AllowForceUnpause(opts)
+	opts = type(opts) == "table" and opts or {}
+	if opts.quitting then return false end
+	return true
+end

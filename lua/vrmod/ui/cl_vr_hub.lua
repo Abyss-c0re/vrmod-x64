@@ -251,8 +251,12 @@ local function activateAt(mx, my)
 					RunConsoleCommand("disconnect")
 					SetStatus("Disconnecting…", 2)
 				elseif id == "quit" then
-					RunConsoleCommand("gamemenucommand", "quit")
-					RunConsoleCommand("quit")
+					if vrmod.RequestQuitGame then
+						vrmod.RequestQuitGame()
+					else
+						RunConsoleCommand("gamemenucommand", "QuitNoConfirm")
+						RunConsoleCommand("quit")
+					end
 				end
 				return
 			end

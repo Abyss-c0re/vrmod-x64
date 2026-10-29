@@ -14,9 +14,29 @@ local function vrLive()
 	return g_VR and g_VR.active
 end
 
+--- Quit Garry's Mod from a VR menu. QuitNoConfirm does not leave a dialog
+--- for the unpause hook to dismiss.
+function vrmod.RequestQuitGame()
+	g_VR = g_VR or {}
+	g_VR._quitting = true
+	local cmd, arg = "gamemenucommand", "QuitNoConfirm"
+	if vrmod.utils and vrmod.utils.MenuLaw_QuitArgs then
+		cmd, arg = vrmod.utils.MenuLaw_QuitArgs()
+	end
+	pcall(function() RunConsoleCommand(cmd, arg) end)
+	pcall(function() RunConsoleCommand("quit") end)
+end
+
 --- Always hide GameUI + unpause while VR is active.
 function vrmod.VRUnpauseWorld()
 	if not vrLive() then return end
+	local allow = true
+	if vrmod.utils and vrmod.utils.MenuLaw_AllowForceUnpause then
+		allow = vrmod.utils.MenuLaw_AllowForceUnpause({ quitting = g_VR._quitting and true or false })
+	elseif g_VR._quitting then
+		allow = false
+	end
+	if not allow then return end
 	g_VR._gameUIProjected = false
 	if gui and gui.HideGameUI then pcall(gui.HideGameUI) end
 	pcall(function() RunConsoleCommand("unpause") end)
