@@ -176,3 +176,37 @@ function vrmod.utils.MenuLaw_IsThrashRisk(decision)
 	if type(decision) ~= "table" then return true end
 	return not decision.path_ok
 end
+
+--- Spawn/context is showing only when the VR surface and the panel are both live.
+--- A stale bind, or a panel the engine already hid, is not showing.
+function vrmod.utils.MenuLaw_ShellShowing(opts)
+	opts = type(opts) == "table" and opts or {}
+	if not opts.bound then return false end
+	if not opts.surface then return false end
+	if not opts.panel_valid then return false end
+	if opts.panel_visible == false then return false end
+	return true
+end
+
+--- What a spawn/context request should do: "open" | "close" | "keep".
+--- force=true is a deferred retry. A retry must not toggle-close a shell that just appeared.
+function vrmod.utils.MenuLaw_ShellRequest(opts)
+	opts = type(opts) == "table" and opts or {}
+	local showing = opts.showing and true or false
+	if opts.force then
+		if showing then return "keep" end
+		return "open"
+	end
+	if showing then return "close" end
+	return "open"
+end
+
+--- Q/C key-up fires OnSpawnMenuClose even when HangOpen left the panel visible.
+--- Keep the VR surface then. Tear it down only when the panel actually hid.
+function vrmod.utils.MenuLaw_KeepShellOnEngineClose(opts)
+	opts = type(opts) == "table" and opts or {}
+	if not opts.vr_active then return false end
+	if not opts.bound then return false end
+	if opts.panel_visible then return true end
+	return false
+end

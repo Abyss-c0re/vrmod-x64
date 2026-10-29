@@ -1372,7 +1372,20 @@ function W.InstallHooks()
 	end)
 
 	hook.Add("OnSpawnMenuClose", "panel2vr_spawn", function()
-		-- Always tear down VR surface on sandbox close
+		-- Q release calls this even when HangOpen kept the panel up.
+		-- Destroying the VR surface then makes the next open look like a miss.
+		local keep = vrmod.utils and vrmod.utils.MenuLaw_KeepShellOnEngineClose
+			and vrmod.utils.MenuLaw_KeepShellOnEngineClose({
+				vr_active = W.IsVR(),
+				bound = bound[STABLE_UID.spawnmenu] and true or false,
+				panel_visible = IsValid(g_SpawnMenu) and g_SpawnMenu:IsVisible() or false,
+			})
+		if keep then
+			if IsValid(g_SpawnMenu) and g_SpawnMenu.SetHangOpen then
+				g_SpawnMenu:SetHangOpen(true)
+			end
+			return
+		end
 		W.Close(STABLE_UID.spawnmenu)
 		if IsValid(g_SpawnMenu) and panelUids[g_SpawnMenu] then
 			W.Close(panelUids[g_SpawnMenu])
@@ -1395,6 +1408,18 @@ function W.InstallHooks()
 	end)
 
 	hook.Add("OnContextMenuClose", "panel2vr_ctx", function()
+		local keep = vrmod.utils and vrmod.utils.MenuLaw_KeepShellOnEngineClose
+			and vrmod.utils.MenuLaw_KeepShellOnEngineClose({
+				vr_active = W.IsVR(),
+				bound = bound[STABLE_UID.contextmenu] and true or false,
+				panel_visible = IsValid(g_ContextMenu) and g_ContextMenu:IsVisible() or false,
+			})
+		if keep then
+			if IsValid(g_ContextMenu) and g_ContextMenu.SetHangOpen then
+				g_ContextMenu:SetHangOpen(true)
+			end
+			return
+		end
 		W.Close(STABLE_UID.contextmenu)
 		if IsValid(g_ContextMenu) and panelUids[g_ContextMenu] then
 			W.Close(panelUids[g_ContextMenu])
@@ -1504,11 +1529,19 @@ function W.IsShellOpen(which)
 	local isCtx = (which == "context" or which == "contextmenu")
 	local panel = isCtx and g_ContextMenu or g_SpawnMenu
 	local uid = isCtx and STABLE_UID.contextmenu or STABLE_UID.spawnmenu
-	if bound[uid] then return true end
-	if IsValid(panel) and panel.IsVisible and panel:IsVisible() and W.IsBound(panel) then
-		return true
+	local info = bound[uid]
+	local surface = g_VR and g_VR.menus and g_VR.menus[uid]
+	local live = IsValid(info and info.panel or panel)
+	local visible = live and (info and info.panel or panel):IsVisible() or false
+	if vrmod.utils and vrmod.utils.MenuLaw_ShellShowing then
+		return vrmod.utils.MenuLaw_ShellShowing({
+			bound = info and true or false,
+			surface = surface and true or false,
+			panel_valid = live,
+			panel_visible = visible,
+		})
 	end
-	return false
+	return info and surface and live and visible or false
 end
 
 --- Hard close — one surface, no ghosts (X button / QM toggle only)
@@ -1569,17 +1602,28 @@ function W.ClearAllShellFloatPoses()
 	shellFloatPose = {}
 end
 
---- Toggle spawn/context — never stack a second copy
-function W.OpenSandboxShell(which)
+--- Toggle spawn/context — never stack a second copy.
+--- opts.force: deferred retry. Never toggle-close a shell that just opened.
+function W.OpenSandboxShell(which, opts)
 	which = which or "spawn"
+	opts = type(opts) == "table" and opts or {}
 	if not W.IsVR() then return false end
 	local isCtx = (which == "context" or which == "contextmenu")
 	local panel = isCtx and g_ContextMenu or g_SpawnMenu
 	local kind = isCtx and "contextmenu" or "spawnmenu"
 	local uidStable = isCtx and STABLE_UID.contextmenu or STABLE_UID.spawnmenu
 
-	-- Already open → CLOSE (toggle)
-	if W.IsShellOpen(which) then
+	local action = "open"
+	if vrmod.utils and vrmod.utils.MenuLaw_ShellRequest then
+		action = vrmod.utils.MenuLaw_ShellRequest({
+			showing = W.IsShellOpen(which),
+			force = opts.force and true or false,
+		})
+	elseif W.IsShellOpen(which) then
+		action = "close"
+	end
+	if action == "keep" then return true end
+	if action == "close" then
 		return W.CloseSandboxShell(which)
 	end
 
@@ -1597,9 +1641,9 @@ function W.OpenSandboxShell(which)
 				log("%s still missing after +menu", kind)
 				return
 			end
-			-- Only open if still closed (avoid double from hooks)
+			-- Retry must not toggle-close the shell this timer just created.
 			if not W.IsShellOpen(which) then
-				W.OpenSandboxShell(which)
+				W.OpenSandboxShell(which, { force = true })
 			end
 		end)
 		return false
@@ -1611,13 +1655,15 @@ function W.OpenSandboxShell(which)
 	if panel.SetMouseInputEnabled then panel:SetMouseInputEnabled(true) end
 	if panel.SetKeyboardInputEnabled then panel:SetKeyboardInputEnabled(false) end
 
-	-- Open sandbox once; MakePopup intercept skips spawn/context (we manifest below)
+	-- Open sandbox once; MakePopup intercept skips spawn/context (we manifest below).
+	-- Open() clears HangOpen. Set it again so Q/C release does not hide the shell.
 	if panel.Open and not panel:IsVisible() then
 		panel:Open()
 	elseif not panel:IsVisible() then
 		if panel.MakePopup then panel:MakePopup() end
 		panel:SetVisible(true)
 	end
+	if panel.SetHangOpen then panel:SetHangOpen(true) end
 
 	-- Theme/size happens once inside Manifest → preparePanelForVR (no double Theme*)
 	local uid = W.ManifestPanel(panel, {
@@ -1636,12 +1682,12 @@ function W.OpenSandboxShell(which)
 	return uid ~= nil
 end
 
-function W.OpenSpawnMenu()
-	return W.OpenSandboxShell("spawn")
+function W.OpenSpawnMenu(opts)
+	return W.OpenSandboxShell("spawn", opts)
 end
 
-function W.OpenContextMenu()
-	return W.OpenSandboxShell("context")
+function W.OpenContextMenu(opts)
+	return W.OpenSandboxShell("context", opts)
 end
 
 function W.CloseSpawnMenu()

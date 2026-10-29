@@ -35,14 +35,14 @@ local function InitializeMenuItems()
 					open = vrmod.OpenSpawnMenuVR()
 				end
 			end
-			-- If open failed (panel late), one more try after sandbox creates it
+			-- Panel was late. Retry must open, not toggle-close the shell that just appeared.
 			if not open then
 				timer.Simple(0.2, function()
 					if not g_VR or not g_VR.active then return end
 					if which == "context" then
-						if p2v and p2v.OpenContextMenu then p2v.OpenContextMenu() end
+						if p2v and p2v.OpenContextMenu then p2v.OpenContextMenu({ force = true }) end
 					else
-						if p2v and p2v.OpenSpawnMenu then p2v.OpenSpawnMenu() end
+						if p2v and p2v.OpenSpawnMenu then p2v.OpenSpawnMenu({ force = true }) end
 					end
 				end)
 			end
