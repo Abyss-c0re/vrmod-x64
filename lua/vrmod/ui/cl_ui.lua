@@ -2092,6 +2092,10 @@ if CLIENT then
 			if vrmod.TryMenuGrab(hand, pressed) then return end
 		end
 
+		if not g_VR.menuFocus and vrmod.MenuUidForClick then
+			local uid = vrmod.MenuUidForClick()
+			if uid then g_VR.menuFocus = uid end
+		end
 		if not g_VR.menuFocus then return end
 		-- Don't inject clicks while resizing (corner drag is not a button press)
 		if g_VR.menuResizeActive then return end
@@ -2229,6 +2233,16 @@ if CLIENT then
 			pump = held and true or false
 		end
 		if not pump then return end
+		-- Unpause policy turns the clicker off. While a Derma surface is focused that drops the first presses.
+		local m = menus[g_VR.menuFocus]
+		local derma = m and IsValid(m.panel)
+		local keepClick = derma
+		if vrmod.utils and vrmod.utils.MenuLaw_KeepScreenClicker then
+			keepClick = vrmod.utils.MenuLaw_KeepScreenClicker({ derma_focused = derma and true or false })
+		end
+		if keepClick and gui and gui.EnableScreenClicker then
+			pcall(function() gui.EnableScreenClicker(true) end)
+		end
 		-- Grip drag reads gui.Mouse* from OnCursorMoved. SetCursorPos alone never calls it.
 		local sx = (gui.MouseX and gui.MouseX()) or g_VR.menuCursorX or 0
 		local sy = (gui.MouseY and gui.MouseY()) or g_VR.menuCursorY or 0
@@ -2247,6 +2261,24 @@ if CLIENT then
 	------------------------------------------------------------------------
 	local VEH_TRIG_THRESH = 0.45
 	local vehTrigPrev = { fwd = false, rev = false }
+
+	function vrmod.MenuUidForClick()
+		if not g_VR or not g_VR.menus then return nil end
+		local hits = {}
+		for uid, m in pairs(g_VR.menus) do
+			if type(m) == "table" and m.cursorEnabled ~= false and m._hitFrame ~= nil then
+				hits[#hits + 1] = { uid = uid, frame = m._hitFrame, dist = m._hitDist or 0 }
+			end
+		end
+		if vrmod.utils and vrmod.utils.MenuLaw_ClickFocus then
+			return vrmod.utils.MenuLaw_ClickFocus({
+				focus = g_VR.menuFocus,
+				stereo_frame = g_VR.stereoFrame or 0,
+				hits = hits,
+			})
+		end
+		return g_VR.menuFocus or nil
+	end
 
 	--- Any interactive VR UI the laser is on (or hold-open wheel that owns focus).
 	function vrmod.IsUIFocused()
@@ -2283,6 +2315,10 @@ if CLIENT then
 		if not vrmod.IsUIFocused() then return false end
 
 		pressed = pressed and true or false
+		if not g_VR.menuFocus and vrmod.MenuUidForClick then
+			local uid = vrmod.MenuUidForClick()
+			if uid then g_VR.menuFocus = uid end
+		end
 		SyncCursorToVR()
 
 		local action
@@ -2292,19 +2328,22 @@ if CLIENT then
 		else
 			action = "boolean_secondaryfire"
 		end
-		-- All menus that hook VRMod_Input + IsMenuPrimaryClick/Secondary
+		-- All menus that hook VRMod_Input + IsMenuPrimaryClick/Secondary.
+		-- That hook injects the gui mouse when a surface is focused. A second inject
+		-- toggles the control back off, so the first press looks like it did nothing.
 		hook.Call("VRMod_Input", nil, action, pressed)
 
-		-- Derma / panel2vr (gui.InternalMouse*)
-		local btn = primary and MOUSE_LEFT or MOUSE_RIGHT
-		heldButtons[btn] = pressed
-		if gui.InternalCursorMoved then
-			pcall(gui.InternalCursorMoved, g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
-		end
-		if pressed then
-			pcall(gui.InternalMousePressed, btn)
-		else
-			pcall(gui.InternalMouseReleased, btn)
+		if not g_VR.menuFocus then
+			local btn = primary and MOUSE_LEFT or MOUSE_RIGHT
+			heldButtons[btn] = pressed
+			if gui.InternalCursorMoved then
+				pcall(gui.InternalCursorMoved, g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+			end
+			if pressed then
+				pcall(gui.InternalMousePressed, btn)
+			else
+				pcall(gui.InternalMouseReleased, btn)
+			end
 		end
 
 		if g_VR.menuFocus then

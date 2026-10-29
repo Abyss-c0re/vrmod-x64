@@ -237,3 +237,37 @@ end
 function vrmod.utils.ScrollLaw_PumpWhileHeld(held)
 	return held and true or false
 end
+
+--- Focus for a click. A live focus wins. Otherwise the nearest surface hit this stereo frame
+--- or the one before it (input often runs before the draw that assigns menuFocus).
+function vrmod.utils.MenuLaw_ClickFocus(opts)
+	opts = type(opts) == "table" and opts or {}
+	if opts.focus and opts.focus ~= false and tostring(opts.focus) ~= "" then
+		return opts.focus
+	end
+	local sf = tonumber(opts.stereo_frame) or 0
+	local best, bestD
+	local hits = opts.hits
+	if type(hits) ~= "table" then return nil end
+	for i = 1, #hits do
+		local h = hits[i]
+		if type(h) == "table" and h.uid and h.frame ~= nil then
+			local age = sf - (tonumber(h.frame) or sf)
+			if age >= 0 and age <= 1 then
+				local d = tonumber(h.dist) or 0
+				if not best or d < bestD then
+					best = h.uid
+					bestD = d
+				end
+			end
+		end
+	end
+	return best
+end
+
+--- Keep the desktop clicker while a Derma panel is the focused VR surface.
+--- Turning it off leaves InternalMousePressed ignored until focus changes, so the first presses do nothing.
+function vrmod.utils.MenuLaw_KeepScreenClicker(opts)
+	opts = type(opts) == "table" and opts or {}
+	return opts.derma_focused and true or false
+end

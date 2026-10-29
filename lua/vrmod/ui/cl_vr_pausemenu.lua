@@ -22,7 +22,14 @@ local function forceUnpause()
 	if gui and gui.HideGameUI then pcall(gui.HideGameUI) end
 	pcall(function() RunConsoleCommand("unpause") end)
 	pcall(function() RunConsoleCommand("sv_pausable", "0") end)
-	if gui and gui.EnableScreenClicker then
+	local derma = false
+	if g_VR.menuFocus and g_VR.menus and g_VR.menus[g_VR.menuFocus] then
+		local m = g_VR.menus[g_VR.menuFocus]
+		derma = m.panel and IsValid(m.panel) or false
+	end
+	local keepClick = vrmod.utils and vrmod.utils.MenuLaw_KeepScreenClicker
+		and vrmod.utils.MenuLaw_KeepScreenClicker({ derma_focused = derma })
+	if gui and gui.EnableScreenClicker and not keepClick then
 		pcall(function() gui.EnableScreenClicker(false) end)
 	end
 	if vrmod.GameUIProject and vrmod.GameUIProject.Unbind then

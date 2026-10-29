@@ -387,7 +387,10 @@ function vrmod.VRHub_Open()
 
 	hook.Add("VRMod_Input", "vr_hub_input", function(action, pressed)
 		if not open or not pressed then return end
-		if g_VR.menuFocus ~= UID then return end
+		local focus = g_VR.menuFocus
+		if vrmod.MenuUidForClick then focus = vrmod.MenuUidForClick() or focus end
+		if focus ~= UID then return end
+		g_VR.menuFocus = UID
 		if vrmod.IsMenuCloseAction and vrmod.IsMenuCloseAction(action) then
 			vrmod.VRHub_Close()
 			return

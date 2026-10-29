@@ -325,22 +325,56 @@ function g_VR.MenuOpen()
 
 	paint(-1)
 
-	-- Primary-hand trigger while open: flip pages without closing
+	local function hoverAt(mx, my)
+		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()
+		if mx >= navPrev.x and mx <= navPrev.x + navPrev.w and my >= navPrev.y and my <= navPrev.y + navPrev.h then
+			return -1, "prev"
+		end
+		if mx >= navNext.x and mx <= navNext.x + navNext.w and my >= navNext.y and my <= navNext.y + navNext.h then
+			return -1, "next"
+		end
+		for i = 1, #pageEntries do
+			local e = pageEntries[i]
+			local bx = e.col * (buttonWidth + gap)
+			local by = baseY + e.row * (buttonHeight + gap)
+			if mx >= bx and mx <= bx + buttonWidth and my >= by and my <= by + buttonHeight then
+				return i, nil
+			end
+		end
+		return -1, nil
+	end
+
+	-- Primary-hand trigger while open: one press runs the tile (or flips a page).
+	-- Release-to-activate still works; this path closes once so the tile func runs a single time.
 	hook.Add("VRMod_Input", "vrmod_qm_page_nav", function(action, pressed)
 		if not open or not pressed then return end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
-		if hoverNav == "prev" then
+		if vrmod.MenuUidForClick then
+			local uid = vrmod.MenuUidForClick()
+			if uid then g_VR.menuFocus = uid end
+		end
+		if g_VR.menuFocus ~= "miscmenu" then return end
+		local mm = g_VR.menus and g_VR.menus.miscmenu
+		local mx = (mm and mm.lastCursorX) or g_VR.menuCursorX or -1
+		local my = (mm and mm.lastCursorY) or g_VR.menuCursorY or -1
+		local item, nav = hoverAt(mx, my)
+		hoverNav = nav
+		prevHoveredItem = item or -1
+		if nav == "prev" then
 			local q = QM()
 			if q and q.PrevPage then q.PrevPage() end
 			rebuildPage()
 			prevHoveredItem = -1
 			return
-		elseif hoverNav == "next" then
+		elseif nav == "next" then
 			local q = QM()
 			if q and q.NextPage then q.NextPage() end
 			rebuildPage()
 			prevHoveredItem = -1
 			return
+		end
+		if item and item > 0 and g_VR.MenuClose then
+			g_VR.MenuClose()
 		end
 	end)
 
@@ -378,28 +412,11 @@ function g_VR.MenuOpen()
 		mm.paintInterval = 12
 		mm.paintIntervalFocused = 0 -- dirty-only (never full-rate font spam)
 
-		local _, _, buttonWidth, buttonHeight, gap, baseY = layoutMetrics()
 		local hoveredItem = -1
 		hoverNav = nil
 		local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
 		if g_VR.menuFocus == "miscmenu" then
-			-- Nav hit
-			if mx >= navPrev.x and mx <= navPrev.x + navPrev.w and my >= navPrev.y and my <= navPrev.y + navPrev.h then
-				hoverNav = "prev"
-			elseif mx >= navNext.x and mx <= navNext.x + navNext.w and my >= navNext.y and my <= navNext.y + navNext.h then
-				hoverNav = "next"
-			else
-				-- Rect hit-test (floor(col) failed when gap was negative / non-uniform)
-				for i = 1, #pageEntries do
-					local e = pageEntries[i]
-					local bx = e.col * (buttonWidth + gap)
-					local by = baseY + e.row * (buttonHeight + gap)
-					if mx >= bx and mx <= bx + buttonWidth and my >= by and my <= by + buttonHeight then
-						hoveredItem = i
-						break
-					end
-				end
-			end
+			hoveredItem, hoverNav = hoverAt(mx, my)
 		end
 		local hoverChanged = false
 		if hoverNav then
