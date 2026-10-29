@@ -2,8 +2,8 @@ if SERVER then return end
 -- =============================================================================
 -- VR pause policy (no stock GameUI while VR is live)
 --
--- ActivateGameUI freezes SP; soft unpause cannot clear it reliably.
--- Pause UI in VR = Cube hub only. Desktop ESC untouched when not in VR.
+-- Cube hub is the VR pause. Shift+ESC opens the stock menu; do not hide it then.
+-- Desktop ESC is untouched when VR is off.
 -- =============================================================================
 
 vrmod = vrmod or {}
@@ -12,6 +12,20 @@ local PREV_PAUSABLE = nil
 
 local function vrLive()
 	return g_VR and g_VR.active
+end
+
+--- Shared inputs for the unpause gate (quit, Shift, stock pause).
+function vrmod.UnpausePolicyOpts()
+	g_VR = g_VR or {}
+	local shift = false
+	if input and input.IsKeyDown then
+		shift = input.IsKeyDown(KEY_LSHIFT) or input.IsKeyDown(KEY_RSHIFT) or false
+	end
+	return {
+		quitting = g_VR._quitting and true or false,
+		shift_down = shift and true or false,
+		stock_pause = g_VR._stockPause and true or false,
+	}
 end
 
 --- Quit Garry's Mod from a VR menu. QuitNoConfirm does not leave a dialog
@@ -31,9 +45,10 @@ end
 function vrmod.VRUnpauseWorld()
 	if not vrLive() then return end
 	local allow = true
+	local opts = vrmod.UnpausePolicyOpts and vrmod.UnpausePolicyOpts() or { quitting = g_VR._quitting }
 	if vrmod.utils and vrmod.utils.MenuLaw_AllowForceUnpause then
-		allow = vrmod.utils.MenuLaw_AllowForceUnpause({ quitting = g_VR._quitting and true or false })
-	elseif g_VR._quitting then
+		allow = vrmod.utils.MenuLaw_AllowForceUnpause(opts)
+	elseif opts.quitting or opts.shift_down or opts.stock_pause then
 		allow = false
 	end
 	if not allow then return end

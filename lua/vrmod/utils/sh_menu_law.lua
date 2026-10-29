@@ -278,9 +278,21 @@ function vrmod.utils.MenuLaw_QuitArgs()
 	return "gamemenucommand", "QuitNoConfirm"
 end
 
---- Force-unpause / HideGameUI must stand down while a quit is in flight.
+--- Force-unpause / HideGameUI must stand down while a quit is in flight,
+--- while Shift is held, or while the stock pause menu is up.
 function vrmod.utils.MenuLaw_AllowForceUnpause(opts)
 	opts = type(opts) == "table" and opts or {}
 	if opts.quitting then return false end
+	if opts.shift_down then return false end
+	if opts.stock_pause then return false end
 	return true
+end
+
+--- ESC while VR is live.
+--- "desktop" outside VR, "stock" for Shift / an open engine pause, "hub" for the Cube pause.
+function vrmod.utils.MenuLaw_EscAction(opts)
+	opts = type(opts) == "table" and opts or {}
+	if not opts.vr_active then return "desktop" end
+	if opts.shift_down or opts.stock_pause then return "stock" end
+	return "hub"
 end
