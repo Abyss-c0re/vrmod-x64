@@ -1990,6 +1990,100 @@ if CLIENT then
 		end
 	end
 
+	local function vguiClass(panel)
+		if not IsValid(panel) then return "" end
+		local c = panel.ClassName
+		if (not c or c == "") and panel.GetClassName then c = panel:GetClassName() end
+		return string.lower(tostring(c or ""))
+	end
+
+	local function hitDeep(panel, lx, ly, depth)
+		if not IsValid(panel) or (depth or 0) > 24 then return nil end
+		local kids = panel.GetChildren and panel:GetChildren() or nil
+		if not kids then return nil end
+		for i = #kids, 1, -1 do
+			local c = kids[i]
+			if IsValid(c) and (not c.IsVisible or c:IsVisible()) then
+				local cx, cy = c:GetPos()
+				local cw, ch = c:GetWide(), c:GetTall()
+				if lx >= cx and ly >= cy and lx <= cx + cw and ly <= cy + ch then
+					local deeper, dlx, dly = hitDeep(c, lx - cx, ly - cy, (depth or 0) + 1)
+					if deeper then return deeper, dlx, dly end
+					return c, lx - cx, ly - cy
+				end
+			end
+		end
+		return nil
+	end
+
+	local function scrollBarOf(panel)
+		local function isBar(p)
+			local c = vguiClass(p)
+			return c == "dvscrollbar" or c == "dhscrollbar"
+		end
+		if isBar(panel) then return panel end
+		local par = IsValid(panel) and panel.GetParent and panel:GetParent() or nil
+		if IsValid(par) and isBar(par) then return par end
+		return nil
+	end
+
+	--- Direct scrollbar press. DVScrollBar grip drag reads gui.MouseY inside OnCursorMoved,
+	--- and the up/down buttons only DoClick on release-while-hovered. Both miss a laser.
+	--- Returns true when this press was a bar (caller must not also InternalMousePressed).
+	function vrmod.ScrollApplyAt(root, x, y)
+		if not IsValid(root) then return false end
+		local hit, lx, ly = hitDeep(root, x or 0, y or 0, 0)
+		local bar = scrollBarOf(hit)
+		if not IsValid(bar) or bar.Enabled == false then return false end
+		local blx, bly = lx, ly
+		if hit ~= bar then
+			local px, py = hit:GetPos()
+			blx, bly = px + (lx or 0), py + (ly or 0)
+		end
+		local vertical = vguiClass(bar) ~= "dhscrollbar"
+		local btn = 0
+		if not (bar.GetHideButtons and bar:GetHideButtons()) then
+			btn = vertical and (bar:GetWide() or 0) or (bar:GetTall() or 0)
+		end
+		local grip = bar.btnGrip
+		local gripPos = vertical and (IsValid(grip) and grip.y or btn) or (IsValid(grip) and grip.x or btn)
+		local gripSize = 0
+		if IsValid(grip) then
+			gripSize = vertical and grip:GetTall() or grip:GetWide()
+		end
+		local track = vertical and bar:GetTall() or bar:GetWide()
+		local pos = vertical and bly or blx
+		local zone = "page_inc"
+		if vrmod.utils and vrmod.utils.ScrollLaw_Zone then
+			zone = vrmod.utils.ScrollLaw_Zone(pos, gripPos, gripSize, btn, track, vertical)
+		end
+		if zone == "miss" then return false end
+		if zone == "grip" then
+			if bar.Grip then pcall(function() bar:Grip() end) end
+			g_VR._scrollDrag = bar
+			return true
+		end
+		g_VR._scrollDrag = nil
+		if zone == "up" or zone == "left" then
+			if bar.AddScroll then pcall(function() bar:AddScroll(-1) end) end
+			return true
+		end
+		if zone == "down" or zone == "right" then
+			if bar.AddScroll then pcall(function() bar:AddScroll(1) end) end
+			return true
+		end
+		-- Page step. OnMousePressed uses CursorPos, which is the desktop mouse, not the laser.
+		local page = tonumber(bar.BarSize) or 50
+		if page < 1 then page = 50 end
+		local dir = (zone == "page_dec") and -1 or 1
+		if bar.SetScroll and bar.GetScroll then
+			pcall(function() bar:SetScroll(bar:GetScroll() + dir * page) end)
+		elseif bar.AddScroll then
+			pcall(function() bar:AddScroll(dir * 4) end)
+		end
+		return true
+	end
+
 	hook.Add("VRMod_Input", "ui", function(action, pressed)
 		-- Panel grab is handled in cl_input (before entity pickup) via vrmod.TryMenuGrab.
 		-- Also handle here so grab works if default input is disabled / reordered.
@@ -2042,7 +2136,30 @@ if CLIENT then
 			SyncCursorToVR()
 			-- Nudge hover state for Derma under PaintManual
 			if gui.InternalCursorMoved then
-				pcall(gui.InternalCursorMoved, g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+				local sx = (gui.MouseX and gui.MouseX()) or g_VR.menuCursorX or 0
+				local sy = (gui.MouseY and gui.MouseY()) or g_VR.menuCursorY or 0
+				pcall(gui.InternalCursorMoved, sx, sy)
+			end
+
+			local scrollHandled = false
+			if mouseButton == MOUSE_LEFT then
+				local menu = menus[g_VR.menuFocus]
+				local root = menu and menu.panel
+				if pressed and IsValid(root) then
+					scrollHandled = vrmod.ScrollApplyAt(root, menu.lastCursorX or g_VR.menuCursorX or 0, menu.lastCursorY or g_VR.menuCursorY or 0)
+				elseif not pressed then
+					local bar = g_VR._scrollDrag
+					g_VR._scrollDrag = nil
+					if IsValid(bar) then
+						scrollHandled = true
+						if bar.OnMouseReleased then pcall(function() bar:OnMouseReleased(MOUSE_LEFT) end) end
+					end
+				end
+			end
+
+			if scrollHandled then
+				if g_VR.menuFocus then vrmod.MarkMenuDirty(g_VR.menuFocus) end
+				return
 			end
 
 			-- RIGHT CLICK (spawn ContentIcon menu):
@@ -2104,6 +2221,24 @@ if CLIENT then
 	hook.Add("Think", "VRUtil_SyncCursorWhileHeld", function()
 		if not g_VR or not g_VR.menuFocus then return end
 		SyncCursorToVR()
+		local held = heldButtons[MOUSE_LEFT] or heldButtons[MOUSE_RIGHT] or heldButtons[MOUSE_MIDDLE]
+		local pump = true
+		if vrmod.utils and vrmod.utils.ScrollLaw_PumpWhileHeld then
+			pump = vrmod.utils.ScrollLaw_PumpWhileHeld(held)
+		else
+			pump = held and true or false
+		end
+		if not pump then return end
+		-- Grip drag reads gui.Mouse* from OnCursorMoved. SetCursorPos alone never calls it.
+		local sx = (gui.MouseX and gui.MouseX()) or g_VR.menuCursorX or 0
+		local sy = (gui.MouseY and gui.MouseY()) or g_VR.menuCursorY or 0
+		if gui.InternalCursorMoved then
+			pcall(gui.InternalCursorMoved, sx, sy)
+		end
+		local bar = g_VR._scrollDrag
+		if IsValid(bar) and bar.Dragging and bar.OnCursorMoved then
+			pcall(function() bar:OnCursorMoved(sx, sy) end)
+		end
 	end)
 
 	------------------------------------------------------------------------

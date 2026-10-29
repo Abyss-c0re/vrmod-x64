@@ -210,3 +210,30 @@ function vrmod.utils.MenuLaw_KeepShellOnEngineClose(opts)
 	if opts.panel_visible then return true end
 	return false
 end
+
+--- Scrollbar zone along one axis. vertical=true uses up/down names; else left/right.
+--- pos is local to the bar. Returns up|down|left|right|grip|page_dec|page_inc|miss.
+function vrmod.utils.ScrollLaw_Zone(pos, gripPos, gripSize, btn, track, vertical)
+	pos = tonumber(pos) or 0
+	gripPos = tonumber(gripPos) or 0
+	gripSize = math.max(tonumber(gripSize) or 0, 0)
+	btn = math.max(tonumber(btn) or 0, 0)
+	track = tonumber(track) or 0
+	if pos < -0.5 or (track > 0 and pos > track + 0.5) then return "miss" end
+	if btn > 0 and pos < btn then
+		return vertical and "up" or "left"
+	end
+	if btn > 0 and track > 0 and pos > track - btn then
+		return vertical and "down" or "right"
+	end
+	if gripSize > 0 and pos >= gripPos and pos <= gripPos + gripSize then
+		return "grip"
+	end
+	if pos < gripPos then return "page_dec" end
+	return "page_inc"
+end
+
+--- While a mouse button is held, VGUI drag (scrollbar grip) only moves if cursor-moved is pumped.
+function vrmod.utils.ScrollLaw_PumpWhileHeld(held)
+	return held and true or false
+end
