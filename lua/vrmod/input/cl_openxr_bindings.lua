@@ -749,22 +749,68 @@ function vrmod.bindings.Apply(input, nativeChanged, sourcesTable)
 		end
 	end
 
+	local function sourceHasReading(rule)
+		if not rule or type(rule.sources) ~= "table" then return false end
+		for _, id in ipairs(rule.sources) do
+			local s = sourcesTable and sourcesTable[id]
+			if type(s) == "table" then
+				if (tonumber(s.value) or 0) > 0.05 or s.pressed == true then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	local function sourceValue(rule)
+		if not rule or type(rule.sources) ~= "table" then return 0 end
+		local best = 0
+		for _, id in ipairs(rule.sources) do
+			local s = sourcesTable and sourcesTable[id]
+			if type(s) == "table" then
+				local v = tonumber(s.value) or 0
+				if v > best then best = v end
+			end
+		end
+		return best
+	end
+
 	for action, rule in pairs(state.map.actions) do
 		local pressed = false
 		local leaf, isDual = ActiveRuleForMode(rule, driving)
+		local inScope = false
+		local useRule = rule
 		if isDual then
 			-- Dual-set: only the active mode's chord/bind (vehicle Weapon Menu ≠ foot stick)
 			if leaf then
-				pressed = vrmod.bindings.EvalRule(leaf, sourcesTable)
+				inScope = true
+				useRule = leaf
 			end
 		else
 			local rset = rule.set
-			local inScope = (rset == nil) or (rset == "driving" and driving) or (rset == "main" and not driving)
-			if inScope then
-				pressed = vrmod.bindings.EvalRule(rule, sourcesTable)
-			end
-			-- Out-of-scope remaps force false so shared hardware cannot dual-fire
+			inScope = (rset == nil) or (rset == "driving" and driving) or (rset == "main" and not driving)
 		end
+		if inScope then
+			local live = sourceHasReading(useRule)
+			local fromSource = live and vrmod.bindings.EvalRule(useRule, sourcesTable) or false
+			-- Right trigger curls the index via vector1_primaryfire. On Pico the
+			-- rebind source can be a different, unbound handle, so EvalRule stays
+			-- false while the finger moves. The synthesized boolean is the click.
+			if action == "boolean_primaryfire" and vrmod.utils and vrmod.utils.LaserLaw_TriggerClick then
+				pressed = vrmod.utils.LaserLaw_TriggerClick({
+					sources_live = live,
+					source_pressed = fromSource,
+					source_value = sourceValue(useRule),
+					native_pressed = input[action] == true,
+					analog = input.vector1_primaryfire,
+				})
+			elseif live then
+				pressed = fromSource
+			else
+				pressed = input[action] == true
+			end
+		end
+		-- Out-of-scope remaps force false so shared hardware cannot dual-fire
 		input[action] = pressed
 		local prev = state.prev[action]
 		if prev == nil then prev = false end

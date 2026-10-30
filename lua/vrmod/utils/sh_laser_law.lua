@@ -76,6 +76,26 @@ function vrmod.utils.LaserLaw_AllowLaserFromHand(handName, primaryHand)
 	return handName == primaryHand
 end
 
+--- Menu click while the trigger finger is moving.
+--- opts: sources_live (a bound source is actually reporting), source_pressed,
+---       native_pressed (OpenXR already synthesized the boolean from the analog),
+---       analog (vector1_primaryfire, the same value that curls the index).
+--- A dead Pico source must not erase that synthesized click.
+function vrmod.utils.LaserLaw_TriggerClick(opts)
+	opts = type(opts) == "table" and opts or {}
+	if opts.sources_live and opts.source_pressed then return true end
+	if not opts.sources_live then
+		if opts.native_pressed then return true end
+		return (tonumber(opts.analog) or 0) >= 0.55
+	end
+	-- Source handle is "live" but reads empty while the finger analog is pulled.
+	local sourceValue = tonumber(opts.source_value) or 0
+	if (tonumber(opts.analog) or 0) >= 0.55 and sourceValue < 0.05 then
+		return true
+	end
+	return false
+end
+
 --- Wrong-hand primary fire steals menu LMB when primary is the other hand.
 --- e.g. primary=left but action=boolean_primaryfire (right trigger) → steal.
 function vrmod.utils.LaserLaw_IsWrongHandPrimaryClick(action, primaryHand)
