@@ -147,6 +147,14 @@ local function ApplyLocal()
 	local fresh = pose and pose.pos and pose.ang and hmd and hmd.ang
 	if fresh then et.supported = true end
 
+	-- Archived default is 0, so a connected eye tracker stayed off.
+	-- Arm once when a real gaze sample arrives. A later explicit 0 stays off.
+	if fresh and not et.enabled and not g_VR._eyeGazeArmed then
+		g_VR._eyeGazeArmed = true
+		RunConsoleCommand("vrmod_eyetracking", "1")
+		et.enabled = true
+	end
+
 	local was = et.active
 	et.active = et.enabled and fresh and true or false
 	et.openness = nil
