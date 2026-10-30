@@ -1283,6 +1283,8 @@ function Session:_drawTrackers()
 		box(tr.pose_waist, Color(80, 200, 80))
 		box(tr.pose_leftfoot, Color(80, 160, 255))
 		box(tr.pose_rightfoot, Color(255, 160, 80))
+		box(tr.pose_leftankle, Color(80, 220, 255))
+		box(tr.pose_rightankle, Color(255, 200, 80))
 	end
 	if self.laserPickBones and self.hoverBonePos and g_VR.tracking.pose_righthand then
 		local rh = g_VR.tracking.pose_righthand

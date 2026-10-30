@@ -358,8 +358,18 @@ function vrmod_fbt.CalculateBonePositions(ply)
 		stockForegrip = true
 	end
 	local rightHandTargetPos, rightHandTargetAng = frame.righthandPos, frame.righthandAng
-	local leftFootTargetPos, leftFootTargetAng = LocalToWorld(info.leftFootCalibrationPos, info.leftFootCalibrationAng, frame.leftfootPos, frame.leftfootAng)
-	local rightFootTargetPos, rightFootTargetAng = LocalToWorld(info.rightFootCalibrationPos, info.rightFootCalibrationAng, frame.rightfootPos, frame.rightfootAng)
+	-- Ankle trackers drive the foot bones. Fall back to the foot pose when
+	-- the runtime only published a foot (or the ankle sample is the foot).
+	local function legSource(liveName, framePos, frameAng)
+		if ply == LocalPlayer() and g_VR.tracking and g_VR.tracking[liveName] and g_VR.tracking[liveName].pos then
+			return g_VR.tracking[liveName].pos, g_VR.tracking[liveName].ang or Angle()
+		end
+		return framePos, frameAng
+	end
+	local leftSrcPos, leftSrcAng = legSource("pose_leftankle", frame.leftfootPos, frame.leftfootAng)
+	local rightSrcPos, rightSrcAng = legSource("pose_rightankle", frame.rightfootPos, frame.rightfootAng)
+	local leftFootTargetPos, leftFootTargetAng = LocalToWorld(info.leftFootCalibrationPos, info.leftFootCalibrationAng, leftSrcPos, leftSrcAng)
+	local rightFootTargetPos, rightFootTargetAng = LocalToWorld(info.rightFootCalibrationPos, info.rightFootCalibrationAng, rightSrcPos, rightSrcAng)
 	-- Override pelvis
 	boneinfo[boneids.pelvis].overridePos, boneinfo[boneids.pelvis].overrideAng = LocalToWorld(vrmod_fbt.zeroVec, Angle(0, 90, 90), pelvisTargetPos, pelvisTargetAng)
 	-- Spine rotation
@@ -489,8 +499,8 @@ function vrmod_fbt.Calibrate()
 
 		sendBone(boneids.head, g_VR.tracking.hmd)
 		sendBone(boneids.pelvis, g_VR.tracking.pose_waist)
-		sendBone(boneids.leftFoot, g_VR.tracking.pose_leftfoot)
-		sendBone(boneids.rightFoot, g_VR.tracking.pose_rightfoot)
+		sendBone(boneids.leftFoot, g_VR.tracking.pose_leftankle or g_VR.tracking.pose_leftfoot)
+		sendBone(boneids.rightFoot, g_VR.tracking.pose_rightankle or g_VR.tracking.pose_rightfoot)
 		net.SendToServer()
 		-- Cleanup via shared util
 		if vrmod.avatar then vrmod.avatar.Close("fbt_cal") end

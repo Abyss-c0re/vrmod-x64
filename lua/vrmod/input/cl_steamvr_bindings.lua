@@ -60,6 +60,14 @@ g_VR.action_manifest = [[
 			"type": "pose"
 		},
 		{
+			"name": "/actions/base/in/pose_leftankle",
+			"type": "pose"
+		},
+		{
+			"name": "/actions/base/in/pose_rightankle",
+			"type": "pose"
+		},
+		{
 			"name": "/actions/base/in/pose_gaze",
 			"type": "pose"
 		},
