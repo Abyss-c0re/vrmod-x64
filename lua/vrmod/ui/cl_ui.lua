@@ -2092,7 +2092,8 @@ if CLIENT then
 			if vrmod.TryMenuGrab(hand, pressed) then return end
 		end
 
-		if not g_VR.menuFocus and vrmod.MenuUidForClick then
+		-- This frame's laser hit replaces a leftover focus, or the press goes to the wrong surface.
+		if vrmod.MenuUidForClick then
 			local uid = vrmod.MenuUidForClick()
 			if uid then g_VR.menuFocus = uid end
 		end
@@ -2267,7 +2268,16 @@ if CLIENT then
 		local hits = {}
 		for uid, m in pairs(g_VR.menus) do
 			if type(m) == "table" and m.cursorEnabled ~= false and m._hitFrame ~= nil then
-				hits[#hits + 1] = { uid = uid, frame = m._hitFrame, dist = m._hitDist or 0 }
+				local x, y = m._hitX, m._hitY
+				local w, h = tonumber(m.width) or 0, tonumber(m.height) or 0
+				local onSurface = true
+				if x and y and w > 0 and h > 0 then
+					local pad = 24
+					onSurface = x >= -pad and y >= -pad and x <= w + pad and y <= h + pad
+				end
+				if onSurface then
+					hits[#hits + 1] = { uid = uid, frame = m._hitFrame, dist = m._hitDist or 0 }
+				end
 			end
 		end
 		if vrmod.utils and vrmod.utils.MenuLaw_ClickFocus then
@@ -2315,7 +2325,7 @@ if CLIENT then
 		if not vrmod.IsUIFocused() then return false end
 
 		pressed = pressed and true or false
-		if not g_VR.menuFocus and vrmod.MenuUidForClick then
+		if vrmod.MenuUidForClick then
 			local uid = vrmod.MenuUidForClick()
 			if uid then g_VR.menuFocus = uid end
 		end

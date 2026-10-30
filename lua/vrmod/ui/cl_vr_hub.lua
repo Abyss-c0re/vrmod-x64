@@ -400,7 +400,11 @@ function vrmod.VRHub_Open()
 			return
 		end
 		if not (vrmod.IsMenuPrimaryClick and vrmod.IsMenuPrimaryClick(action)) then return end
-		activateAt(g_VR.menuCursorX or 0, g_VR.menuCursorY or 0)
+		if #buttons == 0 then rebuildButtons() end
+		local m = g_VR.menus and g_VR.menus[UID]
+		local mx = (m and (m._hitX or m.lastCursorX)) or g_VR.menuCursorX or 0
+		local my = (m and (m._hitY or m.lastCursorY)) or g_VR.menuCursorY or 0
+		activateAt(mx, my)
 		dirty()
 	end)
 

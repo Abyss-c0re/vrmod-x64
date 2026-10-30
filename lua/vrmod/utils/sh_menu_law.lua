@@ -238,31 +238,36 @@ function vrmod.utils.ScrollLaw_PumpWhileHeld(held)
 	return held and true or false
 end
 
---- Focus for a click. A live focus wins. Otherwise the nearest surface hit this stereo frame
---- or the one before it (input often runs before the draw that assigns menuFocus).
+--- Focus for a click.
+--- A hit on this stereo frame is the surface under the laser and wins over a stored focus.
+--- Stored focus is the fallback when this frame has not hit anything yet.
+--- The previous frame's hit is only used when there is no stored focus (input before draw).
 function vrmod.utils.MenuLaw_ClickFocus(opts)
 	opts = type(opts) == "table" and opts or {}
-	if opts.focus and opts.focus ~= false and tostring(opts.focus) ~= "" then
-		return opts.focus
-	end
 	local sf = tonumber(opts.stereo_frame) or 0
-	local best, bestD
+	local bestNow, bestNowD, bestPrev, bestPrevD
 	local hits = opts.hits
-	if type(hits) ~= "table" then return nil end
-	for i = 1, #hits do
-		local h = hits[i]
-		if type(h) == "table" and h.uid and h.frame ~= nil then
-			local age = sf - (tonumber(h.frame) or sf)
-			if age >= 0 and age <= 1 then
+	if type(hits) == "table" then
+		for i = 1, #hits do
+			local h = hits[i]
+			if type(h) == "table" and h.uid and h.frame ~= nil then
+				local age = sf - (tonumber(h.frame) or sf)
 				local d = tonumber(h.dist) or 0
-				if not best or d < bestD then
-					best = h.uid
-					bestD = d
+				if age == 0 and (not bestNow or d < bestNowD) then
+					bestNow = h.uid
+					bestNowD = d
+				elseif age == 1 and (not bestPrev or d < bestPrevD) then
+					bestPrev = h.uid
+					bestPrevD = d
 				end
 			end
 		end
 	end
-	return best
+	if bestNow then return bestNow end
+	if opts.focus and opts.focus ~= false and tostring(opts.focus) ~= "" then
+		return opts.focus
+	end
+	return bestPrev
 end
 
 --- Keep the desktop clicker while a Derma panel is the focused VR surface.
