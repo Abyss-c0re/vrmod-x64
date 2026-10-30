@@ -2138,6 +2138,19 @@ if CLIENT then
 
 		if mouseButton then
 			heldButtons[mouseButton] = pressed
+			-- Unpause turns the clicker off between presses. InternalMousePressed
+			-- is ignored until it is on, so the press itself has to turn it back on.
+			local menuForClick = menus[g_VR.menuFocus]
+			local dermaClick = menuForClick and IsValid(menuForClick.panel)
+			local keepClick = dermaClick and true or false
+			if vrmod.utils and vrmod.utils.MenuLaw_KeepScreenClicker then
+				keepClick = vrmod.utils.MenuLaw_KeepScreenClicker({
+					derma_focused = dermaClick and true or false,
+				})
+			end
+			if keepClick and gui and gui.EnableScreenClicker then
+				pcall(function() gui.EnableScreenClicker(true) end)
+			end
 			SyncCursorToVR()
 			-- Nudge hover state for Derma under PaintManual
 			if gui.InternalCursorMoved then
