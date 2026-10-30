@@ -75,7 +75,7 @@ vrmod.SettingsCatalog = {
 		icon = "icon16/keyboard.png",
 		rows = {
 			{ kind = "help", label = "Replaces SteamVR binding UI — rebind here, not in SteamVR" },
-			{ kind = "help", label = "Quest 3 / Touch defaults active out of the box" },
+			{ kind = "help", label = "Quest 3 and Pico Neo 3 profiles. The headset path picks one." },
 			{ kind = "action", label = "Controller rebind", action_id = "open_controller_bindings" },
 			{ kind = "help", label = "On foot / Vehicle · Bind · Chord · conflicts" },
 			{ kind = "help", label = "Custom named console actions (desktop text edit)" },

@@ -162,3 +162,85 @@ function vrmod.utils.BindingsLaw_IsSilentFailRisk(decision)
 	if type(decision) ~= "table" then return true end
 	return decision.risk == "silent_fail" or (not decision.ok and decision.toast_shown == false)
 end
+
+-- Controller profiles. Quest 3 gold keeps thumbrest chords. Pico Neo 3 has no
+-- thumbrest, so those chords move onto buttons the Neo 3 actually has.
+-- An empty path, or a bare hardware id such as "meta_quest_touch_pro", is not
+-- a switch: only a real OpenXR interaction-profile path selects a profile.
+
+function vrmod.utils.BindingsLaw_KnownProfile(id)
+	id = tostring(id or "")
+	return id == "quest3_touch" or id == "pico_neo3"
+end
+
+function vrmod.utils.BindingsLaw_ProfileLabel(id)
+	if tostring(id or "") == "pico_neo3" then return "Pico Neo 3" end
+	return "Quest 3"
+end
+
+function vrmod.utils.BindingsLaw_ProfileId(path)
+	path = string.lower(tostring(path or ""))
+	if path == "" or path == "none" or path == "?" then return nil end
+	if not string.find(path, "/", 1, true) then return nil end
+	if string.find(path, "pico", 1, true) or string.find(path, "bytedance", 1, true) then
+		return "pico_neo3"
+	end
+	if string.find(path, "oculus", 1, true)
+		or string.find(path, "meta", 1, true)
+		or string.find(path, "facebook", 1, true)
+		or string.find(path, "touch_controller", 1, true) then
+		return "quest3_touch"
+	end
+	return nil
+end
+
+--- Pico replacements for Quest chords that require a thumbrest.
+--- Right grip + right stick click stays alt turret, so the right turn signal
+--- is grip + trigger instead of that same chord.
+function vrmod.utils.BindingsLaw_PicoOverrides()
+	return {
+		boolean_teleport = {
+			sources = { "left_stick_click", "right_stick_click" },
+			mode = "all",
+			set = "main",
+		},
+		boolean_reload = {
+			sources = { "right_a", "right_b" },
+			mode = "all",
+		},
+		boolean_switch_weapon = {
+			sources = { "left_squeeze", "right_squeeze" },
+			mode = "all",
+			set = "driving",
+		},
+		boolean_signal_left = {
+			sources = { "left_squeeze", "left_stick_click" },
+			mode = "all",
+			set = "driving",
+		},
+		boolean_signal_right = {
+			sources = { "right_squeeze", "right_trigger" },
+			mode = "all",
+			set = "driving",
+		},
+	}
+end
+
+-- Eyes and full-body poses inside gVRMod are OpenXR only. Pico's private
+-- eye and body calls stay on the WiVRn client, which publishes these APIs.
+
+function vrmod.utils.TrackingLaw_EyeApi()
+	return "XR_EXT_eye_gaze_interaction"
+end
+
+function vrmod.utils.TrackingLaw_BodyApi()
+	return "XR_FB_body_tracking"
+end
+
+function vrmod.utils.TrackingLaw_FullBodyApi()
+	return "XR_META_body_tracking_full_body"
+end
+
+function vrmod.utils.TrackingLaw_AllowVendorInGmod()
+	return false
+end

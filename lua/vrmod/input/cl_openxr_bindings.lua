@@ -3,14 +3,12 @@
 -- Analogs (sticks/triggers as vector1/2) stay on native OpenXR / OpenVR actions.
 --
 -- =============================================================================
--- QUEST 3 GOLD DEFAULTS — source of truth (do not change without headset smoke)
+-- QUEST 3 GOLD — frozen profile. Pico Neo 3 is a second profile.
 -- =============================================================================
--- DefaultMap() freezes the battle-tested Quest 3 / Oculus Touch scheme used on
--- WiVRn + Monado (mirrors vrmod_bindings_oculus_touch.txt + C++ g_ctrlSources).
--- Fresh install / ResetDefaults must feel identical to this map.
--- Interaction profiles: oculus/touch_controller, facebook/touch_controller_pro,
--- meta/touch_controller_plus (see gVRMod/src/input/xr_input.cpp).
--- Rebind UI (VR hand panel / Derma) is optional power-user tooling on top of this gold.
+-- DefaultMap() is the Quest 3 / Oculus Touch scheme (thumbrest chords included).
+-- PicoMap() is that map with thumbrest chords moved onto Neo 3 buttons.
+-- The live OpenXR interaction profile picks which one Apply() uses.
+-- A version-3 file is the current Quest 3 map and is stored under that profile.
 -- =============================================================================
 
 if SERVER then return end
@@ -26,7 +24,7 @@ local THRESHOLD = 0.55
 -- system uses this so vehicle Weapon Menu can be a chord without fighting turret stick-click.
 local function DefaultMap()
 	return {
-		version = 3,
+		version = 4,
 		preset = "quest3_touch",
 		-- mode "any" = OR of sources; "all" = AND (chord)
 		actions = {
@@ -120,8 +118,56 @@ local function DeepCopy(t)
 	return c
 end
 
-function vrmod.bindings.GetDefaults()
+local function KnownProfile(id)
+	if vrmod.utils and vrmod.utils.BindingsLaw_KnownProfile then
+		return vrmod.utils.BindingsLaw_KnownProfile(id)
+	end
+	return id == "quest3_touch" or id == "pico_neo3"
+end
+
+local function CopySources(src)
+	local out = {}
+	if type(src) ~= "table" then return out end
+	for i, id in ipairs(src) do out[i] = id end
+	return out
+end
+
+--- Quest 3 gold with the thumbrest chords replaced. Shared actions stay.
+local function PicoMap()
+	local m = DefaultMap()
+	m.version = 4
+	m.preset = "pico_neo3"
+	local over = (vrmod.utils and vrmod.utils.BindingsLaw_PicoOverrides and vrmod.utils.BindingsLaw_PicoOverrides()) or {}
+	for action, rule in pairs(over) do
+		local leaf = {
+			sources = CopySources(rule.sources),
+			mode = (rule.mode == "all") and "all" or "any",
+		}
+		if rule.set == "main" or rule.set == "driving" then
+			leaf.set = rule.set
+		end
+		m.actions[action] = leaf
+	end
+	return m
+end
+
+local function GoldMap(id)
+	if id == "pico_neo3" then return PicoMap() end
 	return DefaultMap()
+end
+
+function vrmod.bindings.GetDefaults()
+	local id = state.map and state.map.preset or "quest3_touch"
+	return GoldMap(id)
+end
+
+function vrmod.bindings.ProfileLabel()
+	local id = state.map and state.map.preset or "quest3_touch"
+	if vrmod.utils and vrmod.utils.BindingsLaw_ProfileLabel then
+		return vrmod.utils.BindingsLaw_ProfileLabel(id)
+	end
+	if id == "pico_neo3" then return "Pico Neo 3" end
+	return "Quest 3"
 end
 
 function vrmod.bindings.GetMap()
@@ -205,10 +251,11 @@ local function ActiveRuleForMode(rule, driving)
 	return rule, false
 end
 
---- Restore one action to Quest gold default (or clear if no default).
+--- Restore one action to the active profile's gold (or clear if it has none).
 function vrmod.bindings.RestoreActionDefault(action)
 	if not action or action == "" then return end
-	local def = DefaultMap().actions[action]
+	local id = state.map and state.map.preset or "quest3_touch"
+	local def = GoldMap(id).actions[action]
 	if def then
 		state.map.actions[action] = NormalizeStoredRule(action, def)
 		state.prev[action] = nil
@@ -217,24 +264,15 @@ function vrmod.bindings.RestoreActionDefault(action)
 	end
 end
 
-function vrmod.bindings.Load()
-	state.map = DefaultMap()
-	if not file.Exists(BIND_FILE, "DATA") then return state.map end
-	local raw = file.Read(BIND_FILE, "DATA")
-	if not raw or raw == "" then return state.map end
-	local ok, data = pcall(util.JSONToTable, raw)
-	if not ok or type(data) ~= "table" or type(data.actions) ~= "table" then
-		vrmod.logger.Warn("OpenXR bindings file corrupt; using defaults")
-		return state.map
-	end
-	-- Merge user actions over defaults so new defaults appear after updates
-	local merged = DefaultMap()
-	for action, rule in pairs(data.actions) do
+local function MergeActions(gold, savedActions)
+	local merged = DeepCopy(gold)
+	if type(savedActions) ~= "table" then return merged end
+	for action, rule in pairs(savedActions) do
 		local norm = NormalizeStoredRule(action, rule)
 		if norm and (norm.sources[1] or (norm.sets and (norm.sets.main or norm.sets.driving))) then
 			-- changeweapon: ensure dual-set; upgrade flaky grip+Y vehicle chord → left_menu
 			if action == "boolean_changeweapon" then
-				local gold = DefaultMap().actions.boolean_changeweapon
+				local g = gold.actions.boolean_changeweapon
 				norm.sets = norm.sets or {}
 				if not norm.sets.main and norm.sources[1] then
 					norm.sets.main = { sources = norm.sources, mode = norm.mode }
@@ -244,32 +282,114 @@ function vrmod.bindings.Load()
 					and (table.HasValue(d.sources, "right_squeeze") or table.HasValue(d.sources, "left_squeeze"))
 					and table.HasValue(d.sources, "left_y")
 				if not d or flaky then
-					norm.sets.driving = gold.sets and CopyRuleLeaf(gold.sets.driving) or { sources = { "left_menu" }, mode = "any" }
+					norm.sets.driving = g and g.sets and CopyRuleLeaf(g.sets.driving) or { sources = { "left_menu" }, mode = "any" }
 				end
 				norm.set = nil
 			end
 			merged.actions[action] = norm
 		end
 	end
-	state.map = merged
+	merged.version = 4
+	merged.preset = gold.preset
+	return merged
+end
+
+local function ActionsOf(node)
+	if type(node) ~= "table" then return nil end
+	if type(node.actions) == "table" then return node.actions end
+	return node
+end
+
+local function EnsureProfiles()
+	state.profiles = state.profiles or {}
+	if type(state.profiles.quest3_touch) ~= "table" or type(state.profiles.quest3_touch.actions) ~= "table" then
+		state.profiles.quest3_touch = DefaultMap()
+	end
+	if type(state.profiles.pico_neo3) ~= "table" or type(state.profiles.pico_neo3.actions) ~= "table" then
+		state.profiles.pico_neo3 = PicoMap()
+	end
+end
+
+function vrmod.bindings.Load()
+	state.profiles = {
+		quest3_touch = DefaultMap(),
+		pico_neo3 = PicoMap(),
+	}
+	state.map = DeepCopy(state.profiles.quest3_touch)
 	state.prev = {}
-	vrmod.logger.Info("Loaded OpenXR controller bindings from %s", BIND_FILE)
+	if not file.Exists(BIND_FILE, "DATA") then return state.map end
+	local raw = file.Read(BIND_FILE, "DATA")
+	if not raw or raw == "" then return state.map end
+	local ok, data = pcall(util.JSONToTable, raw)
+	if not ok or type(data) ~= "table"
+		or (type(data.actions) ~= "table" and type(data.profiles) ~= "table") then
+		vrmod.logger.Warn("OpenXR bindings file corrupt; using defaults")
+		return state.map
+	end
+	local hasProfiles = type(data.profiles) == "table"
+	local fileVersion = tonumber(data.version) or 0
+	if hasProfiles then
+		local questSaved = ActionsOf(data.profiles.quest3_touch)
+		if questSaved then
+			state.profiles.quest3_touch = MergeActions(DefaultMap(), questSaved)
+		end
+		local picoSaved = ActionsOf(data.profiles.pico_neo3)
+		if picoSaved then
+			state.profiles.pico_neo3 = MergeActions(PicoMap(), picoSaved)
+		end
+		local id = KnownProfile(data.preset) and data.preset or "quest3_touch"
+		-- Top-level actions are the active profile (the launcher edits this copy).
+		if type(data.actions) == "table" then
+			state.profiles[id] = MergeActions(GoldMap(id), data.actions)
+		end
+		state.map = DeepCopy(state.profiles[id])
+		state.map.preset = id
+	else
+		-- Version 3 and older: this file is the Quest 3 profile.
+		if type(data.actions) == "table" then
+			state.profiles.quest3_touch = MergeActions(DefaultMap(), data.actions)
+		end
+		state.profiles.pico_neo3 = PicoMap()
+		state.map = DeepCopy(state.profiles.quest3_touch)
+		state.map.preset = "quest3_touch"
+	end
+	state.map.version = 4
+	state.prev = {}
+	if not hasProfiles or fileVersion < 4 then
+		vrmod.bindings.Save()
+		vrmod.logger.Info("Saved current bindings as the Quest 3 profile and created Pico Neo 3")
+	else
+		vrmod.logger.Info("Loaded OpenXR controller profile %s from %s", state.map.preset, BIND_FILE)
+	end
 	return state.map
 end
 
 function vrmod.bindings.Save()
+	EnsureProfiles()
+	local id = state.map and state.map.preset or "quest3_touch"
+	if not KnownProfile(id) then id = "quest3_touch" end
+	state.map.preset = id
+	state.map.version = 4
+	state.profiles[id] = DeepCopy(state.map)
+	local blob = {
+		version = 4,
+		preset = id,
+		actions = state.map.actions,
+		profiles = {
+			quest3_touch = { actions = state.profiles.quest3_touch.actions },
+			pico_neo3 = { actions = state.profiles.pico_neo3.actions },
+		},
+	}
 	file.CreateDir("vrmod")
-	file.Write(BIND_FILE, util.TableToJSON(state.map, true))
-	vrmod.logger.Info("Saved OpenXR controller bindings to %s", BIND_FILE)
+	file.Write(BIND_FILE, util.TableToJSON(blob, true))
+	vrmod.logger.Info("Saved OpenXR controller bindings (%s) to %s", id, BIND_FILE)
 end
 
 function vrmod.bindings.ResetDefaults()
-	-- Same Quest 3 gold as C++ Bindings_DefaultMap / launcher RESET button.
-	-- Writes garrysmod/data/vrmod/vrmod_openxr_bindings.json (shared with launcher).
-	state.map = DefaultMap()
-	state.map.preset = "quest3_touch"
-	state.prev = {}
-	-- Best-effort backup of previous user file
+	-- Resets the active profile only. The other profile stays on disk.
+	EnsureProfiles()
+	local id = state.map and state.map.preset or "quest3_touch"
+	if not KnownProfile(id) then id = "quest3_touch" end
 	if file.Exists(BIND_FILE, "DATA") then
 		local raw = file.Read(BIND_FILE, "DATA")
 		if raw and #raw > 0 then
@@ -277,8 +397,46 @@ function vrmod.bindings.ResetDefaults()
 			file.Write("vrmod/vrmod_openxr_bindings.json.bak." .. stamp, raw)
 		end
 	end
+	state.profiles[id] = GoldMap(id)
+	state.map = DeepCopy(state.profiles[id])
+	state.prev = {}
 	vrmod.bindings.Save()
-	vrmod.logger.Info("OpenXR bindings reset to Quest 3 gold (%s)", BIND_FILE)
+	vrmod.logger.Info("OpenXR bindings reset to %s gold (%s)", id, BIND_FILE)
+end
+
+--- Switch the live map. Saves once so the launcher sees the same profile.
+function vrmod.bindings.UseProfile(id)
+	if not KnownProfile(id) then return false end
+	EnsureProfiles()
+	local cur = state.map and state.map.preset or "quest3_touch"
+	if cur == id then return false end
+	state.profiles[cur] = DeepCopy(state.map)
+	state.map = DeepCopy(state.profiles[id] or GoldMap(id))
+	state.map.preset = id
+	state.map.version = 4
+	state.profiles[id] = DeepCopy(state.map)
+	state.prev = {}
+	vrmod.bindings.Save()
+	vrmod.logger.Info("OpenXR controller profile %s", id)
+	return true
+end
+
+--- Read the OpenXR interaction profile. A missing or non-path value does not switch.
+function vrmod.bindings.SyncDetectedProfile()
+	local path = ""
+	if type(VRMOD_GetInteractionProfile) == "function" then
+		local ok, p = pcall(VRMOD_GetInteractionProfile)
+		if ok and type(p) == "string" then path = p end
+	end
+	if path == "" and type(VRMOD_GetTrackedDeviceNames) == "function" then
+		local ok, names = pcall(VRMOD_GetTrackedDeviceNames)
+		if ok and type(names) == "table" and type(names[1]) == "string" then
+			path = names[1]
+		end
+	end
+	local id = vrmod.utils and vrmod.utils.BindingsLaw_ProfileId and vrmod.utils.BindingsLaw_ProfileId(path)
+	if not id then return false end
+	return vrmod.bindings.UseProfile(id)
 end
 
 --- Dedupe sources, drop empties, stable order.
@@ -700,6 +858,10 @@ end
 function vrmod.bindings.Apply(input, nativeChanged, sourcesTable)
 	input = input or {}
 	nativeChanged = type(nativeChanged) == "table" and nativeChanged or {}
+	-- Headset path selects Quest 3 or Pico. Empty / unknown does not switch.
+	if vrmod.bindings.SyncDetectedProfile then
+		vrmod.bindings.SyncDetectedProfile()
+	end
 	if not state.enabled or not sourcesTable then
 		return input, nativeChanged
 	end

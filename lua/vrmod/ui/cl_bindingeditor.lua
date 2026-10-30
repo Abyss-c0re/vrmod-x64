@@ -208,7 +208,8 @@ concommand.Add("vrmod_bindingeditor", function()
 
 	local frame = vgui.Create("DFrame")
 	frame:SetSize(660, 600)
-	frame:SetTitle("Controller Bindings — Quest 3 defaults (SteamVR-style)")
+	local profileLabel = (vrmod.bindings.ProfileLabel and vrmod.bindings.ProfileLabel()) or "Quest 3"
+	frame:SetTitle("Controller Bindings — " .. profileLabel)
 	frame:Center()
 	frame:MakePopup()
 	function frame:OnClose()
@@ -224,7 +225,7 @@ concommand.Add("vrmod_bindingeditor", function()
 	help:SetPos(10, 28)
 	help:SetSize(640, 36)
 	help:SetWrap(true)
-	help:SetText("Bind = press one button. Chord = hold 2+ buttons steady for 3 seconds (saves auto). Cancel aborts. Def = Quest default. On foot / Vehicle sets. Red = hard conflict.")
+	help:SetText("Bind = press one button. Chord = hold 2+ buttons steady for 3 seconds (saves auto). Cancel aborts. Def = " .. profileLabel .. " default. On foot / Vehicle sets. Red = hard conflict.")
 
 	-- Action-set tabs (SteamVR main / driving)
 	local tabBar = vgui.Create("DPanel", frame)

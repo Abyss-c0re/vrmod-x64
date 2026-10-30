@@ -242,7 +242,8 @@ local function paint()
 	local mx, my = g_VR.menuCursorX or -1, g_VR.menuCursorY or -1
 	rebuildButtons()
 
-	local sub = "Replaces SteamVR bind UI · Quest 3 defaults"
+	local profileLabel = (vrmod.bindings and vrmod.bindings.ProfileLabel and vrmod.bindings.ProfileLabel()) or "Quest 3"
+	local sub = "Profile · " .. profileLabel
 	if listen then
 		sub = listen.chord and "CHORD: hold buttons…" or "BIND: press button…"
 	end
@@ -433,7 +434,8 @@ local function activateAt(mx, my)
 			elseif btn.kind == "reset" then
 				StopListen()
 				vrmod.bindings.ResetDefaults()
-				SetStatus("All → Quest 3 defaults", 3)
+				local profileLabel = (vrmod.bindings.ProfileLabel and vrmod.bindings.ProfileLabel()) or "Quest 3"
+				SetStatus("All → " .. profileLabel .. " defaults", 3)
 				return
 			elseif btn.kind == "save" then
 				vrmod.bindings.Save()
