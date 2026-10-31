@@ -1686,6 +1686,8 @@ if CLIENT then
 			for k, val in pairs(calc) do c[k] = val end
 			c.submit_u0, c.submit_u1 = eye.submit_u0, eye.submit_u1
 			c.submit_v0, c.submit_v1 = eye.submit_v0, eye.submit_v1
+			c.fov = eye.fov
+			c.aspectratio = eye.aspectratio
 			return c
 		end
 		local tr = g_VR.tracking

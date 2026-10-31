@@ -111,6 +111,29 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
             and tonumber(calc.submit_v0) and tonumber(calc.submit_v1)
     end
 
+    -- Rigid stereo paints both eyes at max(fov). A crop built for the narrower
+    -- eye's own frustum misses that wider image. Rebase U onto the shared half-angle.
+    local function rebaseHorizontal(a, b)
+        if not (hasAsym(a) and hasAsym(b)) then return end
+        local function tans(calc)
+            local fov = tonumber(calc.fov)
+            if not fov or fov < 1 then return nil end
+            local h = math.tan(math.rad(fov) * 0.5)
+            local su0, su1 = tonumber(calc.submit_u0), tonumber(calc.submit_u1)
+            return h * (2 * su0 - 1), h * (2 * su1 - 1), h
+        end
+        local aL, aR, ha = tans(a)
+        local bL, bR, hb = tans(b)
+        if not aL or not bL then return end
+        local H = math.max(ha, hb)
+        if H < 1e-6 then return end
+        a.submit_u0 = (aL + H) / (2 * H)
+        a.submit_u1 = (aR + H) / (2 * H)
+        b.submit_u0 = (bL + H) / (2 * H)
+        b.submit_u1 = (bR + H) / (2 * H)
+    end
+    rebaseHorizontal(leftCalc, rightCalc)
+
     -- OpenXR layer FOV is the real asymmetric frustum. Each SBS half is a
     -- symmetric overrender. The blit must take submit_u/v or the lens maps
     -- the wrong rect and the world swims when the headset yaws.
