@@ -43,6 +43,7 @@ if SERVER then
     util.AddNetworkString("ChangeWeapon")
     util.AddNetworkString("DropWeapon")
     util.AddNetworkString("SelectEmptyWeapon")
+    util.AddNetworkString("vrmod_arcvr_restore")
     net.Receive("ChangeWeapon", function(_, ply)
         local weaponClass = net.ReadString()
         if weaponClass and isstring(weaponClass) then ply:SelectWeapon(weaponClass) end
@@ -136,12 +137,23 @@ if SERVER then
         end
 
         -- Prefer the client's live mag. Server fields lag rack/chamber.
+        -- If the client copy lost the mag id, keep the server mag id.
         local avrSnapshot
         if dropAsWeapon and (wep.ArcticVR or clientSnap) then
-            if clientSnap then
-                avrSnapshot = clientSnap
-            elseif vrmod.utils and vrmod.utils.ArcVrDrop_CopyState then
-                avrSnapshot = vrmod.utils.ArcVrDrop_CopyState(wep)
+            local serverSnap = (wep.ArcticVR and vrmod.utils and vrmod.utils.ArcVrDrop_CopyState)
+                and vrmod.utils.ArcVrDrop_CopyState(wep) or nil
+            if clientSnap and serverSnap and not clientSnap.Magazine and serverSnap.Magazine then
+                clientSnap.Magazine = serverSnap.Magazine
+                if (clientSnap.LoadedRounds or 0) == 0 then
+                    clientSnap.LoadedRounds = serverSnap.LoadedRounds
+                end
+            end
+            avrSnapshot = clientSnap or serverSnap
+            -- Rounds survived but the id did not. Detachable guns use DefaultMagazine.
+            if avrSnapshot and not avrSnapshot.Magazine and not wep.InternalMagazine
+                and (avrSnapshot.LoadedRounds or 0) > 0
+                and type(wep.DefaultMagazine) == "string" and wep.DefaultMagazine ~= "" then
+                avrSnapshot.Magazine = wep.DefaultMagazine
             end
         end
 
@@ -159,15 +171,6 @@ if SERVER then
         if avrSnapshot and vrmod.utils and vrmod.utils.ArcVrDrop_ApplyState then
             vrmod.utils.ArcVrDrop_ApplyState(dropEnt, avrSnapshot)
             dropEnt.ArcticVR = true
-            -- Broadcast after this DropWeapon receive returns. A nested
-            -- net.Start here corrupts the message. No owner, so justowner
-            -- must be false or SendWeapon returns immediately.
-            local broadcastEnt = dropEnt
-            timer.Simple(0, function()
-                if not IsValid(broadcastEnt) or not broadcastEnt.SendWeapon then return end
-                if not broadcastEnt.Attachments then return end
-                broadcastEnt:SendWeapon(false, true)
-            end)
         elseif avrSnapshot then
             dropEnt.ArcticVR = true
             dropEnt.avrSnapshot = avrSnapshot
@@ -239,5 +242,48 @@ if CLIENT then
             if snap then WriteClientArcSnap(snap) end
             net.SendToServer()
         end
+    end)
+
+    -- Equipped gun: write the dropped mag onto the client weapon and build the mesh.
+    -- SendWeapon's attachment loop can fail before it ever writes Magazine.
+    local pendingRestore = nil
+    local function applyRestore(payload)
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not payload then return false end
+        local wep = ply:GetWeapon(payload.class)
+        if not IsValid(wep) or not wep.ArcticVR then return false end
+        wep.Magazine = payload.mag
+        wep.LoadedRounds = payload.loaded
+        wep.Chambered = payload.chambered
+        wep.EmptyChambered = payload.empty
+        wep.SlideLockedBack = payload.slide
+        wep.Firemode = payload.firemode
+        if wep.SlideLockedBack and wep.SlideLockbackAmount then
+            wep.SlidePos = wep.SlideLockbackAmount
+        end
+        if payload.mag and wep.EnsureCSMagazine then
+            return wep:EnsureCSMagazine() and true or false
+        end
+        if wep.EnsureCSMagazine then wep:EnsureCSMagazine() end
+        return true
+    end
+
+    net.Receive("vrmod_arcvr_restore", function()
+        local mag = net.ReadString()
+        pendingRestore = {
+            class = net.ReadString(),
+            mag = (mag ~= "" and mag) or nil,
+            loaded = net.ReadUInt(16),
+            chambered = net.ReadUInt(8),
+            empty = net.ReadUInt(8),
+            slide = net.ReadBool(),
+            firemode = net.ReadInt(8),
+        }
+        if applyRestore(pendingRestore) then pendingRestore = nil end
+    end)
+
+    hook.Add("VRMod_PreRender", "vrmod_arcvr_restore_mag", function(eye)
+        if eye == "right" or not pendingRestore then return end
+        if applyRestore(pendingRestore) then pendingRestore = nil end
     end)
 end

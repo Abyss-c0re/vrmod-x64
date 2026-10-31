@@ -52,6 +52,19 @@ function vrmod.utils.ArcVrDrop_ShouldRefillClip(wep)
 	return true
 end
 
+--- Magazine id. ArcVR stores a string, or the mag entity (MagID / Name).
+local function mag_id(mag)
+	if type(mag) == "string" then
+		if mag == "" then return nil end
+		return mag
+	end
+	if type(mag) ~= "table" then return nil end
+	local id = mag.MagID
+	if type(id) ~= "string" or id == "" then id = mag.Name end
+	if type(id) ~= "string" or id == "" then return nil end
+	return id
+end
+
 function vrmod.utils.ArcVrDrop_CopyState(wep)
 	if type(wep) ~= "table" or not wep.ArcticVR then return nil end
 	local atts = {}
@@ -63,8 +76,7 @@ function vrmod.utils.ArcVrDrop_CopyState(wep)
 			end
 		end
 	end
-	local mag = wep.Magazine
-	if type(mag) ~= "string" or mag == "" then mag = nil end
+	local mag = mag_id(wep.Magazine)
 	return {
 		LoadedRounds = clamp_int(wep.LoadedRounds, 0, 65535),
 		Chambered = clamp_int(wep.Chambered, 0, 255),
@@ -78,8 +90,7 @@ end
 
 function vrmod.utils.ArcVrDrop_CloneState(snap)
 	if type(snap) ~= "table" then return nil end
-	local mag = snap.Magazine
-	if type(mag) ~= "string" or mag == "" then mag = nil end
+	local mag = mag_id(snap.Magazine)
 	return {
 		LoadedRounds = clamp_int(snap.LoadedRounds, 0, 65535),
 		Chambered = clamp_int(snap.Chambered, 0, 255),

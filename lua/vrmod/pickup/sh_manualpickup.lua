@@ -70,6 +70,21 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 
 	local function push()
 		if not IsValid(ply) or not snap then return end
+		do
+			local mag = snap.Magazine
+			if type(mag) ~= "string" then mag = "" end
+			local firemode = math.floor(tonumber(snap.Firemode) or 0)
+			if firemode < -128 then firemode = -128 elseif firemode > 127 then firemode = 127 end
+			net.Start("vrmod_arcvr_restore")
+			net.WriteString(mag)
+			net.WriteString(wepClass)
+			net.WriteUInt(math.min(math.floor(tonumber(snap.LoadedRounds) or 0), 65535), 16)
+			net.WriteUInt(math.min(math.floor(tonumber(snap.Chambered) or 0), 255), 8)
+			net.WriteUInt(math.min(math.floor(tonumber(snap.EmptyChambered) or 0), 255), 8)
+			net.WriteBool(snap.SlideLockedBack and true or false)
+			net.WriteInt(firemode, 8)
+			net.Send(ply)
+		end
 		local newWep = ply:GetWeapon(wepClass)
 		if not IsValid(newWep) or not newWep.ArcticVR then return end
 		if U and U.ArcVrDrop_ApplyState then
@@ -79,7 +94,7 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 			newWep.Chambered = snap.Chambered
 			newWep.Magazine = snap.Magazine
 		end
-		if newWep.SendWeapon then newWep:SendWeapon(true, true) end
+		if newWep.SendWeapon then pcall(newWep.SendWeapon, newWep, true, true) end
 	end
 
 	if ply:HasWeapon(wepClass) then
