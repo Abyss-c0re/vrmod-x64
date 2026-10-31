@@ -400,9 +400,6 @@ if CLIENT then
 	-- Stereo SoT (one public view, dual eye energy):
 	--   g_VR.view     = cyclopean public SoT (origin/angles/znear for consumers)
 	--   viewLeft/Right= private eye viewsetups (no realloc, no dual gun truth)
-	--   Late latch refreshes the HMD camera immediately before stereo paint.
-	--   The layer locates again at submit. Putting the pre-render pose on the
-	--   layer makes WiVRn reproject across both eyes, and the turn flashes.
 	--   PreRender(eye) → RealRenderView(eye) → ClearDepth → other eye → submit
 	-- Integrity:
 	--   • Never nil-out hmd / pose_lefthand / pose_righthand mid-session
@@ -610,7 +607,7 @@ if CLIENT then
 	local function UpdateTracking()
 		local smoothingFactor = vrmod.SMOOTHING_FACTOR
 		local maxPosDeltaSqr = 100
-		-- Frame order: WaitGetPoses → gameplay → late head camera → render → Submit(fresh locate).
+		-- Frame order (OpenVR): WaitGetPoses → render → Submit. Never invert.
 		if isfunction(VRMOD_UpdatePosesAndActions) then
 			pcall(VRMOD_UpdatePosesAndActions)
 		end
@@ -868,75 +865,6 @@ if CLIENT then
 		end
 
 		g_VR.view.angles = finalAng
-	end
-
-	-- Seated + crouch Z is applied in VRMod_Tracking, which already ran.
-	-- Late latch rewrites the head from the device, then puts that Z back.
-	-- Do not re-run the tracking hook — it would add the offset to the hands again.
-	local function HeadTrackingZOffset()
-		local z = tonumber(g_VR.crouchOffsetZ) or 0
-		local seated = GetConVar and GetConVar("vrmod_seated")
-		if seated and seated.GetBool and seated:GetBool() then
-			local off = GetConVar("vrmod_seatedoffset")
-			z = z + (off and off:GetFloat() or 0)
-		end
-		return z
-	end
-
-	local function LatchHeadForStereo()
-		if not isfunction(VRMOD_LatchRenderViews) then return false end
-		local ok, latched = pcall(VRMOD_LatchRenderViews)
-		if not ok or not latched then return false end
-		if not isfunction(VRMOD_GetPoses) then return false end
-		-- Head only. A second locate of every hand action here delays the eyes.
-		local rawPoses = VRMOD_GetPoses(true)
-		if not istable(rawPoses) then return false end
-		local v = rawPoses.hmd
-		if not v or not v.pos or not v.ang then return false end
-		if not g_VR.origin or not g_VR.originAngle then return false end
-
-		local scale = g_VR.scale or 1
-		local pos, ang = LocalToWorld(v.pos * scale, v.ang, g_VR.origin, g_VR.originAngle)
-		-- A broken sample (bad quat that slipped the module check) must not
-		-- replace the camera for one frame. That flash is the flicker.
-		local prev = g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.ang
-		if prev and math.AngleDifference then
-			local dy = math.abs(math.AngleDifference(ang.y, prev.y))
-			local dp = math.abs(math.AngleDifference(ang.p, prev.p))
-			local dr = math.abs(math.AngleDifference(ang.r, prev.r))
-			if dy > 120 or dp > 120 or dr > 120 then return false end
-		end
-
-		g_VR.rawTracking = g_VR.rawTracking or {}
-		g_VR.tracking = g_VR.tracking or {}
-		local raw = g_VR.rawTracking.hmd or {}
-		g_VR.rawTracking.hmd = raw
-		raw.pos = WriteVec(raw.pos, pos)
-		raw.ang = WriteAng(raw.ang, ang)
-		if v.vel then
-			local wv = LocalToWorld(v.vel, Angle(0, 0, 0), vector_origin, g_VR.originAngle) * scale
-			raw.vel = WriteVec(raw.vel, wv)
-		end
-		if v.angvel then
-			local av = Vector(
-				v.angvel.pitch or v.angvel.p or 0,
-				v.angvel.yaw or v.angvel.y or 0,
-				v.angvel.roll or v.angvel.r or 0
-			)
-			local wav = LocalToWorld(av, Angle(0, 0, 0), vector_origin, g_VR.originAngle)
-			raw.angvel = WriteVec(raw.angvel, wav)
-		end
-		local tr = CopyPoseFields(raw, g_VR.tracking.hmd)
-		g_VR.tracking.hmd = tr
-		-- Seated + crouch Z already ran on the early sample. Reapply on the head only.
-		local zOff = HeadTrackingZOffset()
-		if zOff ~= 0 and tr.pos then
-			tr.pos.z = tr.pos.z + zOff
-		end
-		-- Eyes stay on the early sample. Rigid stereo does not use their poses,
-		-- and rewriting them between the two eyes is a stereo pop.
-		UpdateViewFromEntity()
-		return true
 	end
 
 
@@ -1563,10 +1491,7 @@ if CLIENT then
 				render.CullMode(0)
 			end)
 		elseif isFollow then
-			-- G51: a third RenderView on a late frame sits between WaitFrame and EndFrame.
-			if g_VR._skipDesktopThisFrame then
-				if DC and DC.SyncFromDesktopView then pcall(DC.SyncFromDesktopView, dv) end
-			elseif DC then
+			if DC then
 				if DC.SyncFromDesktopView then pcall(DC.SyncFromDesktopView, dv) end
 				if DC.CaptureFrame then pcall(DC.CaptureFrame) end
 				if DC.PresentDesktop then pcall(DC.PresentDesktop) end
@@ -2392,13 +2317,9 @@ if CLIENT then
 	local function BindRenderSceneHook()
 		BeginVRNestedRenderLock()
 		-- Frame energy (stable order — reverse collect/submit raced MatQueue → ~CThread):
-		--   UpdatePoses (WaitFrame+Begin+early latch) → gameplay
-		--   → late HMD camera → dual RenderView → optional Collect → Submit(fresh locate)
+		--   UpdatePoses (WaitFrame+Begin) → dual RenderView → optional Collect → Submit EndFrame
 		-- Backend still owns XR timing; collect is best-effort isolate, not submit-before-render.
 		hook.Add("RenderScene", "vrutil_hook_renderscene", function()
-			-- Nested RenderView must draw the engine scene. Running this hook
-			-- again would EndFrame the open XR frame and submit a second time.
-			if renderingEyes then return end
 			if DrawErrorOverlay() then return true end
 
 			-- Soft session pins only (never mat_queue_mode — workers are process-global).
@@ -2519,11 +2440,7 @@ if CLIENT then
 			g_VR._skipDesktopThisFrame = budget and budget.skip_desktop and true or false
 
 			local collected = false
-			local lateLatch = false
 			if paint then
-				-- Freshest HMD after gameplay traces, before either eye.
-				-- The layer locates again at submit so reprojection stays small.
-				lateLatch = LatchHeadForStereo()
 				PerformRenderViews()
 				-- b1a5e9e-era: optional Collect into staging (mq < 2 only)
 				local collectOk = (mq or 1) < 2
@@ -2535,21 +2452,6 @@ if CLIENT then
 					local okC = pcall(VRMOD_CollectEyes)
 					collected = okC and true or false
 				end
-			end
-
-			-- Head latch: cameras are the late sample. The layer locates at submit.
-			if vrmod.utils and vrmod.utils.HeadLatch_Decide then
-				local hdec = vrmod.utils.HeadLatch_Decide({
-					vr_active = true,
-					late_latch = lateLatch and true or false,
-					hmd_smoothed = false,
-					use_paint_pose = false,
-				})
-				g_VR._headLatchDecision = hdec
-				g_VR._headLatchLabel = vrmod.utils.HeadLatch_StatusLabel
-					and vrmod.utils.HeadLatch_StatusLabel(hdec) or nil
-				g_VR._headLatchHmdExpect = vrmod.utils.HeadLatch_HmdExpect
-					and vrmod.utils.HeadLatch_HmdExpect(hdec) or nil
 			end
 
 			-- G19: pure submit decision snapshot (dual OUT only; never eng IN / virgin).
