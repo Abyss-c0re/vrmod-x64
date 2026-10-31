@@ -47,11 +47,13 @@ hook.Add("VRMod_Drop", "ManualItemPickupDropHook", function(ply, ent)
 	timer.Simple(0.3, function() if IsValid(ply) then PickupDisabled[id] = true end end)
 end)
 
--- Handle weapon pickup by hand
+-- Handle weapon pickup by hand.
+-- Server only. ply.PickupWeapon is never set, so a guard on it skipped the
+-- whole restore and the dropped mag never came back.
 hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
+	if not SERVER then return end
 	if not IsValid(ply) or not ply:IsPlayer() then return end
 	if not IsValid(ent) or not ent:IsWeapon() then return end
-	if not ply.PickupWeapon then return end
 	-- Copy before ReplaceWeapon / Remove. The ground entity is gone next tick.
 	local U = vrmod.utils
 	local snap = nil
@@ -66,50 +68,45 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 	local replacement = U and U.ReplaceWeapon and U.ReplaceWeapon(ply, ent)
 	if replacement then wepClass = replacement end
 
-	local function pushArcState()
-		if not SERVER or not snap then return end
-		local function push()
-			if not IsValid(ply) then return end
-			local newWep = ply:GetWeapon(wepClass)
-			if not IsValid(newWep) or not newWep.ArcticVR then return end
-			if U and U.ArcVrDrop_ApplyState then
-				U.ArcVrDrop_ApplyState(newWep, snap)
-			else
-				newWep.LoadedRounds = snap.LoadedRounds
-				newWep.Chambered = snap.Chambered
-				newWep.Magazine = snap.Magazine
-			end
-			if newWep.SendWeapon then newWep:SendWeapon(true, true) end
+	local function push()
+		if not IsValid(ply) or not snap then return end
+		local newWep = ply:GetWeapon(wepClass)
+		if not IsValid(newWep) or not newWep.ArcticVR then return end
+		if U and U.ArcVrDrop_ApplyState then
+			U.ArcVrDrop_ApplyState(newWep, snap)
+		else
+			newWep.LoadedRounds = snap.LoadedRounds
+			newWep.Chambered = snap.Chambered
+			newWep.Magazine = snap.Magazine
 		end
-		push()
-		timer.Simple(0, push)
-		timer.Simple(0.25, push)
-		-- Entity may not exist on the client for the first sends.
-		timer.Simple(1, push)
+		if newWep.SendWeapon then newWep:SendWeapon(true, true) end
 	end
 
 	if ply:HasWeapon(wepClass) then
-		if snap and SERVER then
-			local rounds = U and U.ArcVrDrop_ReserveRounds and U.ArcVrDrop_ReserveRounds(snap) or ((snap.LoadedRounds or 0) + (snap.Chambered or 0))
-			local ammoType = IsValid(ent) and ent.GetPrimaryAmmoType and ent:GetPrimaryAmmoType() or -1
-			if rounds > 0 and isnumber(ammoType) and ammoType >= 0 then
-				ply:GiveAmmo(rounds, ammoType, true)
-			end
-		elseif IsValid(ent) then
+		if not snap and IsValid(ent) then
 			local ammoType = ent:GetPrimaryAmmoType()
 			local clip = ent:Clip1()
 			if ammoType >= 0 and clip > 0 then ply:GiveAmmo(clip, ammoType, true) end
 		end
 		ply:SelectWeapon(wepClass)
 	else
+		-- Touch-pickup ban also rejects Player:Give when the new SWEP is not
+		-- yet at the player's feet. This give is the hand equip.
+		ply._vrmodForceWeaponGive = true
 		ply:Give(wepClass, true)
+		ply._vrmodForceWeaponGive = nil
 		timer.Simple(0, function() if IsValid(ply) then ply:SelectWeapon(wepClass) end end)
-		pushArcState()
 	end
 
+	push()
+	timer.Simple(0, push)
+	timer.Simple(0.25, push)
+	-- Entity may not exist on the client for the first sends.
+	timer.Simple(1, push)
+
 	if IsValid(ent) and ent:GetOwner() ~= ply then ent:Remove() end
-	-- Equipped as a weapon. Do not also physics-hold the entity we just removed.
-	if snap and SERVER then return false end
+	-- Equipped. Do not also physics-hold the entity we just removed.
+	return false
 end)
 
 -- Disable touch-based item pickup
@@ -121,6 +118,7 @@ end)
 
 -- Disable touch-based weapon pickup
 hook.Add("PlayerCanPickupWeapon", "WeaponTouchPickupDisablerVR", function(ply, wep)
+	if ply._vrmodForceWeaponGive then return true end
 	local id = ply:EntIndex()
 	if vrmod_manualpickup:GetBool() and wep:GetPos() ~= ply:GetPos() and PickupDisabledWeapons[id] and ply:GetNWBool("IsVR", false) then return false end
 end)

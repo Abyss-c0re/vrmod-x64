@@ -159,6 +159,15 @@ if SERVER then
         if avrSnapshot and vrmod.utils and vrmod.utils.ArcVrDrop_ApplyState then
             vrmod.utils.ArcVrDrop_ApplyState(dropEnt, avrSnapshot)
             dropEnt.ArcticVR = true
+            -- Broadcast after this DropWeapon receive returns. A nested
+            -- net.Start here corrupts the message. No owner, so justowner
+            -- must be false or SendWeapon returns immediately.
+            local broadcastEnt = dropEnt
+            timer.Simple(0, function()
+                if not IsValid(broadcastEnt) or not broadcastEnt.SendWeapon then return end
+                if not broadcastEnt.Attachments then return end
+                broadcastEnt:SendWeapon(false, true)
+            end)
         elseif avrSnapshot then
             dropEnt.ArcticVR = true
             dropEnt.avrSnapshot = avrSnapshot
