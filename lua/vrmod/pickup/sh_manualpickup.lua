@@ -64,6 +64,21 @@ hook.Add("VRMod_Pickup", "ManualWeaponPickupHook", function(ply, ent)
 		timer.Simple(0, function()
 			if IsValid(ply) and IsValid(ent) then ply:SelectWeapon(class) end
 		end)
+		do
+			local mag = ent.Magazine
+			if type(mag) ~= "string" then mag = "" end
+			local firemode = math.floor(tonumber(ent.Firemode) or 0)
+			if firemode < -128 then firemode = -128 elseif firemode > 127 then firemode = 127 end
+			net.Start("vrmod_arcvr_restore")
+			net.WriteString(mag)
+			net.WriteString(class)
+			net.WriteUInt(math.min(math.floor(tonumber(ent.LoadedRounds) or 0), 65535), 16)
+			net.WriteUInt(math.min(math.floor(tonumber(ent.Chambered) or 0), 255), 8)
+			net.WriteUInt(math.min(math.floor(tonumber(ent.EmptyChambered) or 0), 255), 8)
+			net.WriteBool(ent.SlideLockedBack and true or false)
+			net.WriteInt(firemode, 8)
+			net.Send(ply)
+		end
 		return false
 	end
 

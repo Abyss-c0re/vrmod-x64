@@ -138,25 +138,28 @@ function vrmod.utils.IsValidPickupTarget(ent, ply, bLeftHand)
         return false
     end
 
-    if invalidPickupCache[ent] ~= nil then
-        return invalidPickupCache[ent] -- Return cached result without logging
+    -- Weapons change owner and NoDraw when dropped. A sticky cache kept the
+    -- in-hand result and the grip never found the same gun on the ground.
+    local cacheable = not ent:IsWeapon()
+    if cacheable and invalidPickupCache[ent] ~= nil then
+        return invalidPickupCache[ent]
     end
 
     if ent:GetNoDraw() then
         vrmod.logger.Debug("IsValidPickupTarget: Entity has NoDraw -> " .. ent:GetClass())
-        invalidPickupCache[ent] = false
+        if cacheable then invalidPickupCache[ent] = false end
         return false
     end
 
     if ent:IsDormant() then
         vrmod.logger.Debug("IsValidPickupTarget: Entity is dormant -> " .. ent:GetClass())
-        invalidPickupCache[ent] = false
+        if cacheable then invalidPickupCache[ent] = false end
         return false
     end
 
     if vrmod.utils.IsNonPickupable(ent) then
         vrmod.logger.Debug("IsValidPickupTarget: Entity is non-pickupable -> " .. ent:GetClass())
-        invalidPickupCache[ent] = false
+        if cacheable then invalidPickupCache[ent] = false end
         return false
     end
 
@@ -181,12 +184,11 @@ function vrmod.utils.IsValidPickupTarget(ent, ply, bLeftHand)
 
     if ent:IsWeapon() and ent:GetOwner() == ply then
         vrmod.logger.Debug("IsValidPickupTarget: Weapon already owned by player -> " .. ent:GetClass())
-        invalidPickupCache[ent] = false
         return false
     end
 
     vrmod.logger.Debug("IsValidPickupTarget: Valid pickup -> " .. ent:GetClass())
-    invalidPickupCache[ent] = true
+    if cacheable then invalidPickupCache[ent] = true end
     return true
 end
 

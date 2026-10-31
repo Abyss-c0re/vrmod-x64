@@ -20,6 +20,7 @@ if SERVER then
     util.AddNetworkString("ChangeWeapon")
     util.AddNetworkString("DropWeapon")
     util.AddNetworkString("SelectEmptyWeapon")
+    util.AddNetworkString("vrmod_arcvr_restore")
     net.Receive("ChangeWeapon", function(_, ply)
         local weaponClass = net.ReadString()
         if weaponClass and isstring(weaponClass) then ply:SelectWeapon(weaponClass) end
@@ -75,6 +76,10 @@ if SERVER then
             end
             wep:SetPos(pos)
             wep:SetAngles(guninhandang)
+            wep:SetNoDraw(false)
+            wep:SetSolid(SOLID_VPHYSICS)
+            wep:SetMoveType(MOVETYPE_VPHYSICS)
+            wep:SetCollisionGroup(COLLISION_GROUP_WEAPON)
             local function kick()
                 if not IsValid(wep) or not IsValid(ply) then return end
                 local phys = wep:GetPhysicsObject()
