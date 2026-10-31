@@ -458,6 +458,12 @@ if CLIENT then
 		dst.vel = WriteVec(dst.vel, src.vel)
 		dst.angvel = WriteVec(dst.angvel, src.angvel)
 		dst.simulatedPos = src.simulatedPos
+		dst.fov = src.fov
+		dst.aspectratio = src.aspectratio
+		dst.submit_u0 = src.submit_u0
+		dst.submit_u1 = src.submit_u1
+		dst.submit_v0 = src.submit_v0
+		dst.submit_v1 = src.submit_v1
 		return dst
 	end
 
@@ -674,6 +680,14 @@ if CLIENT then
 				prevRawHeadTime = now
 			end
 
+			if v.submit_u0 then
+				rawPose.submit_u0 = v.submit_u0
+				rawPose.submit_u1 = v.submit_u1
+				rawPose.submit_v0 = v.submit_v0
+				rawPose.submit_v1 = v.submit_v1
+			end
+			if v.fov then rawPose.fov = v.fov end
+			if v.aspectratio then rawPose.aspectratio = v.aspectratio end
 			rawPose.vel = LocalToWorld(v.vel, Angle(0, 0, 0), vector_origin, g_VR.originAngle) * g_VR.scale
 			rawPose.angvel = LocalToWorld(Vector(v.angvel.pitch, v.angvel.yaw, v.angvel.roll), Angle(0, 0, 0), vector_origin, g_VR.originAngle)
 			local isRight = k == "pose_righthand"
@@ -1666,7 +1680,18 @@ if CLIENT then
 		local scaleFactor = convars.vrmod_scalefactor:GetFloat()
 		local renderOffset = convars.vrmod_renderoffset:GetBool()
 		local lensBend = (convars.vrmod_lens_bend and convars.vrmod_lens_bend:GetFloat()) or 0
-		local bounds = {vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, scaleFactor, renderOffset, lensBend)}
+		local function withEyeCrop(calc, eye)
+			if not calc or not eye or not eye.submit_u0 then return calc end
+			local c = {}
+			for k, val in pairs(calc) do c[k] = val end
+			c.submit_u0, c.submit_u1 = eye.submit_u0, eye.submit_u1
+			c.submit_v0, c.submit_v1 = eye.submit_v0, eye.submit_v1
+			return c
+		end
+		local tr = g_VR.tracking
+		local lArg = withEyeCrop(leftCalc, tr and tr.eye_left)
+		local rArg = withEyeCrop(rightCalc, tr and tr.eye_right)
+		local bounds = {vrmod.utils.ComputeSubmitBounds(lArg, rArg, hOffset, vOffset, scaleFactor, renderOffset, lensBend)}
 		-- mq2 single-pass: mirror left UV to both eyes if helpers exist
 		local mqLive = g_VR._matQueueMode or WantedMatQueueMode()
 		local monoBoth = g_VR._mq2SinglePass or g_VR._mq2MonoLeftForBoth or (mqLive >= 2)

@@ -106,13 +106,38 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
     -- Work in top-left UV (y=0 top), then convert to platform V.
     -- Independent edge clamp (no re-expand): when pan pushes past 0/1 the
     -- window shrinks on that side — that is the visible offset at scale=1.
-    local function eyeRect(cx, autoH, autoV)
-        local adjU = autoH * hFactor + panU
-        local adjV = autoV * vFactor + panV
-        local u0 = cx - halfU + adjU
-        local u1 = cx + halfU + adjU
-        local y0 = 0.5 - halfV - adjV -- top
-        local y1 = 0.5 + halfV - adjV -- bottom
+    local function hasAsym(calc)
+        return calc and tonumber(calc.submit_u0) and tonumber(calc.submit_u1)
+            and tonumber(calc.submit_v0) and tonumber(calc.submit_v1)
+    end
+
+    -- OpenXR layer FOV is the real asymmetric frustum. Each SBS half is a
+    -- symmetric overrender. The blit must take submit_u/v or the lens maps
+    -- the wrong rect and the world swims when the headset yaws.
+    local function eyeRect(cx, autoH, autoV, calc)
+        local u0, u1, y0, y1
+        if hasAsym(calc) then
+            local su0, su1 = tonumber(calc.submit_u0), tonumber(calc.submit_u1)
+            local sv0, sv1 = tonumber(calc.submit_v0), tonumber(calc.submit_v1)
+            local halfStart = cx - 0.25
+            u0 = halfStart + su0 * 0.5
+            u1 = halfStart + su1 * 0.5
+            y0, y1 = sv0, sv1
+            local cu, cv = (u0 + u1) * 0.5, (y0 + y1) * 0.5
+            u0 = cu + (u0 - cu) / scaleFactor
+            u1 = cu + (u1 - cu) / scaleFactor
+            y0 = cv + (y0 - cv) / scaleFactor
+            y1 = cv + (y1 - cv) / scaleFactor
+            u0, u1 = u0 + panU, u1 + panU
+            y0, y1 = y0 - panV, y1 - panV
+        else
+            local adjU = autoH * hFactor + panU
+            local adjV = autoV * vFactor + panV
+            u0 = cx - halfU + adjU
+            u1 = cx + halfU + adjU
+            y0 = 0.5 - halfV - adjV -- top
+            y1 = 0.5 + halfV - adjV -- bottom
+        end
         if u0 < 0 then u0 = 0 end
         if u1 > 1 then u1 = 1 end
         if y0 < 0 then y0 = 0 end
@@ -150,8 +175,8 @@ function vrmod.utils.ComputeSubmitBounds(leftCalc, rightCalc, hOffset, vOffset, 
         return u0, 1.0 - y0, u1, 1.0 - y1
     end
 
-    local uMinLeft, vMinLeft, uMaxLeft, vMaxLeft = eyeRect(0.25, lo, lv)
-    local uMinRight, vMinRight, uMaxRight, vMaxRight = eyeRect(0.75, ro, rv)
+    local uMinLeft, vMinLeft, uMaxLeft, vMaxLeft = eyeRect(0.25, lo, lv, leftCalc)
+    local uMinRight, vMinRight, uMaxRight, vMaxRight = eyeRect(0.75, ro, rv, rightCalc)
 
     -- Keep halves from crossing the SBS seam too far (soft)
     if uMaxLeft > 0.55 then uMaxLeft = 0.55 end
