@@ -215,7 +215,7 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Pickup range (Server)", cvar = "vrmod_pickup_range", min = 0, max = 10, decimals = 1 },
 			{ kind = "bool", label = "Eye pickup", cvar = "vrmod_pickup_eye" },
 			{ kind = "slider", label = "Eye pickup range", cvar = "vrmod_pickup_eye_range", min = 0, max = 32, decimals = 1 },
-			{ kind = "help", label = "Off by default. On: either grip grabs the prop you look at, with the same pickup rules. A hand already on a prop still wins. Eye stays the choice until that hand is closer to the prop than your head. Range uses the same scale as pickup range." },
+			{ kind = "help", label = "Off by default. On: either grip grabs the prop you look at, with the same pickup rules. A hand already on a prop (within the close grab) still wins. A hand in front of your head does not cancel the look. Range uses the same scale as pickup range." },
 			{ kind = "action", label = "Adjust weapons", cmd = "vrmod_weaponconfig" },
 			{ kind = "action", label = "Reset gameplay defaults", action_id = "reset_gameplay" },
 		},

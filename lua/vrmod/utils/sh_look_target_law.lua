@@ -120,18 +120,26 @@ end
 --- World and sky are not objects: the entity is nil and the point is still returned
 --- when the trace has one. A miss returns the point at max_dist along the look.
 function vrmod.utils.LookTarget_Query(ply, maxDist)
+	if not isfunction(vrmod.GetEyeGaze) then return nil, nil, "no_api" end
+	local pos, ang = vrmod.GetEyeGaze(ply)
+	if not pos or not ang or not isfunction(ang.Forward) then return nil, nil, "no_gaze" end
+	return vrmod.utils.LookTarget_QueryPose(ply, pos, ang, maxDist)
+end
+
+--- Same trace as LookTarget_Query, from an explicit pose. Used when gaze has no sample.
+function vrmod.utils.LookTarget_QueryPose(ply, pos, ang, maxDist)
 	maxDist = tonumber(maxDist)
 	if not finite(maxDist) or maxDist <= 0 then return nil, nil, "range" end
-	if not isfunction(vrmod.GetEyeGaze) then return nil, nil, "no_api" end
 	if ply ~= nil and isfunction(IsValid) and not IsValid(ply) then return nil, nil, "no_player" end
-	local pos, ang = vrmod.GetEyeGaze(ply)
 	if not pos or not ang or not isfunction(ang.Forward) then return nil, nil, "no_gaze" end
 	local dir = ang:Forward()
 	if not dir then return nil, nil, "no_dir" end
 	if not util or not isfunction(util.TraceLine) then return nil, nil, "no_trace" end
 
+	-- Same polarity as the laser: true = hit, false = skip.
+	-- Invalid ents return true so a nil callback does not abort the ray.
 	local filter = function(ent)
-		if not isfunction(IsValid) or not IsValid(ent) then return false end
+		if not isfunction(IsValid) or not IsValid(ent) then return true end
 		if ent == ply then return false end
 		if isWorld(ent) then return true end
 		if g_VR then
@@ -144,13 +152,25 @@ function vrmod.utils.LookTarget_Query(ply, maxDist)
 		return true
 	end
 
-	local ok, tr = pcall(util.TraceLine, {
-		start = pos,
-		endpos = pos + dir * maxDist,
-		filter = filter,
-		mask = MASK_SHOT,
-	})
-	if not ok or type(tr) ~= "table" then return nil, nil, "no_trace" end
+	local lead = vrmod.utils.LookTarget_EyeLead()
+	local function traceFrom(startPos)
+		local ok, tr = pcall(util.TraceLine, {
+			start = startPos,
+			endpos = pos + dir * maxDist,
+			filter = filter,
+			mask = MASK_SHOT,
+		})
+		if not ok or type(tr) ~= "table" then return nil end
+		return tr
+	end
+
+	-- Eyes sit inside the head hull. A ray from the gaze origin hits the
+	-- player and stops. Step forward, and step again if that sample is us.
+	local tr = traceFrom(pos + dir * lead)
+	if tr and (tr.StartSolid or tr.Entity == ply) then
+		tr = traceFrom(pos + dir * (lead * 3))
+	end
+	if not tr then return nil, nil, "no_trace" end
 
 	local ent = tr.Entity
 	if not isfunction(IsValid) or not IsValid(ent) or ent == ply or isWorld(ent) then
@@ -185,11 +205,18 @@ end
 
 --- True only when the hand is strictly closer to the object than the HMD position.
 --- Missing or non-finite distances are not "closer".
+--- This is not the pickup gate. Controllers rest in front of the head, so a
+--- raw hand-vs-HMD test is true for almost every prop in view.
 function vrmod.utils.LookTarget_HandCloserThanHmd(handDist, hmdDist)
 	handDist = tonumber(handDist)
 	hmdDist = tonumber(hmdDist)
 	if not finite(handDist) or not finite(hmdDist) then return false end
 	return handDist < hmdDist
+end
+
+--- Inches to step the look ray out of the head hull before tracing.
+function vrmod.utils.LookTarget_EyeLead()
+	return 8
 end
 
 --- Same weapon exceptions as FindPickupTarget.
@@ -206,9 +233,10 @@ function vrmod.utils.LookTarget_AllowHeldWeapon(isWeapon, sameClass, leftHand, h
 end
 
 --- Which entity a grip should grab.
---- Close-hand results stay. Gaze is the choice only while this hand is not
---- closer to the looked-at object than the HMD position is.
---- opts.hand_ent, hand_dist, eye_ent, eye_enabled, hand_to_eye, hmd_to_eye, close_radius.
+--- A hand result inside the close radius stays. That is the only hand win.
+--- Gaze keeps the looked-at prop while the hand is still outside that radius,
+--- even when the hand is nearer the prop than the HMD (controllers sit in front).
+--- opts.hand_ent, hand_dist, eye_ent, eye_enabled, hand_to_eye, close_radius.
 --- Returns { source = "hand"|"eye"|"none", reason, ent }.
 function vrmod.utils.LookTarget_ChoosePickup(opts)
 	opts = type(opts) == "table" and opts or {}
@@ -221,6 +249,7 @@ function vrmod.utils.LookTarget_ChoosePickup(opts)
 	local eyeEnt = opts.eye_ent
 	if eyeEnt == false then eyeEnt = nil end
 	local handDist = tonumber(opts.hand_dist)
+	local handToEye = tonumber(opts.hand_to_eye)
 	local eyeOn = opts.eye_enabled == true or opts.eye_enabled == 1 or opts.eye_enabled == "1"
 
 	-- Unknown distance: keep the hand result so a near grab is not replaced.
@@ -232,11 +261,12 @@ function vrmod.utils.LookTarget_ChoosePickup(opts)
 	end
 
 	if eyeOn and eyeEnt ~= nil then
-		if vrmod.utils.LookTarget_HandCloserThanHmd(opts.hand_to_eye, opts.hmd_to_eye) then
+		-- Hand has arrived on the looked-at prop. Close pickup owns it.
+		if finite(handToEye) and handToEye <= closeR then
 			if handEnt ~= nil then
-				return { source = "hand", reason = "hand_closer", ent = handEnt }
+				return { source = "hand", reason = "hand_reached", ent = handEnt }
 			end
-			return { source = "none", reason = "hand_closer", ent = nil }
+			return { source = "eye", reason = "eye_reached", ent = eyeEnt }
 		end
 		return { source = "eye", reason = "eye", ent = eyeEnt }
 	end

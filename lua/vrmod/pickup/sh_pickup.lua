@@ -94,7 +94,14 @@ if CLIENT then
 		local rangeCv = GetConVar("vrmod_pickup_eye_range")
 		local range = vrmod.utils.LookTarget_ClampRange(rangeCv and rangeCv:GetFloat() or nil)
 		local reach = vrmod.utils.LookTarget_MaxDistance(range, vrmod.utils.LookTarget_Boost(true, false))
-		local ent, pos = vrmod.utils.LookTarget_Query(ply, reach)
+		local ent, pos, reason = vrmod.utils.LookTarget_Query(ply, reach)
+		-- No eye sample: look along the HMD so a headset without gaze still selects.
+		if reason == "no_gaze" and vrmod.utils.LookTarget_QueryPose then
+			local hmd = g_VR.tracking and g_VR.tracking.hmd
+			if hmd and hmd.pos and hmd.ang then
+				ent, pos = vrmod.utils.LookTarget_QueryPose(ply, hmd.pos, hmd.ang, reach)
+			end
+		end
 		if not IsValid(ent) or not pos then return nil, nil end
 		local gazePos = vrmod.GetEyeGaze and select(1, vrmod.GetEyeGaze(ply))
 		local dist = pointDist(gazePos, nil, pos)
@@ -209,12 +216,10 @@ if CLIENT then
 		local function ShouldAddHalo(ent)
 			if not IsValid(ent) or ent == heldLeft or ent == heldRight or holdingRagdoll then return false end
 			-- Check server flag for pickup validity, fallback to IsValidPickupTarget if flag missing
-			local serverFlag = ent:GetNWBool("vrmod_pickup_valid_for_" .. ply:SteamID(), nil)
-			if serverFlag == nil then
-				-- If no server flag, fallback to your clientside logic
-				return vrmod.utils.IsValidPickupTarget(ent, ply, false)
-			end
-			return serverFlag
+			-- GetNWBool cannot report "unset" (nil default becomes false), so a
+			-- prop the server has not scanned yet drew no halo. The grip
+			-- target was already accepted by IsValidPickupTarget.
+			return vrmod.utils.IsValidPickupTarget(ent, ply, false)
 		end
 
 		if ShouldAddHalo(pickupTargetEntLeft) then haloTargetsLeft[#haloTargetsLeft + 1] = pickupTargetEntLeft end
