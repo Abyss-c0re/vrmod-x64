@@ -1284,45 +1284,67 @@ if CLIENT then
 				view.zfar = VIEW_ZFAR
 			end
 
-			render.PushRenderTarget(g_VR.rt)
-			-- Menu / HUD panel RTs must NEVER nest while this is true (malloc crash ~2s after menu open).
-			g_VR.stereoRtActive = true
-			if DrawErrorOverlay() then
-				g_VR.stereoRtActive = false
-				render.PopRenderTarget()
-				return
-			end
-
-			-- XR Home: entire stereo RT must start magenta (#FF00FF), never black.
-			-- Black clear left the sky black while InfMap floor was already keyed pink.
-			-- Right-eye residual black: engine RenderView re-clears black and sky hooks
-			-- often skip when r_drawskybox=0 — re-clear each scissored half below.
+			-- XR Home: void is magenta, never black.
 			local homeMap = false
 			do
 				local map = string.lower(tostring(game.GetMap() or ""))
 				homeMap = (map == "xr_infmap_passthrough")
 					or (CubeHome and CubeHome.IsHomeMap and CubeHome.IsHomeMap())
+			end
+
+			-- Decals project in viewport space. A half-width SBS viewport slices a
+			-- spray into strips that pop as the head turns. Paint each eye into its
+			-- own full target (viewport 0,0), then copy the pictures into the SBS RT.
+			local function EnsureEyeRenderTargets(w, h)
+				if g_VR.rtEyeLeft and g_VR.rtEyeRight and g_VR.rtEyeLeftMat and g_VR.rtEyeRightMat
+					and g_VR._eyeRtW == w and g_VR._eyeRtH == h then
+					return true
+				end
+				local tag = tostring(SysTime())
+				local depthMode = MATERIAL_RT_DEPTH_SEPARATE or 0
+				local size = RT_SIZE_LITERAL or 0
+				local fmt = IMAGE_FORMAT_RGBA8888
+				local leftRt = GetRenderTargetEx("vrmod_eye_l_" .. tag, w, h, size, depthMode, 0, 0, fmt)
+				local rightRt = GetRenderTargetEx("vrmod_eye_r_" .. tag, w, h, size, depthMode, 0, 0, fmt)
+				if not leftRt or not rightRt then return false end
+				g_VR.rtEyeLeft, g_VR.rtEyeRight = leftRt, rightRt
+				g_VR.rtEyeLeftMat = CreateMaterial("vrmod_eye_l_mat_" .. tag, "UnlitGeneric", {
+					["$basetexture"] = leftRt:GetName(),
+					["$ignorez"] = 1,
+					["$nolod"] = 1,
+				})
+				g_VR.rtEyeRightMat = CreateMaterial("vrmod_eye_r_mat_" .. tag, "UnlitGeneric", {
+					["$basetexture"] = rightRt:GetName(),
+					["$ignorez"] = 1,
+					["$nolod"] = 1,
+				})
+				g_VR._eyeRtW, g_VR._eyeRtH = w, h
+				return true
+			end
+
+			local function PaintFullEye(rt, viewSetup, eyeName)
+				render.PushRenderTarget(rt)
+				render.SetScissorRect(0, 0, 0, 0, false)
+				g_VR.stereoRtActive = true
 				if homeMap then
 					render.Clear(255, 0, 255, 255, true, true)
 				else
 					render.Clear(0, 0, 0, 255, true, true)
 				end
-			end
-			-- Scissored eye clear: color (+ depth) so void is never black after engine clear.
-			local function ClearEyeHalf(x0, y0, x1, y1)
-				render.SetScissorRect(x0, y0, x1, y1, true)
-				if homeMap then
-					render.Clear(255, 0, 255, 255, true, true)
-				end
+				g_VR.stereoEye = eyeName
+				hook.Call("VRMod_PreRender", nil, eyeName)
+				SafeRenderView(viewSetup)
+				render.PopRenderTarget()
 			end
 
-			-- ============================================================
+			local function BlitEyeToSbs(mat, x, y, w, h)
+				surface.SetMaterial(mat)
+				surface.SetDrawColor(255, 255, 255, 255)
+				-- Surface draws an RT upside down. Flip V so SBS matches RenderView.
+				surface.DrawTexturedRectUV(x, y, w, h, 0, 1, 1, 0)
+			end
+
 			-- ONE pose/solve phase for the whole frame (not per-eye).
-			-- Twin IK, HUD RT capture, menu pose snapshot — never on
-			-- VRMod_PreRender(left) only. Both eyes then only DRAW.
-			-- ============================================================
-			-- Freeze hand samples for the whole stereo pair (grip/laser/UI).
-			-- Live tracking must not be re-read between left and right eyes.
 			do
 				local L = g_VR.tracking and g_VR.tracking.pose_lefthand
 				local R = g_VR.tracking and g_VR.tracking.pose_righthand
@@ -1352,10 +1374,61 @@ if CLIENT then
 			EnsureDecalsEnabled()
 
 			local mqNow = g_VR._matQueueMode or WantedMatQueueMode()
-			-- Mode 2: always single-pass (second RenderView = CThread crash on Linux).
-			-- Convar only documents intent; dual-eye under 2 is not supported yet.
+			-- Mode 2: no second RenderView (CThread crash on Linux).
 			local singlePass = mqNow >= 2
 			g_VR._mq2SinglePass = singlePass
+
+			local useFullEye = EnsureEyeRenderTargets(rtHalfW, rtH)
+			if useFullEye then
+				viewLeft.x, viewLeft.y, viewLeft.w, viewLeft.h = 0, 0, rtHalfW, rtH
+				viewRight.x, viewRight.y, viewRight.w, viewRight.h = 0, 0, rtHalfW, rtH
+				PaintFullEye(g_VR.rtEyeLeft, viewLeft, "left")
+				if singlePass then
+					g_VR._mq2MonoLeftForBoth = true
+					g_VR.stereoEye = "right"
+					hook.Call("VRMod_PreRender", nil, "right")
+				else
+					g_VR._mq2MonoLeftForBoth = false
+					PaintFullEye(g_VR.rtEyeRight, viewRight, "right")
+				end
+				render.PushRenderTarget(g_VR.rt)
+				g_VR.stereoRtActive = true
+				render.SetScissorRect(0, 0, 0, 0, false)
+				if homeMap then
+					render.Clear(255, 0, 255, 255, true, true)
+				else
+					render.Clear(0, 0, 0, 255, true, true)
+				end
+				cam.Start2D()
+				BlitEyeToSbs(g_VR.rtEyeLeftMat, leftX, 0, rtHalfW, rtH)
+				if singlePass then
+					BlitEyeToSbs(g_VR.rtEyeLeftMat, rightX, 0, rtHalfW, rtH)
+				else
+					BlitEyeToSbs(g_VR.rtEyeRightMat, rightX, 0, rtHalfW, rtH)
+				end
+				cam.End2D()
+			else
+			render.PushRenderTarget(g_VR.rt)
+			-- Menu / HUD panel RTs must NEVER nest while this is true (malloc crash ~2s after menu open).
+			g_VR.stereoRtActive = true
+			if DrawErrorOverlay() then
+				g_VR.stereoRtActive = false
+				render.PopRenderTarget()
+				return
+			end
+
+			if homeMap then
+				render.Clear(255, 0, 255, 255, true, true)
+			else
+				render.Clear(0, 0, 0, 255, true, true)
+			end
+			-- Scissored eye clear: color (+ depth) so void is never black after engine clear.
+			local function ClearEyeHalf(x0, y0, x1, y1)
+				render.SetScissorRect(x0, y0, x1, y1, true)
+				if homeMap then
+					render.Clear(255, 0, 255, 255, true, true)
+				end
+			end
 
 			-- LEFT eye — draw only (angles = shared HMD roll for both eyes)
 			view.origin = g_VR.eyePosLeft
@@ -1406,6 +1479,7 @@ if CLIENT then
 				render.SetScissorRect(rightX, 0, rightX + rtHalfW, rtH, true)
 				hook.Call("VRMod_PreRender", nil, "right")
 				SafeRenderView(viewRight)
+			end
 			end
 
 			render.SetScissorRect(0, 0, 0, 0, false)
