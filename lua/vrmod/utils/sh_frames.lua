@@ -30,6 +30,10 @@ function vrmod.utils.CopyFrame(srcFrame)
         copyPosAng("leftfootPos", "leftfootAng")
         copyPosAng("rightfootPos", "rightfootAng")
     end
+    -- HMD-relative gaze words. Absent on both sides when eye tracking is off.
+    if vrmod.utils.EyeFrame_CopyFields then
+        vrmod.utils.EyeFrame_CopyFields(copy, srcFrame)
+    end
     return copy
 end
 
@@ -82,6 +86,11 @@ function vrmod.utils.FrameToRelative(absFrame, originPos, originAng)
         convertPosAng("leftfootPos", "leftfootAng")
         convertPosAng("rightfootPos", "rightfootAng")
     end
+    -- Already HMD-relative. WorldToLocal against the player origin would
+    -- bake the playspace yaw into the gaze a second time.
+    if vrmod.utils.EyeFrame_CopyFields then
+        vrmod.utils.EyeFrame_CopyFields(relFrame, absFrame)
+    end
     return relFrame
 end
 
@@ -118,6 +127,9 @@ function vrmod.utils.FrameToAbsolute(relFrame, originPos, originAng)
         convertPosAng("waistPos", "waistAng")
         convertPosAng("leftfootPos", "leftfootAng")
         convertPosAng("rightfootPos", "rightfootAng")
+    end
+    if vrmod.utils.EyeFrame_CopyFields then
+        vrmod.utils.EyeFrame_CopyFields(absFrame, relFrame)
     end
     return absFrame
 end
@@ -171,6 +183,10 @@ function vrmod.utils.FramesAreEqual(f1, f2)
         if not equalAng(f1.leftfootAng, f2.leftfootAng) then return false end
         if not equalVec(f1.rightfootPos, f2.rightfootPos) then return false end
         if not equalAng(f1.rightfootAng, f2.rightfootAng) then return false end
+    end
+    -- Both directions: gaze that just turned off must still count as a new frame.
+    if vrmod.utils.EyeFrame_FieldsEqual and not vrmod.utils.EyeFrame_FieldsEqual(f1, f2) then
+        return false
     end
     return true
 end

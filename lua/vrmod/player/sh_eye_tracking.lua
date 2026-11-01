@@ -1,24 +1,82 @@
--- Eye gaze for character eyes.
+-- Eye gaze for character eyes, and the optional tail on the player frame.
 -- Any backend that fills g_VR.tracking.pose_gaze can drive this. The OpenXR
 -- module does that via XR_EXT_eye_gaze_interaction (Pico, Quest Pro, Index,
--- Varjo, and other runtimes that expose the extension). Default off.
+-- Varjo, and other runtimes that expose the extension). Client default off.
+-- Server default allows it. A server that has no vrmod_sv_eyetracking convar
+-- is treated as allow (see EyeFrame_ServerAllowed).
 --
 -- Globals:
 --   g_VR.tracking.pose_gaze  world pose of the gaze ray (pos + ang)
 --   g_VR.eyeTracking         local sample: enabled, supported, active,
 --                            pos, ang, localAng (relative to the HMD), lookAt
 --   g_VR.net[steamid].eyeGaze  replicated look target for that player
+-- The frame tail is the API sample. vrmod_eye_gaze remains so an older
+-- sender (no tail) can still move character eyes.
 -- Openness is left nil. This extension does not provide it.
 
 local LOOK_DIST = 400
 local SEND_DT = 0.066
 local STALE_SEC = 0.5
 
+g_VR = g_VR or {}
+vrmod = vrmod or {}
+
+local svFlags = bit.bor(FCVAR_ARCHIVE or 128, FCVAR_REPLICATED or 8192)
+vrmod.AddCallbackedConvar(
+	"vrmod_sv_eyetracking",
+	"vrmod_sv_eyetracking",
+	"1",
+	svFlags,
+	"Allow VR eye gaze on the player frame and the legacy eye message",
+	0,
+	1,
+	function(val)
+		if vrmod.utils and vrmod.utils.EyeFrame_ServerAllowed then
+			return vrmod.utils.EyeFrame_ServerAllowed(val)
+		end
+		return val ~= "0" and val ~= 0 and val ~= false
+	end
+)
+
+function vrmod.EyeTrackingAllowed()
+	local cv = GetConVar("vrmod_sv_eyetracking")
+	local raw = nil
+	if cv then
+		if cv.GetString then
+			raw = cv:GetString()
+		elseif cv.GetBool then
+			raw = cv:GetBool()
+		end
+	end
+	if vrmod.utils and vrmod.utils.EyeFrame_ServerAllowed then
+		return vrmod.utils.EyeFrame_ServerAllowed(raw)
+	end
+	return raw ~= "0" and raw ~= false and raw ~= 0
+end
+
+function vrmod.EyeTrackingEnabled()
+	local cv = GetConVar("vrmod_eyetracking")
+	if cv then return cv:GetBool() end
+	return g_VR.eyeTracking and g_VR.eyeTracking.enabled and true or false
+end
+
 if SERVER then
 	util.AddNetworkString("vrmod_eye_gaze")
+	cvars.AddChangeCallback("vrmod_sv_eyetracking", function()
+		if vrmod.EyeTrackingAllowed() then return end
+		if vrmod.EyeFrame_RelayStrip then vrmod.EyeFrame_RelayStrip() end
+	end, "vrmod_sv_eyetracking_strip")
 	-- len is bits. Bool + vector + two angles stays far under this.
 	vrmod.NetReceiveLimited("vrmod_eye_gaze", 20, 2048, function(_, ply)
 		if not IsValid(ply) then return end
+		if not vrmod.EyeTrackingAllowed() then
+			-- Drop the sample and tell everyone else the look is off.
+			net.Start("vrmod_eye_gaze", true)
+			net.WriteEntity(ply)
+			net.WriteBool(false)
+			net.SendOmit(ply)
+			return
+		end
 		local active = net.ReadBool()
 		local lookAt, ang, localAng
 		if active then
@@ -117,6 +175,7 @@ local lastSentActive = nil
 local nextSend = 0
 
 local function SendGaze(active, et)
+	if vrmod.EyeTrackingAllowed and not vrmod.EyeTrackingAllowed() then return end
 	local now = CurTime()
 	if active == lastSentActive and (not active or now < nextSend) then return end
 	-- Stay quiet until a real sample has been shared.
@@ -187,6 +246,47 @@ local function ApplyLocal()
 	SendGaze(true, et)
 end
 
+-- Remote frame tail. A fresh vrmod_eye_gaze sample (source "net") keeps the
+-- traced look point. The tail is applied when that channel is idle, which is
+-- how a peer with only the frame still moves character eyes.
+-- A missing tail does not clear a "net" sample: older clients never write one.
+function vrmod.EyeFrame_NoteRemote(ply, frame)
+	if not IsValid(ply) or ply == LocalPlayer() then return end
+	local slot = LocalSlot(ply)
+	if not slot then return end
+	local now = CurTime()
+	local netFresh = slot.source == "net" and slot.active and slot.time and (now - slot.time) <= STALE_SEC
+	local pitch, yaw
+	if frame and vrmod.utils and vrmod.utils.EyeFrame_UnpackLocal then
+		pitch, yaw = vrmod.utils.EyeFrame_UnpackLocal(frame.eyePitchU, frame.eyeYawU)
+	end
+	if pitch and frame.hmdPos and frame.hmdAng and vrmod.utils.EyeFrame_ComposeAng then
+		if netFresh then return end
+		local hp = frame.hmdAng.p or frame.hmdAng.pitch or 0
+		local hy = frame.hmdAng.y or frame.hmdAng.yaw or 0
+		local hr = frame.hmdAng.r or frame.hmdAng.roll or 0
+		local p, y, r = vrmod.utils.EyeFrame_ComposeAng(hp, hy, hr, pitch, yaw)
+		if not p then return end
+		slot.active = true
+		slot.source = "frame"
+		slot.time = now
+		local ang = Angle(p, y, r)
+		WriteAng(slot.ang, ang)
+		WriteAng(slot.localAng, Angle(pitch, yaw, 0))
+		local fwd = ang:Forward()
+		slot.lookAt.x = frame.hmdPos.x + fwd.x * LOOK_DIST
+		slot.lookAt.y = frame.hmdPos.y + fwd.y * LOOK_DIST
+		slot.lookAt.z = frame.hmdPos.z + fwd.z * LOOK_DIST
+		ply:SetEyeTarget(slot.lookAt)
+		return
+	end
+	if slot.source == "frame" and slot.active then
+		slot.active = false
+		slot.time = now
+		RestoreEyes(ply)
+	end
+end
+
 hook.Add("VRMod_Tracking", "vrmod_eye_tracking", ApplyLocal)
 
 -- Once for the stereo pair, immediately before both eyes draw.
@@ -249,13 +349,22 @@ net.Receive("vrmod_eye_gaze", function()
 		slot = { active = false, lookAt = Vector(), ang = Angle(), localAng = Angle(), time = 0 }
 		g_VR.net[sid].eyeGaze = slot
 	end
-	slot.time = CurTime()
 	if not active then
+		-- Frame-owned look stays until a tailless tick or the stale timer.
+		-- An explicit false still clears a legacy sample.
+		if slot.source == "frame" and slot.active then return end
 		if slot.active then RestoreEyes(ply) end
 		slot.active = false
+		slot.source = "net"
+		slot.time = CurTime()
 		return
 	end
+	if slot.source == "frame" and slot.active and slot.time and (CurTime() - slot.time) <= STALE_SEC then
+		return
+	end
+	slot.time = CurTime()
 	slot.active = true
+	slot.source = "net"
 	WriteVec(slot.lookAt, net.ReadVector())
 	WriteAng(slot.ang, net.ReadAngle())
 	WriteAng(slot.localAng, net.ReadAngle())

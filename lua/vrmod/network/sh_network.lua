@@ -33,6 +33,17 @@ local function netReadFrame()
 		frame.rightfootPos = net.ReadVector()
 		frame.rightfootAng = net.ReadAngle()
 	end
+	-- Optional eye tail. Fewer than 5 leftover bytes means an older tick
+	-- (or this client has eye tracking off). Magic mismatch stops there.
+	if vrmod.utils.EyeFrame_ReadTail and net.BytesLeft then
+		local tail = vrmod.utils.EyeFrame_ReadTail(net.BytesLeft(), function(bits)
+			return net.ReadUInt(bits)
+		end)
+		if tail then
+			frame.eyePitchU = tail.eyePitchU
+			frame.eyeYawU = tail.eyeYawU
+		end
+	end
 	return frame
 end
 
@@ -103,6 +114,39 @@ local function buildClientFrame(relative)
 		if rfp then frame.rightfootPos, frame.rightfootAng = rfp, rfa end
 	end
 
+	-- Gaze is packed against the world HMD before the player-relative convert.
+	-- The uints stay HMD-relative through FrameToRelative.
+	local function attachEye(target, hmdAng)
+		local law = vrmod.utils
+		if not (law and law.EyeFrame_ShouldSend and law.EyeFrame_PackLocal) then return end
+		local pose = g_VR.tracking and g_VR.tracking.pose_gaze
+		local hasPose = pose and pose.pos and pose.ang and hmdAng and true or false
+		local pitch, yaw
+		if hasPose and isfunction(WorldToLocal) then
+			local origin = vector_origin or Vector(0, 0, 0)
+			local okRel, _, rel = pcall(WorldToLocal, origin, pose.ang, origin, hmdAng)
+			if okRel and rel then
+				pitch, yaw = rel.p, rel.y
+			end
+		end
+		local eyeCv = GetConVar("vrmod_eyetracking")
+		local clientOn = eyeCv and eyeCv:GetBool() or false
+		local serverAllow = nil
+		if vrmod.EyeTrackingAllowed then serverAllow = vrmod.EyeTrackingAllowed() end
+		local send = law.EyeFrame_ShouldSend({
+			server_allow = serverAllow,
+			client_enabled = clientOn,
+			has_pose = hasPose and pitch ~= nil and yaw ~= nil,
+			pitch = pitch,
+			yaw = yaw,
+		})
+		if not send then return end
+		local pu, yu = law.EyeFrame_PackLocal(pitch, yaw)
+		if not pu then return end
+		target.eyePitchU, target.eyeYawU = pu, yu
+	end
+
+	attachEye(frame, hmdAng)
 	if relative then return vrmod.utils.ConvertToRelativeFrame(frame) end
 	return frame
 end
@@ -137,6 +181,12 @@ local function netWriteFrame(frame)
 		net.WriteAngle(frame.leftfootAng)
 		net.WriteVector(frame.rightfootPos)
 		net.WriteAngle(frame.rightfootAng)
+	end
+	-- No call when gaze is off: the bit stream matches a pre-eye client.
+	if vrmod.utils.EyeFrame_WriteTail then
+		vrmod.utils.EyeFrame_WriteTail(function(v, bits)
+			net.WriteUInt(v, bits)
+		end, frame)
 	end
 end
 
@@ -252,9 +302,10 @@ if CLIENT then
 			for _, part in ipairs({"hmd", "lefthand", "righthand", "waist", "leftfoot", "rightfoot"}) do
 				if lerpedFrame[part .. "Pos"] then lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"] = LocalToWorld(lerpedFrame[part .. "Pos"], lerpedFrame[part .. "Ang"], plyPos, plyAng) end
 			end
-
-			-- assign the lerped frame directly
+			-- eyePitchU / eyeYawU are HMD-relative integers copied above.
+			-- They are not a pos/ang pair. Compose only after the HMD is in world space.
 			v.lerpedFrame = lerpedFrame
+			if vrmod.EyeFrame_NoteRemote then vrmod.EyeFrame_NoteRemote(ply, lerpedFrame) end
 		end
 	end
 
@@ -536,7 +587,10 @@ if SERVER then
 		net.WriteBool(focused)
 		net.SendOmit(ply)
 	end)
-	vrmod.NetReceiveLimited("vrutil_net_tick", convarValues.vrmod_net_tickrate + 5, 1200, function(len, ply)
+	-- 1200 was tight for a full-body tick. Eye adds 40 bits. 2048 keeps that
+	-- tick, and still drops a runaway message. An old server stays at 1200.
+	local tickMaxBits = (vrmod.utils.EyeFrame_NetTickMaxBits and vrmod.utils.EyeFrame_NetTickMaxBits()) or 1200
+	vrmod.NetReceiveLimited("vrutil_net_tick", convarValues.vrmod_net_tickrate + 5, tickMaxBits, function(len, ply)
 		vrmod.logger.Debug("received net_tick, len: " .. len)
 		if g_VR[ply:SteamID()] == nil then return end
 		local viewHackPos = net.ReadVector()
@@ -545,6 +599,10 @@ if SERVER then
 		g_VR[ply:SteamID()].muzzlePos = viewHackPos
 		g_VR[ply:SteamID()].muzzleAng = viewHackAng
 		local frame = netReadFrame()
+		-- Server disallow: store and relay the same bytes an eye-off client sent.
+		if vrmod.EyeTrackingAllowed and not vrmod.EyeTrackingAllowed() and vrmod.utils.EyeFrame_Clear then
+			vrmod.utils.EyeFrame_Clear(frame)
+		end
 		g_VR[ply:SteamID()].latestFrame = frame
 		if not viewHackPos:IsZero() and util.IsInWorld(viewHackPos) then
 			ply.viewOffset = viewHackPos - ply:EyePos() + ply.viewOffset
@@ -562,6 +620,28 @@ if SERVER then
 		--net.Broadcast()
 		net.SendOmit(ply)
 	end)
+
+	--- Server just turned gaze off. Push one stripped tick so remotes drop
+	--- the sample without waiting for the next pose change.
+	function vrmod.EyeFrame_RelayStrip()
+		if vrmod.EyeTrackingAllowed and vrmod.EyeTrackingAllowed() then return end
+		if not vrmod.utils.EyeFrame_Clear then return end
+		for _, ply in ipairs(player.GetAll()) do
+			if IsValid(ply) then
+				local tab = g_VR[ply:SteamID()]
+				if tab and tab.latestFrame and tab.latestFrame.eyePitchU ~= nil then
+					vrmod.utils.EyeFrame_Clear(tab.latestFrame)
+					if tab.latestFrameWorld and vrmod.utils.EyeFrame_FillWorld then
+						vrmod.utils.EyeFrame_FillWorld(tab.latestFrameWorld, tab.latestFrame, false)
+					end
+					net.Start("vrutil_net_tick", true)
+					net.WriteEntity(ply)
+					netWriteFrame(tab.latestFrame)
+					net.SendOmit(ply)
+				end
+			end
+		end
+	end
 
 	vrmod.NetReceiveLimited("vrutil_net_join", 5, 2, function(len, ply)
 		local sid = ply:SteamID()

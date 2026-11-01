@@ -66,6 +66,13 @@ if SERVER then
             if lf.waistPos then lfw.waistPos, lfw.waistAng = LocalToWorld(lf.waistPos, lf.waistAng or Angle(), refPos, refAng) end
             if lf.leftfootPos then lfw.leftfootPos, lfw.leftfootAng = LocalToWorld(lf.leftfootPos, lf.leftfootAng or Angle(), refPos, refAng) end
             if lf.rightfootPos then lfw.rightfootPos, lfw.rightfootAng = LocalToWorld(lf.rightfootPos, lf.rightfootAng or Angle(), refPos, refAng) end
+            -- Gaze shares this table. Clear it when the tick has no eye so a
+            -- reused world pose cannot keep the previous look.
+            if vrmod.utils.EyeFrame_FillWorld then
+                local allowed = true
+                if vrmod.EyeTrackingAllowed then allowed = vrmod.EyeTrackingAllowed() end
+                vrmod.utils.EyeFrame_FillWorld(lfw, lf, allowed)
+            end
             -- Velocity cache setup
             local sid = ply:SteamID()
             local cache = vrmod.HandVelocityCache[sid]
@@ -398,6 +405,36 @@ if SERVER then
         if not (t and t.latestFrame) then return Vector(), Angle() end
         UpdateWorldPoses(ply, t)
         return t.latestFrameWorld.waistPos or Vector(), t.latestFrameWorld.waistAng or Angle()
+    end
+
+    -- Eye gaze from the player frame. nil when the server disallows it,
+    -- the client left it off, or this tick has no sample.
+    -- Position is the HMD. Angles are the quantized HMD-relative look,
+    -- composed into the same world space as GetHMDAng.
+    function vrmod.GetEyeGaze(ply)
+        if not IsValid(ply) then return nil end
+        if vrmod.EyeTrackingAllowed and not vrmod.EyeTrackingAllowed() then return nil end
+        local t = g_VR[ply:SteamID()]
+        if not (t and t.latestFrame) then return nil end
+        UpdateWorldPoses(ply, t)
+        local w = t.latestFrameWorld
+        if not (w and w.eyeActive and w.eyePos and w.eyeAng) then return nil end
+        return w.eyePos, w.eyeAng
+    end
+
+    function vrmod.GetEyeGazeActive(ply)
+        local pos = vrmod.GetEyeGaze(ply)
+        return pos ~= nil
+    end
+
+    --- HMD-relative pitch, yaw in degrees. nil when this tick has no gaze.
+    function vrmod.GetEyeGazeLocal(ply)
+        if not IsValid(ply) then return nil end
+        if vrmod.EyeTrackingAllowed and not vrmod.EyeTrackingAllowed() then return nil end
+        local t = g_VR[ply:SteamID()]
+        local lf = t and t.latestFrame
+        if not lf or not vrmod.utils.EyeFrame_UnpackLocal then return nil end
+        return vrmod.utils.EyeFrame_UnpackLocal(lf.eyePitchU, lf.eyeYawU)
     end
 
     function vrmod.GetWaistVelocity(ply)

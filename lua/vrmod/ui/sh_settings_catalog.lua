@@ -191,7 +191,17 @@ vrmod.SettingsCatalog = {
 			{ kind = "bool", label = "Wall collisions (Client)", cvar = "vrmod_collisions" },
 			{ kind = "bool", label = "Head / HMD wall block", cvar = "vrmod_head_collision" },
 			{ kind = "bool", label = "Prop collisions (Server)", cvar = "vrmod_collison_proxy" },
-			{ kind = "bool", label = "Flashlight on left hand", cvar = "vrmod_flashlight_attachment" },
+			{ kind = "combo", label = "Flashlight aim", cvar = "vrmod_flashlight_aim", choices = {
+				{ text = "Right hand", value = 0 },
+				{ text = "Left hand", value = 1 },
+				{ text = "HMD", value = 2 },
+				{ text = "Eye tracking", value = 3 },
+			}},
+			{ kind = "combo", label = "Flashlight fallback hand", cvar = "vrmod_flashlight_eye_fallback", choices = {
+				{ text = "Right hand", value = 0 },
+				{ text = "Left hand", value = 1 },
+			}},
+			{ kind = "help", label = "Eye aim uses gaze when eye tracking is on and the server allows it. If gaze is selected but off, or there is no sample, the fallback hand is used. Right hand follows the weapon muzzle." },
 			{ kind = "bool", label = "Drop weapon on grip release", cvar = "vrmod_weapondrop_enable" },
 			{ kind = "bool", label = "Manual item pickup", cvar = "vrmod_manualpickups" },
 			{ kind = "bool", label = "Interactive buttons", cvar = "vrmod_interactive_buttons" },
@@ -215,7 +225,8 @@ vrmod.SettingsCatalog = {
 			{ kind = "header", label = "Animation" },
 			{ kind = "bool", label = "Character IK", cvar = "vrmod_characterik" },
 			{ kind = "bool", label = "Eye tracking", cvar = "vrmod_eyetracking" },
-			{ kind = "help", label = "Off by default. OpenXR eye gaze moves character eyes when the headset provides it (Pico, Quest Pro, Index, and other runtimes on the same extension)." },
+			{ kind = "bool", label = "Allow eye tracking (Server)", cvar = "vrmod_sv_eyetracking" },
+			{ kind = "help", label = "Client off sends no gaze, and the player frame matches older builds. Server off strips gaze from the frame and from the legacy eye message. Both on: pitch and yaw ride the player frame. A server without this convar allows it." },
 			{ kind = "bool", label = "Arm stretcher", cvar = "vrmod_armstretcher" },
 			{ kind = "header", label = "Calibration" },
 			{ kind = "slider", label = "Eye height", cvar = "vrmod_charactereyeheight", min = 30, max = 100, decimals = 1 },
@@ -741,10 +752,15 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_pickup_halos", "1")
 		RunConsoleCommand("vrmod_collisions", "1")
 		RunConsoleCommand("vrmod_collison_proxy", "1")
+		RunConsoleCommand("vrmod_flashlight_attachment", "0")
+		RunConsoleCommand("vrmod_flashlight_aim", "0")
+		RunConsoleCommand("vrmod_flashlight_eye_fallback", "0")
 		return true
 	end
 	if action_id == "reset_character" then
 		RunConsoleCommand("vrmod_characterik", "1")
+		RunConsoleCommand("vrmod_eyetracking", "0")
+		RunConsoleCommand("vrmod_sv_eyetracking", "1")
 		RunConsoleCommand("vrmod_armstretcher", "0")
 		RunConsoleCommand("vrmod_charactereyeheight", "66.8")
 		RunConsoleCommand("vrmod_characterheadtohmddist", "6.3")

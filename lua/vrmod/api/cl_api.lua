@@ -946,6 +946,51 @@ if CLIENT then
         return g_VR.view and g_VR.view.origin or Vector()
     end
 
+    -- Live local gaze (full precision), or a remote player's frame sample.
+    -- nil when eye tracking is off, the server disallows it, or there is no sample.
+    -- This is not GetEyePos (the stereo camera). Character eyes that only have
+    -- the older vrmod_eye_gaze message stay on that channel; this reads the frame.
+    function vrmod.GetEyeGaze(ply)
+        if vrmod.EyeTrackingAllowed and not vrmod.EyeTrackingAllowed() then return nil end
+        ply = (IsValid(ply) and ply) or LocalPlayer()
+        if not IsValid(ply) then return nil end
+        if ply == LocalPlayer() then
+            if vrmod.EyeTrackingEnabled and not vrmod.EyeTrackingEnabled() then return nil end
+            local et = g_VR.eyeTracking
+            if not et or not et.active or not et.pos or not et.ang then return nil end
+            return et.pos, et.ang
+        end
+        local tab = g_VR.net and g_VR.net[ply:SteamID()]
+        local lf = tab and tab.lerpedFrame
+        if not lf or not lf.hmdPos or not lf.hmdAng or not vrmod.utils.EyeFrame_FillWorld then return nil end
+        local dst = { hmdPos = lf.hmdPos, hmdAng = lf.hmdAng }
+        vrmod.utils.EyeFrame_FillWorld(dst, lf, true)
+        if not dst.eyeActive then return nil end
+        return dst.eyePos, dst.eyeAng
+    end
+
+    function vrmod.GetEyeGazeActive(ply)
+        local pos = vrmod.GetEyeGaze(ply)
+        return pos ~= nil
+    end
+
+    --- HMD-relative pitch, yaw. Local player is the live sample, not the uint16.
+    function vrmod.GetEyeGazeLocal(ply)
+        if vrmod.EyeTrackingAllowed and not vrmod.EyeTrackingAllowed() then return nil end
+        ply = (IsValid(ply) and ply) or LocalPlayer()
+        if not IsValid(ply) then return nil end
+        if ply == LocalPlayer() then
+            if vrmod.EyeTrackingEnabled and not vrmod.EyeTrackingEnabled() then return nil end
+            local et = g_VR.eyeTracking
+            if not et or not et.active or not et.localAng then return nil end
+            return et.localAng.p, et.localAng.y
+        end
+        local tab = g_VR.net and g_VR.net[ply:SteamID()]
+        local lf = tab and tab.lerpedFrame
+        if not lf or not vrmod.utils.EyeFrame_UnpackLocal then return nil end
+        return vrmod.utils.EyeFrame_UnpackLocal(lf.eyePitchU, lf.eyeYawU)
+    end
+
     function vrmod.GetTrackedDeviceNames()
         return g_VR.active and VRMOD_GetTrackedDeviceNames and VRMOD_GetTrackedDeviceNames() or {}
     end
