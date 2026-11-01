@@ -1340,8 +1340,8 @@ if CLIENT then
 			local function BlitEyeToSbs(mat, x, y, w, h)
 				surface.SetMaterial(mat)
 				surface.SetDrawColor(255, 255, 255, 255)
-				-- Surface draws an RT upside down. Flip V so SBS matches RenderView.
-				surface.DrawTexturedRectUV(x, y, w, h, 0, 1, 1, 0)
+				-- Keep RenderView's orientation. The OpenXR submit already flips V once.
+				surface.DrawTexturedRect(x, y, w, h)
 			end
 
 			-- ONE pose/solve phase for the whole frame (not per-eye).
