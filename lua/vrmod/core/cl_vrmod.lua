@@ -84,6 +84,11 @@ if CLIENT then
 		-- 0: each eye draws its own decals. Batch 1 flushes once with the last
 		-- view, so the other eye z-fights and bullet holes flicker on head motion.
 		r_drawbatchdecals = "0",
+		-- Queued decals draw a frame late, with the other eye's depth.
+		r_queued_decals = "0",
+		-- Engine default slope bias is -262144. Any view that is not square to
+		-- the wall pushes the spray through the surface in vertical strips.
+		mat_slopescaledepthbias_decal = "-2",
 		snd_mute_losefocus = "0",
 		-- Keep engine frame loop alive when desktop window is not focused (VR HMD play).
 		engine_no_focus_sleep = "0",
@@ -1025,9 +1030,15 @@ if CLIENT then
 		local d = GetConVar("r_drawdecals")
 		local m = GetConVar("r_drawmodeldecals")
 		local b = GetConVar("r_drawbatchdecals")
+		local q = GetConVar("r_queued_decals")
+		local s = GetConVar("mat_slopescaledepthbias_decal")
 		if d and d:GetInt() ~= 1 then setConvarValue("r_drawdecals", "1") end
 		if m and m:GetInt() ~= 1 then setConvarValue("r_drawmodeldecals", "1") end
 		if b and b:GetInt() ~= 0 then overrideConvar("r_drawbatchdecals", "0") end
+		if q and q:GetInt() ~= 0 then overrideConvar("r_queued_decals", "0") end
+		if s and math.abs(s:GetFloat() - (-2)) > 0.05 then
+			overrideConvar("mat_slopescaledepthbias_decal", "-2")
+		end
 	end
 
 	--- Engine eye pass only — never WorldPortals_RenderView, never nested RTs.
