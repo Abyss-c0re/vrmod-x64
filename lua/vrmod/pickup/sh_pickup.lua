@@ -18,6 +18,11 @@ if CLIENT then
 	end
 
 	CreateClientConVar("vrmod_pickup_halos", "1", true, FCVAR_CLIENTCMD_CAN_EXECUTE + FCVAR_ARCHIVE)
+	vrmod.AddCallbackedConvar("vrmod_pickup_eye", nil, "0", FCVAR_ARCHIVE, "Grab the prop you look at when either grip is pressed", 0, 1, tobool)
+	vrmod.AddCallbackedConvar("vrmod_pickup_eye_range", nil, "12", FCVAR_ARCHIVE, "Eye pickup range, same scale as vrmod_pickup_range", 0, 32, function(v)
+		if vrmod.utils.LookTarget_ClampRange then return vrmod.utils.LookTarget_ClampRange(v) end
+		return tonumber(v) or 12
+	end)
 	local pickupTargetEntLeft = nil
 	local pickupTargetEntRight = nil
 	local haloTargetsLeft = {}
@@ -58,6 +63,84 @@ if CLIENT then
 		end
 	end)
 
+	local function pointDist(fromPos, ent, fallbackPos)
+		if not fromPos or not vrmod.utils.LookTarget_Distance then return nil end
+		local p = fallbackPos
+		if IsValid(ent) and ent.NearestPoint then
+			local ok, np = pcall(ent.NearestPoint, ent, fromPos)
+			if ok and np then p = np end
+		elseif IsValid(ent) and ent.GetPos then
+			local ok, gp = pcall(ent.GetPos, ent)
+			if ok and gp then p = gp end
+		end
+		if not p then return nil end
+		return vrmod.utils.LookTarget_Distance(
+			{ x = fromPos.x, y = fromPos.y, z = fromPos.z },
+			{ x = p.x, y = p.y, z = p.z }
+		)
+	end
+
+	local function eyePickupEnabled()
+		local cv = GetConVar("vrmod_pickup_eye")
+		if not cv or not cv:GetBool() then return false end
+		if vrmod.EyeTrackingEnabled and not vrmod.EyeTrackingEnabled() then return false end
+		if vrmod.EyeTrackingAllowed and not vrmod.EyeTrackingAllowed() then return false end
+		return vrmod.utils.LookTarget_Query ~= nil and vrmod.utils.LookTarget_ChoosePickup ~= nil
+	end
+
+	-- Same reach rule as the hand, with the eye slider. Important items use boost 5
+	-- for the trace; the hit is then checked with that entity's own boost.
+	local function findEyeTarget(ply)
+		local rangeCv = GetConVar("vrmod_pickup_eye_range")
+		local range = vrmod.utils.LookTarget_ClampRange(rangeCv and rangeCv:GetFloat() or nil)
+		local reach = vrmod.utils.LookTarget_MaxDistance(range, vrmod.utils.LookTarget_Boost(true, false))
+		local ent, pos = vrmod.utils.LookTarget_Query(ply, reach)
+		if not IsValid(ent) or not pos then return nil, nil end
+		local gazePos = vrmod.GetEyeGaze and select(1, vrmod.GetEyeGaze(ply))
+		local dist = pointDist(gazePos, nil, pos)
+		local important = false
+		if vrmod.utils.IsImportantPickup then
+			local okImp, resImp = pcall(vrmod.utils.IsImportantPickup, ent)
+			important = okImp and resImp and true or false
+		end
+		local npc = false
+		if ent.IsNPC then
+			local okNpc, resNpc = pcall(ent.IsNPC, ent)
+			npc = okNpc and resNpc and true or false
+		end
+		if not vrmod.utils.LookTarget_Within(dist, range, vrmod.utils.LookTarget_Boost(important, npc)) then
+			return nil, nil
+		end
+		return ent, pos
+	end
+
+	local function targetForHand(ply, bLeft, handPos, handEnt, eyeEnt, eyePos, hmdPos)
+		if not IsValid(eyeEnt) or not vrmod.utils.LookTarget_ChoosePickup then return handEnt end
+		local useEye = eyeEnt
+		local _, cv = vrmod.GetConvars()
+		local aw = ply.GetActiveWeapon and ply:GetActiveWeapon() or nil
+		local isWep = vrmod.utils.IsWeaponEntity and vrmod.utils.IsWeaponEntity(useEye)
+		local same = IsValid(aw) and useEye.GetClass and aw.GetClass and useEye:GetClass() == aw:GetClass()
+		local holding = vrmod.utils.IsValidWep and vrmod.utils.IsValidWep(aw)
+		local allowWep = true
+		if vrmod.utils.LookTarget_AllowHeldWeapon then
+			allowWep = vrmod.utils.LookTarget_AllowHeldWeapon(isWep, same, bLeft, holding)
+		end
+		local okTarget = vrmod.utils.IsValidPickupTarget(useEye, ply, bLeft)
+		local okCan = vrmod.utils.CanPickupEntity(useEye, ply, cv or {})
+		if not okTarget or not okCan or not allowWep then useEye = nil end
+		local choice = vrmod.utils.LookTarget_ChoosePickup({
+			eye_enabled = useEye ~= nil,
+			hand_ent = IsValid(handEnt) and handEnt or nil,
+			hand_dist = pointDist(handPos, handEnt, nil),
+			eye_ent = useEye,
+			hand_to_eye = pointDist(handPos, useEye, eyePos),
+			hmd_to_eye = pointDist(hmdPos, useEye, eyePos),
+		})
+		if choice.source == "none" then return nil end
+		return choice.ent
+	end
+
 	hook.Add("Think", "vrmod_find_pickup_target", function()
 		-- Sphere+trace both hands every Think hitches prop-dense maps. 30 Hz is enough.
 		local fn = FrameNumber and FrameNumber() or 0
@@ -67,16 +150,31 @@ if CLIENT then
 		local pickupRange = GetConVar("vrmod_pickup_range"):GetFloat()
 		local heldLeft = g_VR.heldEntityLeft
 		local heldRight = g_VR.heldEntityRight
+		local useEye = eyePickupEnabled()
+		local eyeEnt, eyePos = nil, nil
+		if useEye then eyeEnt, eyePos = findEyeTarget(ply) end
+		local hmdPos = g_VR.tracking and g_VR.tracking.hmd and g_VR.tracking.hmd.pos
 		local rightHand = g_VR.tracking and g_VR.tracking.pose_righthand
+		-- Right grip still refuses world props while a weapon is out.
 		if rightHand and not heldRight and not vrmod.utils.IsValidWep(ply:GetActiveWeapon()) then
-			pickupTargetEntRight = vrmod.utils.FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, pickupRange)
+			local handEnt = vrmod.utils.FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, pickupRange)
+			if useEye then
+				pickupTargetEntRight = targetForHand(ply, false, rightHand.pos, handEnt, eyeEnt, eyePos, hmdPos)
+			else
+				pickupTargetEntRight = handEnt
+			end
 		else
 			pickupTargetEntRight = nil
 		end
 
 		local leftHand = g_VR.tracking and g_VR.tracking.pose_lefthand
 		if leftHand and not heldLeft then
-			pickupTargetEntLeft = vrmod.utils.FindPickupTarget(ply, true, leftHand.pos, leftHand.ang, pickupRange)
+			local handEnt = vrmod.utils.FindPickupTarget(ply, true, leftHand.pos, leftHand.ang, pickupRange)
+			if useEye then
+				pickupTargetEntLeft = targetForHand(ply, true, leftHand.pos, handEnt, eyeEnt, eyePos, hmdPos)
+			else
+				pickupTargetEntLeft = handEnt
+			end
 		else
 			pickupTargetEntLeft = nil
 		end

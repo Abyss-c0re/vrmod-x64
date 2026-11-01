@@ -52,6 +52,14 @@ On the client, the local player returns the live sample. Another player returns 
 
 `vrmod.GetEyePos` is still the stereo camera. It is not gaze.
 
+## Look target
+
+`vrmod.utils.LookTarget_Select` turns a trace into the entity and the exact hit point. `vrmod.utils.LookTarget_Query(ply, maxDist)` runs that trace from `vrmod.GetEyeGaze`. World and sky return the point and no object. A miss returns the point at `maxDist` along the look.
+
+## Pickup
+
+Gameplay → **Eye pickup** (`vrmod_pickup_eye`, default off) and **Eye pickup range** (`vrmod_pickup_eye_range`, default 12, same slider × 12 × boost rule as hand pickup). When it is on and gaze is live, either grip grabs the looked-at prop through the existing pickup path. Menu grab, foregrip, pickup disable, and a weapon already in the right hand still run first. A hand result within 18 units is left alone. Gaze stays the choice until that hand is closer to the prop than the HMD position.
+
 ## Flashlight
 
 Gameplay settings:

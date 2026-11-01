@@ -176,3 +176,73 @@ function vrmod.utils.LookTarget_Query(ply, maxDist)
 	end
 	return chosen, vec, reason
 end
+
+--- Matches the close sphere in FindPickupTarget (bestDist <= 18).
+--- A hand result inside this radius is never replaced by gaze.
+function vrmod.utils.LookTarget_CloseRadius()
+	return 18
+end
+
+--- True only when the hand is strictly closer to the object than the HMD position.
+--- Missing or non-finite distances are not "closer".
+function vrmod.utils.LookTarget_HandCloserThanHmd(handDist, hmdDist)
+	handDist = tonumber(handDist)
+	hmdDist = tonumber(hmdDist)
+	if not finite(handDist) or not finite(hmdDist) then return false end
+	return handDist < hmdDist
+end
+
+--- Same weapon exceptions as FindPickupTarget.
+--- A dropped gun of the class you are holding is not a second copy.
+--- The right hand does not take a weapon while a weapon is already out.
+function vrmod.utils.LookTarget_AllowHeldWeapon(isWeapon, sameClass, leftHand, holdingWeapon)
+	local function on(v)
+		return v == true or v == 1 or v == "1"
+	end
+	if not on(isWeapon) then return true end
+	if on(sameClass) then return false end
+	if not on(leftHand) and on(holdingWeapon) then return false end
+	return true
+end
+
+--- Which entity a grip should grab.
+--- Close-hand results stay. Gaze is the choice only while this hand is not
+--- closer to the looked-at object than the HMD position is.
+--- opts.hand_ent, hand_dist, eye_ent, eye_enabled, hand_to_eye, hmd_to_eye, close_radius.
+--- Returns { source = "hand"|"eye"|"none", reason, ent }.
+function vrmod.utils.LookTarget_ChoosePickup(opts)
+	opts = type(opts) == "table" and opts or {}
+	local closeR = tonumber(opts.close_radius)
+	if not finite(closeR) or closeR < 0 then
+		closeR = vrmod.utils.LookTarget_CloseRadius()
+	end
+	local handEnt = opts.hand_ent
+	if handEnt == false then handEnt = nil end
+	local eyeEnt = opts.eye_ent
+	if eyeEnt == false then eyeEnt = nil end
+	local handDist = tonumber(opts.hand_dist)
+	local eyeOn = opts.eye_enabled == true or opts.eye_enabled == 1 or opts.eye_enabled == "1"
+
+	-- Unknown distance: keep the hand result so a near grab is not replaced.
+	if handEnt ~= nil and not finite(handDist) then
+		return { source = "hand", reason = "hand_unmeasured", ent = handEnt }
+	end
+	if handEnt ~= nil and handDist <= closeR then
+		return { source = "hand", reason = "close_hand", ent = handEnt }
+	end
+
+	if eyeOn and eyeEnt ~= nil then
+		if vrmod.utils.LookTarget_HandCloserThanHmd(opts.hand_to_eye, opts.hmd_to_eye) then
+			if handEnt ~= nil then
+				return { source = "hand", reason = "hand_closer", ent = handEnt }
+			end
+			return { source = "none", reason = "hand_closer", ent = nil }
+		end
+		return { source = "eye", reason = "eye", ent = eyeEnt }
+	end
+
+	if handEnt ~= nil then
+		return { source = "hand", reason = "hand", ent = handEnt }
+	end
+	return { source = "none", reason = "none", ent = nil }
+end

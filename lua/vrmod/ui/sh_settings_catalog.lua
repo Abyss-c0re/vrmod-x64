@@ -213,6 +213,9 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Head collision radius", cvar = "vrmod_head_collision_radius", min = 3, max = 14, decimals = 1 },
 			{ kind = "slider", label = "Pickup weight (Server)", cvar = "vrmod_pickup_weight", min = 1, max = 10000, decimals = 0 },
 			{ kind = "slider", label = "Pickup range (Server)", cvar = "vrmod_pickup_range", min = 0, max = 10, decimals = 1 },
+			{ kind = "bool", label = "Eye pickup", cvar = "vrmod_pickup_eye" },
+			{ kind = "slider", label = "Eye pickup range", cvar = "vrmod_pickup_eye_range", min = 0, max = 32, decimals = 1 },
+			{ kind = "help", label = "Off by default. On: either grip grabs the prop you look at, with the same pickup rules. A hand already on a prop still wins. Eye stays the choice until that hand is closer to the prop than your head. Range uses the same scale as pickup range." },
 			{ kind = "action", label = "Adjust weapons", cmd = "vrmod_weaponconfig" },
 			{ kind = "action", label = "Reset gameplay defaults", action_id = "reset_gameplay" },
 		},
@@ -747,6 +750,8 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_weapon_swap", "1")
 		RunConsoleCommand("vrmod_pickup_weight", "150")
 		RunConsoleCommand("vrmod_pickup_range", "3.5")
+		RunConsoleCommand("vrmod_pickup_eye", "0")
+		RunConsoleCommand("vrmod_pickup_eye_range", "12")
 		RunConsoleCommand("vrmod_pickup_limit", "1")
 		RunConsoleCommand("vrmod_pickup_npcs", "1")
 		RunConsoleCommand("vrmod_pickup_halos", "1")
