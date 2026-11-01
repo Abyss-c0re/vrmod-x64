@@ -81,7 +81,9 @@ if CLIENT then
 		r_queued_ropes = "1",
 		r_drawdecals = "1",
 		r_drawmodeldecals = "1",
-		r_drawbatchdecals = "1",
+		-- 0: each eye draws its own decals. Batch 1 flushes once with the last
+		-- view, so the other eye z-fights and bullet holes flicker on head motion.
+		r_drawbatchdecals = "0",
 		snd_mute_losefocus = "0",
 		-- Keep engine frame loop alive when desktop window is not focused (VR HMD play).
 		engine_no_focus_sleep = "0",
@@ -1022,8 +1024,10 @@ if CLIENT then
 	local function EnsureDecalsEnabled()
 		local d = GetConVar("r_drawdecals")
 		local m = GetConVar("r_drawmodeldecals")
+		local b = GetConVar("r_drawbatchdecals")
 		if d and d:GetInt() ~= 1 then setConvarValue("r_drawdecals", "1") end
 		if m and m:GetInt() ~= 1 then setConvarValue("r_drawmodeldecals", "1") end
+		if b and b:GetInt() ~= 0 then overrideConvar("r_drawbatchdecals", "0") end
 	end
 
 	--- Engine eye pass only — never WorldPortals_RenderView, never nested RTs.
