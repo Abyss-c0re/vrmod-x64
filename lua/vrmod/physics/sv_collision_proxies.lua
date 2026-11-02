@@ -308,17 +308,60 @@ hook.Add("Tick", "VRProxy_PhysicsSync", function()
                 targetPos = pos + ang:Forward() * (vrmod.DEFAULT_OFFSET or 0)
             end
 
-            -- Anti-clip trace (keep this)
-            local trace = util.TraceHull({
-                start = pos,
-                endpos = targetPos,
-                mins = Vector(-4, -4, -4),
-                maxs = Vector(4, 4, 4),
-                filter = {ply, proxyData.ent},
-                mask = MASK_SOLID
-            })
+            -- Anti-clip stays server-authoritative. Do not reuse a client hull.
+            -- Skip the trace when this proxy has not moved and the player is not jumping.
+            local aimX, aimY, aimZ = targetPos.x, targetPos.y, targetPos.z
+            local tick = (engine and engine.TickCount and engine.TickCount()) or 0
+            local moved, age, same, has = nil, nil, false, false
+            if proxyData.traceValid and proxyData.traceAimX ~= nil then
+                has = true
+                local dx = aimX - proxyData.traceAimX
+                local dy = aimY - proxyData.traceAimY
+                local dz = aimZ - proxyData.traceAimZ
+                moved = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if proxyData.traceTick ~= nil then
+                    age = tick - proxyData.traceTick
+                    same = proxyData.traceTick == tick
+                end
+            end
+            local vz = nil
+            if ply.GetVelocity then
+                local vel = ply:GetVelocity()
+                if vel then vz = vel.z or 0 end
+            end
+            local jump = ply.KeyPressed and IN_JUMP and ply:KeyPressed(IN_JUMP) or false
+            local doTrace = true
+            if vrmod.utils.HandRetrace_Should then
+                doTrace = vrmod.utils.HandRetrace_Should({
+                    moved = moved,
+                    vert_speed = vz,
+                    frame_age = age,
+                    jump_pressed = jump,
+                    same_frame = same,
+                    has_cache = has,
+                })
+            end
+            if not doTrace then
+                if proxyData.traceBlocked and proxyData.traceResX ~= nil then
+                    targetPos = Vector(proxyData.traceResX, proxyData.traceResY, proxyData.traceResZ)
+                end
+            else
+                local trace = util.TraceHull({
+                    start = pos,
+                    endpos = targetPos,
+                    mins = Vector(-4, -4, -4),
+                    maxs = Vector(4, 4, 4),
+                    filter = {ply, proxyData.ent},
+                    mask = MASK_SOLID
+                })
 
-            if trace.Hit then targetPos = trace.HitPos + trace.HitNormal * 3 end
+                if trace.Hit then targetPos = trace.HitPos + trace.HitNormal * 3 end
+                proxyData.traceValid = true
+                proxyData.traceBlocked = trace.Hit and true or false
+                proxyData.traceAimX, proxyData.traceAimY, proxyData.traceAimZ = aimX, aimY, aimZ
+                proxyData.traceResX, proxyData.traceResY, proxyData.traceResZ = targetPos.x, targetPos.y, targetPos.z
+                proxyData.traceTick = tick
+            end
             local phys = proxyData.phys
             phys:Wake()
             phys:ComputeShadowControl({

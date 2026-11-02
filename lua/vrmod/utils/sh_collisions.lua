@@ -72,19 +72,6 @@ local function SetSymmetricHull(radius)
     return tmpHullNeg, tmpHullPos
 end
 
---- Cheap brush overlap only (no penetration resolve). Used for broadphase.
-local function WorldBrushOverlaps(pos, radius)
-    local mins, maxs = SetSymmetricHull(radius)
-    local tr = util.TraceHull({
-        start = pos,
-        endpos = pos,
-        mins = mins,
-        maxs = maxs,
-        mask = MASK_SOLID_BRUSHONLY
-    })
-    return tr.Hit and tr.HitWorld
-end
-
 --- Reach sweep hit test only (no push-out iterations).
 local function BoxSweepHitsWorld(pos, ang, mins, maxs, reach)
     local tr = util.TraceHull({
@@ -678,12 +665,12 @@ function vrmod.utils.CollisionsPreCheck(leftPos, rightPos)
         return
     end
 
-    lastPreCheckLeft:Set(leftPos)
-    lastPreCheckRight:Set(rightPos)
-    -- Broadphase only: single hull each, no push-out resolve
-    local bigRadius = vrmod.utils.IsValidWep(ply:GetActiveWeapon()) and 69 or 30
-    lastPreCheckResult = WorldBrushOverlaps(leftPos, 30) or WorldBrushOverlaps(rightPos, bigRadius)
-    vrmod._collisionNearby = lastPreCheckResult
+    if leftPos then lastPreCheckLeft:Set(leftPos) end
+    if rightPos then lastPreCheckRight:Set(rightPos) end
+    -- Radius 30/69 hulls used to run here on every pose step, then
+    -- UpdateHandCollisions swept the real hand hull the same frame.
+    -- On a jump the playspace origin moves, so the skip never hit, and the
+    -- fat hulls hitch large BSPs. The hand sweep is the only broadphase.
 end
 
 --- World collision for a hand/weapon sample.
@@ -897,6 +884,132 @@ local function AddPosInPlace(pos, delta)
 	return pos + delta
 end
 
+-- One cached hull per hand / gun / head. Not shared with the server.
+local jumpEdgeFrame, jumpEdgeValue = nil, false
+local prevJumpHeld = false
+
+local function NowFrame()
+	if isfunction(FrameNumber) then return FrameNumber() end
+	return nil
+end
+
+local function PlayerVertSpeed(ply)
+	if not IsValid(ply) or not ply.GetVelocity then return nil end
+	local vel = ply:GetVelocity()
+	if not vel then return nil end
+	return vel.z or 0
+end
+
+--- IN_JUMP edge, sampled once per frame (left hand, right hand, gun, head).
+local function JumpEdgeThisFrame(ply)
+	local frame = NowFrame()
+	if frame ~= nil and jumpEdgeFrame == frame then
+		return jumpEdgeValue
+	end
+	local edge = false
+	if IsValid(ply) and ply.KeyPressed and IN_JUMP and ply:KeyPressed(IN_JUMP) then
+		edge = true
+	end
+	local held = g_VR and g_VR.input and g_VR.input.boolean_jump and true or false
+	if held and not prevJumpHeld then
+		edge = true
+	end
+	prevJumpHeld = held and true or false
+	jumpEdgeFrame = frame
+	jumpEdgeValue = edge
+	return edge
+end
+
+local function EnsureRetrace(holder)
+	local c = holder.retrace
+	if c then return c end
+	c = {
+		valid = false,
+		frame = nil,
+		sample = Vector(),
+		delta = Vector(),
+		normal = Vector(),
+		hasNormal = false,
+		clipped = false,
+	}
+	holder.retrace = c
+	return c
+end
+
+local function StoreRetrace(cache, sample, safe, clipped, normal, frame)
+	if not cache or not IsVec(sample) then return end
+	cache.valid = true
+	cache.frame = frame
+	cache.sample:Set(sample)
+	if clipped and IsVec(safe) then
+		cache.delta.x = safe.x - sample.x
+		cache.delta.y = safe.y - sample.y
+		cache.delta.z = safe.z - sample.z
+		cache.clipped = true
+	else
+		cache.delta.x, cache.delta.y, cache.delta.z = 0, 0, 0
+		cache.clipped = false
+	end
+	if clipped and IsVec(normal) and normal:LengthSqr() > 0.01 then
+		cache.normal:Set(normal)
+		cache.hasNormal = true
+	else
+		cache.hasNormal = false
+	end
+end
+
+--- Already-corrected pose (same-frame second hook) returns desired unchanged.
+local function RetraceResult(desired, cache)
+	if not cache or not cache.clipped then
+		return desired, false, nil
+	end
+	local dx, dy, dz = cache.delta.x, cache.delta.y, cache.delta.z
+	local cx = cache.sample.x + dx
+	local cy = cache.sample.y + dy
+	local cz = cache.sample.z + dz
+	local ddx = desired.x - cx
+	local ddy = desired.y - cy
+	local ddz = desired.z - cz
+	local normal = cache.hasNormal and cache.normal or nil
+	if (ddx * ddx + ddy * ddy + ddz * ddz) <= (0.35 * 0.35) then
+		return desired, true, normal
+	end
+	return Vector(desired.x + dx, desired.y + dy, desired.z + dz), true, normal
+end
+
+local function ShouldTracePose(cache, samplePos, ply, angDeg)
+	local frame = NowFrame()
+	local moved, age, same, has = nil, nil, false, false
+	if cache and cache.valid and IsVec(cache.sample) and IsVec(samplePos) then
+		has = true
+		moved = cache.sample:Distance(samplePos)
+		if frame ~= nil and cache.frame ~= nil then
+			age = frame - cache.frame
+			same = cache.frame == frame
+		end
+	end
+	local fn = vrmod.utils.HandRetrace_Should
+	if not fn then return true end
+	return fn({
+		moved = moved,
+		vert_speed = PlayerVertSpeed(ply),
+		frame_age = age,
+		jump_pressed = JumpEdgeThisFrame(ply),
+		same_frame = same,
+		has_cache = has,
+		ang_deg = angDeg,
+	})
+end
+
+local function PoseAngDelta(cache, ang)
+	if not cache or not cache.valid or not ang or cache.p == nil then return nil end
+	return math.max(
+		math.abs(math.AngleDifference(ang.p or 0, cache.p)),
+		math.abs(math.AngleDifference(ang.y or 0, cache.y)),
+		math.abs(math.AngleDifference(ang.r or 0, cache.r))
+	)
+end
+
 --- Sweep weapon collision box + barrel tip.
 --- Cube law: OVERRIDE the hand Vector that lives on g_VR.tracking (SoT).
 --- rawTracking is never touched — device energy stays pure elsewhere.
@@ -905,6 +1018,7 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
     local wep = ply:GetActiveWeapon()
     if not vrmod.utils.IsValidWep(wep) then
         wepWall.hasFree = false
+        if wepWall.retrace then wepWall.retrace.valid = false end
         table.Empty(vrmod.collisionBoxes)
         return handPos, handAng
     end
@@ -926,6 +1040,15 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
 
     local desired = vrmod.utils.AdjustCollisionsBox(handPos, handAng, isMelee)
     if not IsVec(desired) then return handPos, handAng end
+    local wepCache = EnsureRetrace(wepWall)
+    if not ShouldTracePose(wepCache, desired, ply, PoseAngDelta(wepCache, handAng)) then
+        local safe = RetraceResult(desired, wepCache)
+        if IsVec(safe) and safe ~= desired then
+            handPos = AddPosInPlace(handPos, safe - desired)
+        end
+        return handPos, handAng
+    end
+    local ox, oy, oz = handPos.x, handPos.y, handPos.z
     local pad = math.max(0.05, GetWallPushPad())
     local startPos = (wepWall.hasFree and IsVec(wepWall.lastFree) and wepWall.lastFree) or desired
     local fwd = handAng:Forward()
@@ -1022,6 +1145,21 @@ local function ApplyWeaponWallToHand(handPos, handAng, ply)
         hitWorld = clipped
     }}
 
+    wepCache.valid = true
+    wepCache.frame = NowFrame()
+    wepCache.sample:Set(desired)
+    wepCache.delta.x = handPos.x - ox
+    wepCache.delta.y = handPos.y - oy
+    wepCache.delta.z = handPos.z - oz
+    local wd = wepCache.delta.x * wepCache.delta.x
+        + wepCache.delta.y * wepCache.delta.y
+        + wepCache.delta.z * wepCache.delta.z
+    wepCache.clipped = wd > 1e-8
+    wepCache.hasNormal = false
+    if handAng then
+        wepCache.p, wepCache.y, wepCache.r = handAng.p, handAng.y, handAng.r
+    end
+
     return handPos, handAng
 end
 
@@ -1067,7 +1205,11 @@ local MAX_HAND_CORRECTION = 40
 local MIN_HAND_CORRECTION_SQR = 0.35 * 0.35
 
 --- Hull-sweep from last free sample → desired sample (climbing-style).
+--- One segment hull. The old path point-tested both ends and then swept that
+--- same hull again (clear + tr). A jump moves the playspace, so both hands
+--- paid that twice per frame on large BSPs.
 --- Never returns a position still inside solid when a free sample is known.
+--- Floor/ceiling normals still release; climb grip never reaches here.
 local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 	if not IsVec(desiredSample) then
 		return Vector(), false, nil
@@ -1084,7 +1226,7 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		st.hasFree = false
 	end
 
-	local function isFree(pos)
+	local function pointFree(pos)
 		local t = util.TraceHull({
 			start = pos,
 			endpos = pos,
@@ -1096,45 +1238,67 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		return not (t.StartSolid or t.AllSolid)
 	end
 
-	local desiredFree = isFree(desiredSample)
-
-	-- Drop stale free anchors only when desired is free (re-acquire) or lastFree invalid.
-	-- If desired is solid, KEEP lastFree even when far — that stops force-through.
-	local lastFreeOk = false
-	if st.hasFree and IsVec(st.lastFree) then
-		lastFreeOk = isFree(st.lastFree)
-		if not lastFreeOk then
-			st.hasFree = false
-		elseif desiredFree and st.lastFree:DistToSqr(desiredSample) > MAX_LASTFREE_DIST_SQR then
-			st.hasFree = false
-			lastFreeOk = false
+	local desiredFree = nil
+	local desiredNormal = nil
+	local function isDesiredFree()
+		if desiredFree == nil then
+			local t = util.TraceHull({
+				start = desiredSample,
+				endpos = desiredSample,
+				mins = mins,
+				maxs = maxs,
+				mask = HAND_MASK,
+				filter = filter
+			})
+			desiredFree = not (t.StartSolid or t.AllSolid)
+			if IsVec(t.HitNormal) and t.HitNormal:LengthSqr() > 0.01 then
+				-- Copy: the next hull reuses the engine normal.
+				desiredNormal = Vector(t.HitNormal.x, t.HitNormal.y, t.HitNormal.z)
+			end
 		end
+		return desiredFree
 	end
 
-	if desiredFree and not st.hasFree then
+	local coverSqr = (radius * 2) * (radius * 2)
+	local distSqr = 0
+	if st.hasFree and IsVec(st.lastFree) then
+		distSqr = st.lastFree:DistToSqr(desiredSample)
+	end
+	local far = st.hasFree and distSqr > MAX_LASTFREE_DIST_SQR
+	-- Drop a far anchor only when the sample is already free (force-through
+	-- keeps it when the sample is buried). Do not trace the stale point.
+	if far and isDesiredFree() then
+		st.hasFree = false
 		return desiredSample, false, nil
 	end
 
 	local startPos = desiredSample
-	if st.hasFree and lastFreeOk then
-		startPos = st.lastFree
-	else
-		st.hasFree = false
+	local anchored = false
+	local anchorProved = false
+	if st.hasFree and IsVec(st.lastFree) then
+		local longStep = distSqr > coverSqr
+		if longStep or far then
+			if pointFree(st.lastFree) then
+				startPos = st.lastFree
+				anchored = true
+				anchorProved = true
+			else
+				st.hasFree = false
+			end
+		else
+			-- Shorter than the hull: one segment trace covers both ends.
+			startPos = st.lastFree
+			anchored = true
+		end
 	end
 
-	-- Desired free, continuous lastFree: clear path → unlock
-	if desiredFree and st.hasFree and startPos == st.lastFree then
-		local clear = util.TraceHull({
-			start = startPos,
-			endpos = desiredSample,
-			mins = mins,
-			maxs = maxs,
-			mask = HAND_MASK,
-			filter = filter
-		})
-		if not clear.Hit and not clear.StartSolid and not clear.AllSolid then
+	if not anchored then
+		if isDesiredFree() then
 			return desiredSample, false, nil
 		end
+		local n = desiredNormal
+		if not IsVec(n) or n:LengthSqr() < 0.01 then n = ZERO_UP end
+		return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
 	end
 
 	local tr = util.TraceHull({
@@ -1146,52 +1310,56 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 		filter = filter
 	})
 
-	if tr.StartSolid or tr.AllSolid then
-		if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
-			local n = tr.HitNormal
-			if not IsVec(n) or n:LengthSqr() < 0.01 then n = ZERO_UP end
-			return Vector(st.lastFree), true, n
+	local function freeAnchor(normal)
+		if anchored and IsVec(st.lastFree) and (anchorProved or pointFree(st.lastFree)) then
+			return Vector(st.lastFree), true, normal
 		end
+		return nil
+	end
+
+	if tr.StartSolid or tr.AllSolid then
 		local n = tr.HitNormal
 		if not IsVec(n) or n:LengthSqr() < 0.01 then n = ZERO_UP end
+		local back, blocked, bn = freeAnchor(n)
+		if back then return back, blocked, bn end
+		st.hasFree = false
+		if isDesiredFree() then
+			return desiredSample, false, nil
+		end
 		return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
 	end
 
-	if tr.Hit then
-		local n = tr.HitNormal
-		if not IsVec(n) or n:LengthSqr() < 0.01 then
-			n = ZERO_UP
+	if not tr.Hit then
+		-- Short segment: the hull covered the end. Long segment: confirm the
+		-- end so a thin brush is not tunneled on a stalled jump frame.
+		if distSqr <= coverSqr or isDesiredFree() then
+			return desiredSample, false, nil
 		end
-		-- Floors/ceilings: allow free vertical motion (climb/grab), but only if
-		-- the rest position is not still inside a wall brush.
-		if IsFloorOrCeilingNormal(n) then
-			if desiredFree then
-				return desiredSample, false, nil
-			end
-			-- Desired still solid (e.g. pressed into floor+wall joint) → depenetrate
-			return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
-		end
-		local restPad = math.max(0.15, pad)
-		local rest = WallRestPos(tr.HitPos, n, restPad, startPos)
-		-- Guarantee rest is free; if not, fall back to lastFree / depenetrate
-		if not isFree(rest) then
-			if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
-				return Vector(st.lastFree), true, n
-			end
-			return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
-		end
-		return rest, true, n
-	end
-
-	-- No hit but desired solid (degenerate hull / thin wall): still block
-	if not desiredFree then
-		if st.hasFree and IsVec(st.lastFree) and isFree(st.lastFree) then
-			return Vector(st.lastFree), true, ZERO_UP
-		end
+		local back, blocked, bn = freeAnchor(ZERO_UP)
+		if back then return back, blocked, bn end
 		return DepenetrateFromSolid(desiredSample, radius, pad, filter, ZERO_UP)
 	end
 
-	return desiredSample, false, nil
+	local n = tr.HitNormal
+	if not IsVec(n) or n:LengthSqr() < 0.01 then
+		n = ZERO_UP
+	end
+	-- Floors/ceilings: allow free vertical motion (climb/grab), but only if
+	-- the rest position is not still inside a wall brush.
+	if IsFloorOrCeilingNormal(n) then
+		if isDesiredFree() then
+			return desiredSample, false, nil
+		end
+		return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
+	end
+	local restPad = math.max(0.15, pad)
+	local rest = WallRestPos(tr.HitPos, n, restPad, startPos)
+	if not pointFree(rest) then
+		local back, blocked, bn = freeAnchor(n)
+		if back then return back, blocked, bn end
+		return DepenetrateFromSolid(desiredSample, radius, pad, filter, n)
+	end
+	return rest, true, n
 end
 
 local function MakeHandShape(samplePos, radius, ang, clipped, pushOut, normal, reachHit)
@@ -1212,6 +1380,9 @@ end
 local function ClearHandWallState(handKey)
     if not handWall[handKey] then return end
     handWall[handKey].hasFree = false
+    if handWall[handKey].retrace then
+        handWall[handKey].retrace.valid = false
+    end
     lastNonClippedPos[handKey] = nil
     lastNonClippedNormal[handKey] = nil
     cachedPushOutPos[handKey] = nil
@@ -1288,6 +1459,7 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         or ShouldSkipHandWall(ply)
     then
         wepWall.hasFree = false
+        if wepWall.retrace then wepWall.retrace.valid = false end
         return passthrough()
     end
 
@@ -1331,7 +1503,14 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
         end
 
         local desiredSample = trackPos + trackAng:Forward() * offset
-        local safeSample, clipped, normal = ResolveHandWallSweep(desiredSample, handKey, radius, filter)
+        local cache = EnsureRetrace(handWall[handKey])
+        local doTrace = ShouldTracePose(cache, desiredSample, ply, nil)
+        local safeSample, clipped, normal
+        if not doTrace then
+            safeSample, clipped, normal = RetraceResult(desiredSample, cache)
+        else
+            safeSample, clipped, normal = ResolveHandWallSweep(desiredSample, handKey, radius, filter)
+        end
         if not IsVec(safeSample) then
             safeSample = desiredSample
             clipped = false
@@ -1356,6 +1535,12 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
                 normal = nil
                 ClearHandWallState(handKey)
             end
+        end
+
+        -- Floor reject clears the cache. Record the post-floor result only
+        -- after a real trace (a reuse must not refresh the frame stamp).
+        if doTrace or not cache.valid then
+            StoreRetrace(cache, desiredSample, safeSample, clipped, normal, NowFrame())
         end
 
         -- Reach probe only when debug shapes need it (saves a TraceLine every hand every frame)
@@ -1424,7 +1609,18 @@ function vrmod.utils.UpdateHandCollisions(lefthandPos, lefthandAng, righthandPos
     -- Gun block: same right-hand tracking Vector (shared with g_VR.tracking.pose_righthand.pos)
     if holdingGun and not rightGrip then
         righthandPos, righthandAng = ApplyWeaponWallToHand(righthandPos, righthandAng, ply)
+    elseif wepWall.retrace then
+        wepWall.retrace.valid = false
     end
+
+    local near = false
+    if handShapeStore.left and handShapeStore.left.hitWorld then near = true end
+    if handShapeStore.right and handShapeStore.right.hitWorld then near = true end
+    if vrmod.collisionBoxes and vrmod.collisionBoxes[1] and vrmod.collisionBoxes[1].hitWorld then
+        near = true
+    end
+    vrmod._collisionNearby = near
+    lastPreCheckResult = near
 
     -- If caller passed non-tracking vectors, still push result into SoT so gun sees it
     if not inPlace and leftT and rightT then
@@ -1484,7 +1680,10 @@ end
 
 --- Block head through walls by sliding the room origin (camera + hands stay outside).
 function vrmod.utils.UpdateHeadCollisions()
-	if not cv_head_coll:GetBool() then return end
+	if not cv_head_coll:GetBool() then
+		if hmdWall.retrace then hmdWall.retrace.valid = false end
+		return
+	end
 	local ply = LocalPlayer()
 	local hmd = g_VR.tracking and g_VR.tracking.hmd
 	if not IsValid(ply) or not g_VR.active or not hmd or not IsVec(hmd.pos) then return end
@@ -1498,6 +1697,7 @@ function vrmod.utils.UpdateHeadCollisions()
 		or ShouldSkipHandWall(ply)
 	then
 		hmdWall.hasFree = false
+		if hmdWall.retrace then hmdWall.retrace.valid = false end
 		return
 	end
 
@@ -1508,6 +1708,15 @@ function vrmod.utils.UpdateHeadCollisions()
 	local pad = math.max(0.75, GetWallPushPad() * 0.75)
 	local mins, maxs = SetSymmetricHull(radius)
 	local filter = WallFilter(ply)
+	local headCache = EnsureRetrace(hmdWall)
+	-- Still head, calm vertical speed: one frame of reuse. A jump still traces.
+	-- Same frame (duplicate hook) does not sweep this hull again.
+	if not ShouldTracePose(headCache, desired, ply, nil) then
+		return
+	end
+	local function markHead()
+		StoreRetrace(headCache, desired, desired, false, nil, NowFrame())
+	end
 
 	local function isFree(pos)
 		local t = util.TraceHull({
@@ -1523,10 +1732,14 @@ function vrmod.utils.UpdateHeadCollisions()
 
 	local lastFreeOk = false
 	if hmdWall.hasFree and IsVec(hmdWall.lastFree) then
-		lastFreeOk = isFree(hmdWall.lastFree)
-		if not lastFreeOk or hmdWall.lastFree:DistToSqr(desired) > (120 * 120) then
+		-- Far anchor is discarded either way — don't trace it.
+		if hmdWall.lastFree:DistToSqr(desired) > (120 * 120) then
 			hmdWall.hasFree = false
-			lastFreeOk = false
+		else
+			lastFreeOk = isFree(hmdWall.lastFree)
+			if not lastFreeOk then
+				hmdWall.hasFree = false
+			end
 		end
 	end
 
@@ -1534,6 +1747,7 @@ function vrmod.utils.UpdateHeadCollisions()
 	if desiredFree and not hmdWall.hasFree then
 		hmdWall.lastFree:Set(desired)
 		hmdWall.hasFree = true
+		markHead()
 		return
 	end
 
@@ -1542,22 +1756,8 @@ function vrmod.utils.UpdateHeadCollisions()
 		startPos = hmdWall.lastFree
 	end
 
-	if desiredFree and hmdWall.hasFree then
-		local clear = util.TraceHull({
-			start = startPos,
-			endpos = desired,
-			mins = mins,
-			maxs = maxs,
-			mask = HAND_MASK,
-			filter = filter
-		})
-		if not clear.Hit and not clear.StartSolid and not clear.AllSolid then
-			hmdWall.lastFree:Set(desired)
-			hmdWall.hasFree = true
-			return
-		end
-	end
-
+	-- One segment hull. A second identical sweep used to follow whenever the
+	-- path was blocked (jump into a ceiling on a large map).
 	local tr = util.TraceHull({
 		start = startPos,
 		endpos = desired,
@@ -1566,13 +1766,19 @@ function vrmod.utils.UpdateHeadCollisions()
 		mask = HAND_MASK,
 		filter = filter
 	})
+	if desiredFree and hmdWall.hasFree and not tr.Hit and not tr.StartSolid and not tr.AllSolid then
+		hmdWall.lastFree:Set(desired)
+		hmdWall.hasFree = true
+		markHead()
+		return
+	end
 
 	local safe = desired
 	local blocked = false
 
 	if tr.StartSolid or tr.AllSolid then
 		blocked = true
-		if hmdWall.hasFree and IsVec(hmdWall.lastFree) and isFree(hmdWall.lastFree) then
+		if hmdWall.hasFree and IsVec(hmdWall.lastFree) and lastFreeOk then
 			safe = Vector(hmdWall.lastFree)
 		else
 			local n = (IsVec(tr.HitNormal) and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
@@ -1584,7 +1790,7 @@ function vrmod.utils.UpdateHeadCollisions()
 		local n = (IsVec(tr.HitNormal) and tr.HitNormal:LengthSqr() > 0.01) and tr.HitNormal or ZERO_UP
 		safe = WallRestPos(tr.HitPos, n, pad, startPos)
 		if not isFree(safe) then
-			if hmdWall.hasFree and isFree(hmdWall.lastFree) then
+			if hmdWall.hasFree and lastFreeOk then
 				safe = Vector(hmdWall.lastFree)
 			else
 				safe = DepenetrateFromSolid(desired, radius, pad, filter, n)
@@ -1592,7 +1798,7 @@ function vrmod.utils.UpdateHeadCollisions()
 		end
 	elseif not desiredFree then
 		blocked = true
-		if hmdWall.hasFree and isFree(hmdWall.lastFree) then
+		if hmdWall.hasFree and lastFreeOk then
 			safe = Vector(hmdWall.lastFree)
 		else
 			safe = DepenetrateFromSolid(desired, radius, pad, filter, ZERO_UP)
@@ -1604,6 +1810,7 @@ function vrmod.utils.UpdateHeadCollisions()
 			hmdWall.lastFree:Set(desired)
 			hmdWall.hasFree = true
 		end
+		markHead()
 		return
 	end
 
@@ -1611,9 +1818,13 @@ function vrmod.utils.UpdateHeadCollisions()
 	local dlenSqr = delta:LengthSqr()
 	-- Dead-zone: tiny origin shoves caused whole-body hand flicker with steering
 	if dlenSqr < (0.6 * 0.6) then
-		if hmdWall.hasFree then return end
+		if hmdWall.hasFree then
+			markHead()
+			return
+		end
 		hmdWall.lastFree:Set(desired)
 		hmdWall.hasFree = true
+		markHead()
 		return
 	end
 	local dlen = math.sqrt(dlenSqr)
@@ -1633,6 +1844,7 @@ function vrmod.utils.UpdateHeadCollisions()
 		hmdWall.lastFree:Set(safe)
 		hmdWall.hasFree = true
 	end
+	markHead()
 end
 
 function vrmod.utils.SphereCollidesWithProp(pos, radius, filter)
