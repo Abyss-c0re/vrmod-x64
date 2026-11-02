@@ -213,9 +213,13 @@ vrmod.SettingsCatalog = {
 			{ kind = "slider", label = "Head collision radius", cvar = "vrmod_head_collision_radius", min = 3, max = 14, decimals = 1 },
 			{ kind = "slider", label = "Pickup weight (Server)", cvar = "vrmod_pickup_weight", min = 1, max = 10000, decimals = 0 },
 			{ kind = "slider", label = "Pickup range (Server)", cvar = "vrmod_pickup_range", min = 0, max = 10, decimals = 1 },
-			{ kind = "bool", label = "Eye pickup", cvar = "vrmod_pickup_eye" },
-			{ kind = "slider", label = "Eye pickup range", cvar = "vrmod_pickup_eye_range", min = 0, max = 32, decimals = 1 },
-			{ kind = "help", label = "Off by default. On: either grip grabs the prop you look at, with the same pickup rules. A hand already on a prop (within the close grab) still wins. A hand in front of your head does not cancel the look. Range uses the same scale as pickup range." },
+			{ kind = "combo", label = "Pickup source", cvar = "vrmod_pickup_source", choices = {
+				{ text = "Hand proximity", value = 0 },
+				{ text = "Eye gazing", value = 1 },
+			}},
+			{ kind = "slider", label = "Hand trigger distance", cvar = "vrmod_pickup_hand_range", min = 0, max = 16, decimals = 1 },
+			{ kind = "slider", label = "Eye trigger distance", cvar = "vrmod_pickup_eye_range", min = 0, max = 32, decimals = 1 },
+			{ kind = "help", label = "Client distances, same scale as server pickup range. Eye gazing uses the look ray on either grip. No gaze sample falls back to hand proximity. Touching a prop with a hand always takes that prop, and nothing else overrides the source." },
 			{ kind = "action", label = "Adjust weapons", cmd = "vrmod_weaponconfig" },
 			{ kind = "action", label = "Reset gameplay defaults", action_id = "reset_gameplay" },
 		},
@@ -750,6 +754,8 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_weapon_swap", "1")
 		RunConsoleCommand("vrmod_pickup_weight", "150")
 		RunConsoleCommand("vrmod_pickup_range", "3.5")
+		RunConsoleCommand("vrmod_pickup_source", "0")
+		RunConsoleCommand("vrmod_pickup_hand_range", "3.5")
 		RunConsoleCommand("vrmod_pickup_eye", "0")
 		RunConsoleCommand("vrmod_pickup_eye_range", "12")
 		RunConsoleCommand("vrmod_pickup_limit", "1")

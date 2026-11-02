@@ -232,43 +232,70 @@ function vrmod.utils.LookTarget_AllowHeldWeapon(isWeapon, sameClass, leftHand, h
 	return true
 end
 
+--- Inches. A hand this close to a surface is touching it.
+--- The old 18-unit "close" sphere is a search bubble, not contact.
+--- A controller held in front of the body sits inside that bubble and was
+--- stealing the gaze target on the right hand.
+function vrmod.utils.LookTarget_TouchDistance()
+	return 6
+end
+
+function vrmod.utils.LookTarget_IsTouch(dist, touchDist)
+	dist = tonumber(dist)
+	touchDist = tonumber(touchDist)
+	if not finite(touchDist) or touchDist < 0 then
+		touchDist = vrmod.utils.LookTarget_TouchDistance()
+	end
+	if not finite(dist) then return false end
+	return dist <= touchDist
+end
+
+--- 0 / "hand" → hand proximity. 1 / "eye" → eye gazing. Anything else is hand.
+function vrmod.utils.LookTarget_SourceMode(v)
+	if v == "eye" or v == 1 or v == "1" or v == true then return "eye" end
+	return "hand"
+end
+
 --- Which entity a grip should grab.
---- A hand result inside the close radius stays. That is the only hand win.
---- Gaze keeps the looked-at prop while the hand is still outside that radius,
---- even when the hand is nearer the prop than the HMD (controllers sit in front).
---- opts.hand_ent, hand_dist, eye_ent, eye_enabled, hand_to_eye, close_radius.
---- Returns { source = "hand"|"eye"|"none", reason, ent }.
+--- mode "eye" uses eye_ent while a gaze sample exists.
+--- No sample (eye_sensor false) falls back to hand_ent.
+--- touch_ent wins over both. That is the only override, and it is this hand
+--- actually touching a prop, not merely being nearer than the head.
+--- Returns { source = "touch"|"hand"|"eye"|"none", reason, ent }.
 function vrmod.utils.LookTarget_ChoosePickup(opts)
 	opts = type(opts) == "table" and opts or {}
-	local closeR = tonumber(opts.close_radius)
-	if not finite(closeR) or closeR < 0 then
-		closeR = vrmod.utils.LookTarget_CloseRadius()
+	local function present(v)
+		if v == nil or v == false then return nil end
+		return v
 	end
-	local handEnt = opts.hand_ent
-	if handEnt == false then handEnt = nil end
-	local eyeEnt = opts.eye_ent
-	if eyeEnt == false then eyeEnt = nil end
-	local handDist = tonumber(opts.hand_dist)
-	local handToEye = tonumber(opts.hand_to_eye)
-	local eyeOn = opts.eye_enabled == true or opts.eye_enabled == 1 or opts.eye_enabled == "1"
-
-	-- Unknown distance: keep the hand result so a near grab is not replaced.
-	if handEnt ~= nil and not finite(handDist) then
-		return { source = "hand", reason = "hand_unmeasured", ent = handEnt }
-	end
-	if handEnt ~= nil and handDist <= closeR then
-		return { source = "hand", reason = "close_hand", ent = handEnt }
+	local touchEnt = present(opts.touch_ent)
+	if touchEnt ~= nil then
+		return { source = "touch", reason = "touch", ent = touchEnt }
 	end
 
-	if eyeOn and eyeEnt ~= nil then
-		-- Hand has arrived on the looked-at prop. Close pickup owns it.
-		if finite(handToEye) and handToEye <= closeR then
+	local mode = opts.mode
+	if mode == nil and (opts.eye_enabled == true or opts.eye_enabled == 1 or opts.eye_enabled == "1") then
+		mode = "eye"
+	end
+	mode = vrmod.utils.LookTarget_SourceMode(mode)
+
+	local handEnt = present(opts.hand_ent)
+	local eyeEnt = present(opts.eye_ent)
+	local sensor = opts.eye_sensor
+	if sensor == nil then sensor = true end
+	if sensor == false or sensor == 0 or sensor == "0" then sensor = false else sensor = true end
+
+	if mode == "eye" then
+		if not sensor then
 			if handEnt ~= nil then
-				return { source = "hand", reason = "hand_reached", ent = handEnt }
+				return { source = "hand", reason = "eye_fallback", ent = handEnt }
 			end
-			return { source = "eye", reason = "eye_reached", ent = eyeEnt }
+			return { source = "none", reason = "eye_fallback", ent = nil }
 		end
-		return { source = "eye", reason = "eye", ent = eyeEnt }
+		if eyeEnt ~= nil then
+			return { source = "eye", reason = "eye", ent = eyeEnt }
+		end
+		return { source = "none", reason = "eye", ent = nil }
 	end
 
 	if handEnt ~= nil then

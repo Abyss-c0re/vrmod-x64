@@ -58,7 +58,7 @@ On the client, the local player returns the live sample. Another player returns 
 
 ## Pickup
 
-Gameplay → **Eye pickup** (`vrmod_pickup_eye`, default off) and **Eye pickup range** (`vrmod_pickup_eye_range`, default 12, same slider × 12 × boost rule as hand pickup). When it is on and gaze is live, either grip grabs the looked-at prop through the existing pickup path. The look ray starts 8 units in front of the eyes so the head hull does not eat it. Menu grab, foregrip, pickup disable, and a weapon already in the right hand still run first. A hand result within 18 units is left alone. Gaze stays the choice until that hand is inside those 18 units of the prop. A hand merely in front of the head does not cancel the look.
+Gameplay → **Pickup source** (`vrmod_pickup_source`): hand proximity `0` or eye gazing `1`. **Hand trigger distance** (`vrmod_pickup_hand_range`, default 3.5) and **Eye trigger distance** (`vrmod_pickup_eye_range`, default 12) are client-only and use the same scale as the server pickup range. Eye gazing drives either grip from the look ray. If that mode is selected and there is no gaze sample, selection falls back to hand proximity. The only override is a hand touching the prop (6 units to the surface). A hand held in front of the body is not a touch, so it does not blank the other hand. Menu grab, foregrip, and pickup disable still run before the grab. The right hand still will not take a second copy of the weapon it is holding.
 
 ## Flashlight
 

@@ -138,6 +138,11 @@ function vrmod.utils.IsValidPickupTarget(ent, ply, bLeftHand)
         return false
     end
 
+    -- Held-in-this-hand is per hand. Caching it made the other hand, and the
+    -- same hand after a drop, treat the prop as permanently invalid.
+    if g_VR and bLeftHand and ent == g_VR.heldEntityLeft then return false end
+    if g_VR and not bLeftHand and ent == g_VR.heldEntityRight then return false end
+
     -- Weapons change owner and NoDraw when dropped. A sticky cache kept the
     -- in-hand result and the grip never found the same gun on the ground.
     local cacheable = not ent:IsWeapon()
@@ -170,17 +175,6 @@ function vrmod.utils.IsValidPickupTarget(ent, ply, bLeftHand)
     end
 
     if IsReAgdollHiddenNPC(ent) then return false end
-    if bLeftHand and ent == g_VR.heldEntityLeft then
-        vrmod.logger.Debug("IsValidPickupTarget: Already held in left hand -> " .. ent:GetClass())
-        invalidPickupCache[ent] = false
-        return false
-    end
-
-    if not bLeftHand and ent == g_VR.heldEntityRight then
-        vrmod.logger.Debug("IsValidPickupTarget: Already held in right hand -> " .. ent:GetClass())
-        invalidPickupCache[ent] = false
-        return false
-    end
 
     if ent:IsWeapon() and ent:GetOwner() == ply then
         vrmod.logger.Debug("IsValidPickupTarget: Weapon already owned by player -> " .. ent:GetClass())
@@ -277,7 +271,12 @@ function vrmod.utils.FindPickupTarget(ply, bLeftHand, handPos, handAng, pickupRa
         end
     end
 
-    if IsValid(bestEnt) and bestDist <= 18 then return bestEnt end
+    if IsValid(bestEnt) then
+        local closeBoost = vrmod.utils.IsImportantPickup(bestEnt) and 5 or bestEnt:IsNPC() and 3 or 1
+        local closeMax = pickupRange * 12 * closeBoost
+        -- 18 is the near-hand sphere. It still has to sit inside the trigger distance.
+        if bestDist <= 18 and bestDist <= closeMax then return bestEnt end
+    end
     local ent
     local offsetPos = handPos + handAng:Forward() * vrmod.DEFAULT_OFFSET
     local sphereEnt, _ = vrmod.utils.SphereCollidesWithProp(offsetPos, 5, ply)
