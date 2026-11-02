@@ -10,6 +10,41 @@ function vrmod.utils.GlideSeatIsDriver(seatIndex)
 	return seat == 1 or seat < 1
 end
 
+--- 0 / anything else → headset. 1 / "eye" → eye tracking.
+function vrmod.utils.GlideTankAim_Mode(v)
+	if v == 1 or v == "1" or v == "eye" or v == true then return "eye" end
+	return "hmd"
+end
+
+--- Tank turret aim source. The VR picture stays on the HMD either way.
+--- Eye is used only for a tank, with the setting on, eye tracking allowed,
+--- and a live gaze sample. Otherwise the turret stays on the headset.
+--- opts: mode, is_tank, eye_enabled, eye_allowed (nil = allow), eye_active.
+--- Returns { source = "hmd"|"eye", reason }.
+function vrmod.utils.GlideTankAim_Decide(opts)
+	opts = type(opts) == "table" and opts or {}
+	if not opts.is_tank then
+		return { source = "hmd", reason = "not_tank" }
+	end
+	if vrmod.utils.GlideTankAim_Mode(opts.mode) ~= "eye" then
+		return { source = "hmd", reason = "hmd" }
+	end
+	local function on(v)
+		return v == true or v == 1 or v == "1"
+	end
+	local allowed = opts.eye_allowed
+	if allowed == nil then allowed = true end
+	if allowed == false or allowed == 0 or allowed == "0" then
+		allowed = false
+	else
+		allowed = true
+	end
+	if not on(opts.eye_enabled) or not allowed or not on(opts.eye_active) then
+		return { source = "hmd", reason = "eye_fallback" }
+	end
+	return { source = "eye", reason = "eye" }
+end
+
 --- Prefer thumbstick steer; only use wheel when stick is near idle.
 --- Returns steer value and source "stick" | "wheel".
 function vrmod.utils.GlidePreferStickSteer(stickX, wheelSteer, stickDeadzone, wheelMin)

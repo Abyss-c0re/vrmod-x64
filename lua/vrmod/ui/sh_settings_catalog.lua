@@ -202,6 +202,11 @@ vrmod.SettingsCatalog = {
 				{ text = "Left hand", value = 1 },
 			}},
 			{ kind = "help", label = "Eye aim uses gaze when eye tracking is on and the server allows it. If gaze is selected but off, or there is no sample, the fallback hand is used. Right hand follows the weapon muzzle." },
+			{ kind = "combo", label = "Glide tank aim", cvar = "vrmod_glide_tank_aim", choices = {
+				{ text = "HMD", value = 0 },
+				{ text = "Eye tracking", value = 1 },
+			}},
+			{ kind = "help", label = "Tanks only. Eye tracking aims the turret from the gaze sample. No sample, or eye tracking off, keeps the headset. The view stays on the HMD." },
 			{ kind = "bool", label = "Drop weapon on grip release", cvar = "vrmod_weapondrop_enable" },
 			{ kind = "bool", label = "Manual item pickup", cvar = "vrmod_manualpickups" },
 			{ kind = "bool", label = "Interactive buttons", cvar = "vrmod_interactive_buttons" },
@@ -766,6 +771,7 @@ function vrmod.SettingsRunAction(action_id, ctx)
 		RunConsoleCommand("vrmod_flashlight_attachment", "0")
 		RunConsoleCommand("vrmod_flashlight_aim", "0")
 		RunConsoleCommand("vrmod_flashlight_eye_fallback", "0")
+		RunConsoleCommand("vrmod_glide_tank_aim", "0")
 		return true
 	end
 	if action_id == "reset_character" then

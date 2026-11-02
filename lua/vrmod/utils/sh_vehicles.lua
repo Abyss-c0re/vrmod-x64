@@ -275,6 +275,13 @@ function vrmod.utils.GetVehicleBonePosition(vehicle, boneId)
     return cachedBonePos, cachedBoneAng
 end
 
+if CLIENT then
+	vrmod.AddCallbackedConvar("vrmod_glide_tank_aim", nil, "0", FCVAR_ARCHIVE, "Glide tank turret aim: 0 HMD, 1 eye tracking", 0, 1, function(v)
+		if vrmod.utils.GlideTankAim_Mode and vrmod.utils.GlideTankAim_Mode(v) == "eye" then return 1 end
+		return 0
+	end)
+end
+
 function vrmod.utils.PatchGlideCamera()
     local Camera = Glide.Camera
     if not Camera then return end
@@ -312,12 +319,37 @@ function vrmod.utils.PatchGlideCamera()
             end
 
             self.position = pivot + angles:Forward() * offset[1] + angles:Right() * offset[2] + angles:Up() * offset[3]
-            -- Aim: HMD forward only (no world TraceLine) — weapons still use VR tracking
-            self.lastAimPos = hmdPos + hmdAng:Forward() * 4096
+            -- Picture stays on the headset. Turret aim can follow gaze on tanks.
+            local aimPos, aimAng = hmdPos, hmdAng
+            local isTank = (g_VR.vehicle and g_VR.vehicle.type == "tank")
+                or (Glide and Glide.VEHICLE_TYPE and vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK)
+            if isTank and vrmod.utils.GlideTankAim_Decide then
+                local gpos, gang
+                if vrmod.GetEyeGaze then
+                    gpos, gang = vrmod.GetEyeGaze(user)
+                end
+                local mode = 0
+                local aimCv = GetConVar("vrmod_glide_tank_aim")
+                if aimCv then mode = aimCv:GetInt() end
+                local enabled = vrmod.EyeTrackingEnabled and vrmod.EyeTrackingEnabled() or false
+                local allowed = true
+                if vrmod.EyeTrackingAllowed then allowed = vrmod.EyeTrackingAllowed() end
+                local d = vrmod.utils.GlideTankAim_Decide({
+                    mode = mode,
+                    is_tank = true,
+                    eye_enabled = enabled,
+                    eye_allowed = allowed,
+                    eye_active = gpos ~= nil and gang ~= nil,
+                })
+                if d.source == "eye" and gpos and gang then
+                    aimPos, aimAng = gpos, gang
+                end
+            end
+            self.lastAimPos = aimPos + aimAng:Forward() * 4096
             self.lastAimEntity = NULL
             self.lastAimPosDistanceFromEyes = 4096
-            self.lastAimPosAnglesFromEyes = hmdAng
-            if user.SetEyeAngles then user:SetEyeAngles(hmdAng) end
+            self.lastAimPosAnglesFromEyes = aimAng
+            if user.SetEyeAngles then user:SetEyeAngles(aimAng) end
             return {
                 origin = self.position,
                 angles = angles + (self.punchAngle or Angle(0, 0, 0)),
