@@ -320,28 +320,35 @@ function vrmod.utils.PickupFilter_IsDriven(opts)
 	return false
 end
 
---- Same mass gate the server uses for a grab. limit 1 (the default) caps mass.
---- A missing limit is 1, so a client that has not replicated the convar yet
---- still hides an overweight prop. No physics object is not grabbable.
---- A vehicle with no mass, or a zero mass, is over the limit: the client
---- often has no real phys object for a hull, and that hull was highlighting.
+--- Weight cap shared by hand and gaze.
+--- limit 1 (the default) caps a KNOWN mass. A vehicle with no mass, or a
+--- zero mass, counts as over the limit: that is the hull the client cannot weigh.
+--- A normal prop with no client physics object stays selectable. Requiring a
+--- client phys object blanked every prop, including one the hand was touching.
+--- realm "server" still rejects a missing physics object, which is the old grab check.
 function vrmod.utils.PickupFilter_MassOK(opts)
 	opts = type(opts) == "table" and opts or {}
 	local limit = tonumber(opts.limit)
 	if limit == nil then limit = 1 end
+	local server = opts.realm == "server"
+	local vehicle = flagOn(opts.is_vehicle)
 	if limit ~= 1 then
-		if opts.has_phys == false then return false end
+		if server and opts.has_phys == false then return false end
 		return true
 	end
-	local vehicle = flagOn(opts.is_vehicle)
-	if vehicle and (opts.has_phys == false or opts.mass == nil) then return false end
-	if opts.has_phys == false or opts.mass == nil then return false end
 	local mass = tonumber(opts.mass)
 	local weight = tonumber(opts.weight)
 	if weight == nil then weight = 150 end
-	if not mass or mass ~= mass then return false end
-	if vehicle and mass <= 0 then return false end
-	if opts.move_vphysics == false then return false end
+	local known = opts.has_phys == true and mass ~= nil and mass == mass and mass > 0
+	if vehicle then
+		if not known or opts.move_vphysics == false then return false end
+		return mass <= weight
+	end
+	if not known then
+		if server then return false end
+		return true
+	end
+	if server and opts.move_vphysics == false then return false end
 	return mass <= weight
 end
 

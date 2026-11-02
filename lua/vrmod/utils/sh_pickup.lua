@@ -308,6 +308,7 @@ function vrmod.utils.CanPickupEntity(v, ply, cv)
         mass = mass,
         move_vphysics = moveOk,
         is_vehicle = entityIsVehicle(v, class),
+        realm = SERVER and "server" or "client",
     })
 end
 
