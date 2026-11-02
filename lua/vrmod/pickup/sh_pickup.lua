@@ -200,40 +200,65 @@ if CLIENT then
 		return choice.ent
 	end
 
-	hook.Add("Think", "vrmod_find_pickup_target", function()
-		-- Sphere+trace both hands every Think hitches prop-dense maps. 30 Hz is enough.
+	-- Hand sphere stays on even frames. The gaze trace does not: a half-rate
+	-- target made the first grip miss, then the next think painted the other hand.
+	local cachedHandLeft, cachedHandRight
+	local cachedHandFrame = -1
+
+	local function rescanHands(ply, handRange, heldLeft, heldRight)
+		cachedHandLeft, cachedHandRight = nil, nil
+		local rightHand = g_VR.tracking and g_VR.tracking.pose_righthand
+		if rightHand and not heldRight then
+			cachedHandRight = vrmod.utils.FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, handRange)
+		end
+		local leftHand = g_VR.tracking and g_VR.tracking.pose_lefthand
+		if leftHand and not heldLeft then
+			cachedHandLeft = vrmod.utils.FindPickupTarget(ply, true, leftHand.pos, leftHand.ang, handRange)
+		end
+		cachedHandFrame = FrameNumber and FrameNumber() or 0
+	end
+
+	local function resolvePickupTargets(ply, force)
+		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) or not ply:Alive() then
+			pickupTargetEntLeft, pickupTargetEntRight = nil, nil
+			if g_VR then
+				g_VR.pickupTargetLeft, g_VR.pickupTargetRight = nil, nil
+			end
+			return
+		end
+		local mode = pickupSourceMode()
 		local fn = FrameNumber and FrameNumber() or 0
-		if fn % 2 == 1 then return end
-		local ply = LocalPlayer()
-		if not IsValid(ply) or not g_VR or not vrmod.IsPlayerInVR(ply) or not ply:Alive() then return end
+		-- Hand mode keeps the even-frame skip. Eye mode refreshes the look every frame.
+		if mode ~= "eye" and not force and fn % 2 == 1 then return end
 		local handRange = clientHandRange()
 		local heldLeft = g_VR.heldEntityLeft
 		local heldRight = g_VR.heldEntityRight
-		local mode = pickupSourceMode()
+		local stale = cachedHandFrame < 0 or cachedHandFrame ~= fn
+		if force or (stale and fn % 2 == 0) then
+			rescanHands(ply, handRange, heldLeft, heldRight)
+		end
 		local eyeEnt, eyePos, sensor = nil, nil, false
 		if mode == "eye" then
 			eyeEnt, eyePos, sensor = findEyeTarget(ply)
 		end
-		-- Both hands run the same resolver. A weapon in the right hand no longer
-		-- blanks that grip; it only refuses a second copy of the held weapon.
 		local rightHand = g_VR.tracking and g_VR.tracking.pose_righthand
 		if rightHand and not heldRight then
-			local handEnt = vrmod.utils.FindPickupTarget(ply, false, rightHand.pos, rightHand.ang, handRange)
-			pickupTargetEntRight = targetForHand(ply, false, rightHand.pos, handEnt, eyeEnt, eyePos, sensor)
+			pickupTargetEntRight = targetForHand(ply, false, rightHand.pos, cachedHandRight, eyeEnt, eyePos, sensor)
 		else
 			pickupTargetEntRight = nil
 		end
-
 		local leftHand = g_VR.tracking and g_VR.tracking.pose_lefthand
 		if leftHand and not heldLeft then
-			local handEnt = vrmod.utils.FindPickupTarget(ply, true, leftHand.pos, leftHand.ang, handRange)
-			pickupTargetEntLeft = targetForHand(ply, true, leftHand.pos, handEnt, eyeEnt, eyePos, sensor)
+			pickupTargetEntLeft = targetForHand(ply, true, leftHand.pos, cachedHandLeft, eyeEnt, eyePos, sensor)
 		else
 			pickupTargetEntLeft = nil
 		end
-		-- Publish for vehicle wheel-grip vs mag-grab arbitration (cl_input)
 		g_VR.pickupTargetLeft = pickupTargetEntLeft
 		g_VR.pickupTargetRight = pickupTargetEntRight
+	end
+
+	hook.Add("Think", "vrmod_find_pickup_target", function()
+		resolvePickupTargets(LocalPlayer(), false)
 	end)
 
 	hook.Add("PostDrawOpaqueRenderables", "vrmod_draw_pickup_halo", function(depth, sky)
@@ -259,19 +284,31 @@ if CLIENT then
 		end
 		local holdingRagdoll = (IsValid(heldLeft) and heldLeft:GetNWBool("is_npc_ragdoll", false))
 			or (IsValid(heldRight) and heldRight:GetNWBool("is_npc_ragdoll", false))
+		local _, cv = vrmod.GetConvars()
 		local function ShouldAddHalo(ent)
 			if not IsValid(ent) or ent == heldLeft or ent == heldRight or holdingRagdoll then return false end
-			-- Check server flag for pickup validity, fallback to IsValidPickupTarget if flag missing
-			-- GetNWBool cannot report "unset" (nil default becomes false), so a
-			-- prop the server has not scanned yet drew no halo. The grip
-			-- target was already accepted by IsValidPickupTarget.
-			return vrmod.utils.IsValidPickupTarget(ent, ply, false)
+			-- Same gate as the grab. IsValidPickupTarget alone let an overweight
+			-- hull and the vehicle being driven draw a halo.
+			if vrmod.utils.IsValidPickupTarget and not vrmod.utils.IsValidPickupTarget(ent, ply, false) then return false end
+			if vrmod.utils.CanPickupEntity and not vrmod.utils.CanPickupEntity(ent, ply, cv or {}) then return false end
+			return true
 		end
 
-		if ShouldAddHalo(pickupTargetEntLeft) then haloTargetsLeft[#haloTargetsLeft + 1] = pickupTargetEntLeft end
-		if ShouldAddHalo(pickupTargetEntRight) then haloTargetsRight[#haloTargetsRight + 1] = pickupTargetEntRight end
-		if #haloTargetsLeft > 0 then halo.Add(haloTargetsLeft, Color(250, 100, 0), 1, 1, 1, true, true) end
-		if #haloTargetsRight > 0 then halo.Add(haloTargetsRight, Color(0, 255, 255), 1, 1, 1, true, true) end
+		local showLeft = ShouldAddHalo(pickupTargetEntLeft) and pickupTargetEntLeft or nil
+		local showRight = ShouldAddHalo(pickupTargetEntRight) and pickupTargetEntRight or nil
+		local plan = vrmod.utils.PickupHalo_Plan and vrmod.utils.PickupHalo_Plan(showLeft, showRight) or { mode = "both" }
+		local eyeMode = pickupSourceMode() == "eye"
+		-- Shared look, or any eye target: one pass. Orange plus cyan on the same
+		-- model washed out to white a frame later and the first grip missed.
+		if plan.mode == "one" or (eyeMode and (plan.mode == "left" or plan.mode == "right")) then
+			local ent = plan.mode == "right" and showRight or showLeft
+			if IsValid(ent) then halo.Add({ ent }, Color(255, 255, 255), 1, 1, 1, true, true) end
+		else
+			if showLeft then haloTargetsLeft[#haloTargetsLeft + 1] = showLeft end
+			if showRight then haloTargetsRight[#haloTargetsRight + 1] = showRight end
+			if #haloTargetsLeft > 0 then halo.Add(haloTargetsLeft, Color(250, 100, 0), 1, 1, 1, true, true) end
+			if #haloTargetsRight > 0 then halo.Add(haloTargetsRight, Color(0, 255, 255), 1, 1, 1, true, true) end
+		end
 	end)
 
 	function vrmod.Pickup(bLeftHand, bDrop)
@@ -285,6 +322,10 @@ if CLIENT then
 			net.SendToServer()
 			g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] = nil
 		else
+			-- The think target can be a frame behind the gaze. The pressed grip
+			-- resolves this hand now, so the first squeeze grabs the looked-at prop.
+			local ply = LocalPlayer()
+			if IsValid(ply) then resolvePickupTargets(ply, true) end
 			local targetEnt = bLeftHand and pickupTargetEntLeft or pickupTargetEntRight
 			if IsValid(targetEnt) then
 				if g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] ~= targetEnt then

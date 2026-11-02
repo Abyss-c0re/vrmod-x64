@@ -282,12 +282,58 @@ if CLIENT then
 	end)
 end
 
+--- Write Glide.Camera.lastAimPos from gaze when the tank setting says eye.
+--- Returns the world gaze angle and the upmove distance, or nil to keep the HMD.
+--- The VR picture is g_VR.view. This only feeds the turret (GetCameraAimPos / the usercmd).
+function vrmod.utils.GlideTankAim_Apply(ply)
+    if not IsValid(ply) or not g_VR then return nil end
+    if ply.InVehicle and not ply:InVehicle() and not (g_VR.vehicle and g_VR.vehicle.inside) then return nil end
+    if not vrmod.utils.GlideTankAim_Cmd then return nil end
+    local veh = g_VR.vehicle and g_VR.vehicle.current
+    local isTank = g_VR.vehicle and g_VR.vehicle.type == "tank"
+    local camVeh = Glide and Glide.Camera and Glide.Camera.vehicle
+    if not isTank and IsValid(veh) and Glide and Glide.VEHICLE_TYPE and veh.VehicleType == Glide.VEHICLE_TYPE.TANK then
+        isTank = true
+    end
+    if not isTank and IsValid(camVeh) and Glide and Glide.VEHICLE_TYPE and camVeh.VehicleType == Glide.VEHICLE_TYPE.TANK then
+        isTank = true
+    end
+    if not isTank then return nil end
+    local gpos, gang = nil, nil
+    if vrmod.GetEyeGaze then gpos, gang = vrmod.GetEyeGaze(ply) end
+    local mode = 0
+    local aimCv = GetConVar("vrmod_glide_tank_aim")
+    if aimCv then mode = aimCv:GetInt() end
+    local enabled = vrmod.EyeTrackingEnabled and vrmod.EyeTrackingEnabled() or false
+    local allowed = true
+    if vrmod.EyeTrackingAllowed then allowed = vrmod.EyeTrackingAllowed() end
+    local aimCmd = vrmod.utils.GlideTankAim_Cmd({
+        mode = mode,
+        is_tank = true,
+        eye_enabled = enabled,
+        eye_allowed = allowed,
+        eye_active = gpos ~= nil and gang ~= nil,
+    })
+    if aimCmd.angles ~= "gaze" or not gpos or not gang then return nil end
+    local dist = aimCmd.upmove or 4096
+    if Glide and Glide.Camera then
+        local cam = Glide.Camera
+        cam.lastAimPos = gpos + gang:Forward() * dist
+        cam.lastAimEntity = NULL
+        cam.lastAimPosDistanceFromEyes = dist
+        cam.lastAimPosAnglesFromEyes = gang
+    end
+    return gang, dist
+end
+
 function vrmod.utils.PatchGlideCamera()
-    local Camera = Glide.Camera
-    if not Camera then return end
+    local Camera = Glide and Glide.Camera
+    if not Camera or not Camera.CalcView then return false end
+    local patchId = vrmod.utils.GlideCamera_PatchId and vrmod.utils.GlideCamera_PatchId() or "gvrmod_glide_cam_eye_3"
+    if Camera._VRModGlidePatch == patchId then return true end
     local Config = Glide.Config
     if not Config then vrmod.logger.Warn("[Glide] Warning: Glide.Config not found, using fallback values") end
-    -- Store original functions
+    -- Keep the real Glide functions. A second call must not latch our own wrapper.
     if not Camera._OrigCalcView then Camera._OrigCalcView = Camera.CalcView end
     if not Camera._OrigCreateMove then Camera._OrigCreateMove = Camera.CreateMove end
     -- Override CalcView
@@ -320,36 +366,17 @@ function vrmod.utils.PatchGlideCamera()
 
             self.position = pivot + angles:Forward() * offset[1] + angles:Right() * offset[2] + angles:Up() * offset[3]
             -- Picture stays on the headset. Turret aim can follow gaze on tanks.
-            local aimPos, aimAng = hmdPos, hmdAng
-            local isTank = (g_VR.vehicle and g_VR.vehicle.type == "tank")
-                or (Glide and Glide.VEHICLE_TYPE and vehicle.VehicleType == Glide.VEHICLE_TYPE.TANK)
-            if isTank and vrmod.utils.GlideTankAim_Decide then
-                local gpos, gang
-                if vrmod.GetEyeGaze then
-                    gpos, gang = vrmod.GetEyeGaze(user)
-                end
-                local mode = 0
-                local aimCv = GetConVar("vrmod_glide_tank_aim")
-                if aimCv then mode = aimCv:GetInt() end
-                local enabled = vrmod.EyeTrackingEnabled and vrmod.EyeTrackingEnabled() or false
-                local allowed = true
-                if vrmod.EyeTrackingAllowed then allowed = vrmod.EyeTrackingAllowed() end
-                local d = vrmod.utils.GlideTankAim_Decide({
-                    mode = mode,
-                    is_tank = true,
-                    eye_enabled = enabled,
-                    eye_allowed = allowed,
-                    eye_active = gpos ~= nil and gang ~= nil,
-                })
-                if d.source == "eye" and gpos and gang then
-                    aimPos, aimAng = gpos, gang
-                end
+            -- GlideTankAim_Apply writes lastAimPos only when the setting is eye and a sample exists.
+            local gazeAng = vrmod.utils.GlideTankAim_Apply and vrmod.utils.GlideTankAim_Apply(user) or nil
+            if not gazeAng then
+                self.lastAimPos = hmdPos + hmdAng:Forward() * 4096
+                self.lastAimEntity = NULL
+                self.lastAimPosDistanceFromEyes = 4096
+                self.lastAimPosAnglesFromEyes = hmdAng
+                if user.SetEyeAngles then user:SetEyeAngles(hmdAng) end
+            elseif user.SetEyeAngles then
+                user:SetEyeAngles(gazeAng)
             end
-            self.lastAimPos = aimPos + aimAng:Forward() * 4096
-            self.lastAimEntity = NULL
-            self.lastAimPosDistanceFromEyes = 4096
-            self.lastAimPosAnglesFromEyes = aimAng
-            if user.SetEyeAngles then user:SetEyeAngles(aimAng) end
             return {
                 origin = self.position,
                 angles = angles + (self.punchAngle or Angle(0, 0, 0)),
@@ -363,6 +390,17 @@ function vrmod.utils.PatchGlideCamera()
 
     function Camera:CreateMove(cmd)
         if self.isActive and vrmod and vrmod.IsPlayerInVR and vrmod.IsPlayerInVR(self.user) then
+            -- Re-apply gaze here. Locomotion writes the HMD first; this hook is added
+            -- on seat enter, so it runs after that and is what Glide's server aim reads.
+            local gazeAng, dist = nil, nil
+            if vrmod.utils.GlideTankAim_Apply then
+                gazeAng, dist = vrmod.utils.GlideTankAim_Apply(self.user)
+            end
+            if gazeAng then
+                cmd:SetViewAngles(gazeAng)
+                cmd:SetUpMove(dist or 4096)
+                return
+            end
             local setAng = self.lastAimPosAnglesFromEyes or g_VR and g_VR.view and g_VR.view.angles or self.angles or Angle(0, 0, 0)
             cmd:SetViewAngles(setAng)
             cmd:SetUpMove(math.Clamp(self.lastAimPosDistanceFromEyes or 0, 0, 10000))
@@ -372,6 +410,9 @@ function vrmod.utils.PatchGlideCamera()
         -- Non-VR
         self:_OrigCreateMove(cmd)
     end
+
+    Camera._VRModGlidePatch = patchId
+    return true
 end
 
 function vrmod.utils.IsInChair(ply)

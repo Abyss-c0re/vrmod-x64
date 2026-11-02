@@ -45,6 +45,34 @@ function vrmod.utils.GlideTankAim_Decide(opts)
 	return { source = "eye", reason = "eye" }
 end
 
+--- Bump when the camera closure changes so a live session replaces a stale patch.
+--- VRMod_Start runs once. Glide also replaces Camera.CalcView when the seat inits.
+function vrmod.utils.GlideCamera_PatchId()
+	return "gvrmod_glide_cam_eye_3"
+end
+
+--- True when the installed stamp is not this build. nil is not installed.
+function vrmod.utils.GlideCamera_NeedsPatch(installed)
+	local cur = vrmod.utils.GlideCamera_PatchId()
+	if installed == nil or installed == "" then return true end
+	return tostring(installed) ~= cur
+end
+
+--- Usercmd for the tank turret. Glide's server aim is EyePos + viewangles:Forward() * upmove.
+--- Eye writes world gaze angles and a long upmove. HMD leaves the existing path alone.
+--- opts may be a Decide table, or { source = "eye"|"hmd" }.
+function vrmod.utils.GlideTankAim_Cmd(opts)
+	opts = type(opts) == "table" and opts or {}
+	local source = opts.source
+	if source ~= "eye" and source ~= "hmd" then
+		source = vrmod.utils.GlideTankAim_Decide(opts).source
+	end
+	if source == "eye" then
+		return { angles = "gaze", upmove = 4096, write_aim = true }
+	end
+	return { angles = "hmd", upmove = nil, write_aim = false }
+end
+
 --- Prefer thumbstick steer; only use wheel when stick is near idle.
 --- Returns steer value and source "stick" | "wheel".
 function vrmod.utils.GlidePreferStickSteer(stickX, wheelSteer, stickDeadzone, wheelMin)

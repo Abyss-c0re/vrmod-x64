@@ -224,7 +224,7 @@ vrmod.SettingsCatalog = {
 			}},
 			{ kind = "slider", label = "Hand trigger distance", cvar = "vrmod_pickup_hand_range", min = 0, max = 16, decimals = 1 },
 			{ kind = "slider", label = "Eye trigger distance", cvar = "vrmod_pickup_eye_range", min = 0, max = 32, decimals = 1 },
-			{ kind = "help", label = "Client distances, same scale as server pickup range. Eye gazing uses the look ray on either grip. No gaze sample falls back to hand proximity. Touching a prop with a hand always takes that prop, and nothing else overrides the source." },
+			{ kind = "help", label = "Client distances, same scale as server pickup range. Eye gazing uses the look ray on either grip. No gaze sample falls back to hand proximity. Touching a prop with a hand always takes that prop. The weight limit and the vehicle you are driving apply to the gaze the same way they apply to the hand." },
 			{ kind = "action", label = "Adjust weapons", cmd = "vrmod_weaponconfig" },
 			{ kind = "action", label = "Reset gameplay defaults", action_id = "reset_gameplay" },
 		},

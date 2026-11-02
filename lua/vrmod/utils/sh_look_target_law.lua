@@ -303,3 +303,73 @@ function vrmod.utils.LookTarget_ChoosePickup(opts)
 	end
 	return { source = "none", reason = "none", ent = nil }
 end
+
+local function flagOn(v)
+	return v == true or v == 1 or v == "1"
+end
+
+--- The seat, the hull it is parented to, a child of that hull, or g_VR.vehicle.current.
+--- The occupied check is not only ply:GetVehicle(). Glide's seat is a pod; the mesh
+--- the player looks at is the parent hull.
+function vrmod.utils.PickupFilter_IsDriven(opts)
+	opts = type(opts) == "table" and opts or {}
+	if not flagOn(opts.in_vehicle) then return false end
+	if flagOn(opts.is_seat) or flagOn(opts.is_seat_parent) or flagOn(opts.is_hull_child) or flagOn(opts.is_current) then
+		return true
+	end
+	return false
+end
+
+--- Same mass gate the server uses for a grab. limit 1 (the default) caps mass.
+--- A missing limit is 1, so a client that has not replicated the convar yet
+--- still hides an overweight prop. No physics object is not grabbable.
+--- A vehicle with no mass, or a zero mass, is over the limit: the client
+--- often has no real phys object for a hull, and that hull was highlighting.
+function vrmod.utils.PickupFilter_MassOK(opts)
+	opts = type(opts) == "table" and opts or {}
+	local limit = tonumber(opts.limit)
+	if limit == nil then limit = 1 end
+	if limit ~= 1 then
+		if opts.has_phys == false then return false end
+		return true
+	end
+	local vehicle = flagOn(opts.is_vehicle)
+	if vehicle and (opts.has_phys == false or opts.mass == nil) then return false end
+	if opts.has_phys == false or opts.mass == nil then return false end
+	local mass = tonumber(opts.mass)
+	local weight = tonumber(opts.weight)
+	if weight == nil then weight = 150 end
+	if not mass or mass ~= mass then return false end
+	if vehicle and mass <= 0 then return false end
+	if opts.move_vphysics == false then return false end
+	return mass <= weight
+end
+
+--- Hand and gaze share this. Driven vehicle loses even to a whitelist.
+--- NPC mode and the whitelist still skip the mass cap, matching the server.
+function vrmod.utils.PickupFilter_Allow(opts)
+	opts = type(opts) == "table" and opts or {}
+	if flagOn(opts.self_ent) then return false end
+	if vrmod.utils.PickupFilter_IsDriven(opts) then return false end
+	if flagOn(opts.is_npc) and tonumber(opts.npc_mode) == 1 then return true end
+	if flagOn(opts.whitelisted) then return true end
+	if flagOn(opts.blacklisted) then return false end
+	return vrmod.utils.PickupFilter_MassOK(opts)
+end
+
+--- One outline when both hands share a target. Two passes on one model
+--- wash orange then cyan into white, which read as a second confirmation.
+--- mode: "one" | "both" | "left" | "right" | "none"
+function vrmod.utils.PickupHalo_Plan(leftEnt, rightEnt)
+	local hasL = leftEnt ~= nil and leftEnt ~= false
+	local hasR = rightEnt ~= nil and rightEnt ~= false
+	if hasL and hasR and leftEnt == rightEnt then
+		return { mode = "one", shared = true }
+	end
+	if hasL and hasR then
+		return { mode = "both", shared = false }
+	end
+	if hasL then return { mode = "left", shared = false } end
+	if hasR then return { mode = "right", shared = false } end
+	return { mode = "none", shared = false }
+end

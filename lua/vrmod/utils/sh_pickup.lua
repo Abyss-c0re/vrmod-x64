@@ -195,25 +195,120 @@ function vrmod.utils.IsIgnoredProp(ent)
     return false
 end
 
+local function entityParent(ent)
+    if not IsValid(ent) or not ent.GetParent then return nil end
+    local ok, parent = pcall(ent.GetParent, ent)
+    if ok and IsValid(parent) then return parent end
+    return nil
+end
+
+local function parentedToAny(ent, roots)
+    if not IsValid(ent) then return false end
+    local guard = 0
+    local cursor = ent
+    while guard < 8 do
+        guard = guard + 1
+        local parent = entityParent(cursor)
+        if not parent then return false end
+        for i = 1, #roots do
+            if parent == roots[i] then return true end
+        end
+        cursor = parent
+    end
+    return false
+end
+
+local function entityIsVehicle(ent, class)
+    if ent.IsGlideVehicle then return true end
+    if ent.VehicleType ~= nil then return true end
+    if class:find("vehicle", 1, true) or class:find("glide", 1, true) then return true end
+    if ent.IsVehicle then
+        local ok, res = pcall(ent.IsVehicle, ent)
+        if ok and res then return true end
+    end
+    return false
+end
+
+-- Hand proximity and eye gaze both call this. The mass cap used to run only
+-- on the server, so the client halo accepted overweight vehicles. The occupied
+-- check used to be only the seat, so the Glide hull the player drives still lit.
 function vrmod.utils.CanPickupEntity(v, ply, cv)
-    if not IsValid(v) or v == ply then return false end
-    -- Block picking up the exact chair the player is currently sitting in
-    if ply:InVehicle() and v == ply:GetVehicle() then return false end
-    if cv.vrmod_pickup_npcs == 1 then if v:IsNPC() or v:IsNextBot() then return true end end
-    local class = v:GetClass():lower()
-    local model = (v:GetModel() or ""):lower()
-    local key = class .. "|" .. model
-    if vrmod.pickupLists then
-        if vrmod.pickupLists.whitelist[key] then return true end
-        if vrmod.pickupLists.blacklist[key] then return false end
+    if not IsValid(v) or not IsValid(ply) or v == ply then return false end
+    cv = cv or {}
+    if not vrmod.utils.PickupFilter_Allow then
+        if ply:InVehicle() and v == ply:GetVehicle() then return false end
+        return true
     end
 
-    if SERVER then
-        local phys = v:GetPhysicsObject()
-        if not IsValid(phys) then return false end
-        if cv.vrmod_pickup_limit == 1 then return v:GetMoveType() == MOVETYPE_VPHYSICS and phys:GetMass() <= cv.vrmod_pickup_weight end
+    local inVeh = ply.InVehicle and ply:InVehicle() or false
+    local seat = nil
+    if inVeh and ply.GetVehicle then
+        local okSeat, got = pcall(ply.GetVehicle, ply)
+        if okSeat and IsValid(got) then seat = got end
     end
-    return true
+    local seatParent = entityParent(seat)
+    local current = nil
+    if g_VR and g_VR.vehicle and IsValid(g_VR.vehicle.current) then
+        current = g_VR.vehicle.current
+    end
+    local inside = inVeh or (g_VR and g_VR.vehicle and g_VR.vehicle.inside) or false
+    local roots = {}
+    if IsValid(seat) then roots[#roots + 1] = seat end
+    if IsValid(seatParent) then roots[#roots + 1] = seatParent end
+    if IsValid(current) then roots[#roots + 1] = current end
+
+    local class = (v.GetClass and v:GetClass() or ""):lower()
+    local model = (v.GetModel and v:GetModel() or ""):lower()
+    local key = class .. "|" .. model
+    local whitelisted, blacklisted = false, false
+    if vrmod.pickupLists then
+        whitelisted = vrmod.pickupLists.whitelist[key] and true or false
+        blacklisted = vrmod.pickupLists.blacklist[key] and true or false
+    end
+
+    local phys = nil
+    if v.GetPhysicsObject then
+        local okPhys, gotPhys = pcall(v.GetPhysicsObject, v)
+        if okPhys and IsValid(gotPhys) then phys = gotPhys end
+    end
+    local mass = nil
+    if phys and phys.GetMass then
+        local okMass, gotMass = pcall(phys.GetMass, phys)
+        if okMass then mass = tonumber(gotMass) end
+    end
+    local moveOk = true
+    if v.GetMoveType and MOVETYPE_VPHYSICS then
+        local okMove, mt = pcall(v.GetMoveType, v)
+        if okMove then moveOk = mt == MOVETYPE_VPHYSICS end
+    end
+    local isNpc = false
+    if v.IsNPC then
+        local okNpc, resNpc = pcall(v.IsNPC, v)
+        isNpc = okNpc and resNpc or false
+    end
+    if not isNpc and v.IsNextBot then
+        local okBot, resBot = pcall(v.IsNextBot, v)
+        isNpc = okBot and resBot or false
+    end
+
+    return vrmod.utils.PickupFilter_Allow({
+        self_ent = false,
+        in_vehicle = inside and #roots > 0,
+        is_seat = IsValid(seat) and v == seat,
+        is_seat_parent = IsValid(seatParent) and v == seatParent,
+        is_hull_child = parentedToAny(v, roots),
+        is_current = IsValid(current) and v == current,
+        is_npc = isNpc,
+        npc_mode = cv.vrmod_pickup_npcs,
+        whitelisted = whitelisted,
+        blacklisted = blacklisted,
+        limit = cv.vrmod_pickup_limit,
+        weight = cv.vrmod_pickup_weight,
+        has_phys = phys ~= nil,
+        mass = mass,
+        move_vphysics = moveOk,
+        is_vehicle = entityIsVehicle(v, class),
+    })
 end
 
 function vrmod.utils.ValidatePickup(ply, bLeftHand, ent)

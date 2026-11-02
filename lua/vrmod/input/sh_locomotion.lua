@@ -227,8 +227,20 @@ local function start()
 			end
 
 			cmd:SetSideMove((inputVector or 0) * 400)
-			local _, ra = WorldToLocal(Vector(), g_VR.tracking.hmd.ang, Vector(), ply:GetVehicle():GetAngles())
-			cmd:SetViewAngles(ra)
+			-- Tank eye aim: world gaze + a long upmove. Glide's server turret is
+			-- EyePos + cmd view forward * upmove, not the headset picture.
+			-- HMD aim keeps the vehicle-local angles this path already sent.
+			local gazeAng, gazeDist = nil, nil
+			if vrmod.utils.GlideTankAim_Apply then
+				gazeAng, gazeDist = vrmod.utils.GlideTankAim_Apply(ply)
+			end
+			if gazeAng then
+				cmd:SetViewAngles(gazeAng)
+				cmd:SetUpMove(gazeDist or 4096)
+			else
+				local _, ra = WorldToLocal(Vector(), g_VR.tracking.hmd.ang, Vector(), ply:GetVehicle():GetAngles())
+				cmd:SetViewAngles(ra)
+			end
 			cmd:SetButtons(bit.bor(cmd:GetButtons(), g_VR.input.boolean_turbo and IN_SPEED or 0, g_VR.input.boolean_handbrake and IN_JUMP or 0))
 			return
 		end

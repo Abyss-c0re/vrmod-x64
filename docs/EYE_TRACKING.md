@@ -60,9 +60,11 @@ On the client, the local player returns the live sample. Another player returns 
 
 Gameplay → **Pickup source** (`vrmod_pickup_source`): hand proximity `0` or eye gazing `1`. **Hand trigger distance** (`vrmod_pickup_hand_range`, default 3.5) and **Eye trigger distance** (`vrmod_pickup_eye_range`, default 12) are client-only and use the same scale as the server pickup range. Eye gazing drives either grip from the look ray. If that mode is selected and there is no gaze sample, selection falls back to hand proximity. The only override is a hand touching the prop (6 units to the surface). A hand held in front of the body is not a touch, so it does not blank the other hand. Menu grab, foregrip, and pickup disable still run before the grab. The right hand still will not take a second copy of the weapon it is holding.
 
+The gaze uses the same pickup filter as the hand. That includes the weight limit on the client (it used to run only on the server, so an overweight vehicle still drew a halo) and the vehicle the player is driving: the seat, the parent hull, a child of that hull, and `g_VR.vehicle.current`. The look trace runs every frame. A shared look draws one halo. The grip press resolves the target before it sends, so the first squeeze grabs.
+
 ## Glide tanks
 
-Gameplay → **Glide tank aim** (`vrmod_glide_tank_aim`): HMD `0` or eye tracking `1`. Only tanks use it. The headset still draws the view. The turret aim point (`lastAimPos`) follows `vrmod.GetEyeGaze` when eye tracking is on, the server allows it, and a sample exists. Otherwise the turret stays on the HMD.
+Gameplay → **Glide tank aim** (`vrmod_glide_tank_aim`): HMD `0` or eye tracking `1`. Only tanks use it. The headset still draws the view. The turret reads `Glide.GetCameraAimPos` on the client and, on the server, `EyePos + viewangles:Forward() * upmove`. Both follow `vrmod.GetEyeGaze` when eye tracking is on, the server allows it, and a sample exists. Otherwise the turret stays on the HMD. `PatchGlideCamera` is reinstalled when its stamp is not this build: on VR start, on entering a Glide seat, and while VR is active. A session that started before this closure does not keep the old HMD-only camera.
 
 ## Flashlight
 

@@ -301,6 +301,62 @@ else -- CLIENT
 		end
 	end)
 
+	-- VRMod_Start already ran in a live session, or Glide replaced Camera.CalcView
+	-- when the seat inited. Reinstall this build's closure. The stamp makes a
+	-- matching patch a no-op, so the Think is cheap.
+	local function ReapplyGlideCamera()
+		if not (Glide and Glide.Camera and vrmod.utils.PatchGlideCamera) then return end
+		local installed = Glide.Camera._VRModGlidePatch
+		if vrmod.utils.GlideCamera_NeedsPatch and not vrmod.utils.GlideCamera_NeedsPatch(installed) then return end
+		vrmod.utils.PatchGlideCamera()
+	end
+
+	local function InstallLateTankAim()
+		-- Last CreateMove writer. Glide's camera hook and locomotion both set
+		-- view angles; whichever was added last used to keep the HMD ray.
+		hook.Remove("CreateMove", "vrmod_glide_tank_aim_late")
+		hook.Add("CreateMove", "vrmod_glide_tank_aim_late", function(cmd)
+			if not vrmod.utils.GlideTankAim_Apply then return end
+			local ply = LocalPlayer()
+			if not IsValid(ply) then return end
+			local gang, dist = vrmod.utils.GlideTankAim_Apply(ply)
+			if not gang then return end
+			cmd:SetViewAngles(gang)
+			cmd:SetUpMove(dist or 4096)
+		end)
+	end
+
+	local function SeatedInTank()
+		if not g_VR or not g_VR.vehicle then return false end
+		if g_VR.vehicle.type == "tank" then return true end
+		local veh = g_VR.vehicle.current
+		if IsValid(veh) and Glide and Glide.VEHICLE_TYPE and veh.VehicleType == Glide.VEHICLE_TYPE.TANK then
+			return true
+		end
+		local camVeh = Glide and Glide.Camera and Glide.Camera.vehicle
+		return IsValid(camVeh) and Glide and Glide.VEHICLE_TYPE and camVeh.VehicleType == Glide.VEHICLE_TYPE.TANK
+	end
+
+	hook.Add("Think", "vrmod_glide_cam_stamp", function()
+		if not g_VR or not g_VR.active then
+			hook.Remove("CreateMove", "vrmod_glide_tank_aim_late")
+			return
+		end
+		ReapplyGlideCamera()
+		-- Re-add every frame while seated in a tank so this hook stays last
+		-- even if Glide attaches Camera:CreateMove on enter.
+		if SeatedInTank() then
+			InstallLateTankAim()
+		else
+			hook.Remove("CreateMove", "vrmod_glide_tank_aim_late")
+		end
+	end)
+
+	hook.Add("Glide_OnLocalEnterVehicle", "vrmod_glide_cam_enter", function()
+		ReapplyGlideCamera()
+		timer.Simple(0, ReapplyGlideCamera)
+	end)
+
 	hook.Add("VRMod_Exit", "Glide_RestoreMouseFlyMode", function()
 		if not (Glide and Glide.Config) then
 			vrmod.logger.Debug("[Glide] Glide not loaded, cannot restore")
