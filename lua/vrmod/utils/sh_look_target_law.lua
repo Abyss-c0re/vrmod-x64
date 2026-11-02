@@ -411,6 +411,24 @@ local function flagOn(v)
 	return v == true or v == 1 or v == "1"
 end
 
+--- Map geometry is not a prop. Gaze and the hand share this.
+--- opts.class (lowercase), is_world, solid_bsp, move_vphysics.
+--- prop_static, doors, brushes, and a frozen prop_dynamic are map parts.
+--- prop_physics stays a pickup even when the mapper froze it.
+function vrmod.utils.PickupFilter_IsMapSolid(opts)
+	opts = type(opts) == "table" and opts or {}
+	if flagOn(opts.is_world) or flagOn(opts.solid_bsp) then return true end
+	local class = type(opts.class) == "string" and opts.class:lower() or ""
+	if class == "" then return false end
+	if class == "worldspawn" or class == "prop_static" then return true end
+	if class:sub(1, 5) == "func_" then return true end
+	if class:sub(1, 9) == "prop_door" then return true end
+	if class == "prop_dynamic" or class == "prop_dynamic_override" then
+		return not flagOn(opts.move_vphysics)
+	end
+	return false
+end
+
 --- The seat, the hull it is parented to, a child of that hull, or g_VR.vehicle.current.
 --- The occupied check is not only ply:GetVehicle(). Glide's seat is a pod; the mesh
 --- the player looks at is the parent hull.

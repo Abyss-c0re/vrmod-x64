@@ -998,6 +998,7 @@ local function ShouldTracePose(cache, samplePos, ply, angDeg)
 		same_frame = same,
 		has_cache = has,
 		ang_deg = angDeg,
+		was_clipped = cache and cache.clipped and true or false,
 	})
 end
 
@@ -1343,6 +1344,17 @@ local function ResolveHandWallSweep(desiredSample, handKey, radius, filter)
 	local n = tr.HitNormal
 	if not IsVec(n) or n:LengthSqr() < 0.01 then
 		n = ZERO_UP
+	end
+	-- Pulling the hand back: the sweep starts on the contact hull, so the
+	-- engine reports a hit at fraction 0 even though the new sample is free.
+	-- Holding lastFree there glued the hand to the wall until it was 48 units away.
+	if isDesiredFree() and IsVec(tr.HitPos) then
+		local ax = desiredSample.x - tr.HitPos.x
+		local ay = desiredSample.y - tr.HitPos.y
+		local az = desiredSample.z - tr.HitPos.z
+		if (ax * n.x + ay * n.y + az * n.z) > 0.25 then
+			return desiredSample, false, nil
+		end
 	end
 	-- Floors/ceilings: allow free vertical motion (climb/grab), but only if
 	-- the rest position is not still inside a wall brush.

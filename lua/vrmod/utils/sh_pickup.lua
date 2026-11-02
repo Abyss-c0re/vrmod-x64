@@ -86,9 +86,21 @@ function vrmod.utils.IsNonPickupable(ent)
         return pickupableCache[key]
     end
 
-    -- Weapon or important item overrides (allow all prop_*, weapons, important pickups FIRST,
+    -- Walls, static map models, and brushes are not props. The old prop_
+    -- prefix ran first, so gaze haloed prop_static and the hand filter never saw them.
+    if vrmod.utils.PickupFilter_IsMapSolid and vrmod.utils.PickupFilter_IsMapSolid({
+        class = class,
+        is_world = ent.IsWorld and ent:IsWorld() or false,
+        solid_bsp = SOLID_BSP ~= nil and ent.GetSolid and ent:GetSolid() == SOLID_BSP or false,
+        move_vphysics = ent.GetMoveType and ent:GetMoveType() == MOVETYPE_VPHYSICS or false,
+    }) then
+        pickupableCache[key] = true
+        return true
+    end
+
+    -- Weapon or important item overrides (allow prop_physics, weapons, important pickups FIRST,
     -- so that prop_dynamic, prop_physics, etc. are not killed by the "dynamic" pattern below)
-    if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_") or vrmod.utils.IsImportantPickup(ent) then
+    if vrmod.utils.IsWeaponEntity(ent) or class:find("prop_", 1, true) or vrmod.utils.IsImportantPickup(ent) then
         vrmod.logger.Debug("IsNonPickupable: Entity is a weapon, prop, or important pickup -> " .. class)
         pickupableCache[key] = false
         return false

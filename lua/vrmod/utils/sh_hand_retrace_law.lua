@@ -37,11 +37,16 @@ end
 ---   same_frame   bool    this hull was already traced this frame
 ---   has_cache    bool    a previous hull result exists
 ---   ang_deg      number  optional pose angle change since the cache
+---   was_clipped  bool    last hull was inside a wall. Must trace again so
+---                        pulling the hand back is not stuck on that correction.
 function vrmod.utils.HandRetrace_Should(opts)
 	opts = type(opts) == "table" and opts or {}
 	local has = opts.has_cache and true or false
 	if opts.same_frame and has then
 		return false
+	end
+	if opts.was_clipped then
+		return true
 	end
 	if not has then
 		return true
