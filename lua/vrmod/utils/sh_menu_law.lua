@@ -279,8 +279,16 @@ end
 
 --- Engine quit that does not wait on a confirm dialog.
 --- "quit" opens that dialog; the VR unpause hook then hides GameUI and the quit vanishes.
+--- These lines must be sent with LocalPlayer():ConCommand. RunConsoleCommand
+--- drops them: quit and gamemenucommand are not FCVAR_CLIENTCMD_CAN_EXECUTE.
 function vrmod.utils.MenuLaw_QuitArgs()
 	return "gamemenucommand", "QuitNoConfirm"
+end
+
+--- Client command lines, in order. QuitNoConfirm first, then quit.
+function vrmod.utils.MenuLaw_QuitLines()
+	local cmd, arg = vrmod.utils.MenuLaw_QuitArgs()
+	return { tostring(cmd) .. " " .. tostring(arg), "quit" }
 end
 
 --- Force-unpause / HideGameUI must stand down while a quit is in flight,
@@ -298,6 +306,9 @@ end
 function vrmod.utils.MenuLaw_EscAction(opts)
 	opts = type(opts) == "table" and opts or {}
 	if not opts.vr_active then return "desktop" end
+	-- A quit in flight must not be turned into the Cube hub. OnPauseMenuShow
+	-- swallows the engine menu when this returns "hub", and the process stays up.
+	if opts.quitting then return "quit" end
 	if opts.shift_down or opts.stock_pause then return "stock" end
 	return "hub"
 end

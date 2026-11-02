@@ -202,8 +202,11 @@ local function InitializeMenuItems()
 			if vrmod.RequestQuitGame then
 				vrmod.RequestQuitGame()
 			else
-				pcall(function() RunConsoleCommand("gamemenucommand", "QuitNoConfirm") end)
-				pcall(function() RunConsoleCommand("quit") end)
+				local ply = LocalPlayer()
+				if IsValid(ply) then
+					ply:ConCommand("gamemenucommand QuitNoConfirm")
+					ply:ConCommand("quit")
+				end
 			end
 		end)
 	end, true, "close Garry's Mod", "exit_game")

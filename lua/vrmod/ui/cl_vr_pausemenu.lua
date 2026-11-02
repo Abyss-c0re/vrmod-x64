@@ -66,6 +66,7 @@ end
 
 --- ESC / pause in VR: VirtualDisplay "pause" session → Cube hub (never stock GameUI).
 function vrmod.OpenPauseMenuVR()
+	if g_VR and g_VR._quitting then return false end
 	if not vrLive() then
 		if gui and gui.ActivateGameUI then pcall(gui.ActivateGameUI) end
 		return false
@@ -114,6 +115,10 @@ local function onEsc(fromPauseHook)
 		action = vrmod.utils.MenuLaw_EscAction(opts)
 	elseif opts.shift_down or opts.stock_pause then
 		action = "stock"
+	end
+	if action == "quit" then
+		-- Let the engine finish quitting. Opening the hub here cancels it.
+		return false
 	end
 	if action == "stock" then
 		g_VR._stockPause = true

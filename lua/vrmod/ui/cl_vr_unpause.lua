@@ -30,15 +30,31 @@ end
 
 --- Quit Garry's Mod from a VR menu. QuitNoConfirm does not leave a dialog
 --- for the unpause hook to dismiss.
+--- RunConsoleCommand cannot run quit. The client must ConCommand it, and the
+--- pause hook must not swallow the engine menu while that is in flight.
 function vrmod.RequestQuitGame()
 	g_VR = g_VR or {}
 	g_VR._quitting = true
-	local cmd, arg = "gamemenucommand", "QuitNoConfirm"
-	if vrmod.utils and vrmod.utils.MenuLaw_QuitArgs then
-		cmd, arg = vrmod.utils.MenuLaw_QuitArgs()
+	local lines = { "gamemenucommand QuitNoConfirm", "quit" }
+	if vrmod.utils and vrmod.utils.MenuLaw_QuitLines then
+		lines = vrmod.utils.MenuLaw_QuitLines()
 	end
-	pcall(function() RunConsoleCommand(cmd, arg) end)
-	pcall(function() RunConsoleCommand("quit") end)
+	local ply = LocalPlayer and LocalPlayer() or nil
+	for i = 1, #lines do
+		local line = lines[i]
+		if line and line ~= "" then
+			if IsValid(ply) and ply.ConCommand then
+				ply:ConCommand(line)
+			else
+				local head, rest = string.match(line, "^(%S+)%s+(.*)$")
+				if head and rest then
+					pcall(function() RunConsoleCommand(head, rest) end)
+				else
+					pcall(function() RunConsoleCommand(line) end)
+				end
+			end
+		end
+	end
 end
 
 --- Always hide GameUI + unpause while VR is active.
