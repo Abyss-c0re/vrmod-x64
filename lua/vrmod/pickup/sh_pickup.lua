@@ -123,6 +123,79 @@ if CLIENT then
 		return v
 	end
 
+	-- Defined below. The gaze refine runs after both exist.
+	local handMayTake
+
+	local function rayFocus(origin, dir, point)
+		if not origin or not dir or not point or not dir.Dot then return nil, nil end
+		local rel = point - origin
+		local along = rel:Dot(dir)
+		if not along then return nil, nil end
+		local perp = rel - dir * along
+		local radial = perp.Length and perp:Length() or nil
+		return along, radial
+	end
+
+	-- The trace hits the fat prop and misses the gun beside it. Prefer a dropped
+	-- weapon or other important pickup that sits close to the ray.
+	local function refineEyeFocus(ply, hitEnt, hitPos)
+		if not vrmod.utils.LookTarget_Prefer or not IsValid(hitEnt) or not hitPos then return hitEnt end
+		if not ents or not ents.FindInSphere then return hitEnt end
+		local gazePos, gazeAng = nil, nil
+		if vrmod.GetEyeGaze then gazePos, gazeAng = vrmod.GetEyeGaze(ply) end
+		if not gazePos or not gazeAng or not gazeAng.Forward then return hitEnt end
+		local dir = gazeAng:Forward()
+		if not dir then return hitEnt end
+		local radius = vrmod.utils.LookTarget_FocusRadius and vrmod.utils.LookTarget_FocusRadius() or 12
+		local hitAlong = select(1, rayFocus(gazePos, dir, hitPos))
+		local near = ents.FindInSphere(hitPos, radius)
+		local candidates = {}
+		local function push(ent)
+			if not IsValid(ent) or ent == ply then return end
+			local okTake = false
+			if handMayTake then
+				okTake = handMayTake(ply, true, ent) or handMayTake(ply, false, ent)
+			end
+			if not okTake then return end
+			local center = ent.WorldSpaceCenter and ent:WorldSpaceCenter() or (ent.GetPos and ent:GetPos() or nil)
+			if not center then return end
+			local along, radial = rayFocus(gazePos, dir, center)
+			if ent.NearestPoint and along then
+				local onRay = gazePos + dir * along
+				local okNp, np = pcall(ent.NearestPoint, ent, onRay)
+				if okNp and np then
+					along, radial = rayFocus(gazePos, dir, np)
+				end
+			end
+			if not along or not radial then return end
+			local important = false
+			if vrmod.utils.IsImportantPickup then
+				local okImp, resImp = pcall(vrmod.utils.IsImportantPickup, ent)
+				important = okImp and resImp and true or false
+			end
+			candidates[#candidates + 1] = {
+				ent = ent,
+				along = along,
+				radial = radial,
+				important = important,
+			}
+		end
+		push(hitEnt)
+		if istable(near) then
+			for i = 1, #near do
+				if near[i] ~= hitEnt then push(near[i]) end
+			end
+		end
+		local chosen = vrmod.utils.LookTarget_Prefer({
+			hit_ent = hitEnt,
+			hit_along = hitAlong,
+			radius = radius,
+			candidates = candidates,
+		})
+		if IsValid(chosen) then return chosen end
+		return hitEnt
+	end
+
 	-- Gaze sample only. No sample is not an HMD look. The caller falls back to the hand.
 	local function findEyeTarget(ply)
 		if not vrmod.utils.LookTarget_Query then return nil, nil, false end
@@ -147,10 +220,11 @@ if CLIENT then
 		if not vrmod.utils.LookTarget_Within(dist, range, vrmod.utils.LookTarget_Boost(important, npc)) then
 			return nil, nil, true
 		end
+		ent = refineEyeFocus(ply, ent, pos)
 		return ent, pos, true
 	end
 
-	local function handMayTake(ply, bLeft, ent)
+	handMayTake = function(ply, bLeft, ent)
 		if not IsValid(ent) then return false end
 		local _, cv = vrmod.GetConvars()
 		if vrmod.utils.IsValidPickupTarget and not vrmod.utils.IsValidPickupTarget(ent, ply, bLeft) then return false end
@@ -285,17 +359,17 @@ if CLIENT then
 		local holdingRagdoll = (IsValid(heldLeft) and heldLeft:GetNWBool("is_npc_ragdoll", false))
 			or (IsValid(heldRight) and heldRight:GetNWBool("is_npc_ragdoll", false))
 		local _, cv = vrmod.GetConvars()
-		local function ShouldAddHalo(ent)
+		local function ShouldAddHalo(ent, bLeft)
 			if not IsValid(ent) or ent == heldLeft or ent == heldRight or holdingRagdoll then return false end
-			-- Same gate as the grab. IsValidPickupTarget alone let an overweight
-			-- hull and the vehicle being driven draw a halo.
-			if vrmod.utils.IsValidPickupTarget and not vrmod.utils.IsValidPickupTarget(ent, ply, false) then return false end
+			-- The hand that is actually targeting it. Always asking the right hand
+			-- hid a prop the left hand could still touch after a drop.
+			if vrmod.utils.IsValidPickupTarget and not vrmod.utils.IsValidPickupTarget(ent, ply, bLeft) then return false end
 			if vrmod.utils.CanPickupEntity and not vrmod.utils.CanPickupEntity(ent, ply, cv or {}) then return false end
 			return true
 		end
 
-		local showLeft = ShouldAddHalo(pickupTargetEntLeft) and pickupTargetEntLeft or nil
-		local showRight = ShouldAddHalo(pickupTargetEntRight) and pickupTargetEntRight or nil
+		local showLeft = ShouldAddHalo(pickupTargetEntLeft, true) and pickupTargetEntLeft or nil
+		local showRight = ShouldAddHalo(pickupTargetEntRight, false) and pickupTargetEntRight or nil
 		local plan = vrmod.utils.PickupHalo_Plan and vrmod.utils.PickupHalo_Plan(showLeft, showRight) or { mode = "both" }
 		local eyeMode = pickupSourceMode() == "eye"
 		-- Shared look, or any eye target: one pass. Orange plus cyan on the same
@@ -363,6 +437,7 @@ if CLIENT then
 			if ply == LocalPlayer() then
 				if g_VR.heldEntityLeft == ent then g_VR.heldEntityLeft = nil end
 				if g_VR.heldEntityRight == ent then g_VR.heldEntityRight = nil end
+				if vrmod.utils.Pickup_ClearTargetCache then vrmod.utils.Pickup_ClearTargetCache(ent) end
 			end
 			hook.Call("VRMod_Drop", nil, ply, ent)
 			return
@@ -376,8 +451,17 @@ if CLIENT then
 		end
 
 		if ply == LocalPlayer() then
-			g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] = ent
-			vrmod.logger.Debug("net.Receive vrmod_pickup: Picked up entity with " .. (bLeftHand and "Left" or "Right") .. " hand -> " .. ent:GetClass())
+			-- A drop used to be broadcast as a pickup and pinned the prop as held
+			-- after the grip was already up. Only confirm a hold while that grip is down.
+			local action = bLeftHand and "boolean_left_pickup" or "boolean_right_pickup"
+			local grip = g_VR.input and g_VR.input[action]
+			if grip then
+				g_VR[bLeftHand and "heldEntityLeft" or "heldEntityRight"] = ent
+				vrmod.logger.Debug("net.Receive vrmod_pickup: Picked up entity with " .. (bLeftHand and "Left" or "Right") .. " hand -> " .. ent:GetClass())
+			else
+				if vrmod.utils.Pickup_ClearTargetCache then vrmod.utils.Pickup_ClearTargetCache(ent) end
+				vrmod.logger.Debug("net.Receive vrmod_pickup: Ignoring hold confirm, grip is up -> " .. ent:GetClass())
+			end
 		end
 
 		hook.Call("VRMod_Pickup", nil, ply, ent)

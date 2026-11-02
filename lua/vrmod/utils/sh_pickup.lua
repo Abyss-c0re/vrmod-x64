@@ -150,15 +150,15 @@ function vrmod.utils.IsValidPickupTarget(ent, ply, bLeftHand)
         return invalidPickupCache[ent]
     end
 
+    -- NoDraw and dormant flip when a prop is grabbed and dropped. Caching the
+    -- failure left the prop ungrabbable after it was visible again.
     if ent:GetNoDraw() then
         vrmod.logger.Debug("IsValidPickupTarget: Entity has NoDraw -> " .. ent:GetClass())
-        if cacheable then invalidPickupCache[ent] = false end
         return false
     end
 
     if ent:IsDormant() then
         vrmod.logger.Debug("IsValidPickupTarget: Entity is dormant -> " .. ent:GetClass())
-        if cacheable then invalidPickupCache[ent] = false end
         return false
     end
 
@@ -664,14 +664,21 @@ end
 --=======================================================================
 -- Networking
 --=======================================================================
+function vrmod.utils.Pickup_ClearTargetCache(ent)
+    if ent ~= nil then invalidPickupCache[ent] = nil end
+end
+
 function vrmod.utils.SendPickupNetMessage(ply, ent, bLeftHand)
+    -- A nil hand is a drop. Writing "pickup" here set heldEntityRight to the
+    -- prop on the ground, so the halo died while the other hand could still touch it.
+    local dropping = bLeftHand == nil
     net.Start("vrmod_pickup")
     net.WriteEntity(ply)
     net.WriteEntity(ent)
-    net.WriteBool(false)
-    net.WriteBool(bLeftHand)
+    net.WriteBool(dropping)
+    net.WriteBool((not dropping) and bLeftHand and true or false)
     net.Broadcast()
-    vrmod.logger.Debug("SendPickupNetMessage: Sent for " .. tostring(ply) .. " -> " .. tostring(ent))
+    vrmod.logger.Debug("SendPickupNetMessage: Sent for " .. tostring(ply) .. " -> " .. tostring(ent) .. " drop=" .. tostring(dropping))
 end
 
 if SERVER then

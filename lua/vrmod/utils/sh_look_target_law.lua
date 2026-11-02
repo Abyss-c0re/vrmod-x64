@@ -142,14 +142,39 @@ function vrmod.utils.LookTarget_QueryPose(ply, pos, ang, maxDist)
 		if not isfunction(IsValid) or not IsValid(ent) then return true end
 		if ent == ply then return false end
 		if isWorld(ent) then return true end
+		local held = false
+		local viewmodel = false
 		if g_VR then
-			if ent == g_VR.heldEntityLeft or ent == g_VR.heldEntityRight then return false end
-			if ent == g_VR.viewModel or ent == g_VR.worldModelVM then return false end
+			held = ent == g_VR.heldEntityLeft or ent == g_VR.heldEntityRight
+			viewmodel = ent == g_VR.viewModel or ent == g_VR.worldModelVM
 		end
-		if vrmod.utils.HitFilter then
-			return vrmod.utils.HitFilter(ent, ply) and true or false
+		local isWep = ent.IsWeapon and ent:IsWeapon() or false
+		local ownerSelf = false
+		if isWep and ply ~= nil and ent.GetOwner then
+			ownerSelf = ent:GetOwner() == ply
 		end
-		return true
+		local isMag = vrmod.utils.IsMagazine and vrmod.utils.IsMagazine(ent) or false
+		-- Hand HitFilter skips every weapon so the gun mesh does not block the
+		-- hand. A dropped gun is a gaze target. The equipped gun is not.
+		local filterHit = true
+		if not isWep and not isMag and vrmod.utils.HitFilter then
+			filterHit = vrmod.utils.HitFilter(ent, ply) and true or false
+		end
+		if vrmod.utils.LookTarget_GazeHits then
+			return vrmod.utils.LookTarget_GazeHits({
+				is_player = ent == ply,
+				is_held = held,
+				is_viewmodel = viewmodel,
+				is_weapon = isWep,
+				owner_is_self = ownerSelf,
+				is_magazine = isMag,
+				hit_filter = filterHit,
+			})
+		end
+		if ent == ply or held or viewmodel then return false end
+		if isWep then return not ownerSelf end
+		if isMag then return true end
+		return filterHit
 	end
 
 	local lead = vrmod.utils.LookTarget_EyeLead()
@@ -217,6 +242,84 @@ end
 --- Inches to step the look ray out of the head hull before tracing.
 function vrmod.utils.LookTarget_EyeLead()
 	return 8
+end
+
+--- Inches. A dropped gun this close to the gaze ray wins over the fat prop the ray hit.
+function vrmod.utils.LookTarget_FocusRadius()
+	return 12
+end
+
+--- true = the gaze ray hits this entity. false = skip it.
+--- Dropped weapons and magazines are targets. The weapon in the player's
+--- hands is not. opts: is_player, is_held, is_viewmodel, is_weapon,
+--- owner_is_self, is_magazine, hit_filter (false = some other filter skipped it).
+function vrmod.utils.LookTarget_GazeHits(opts)
+	opts = type(opts) == "table" and opts or {}
+	local function on(v)
+		return v == true or v == 1 or v == "1"
+	end
+	if on(opts.is_player) or on(opts.is_held) or on(opts.is_viewmodel) then return false end
+	if on(opts.is_weapon) then
+		if on(opts.owner_is_self) then return false end
+		return true
+	end
+	if on(opts.is_magazine) then return true end
+	if opts.hit_filter == false or opts.hit_filter == 0 or opts.hit_filter == "0" then return false end
+	return true
+end
+
+--- Choose the entity under the gaze when a thin weapon sits against a fat prop.
+--- The ray can hit the prop and miss the gun. An important candidate within
+--- the focus radius, and not buried behind the hit, replaces that prop.
+--- opts.hit_ent, hit_along, radius, candidates = { ent, along, radial, important }.
+--- Returns ent, reason ("focus_important"|"focus"|"hit"|"none").
+function vrmod.utils.LookTarget_Prefer(opts)
+	opts = type(opts) == "table" and opts or {}
+	local radius = tonumber(opts.radius)
+	if not radius or radius ~= radius or radius < 0 then
+		radius = vrmod.utils.LookTarget_FocusRadius()
+	end
+	local hitAlong = tonumber(opts.hit_along)
+	local best, bestRadial, bestAlong, bestImportant = nil, math.huge, math.huge, false
+	local list = opts.candidates
+	if type(list) == "table" then
+		for i = 1, #list do
+			local c = list[i]
+			if type(c) == "table" and c.ent ~= nil and c.ent ~= false then
+				local radial = tonumber(c.radial)
+				local along = tonumber(c.along)
+				if radial and along and radial == radial and along == along and radial >= 0 and along >= 0 and radial <= radius then
+					local buried = hitAlong and along > hitAlong + radius
+					if not buried then
+						local important = c.important == true or c.important == 1 or c.important == "1"
+						local better = false
+						if best == nil then
+							better = true
+						elseif important and not bestImportant then
+							better = true
+						elseif important == bestImportant then
+							if radial < bestRadial - 0.5 or (math.abs(radial - bestRadial) <= 0.5 and along < bestAlong) then
+								better = true
+							end
+						end
+						if better then
+							best = c.ent
+							bestRadial = radial
+							bestAlong = along
+							bestImportant = important
+						end
+					end
+				end
+			end
+		end
+	end
+	if best ~= nil then
+		return best, bestImportant and "focus_important" or "focus"
+	end
+	if opts.hit_ent ~= nil and opts.hit_ent ~= false then
+		return opts.hit_ent, "hit"
+	end
+	return nil, "none"
 end
 
 --- Same weapon exceptions as FindPickupTarget.
